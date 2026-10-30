@@ -37,3 +37,57 @@ test('inline marks', () => {
   expect(parseInline('a **b *c*** d')).toEqual([{ t: 'a ', b: false, i: false }, { t: 'b ', b: true, i: false }, { t: 'c', b: true, i: true }, { t: ' d', b: false, i: false }]);
   expect(parseInline('5 * 3')).toEqual([{ t: '5 * 3', b: false, i: false }]);
 });
+test('redaction fails closed: nested', () => {
+  const t = [{ p: 'A {{redact:a}}x {{redact:b}}SECRETB{{/redact}} SECRETA{{/redact}} end' }];
+  expect(redact(t, new Set())).toEqual([{ p: 'A ██████ end' }]);
+  expect(redact(t, new Set(['a']))).toEqual([{ p: 'A x ██████ SECRETA end' }]);
+  expect(redact(t, new Set(['b']))).toEqual([{ p: 'A ██████ end' }]); // inner alone can't open the outer
+  expect(redact(t, new Set(['a', 'b']))).toEqual([{ p: 'A x SECRETB SECRETA end' }]);
+  expect(redactionIds(t)).toEqual(['a', 'b']);
+});
+test('redaction fails closed: unclosed, stray closer, unterminated opener', () => {
+  expect(redact([{ p: 'pre {{redact:r1}}SECRET never closed' }], new Set())).toEqual([{ p: 'pre ██████' }]);
+  expect(redact([{ p: 'pre {{redact:r1}}SECRET never closed' }], new Set(['r1']))).toEqual([{ p: 'pre SECRET never closed' }]);
+  expect(redact([{ p: 'a{{/redact}}b' }], new Set())).toEqual([{ p: 'ab' }]);
+  expect(redact([{ p: 'pre {{redact:r1 SECRET' }], new Set())).toEqual([{ p: 'pre ██████' }]);
+  expect(redact([{ p: 'x {{redact:}}S{{/redact}} y' }], new Set())).toEqual([{ p: 'x ██████ y' }]);
+});
+test('redaction fails closed: across blocks', () => {
+  const t = [{ p: '{{redact:r1}}SEC' }, { p: 'RET{{/redact}} shown' }];
+  expect(redact(t, new Set())).toEqual([{ p: '██████' }, { p: '██████ shown' }]);
+  expect(redact(t, new Set(['r1']))).toEqual([{ p: 'SEC' }, { p: 'RET shown' }]);
+  expect(redactionIds(t)).toEqual(['r1']);
+});
+test('redaction in table cells, captions and headings', () => {
+  const t = [{ h: 'H {{redact:h1}}hid{{/redact}}', blocks: [{ table: { caption: 'C {{redact:c1}}cap{{/redact}}', head: ['a', '{{redact:t1}}b{{/redact}}'], rows: [['{{redact:t2}}1{{/redact}}', '2']] } }] }];
+  expect(redact(t, new Set())).toEqual([{ h: 'H ██████', blocks: [{ table: { caption: 'C ██████', head: ['a', '██████'], rows: [['██████', '2']] } }] }]);
+  expect(redact(t, new Set(['h1', 'c1', 't1', 't2']))).toEqual([{ h: 'H hid', blocks: [{ table: { caption: 'C cap', head: ['a', 'b'], rows: [['1', '2']] } }] }]);
+  expect(redactionIds(t)).toEqual(['h1', 'c1', 't1', 't2']);
+  expect(richToPlain(t)).toBe('H hid\nC cap\na | b\n1 | 2');
+});
+test('tag display parts, one row per DISPLAY_AT entry plus fallbacks', () => {
+  const rows: [string, string][] = [
+    ['{@dice 1d20+5|+5|Perception}', '+5'],
+    ['{@damage 1d6+3|1d6 + 3}', '1d6 + 3'],
+    ['{@filter cantrips|spells|level=0}', 'cantrips'],
+    ["{@book Player's Handbook|PHB|3|Wizard}", "Player's Handbook"],
+    ['{@adventure Curse of Strahd|CoS|2}', 'Curse of Strahd'],
+    ['{@link the site|https://example.com|x}', 'the site'],
+    ['{@footnote the gem|It glows faintly.|Gem lore}', 'the gem'],
+    ['{@area Cellar|3a|CoS}', 'Cellar'],
+    ['{@deity Pelor|Greyhawk|PHB|the Sun God}', 'the Sun God'],
+    ['{@deity Pelor|Greyhawk|PHB}', 'Pelor'],
+    ['{@classFeature Rage|Barbarian||1||Raging}', 'Raging'],
+    ['{@classFeature Rage|Barbarian|PHB|1}', 'Rage'],
+    ['{@subclassFeature Frenzy|Barbarian||Berserker||3||Frenzied}', 'Frenzied'],
+    ['{@subclassFeature Frenzy|Barbarian|PHB|Berserker|PHB|3}', 'Frenzy'],
+    ['{@quickref Cover||3||half cover}', 'half cover'],
+    ['{@quickref difficult terrain||3}', 'difficult terrain'],
+    ['{@card Ghost|Tarokka Deck|CoS|the Ghost}', 'the Ghost'],
+    ['{@card Ghost|Tarokka Deck|CoS}', 'Ghost'],
+    ["{@subclass Berserker|Barbarian|XPHB|XPHB|Berserker's}", "Berserker's"],
+    ['{@subclass Berserker|Barbarian|PHB|PHB}', 'Berserker'],
+    ['{@subclass Berserker|Barbarian|PHB}', 'Berserker'],
+  ];
+  for (const [input, out] of rows) expect(renderTags(input), input).toBe(out);
+});

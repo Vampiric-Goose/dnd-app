@@ -3,15 +3,18 @@ import type { Block, RichText } from '../types.ts';
 // Pure (no Svelte/Vite/DOM): shared with Node scripts and the 5etools importer.
 
 const BAR = '██████'; // fixed width, so the bar doesn't leak the hidden text's length
-const REDACT = /\{\{redact:([^}]+)\}\}([\s\S]*?)\{\{\/redact\}\}/g;
+// An opener (group 1 = id; the closing braces are optional so a malformed opener still counts) or a closer.
+const MARK = /\{\{redact:([^}]*)(?:\}\})?|\{\{\/redact\}\}/g;
 const TAG = /\{@(\w+)(?:\s+([^{}]*))?\}/g;
 
 const ATK: Record<string, string> = {
   m: 'Melee', r: 'Ranged', mw: 'Melee Weapon', rw: 'Ranged Weapon', ms: 'Melee Spell', rs: 'Ranged Spell', 'mw,rw': 'Melee or Ranged Weapon',
 };
-// Index of the display-text part when it isn't the third one (default 2).
+// Index of the display-text part when it isn't the third one (default 2). Used only when that part
+// exists and is non-empty; otherwise the tag shows part 0.
 const DISPLAY_AT: Record<string, number> = {
-  dice: 1, damage: 1, filter: 0, book: 0, adventure: 0, link: 0, footnote: 0, area: 0, deity: 3, classFeature: 5, subclassFeature: 7,
+  dice: 1, damage: 1, filter: 0, book: 0, adventure: 0, link: 0, footnote: 0, area: 0,
+  deity: 3, card: 3, classFeature: 5, subclassFeature: 7, quickref: 4, subclass: 4,
 };
 
 const tag = (name: string, arg = ''): string => {
@@ -56,13 +59,48 @@ const mapText = (r: RichText, f: (s: string) => string): RichText => r.map((b): 
 
 /** Marks stripped; redaction markers dropped but their text kept, so pass redacted text for player-facing output. */
 export const richToPlain = (r: RichText): string =>
-  lines(r).map(l => l.replace(REDACT, '$2').replace(/\*\*(.+?)\*\*/g, '$1').replace(/\*(.+?)\*/g, '$1')).join('\n');
+  lines(r).map(l => l.replace(MARK, '').replace(/\*\*(.+?)\*\*/g, '$1').replace(/\*(.+?)\*/g, '$1')).join('\n');
 
-export const redact = (r: RichText, revealed: ReadonlySet<string>): RichText =>
-  mapText(r, s => s.replace(REDACT, (_, id: string, text: string) => (revealed.has(id) ? text : BAR)));
+/**
+ * The one redaction scanner. `open` is the stack of redactions still open, shared by every string of a
+ * RichText in document order, so a span that is nested, unclosed or crosses blocks stays hidden until its
+ * closer (or the end). Text shows only if every open redaction is revealed. A run of hidden text becomes
+ * one bar; stray closers are dropped. Opened ids are added to `ids`.
+ */
+const scan = (s: string, open: string[], revealed: ReadonlySet<string>, ids?: Set<string>): string => {
+  let out = '', barred = false, at = 0;
+  const text = (t: string) => {
+    if (open.every(id => revealed.has(id))) {
+      out += t;
+      if (t) barred = false;
+    } else if (!barred) {
+      out += BAR;
+      barred = true;
+    }
+  };
+  for (const m of s.matchAll(MARK)) {
+    text(s.slice(at, m.index));
+    at = m.index + m[0].length;
+    if (m[1] === undefined) open.pop();
+    else {
+      open.push(m[1]);
+      ids?.add(m[1]);
+    }
+  }
+  text(s.slice(at));
+  return out;
+};
 
-export const redactionIds = (r: RichText): string[] =>
-  [...new Set(lines(r).flatMap(l => [...l.matchAll(REDACT)].map(m => m[1])))];
+export const redact = (r: RichText, revealed: ReadonlySet<string>): RichText => {
+  const open: string[] = [];
+  return mapText(r, s => scan(s, open, revealed));
+};
+
+export const redactionIds = (r: RichText): string[] => {
+  const open: string[] = [], ids = new Set<string>();
+  for (const l of lines(r)) scan(l, open, new Set(), ids);
+  return [...ids];
+};
 
 export interface Span { t: string; b: boolean; i: boolean }
 /** Splits one string on `**` / `*` toggles. Unbalanced marks (e.g. a literal "5 * 3") leave the string as plain text. */
