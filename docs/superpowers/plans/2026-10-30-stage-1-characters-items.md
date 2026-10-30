@@ -146,6 +146,7 @@ test('parseHash splits path and query', () => {
     `types: ["svelte", "vite/client"]`.
   - `vite.config.ts`: `base: '/dnd-app/'`, the svelte plugin, and `test.environment: 'node'`.
   - `.gitignore`: `node_modules`, `dist`, `*.local`.
+  - `.gitattributes`: `* text=auto eol=lf`. This machine has `core.autocrlf` on.
 - [ ] **Step 3: Run `npx vitest run tests/router.test.ts`.** Expected: FAIL (module not found).
 - [ ] **Step 4: Implement the router and the shell**
   - **Navigation:** a bottom tab bar below 768 px and a left sidebar from 768 px. Entries:
