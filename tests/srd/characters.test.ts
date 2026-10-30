@@ -57,6 +57,11 @@ test('SRD class features drive numbers', () => {
   expect(sheetOf(build('human', undefined, { int: 15, wis: 13 }, ['wizard', 'wizard', 'wizard', 'cleric', 'cleric'])).slots).toEqual([4, 3, 2]);
 });
 
+test('R27: a Cleric 2 / Paladin 3 has one Channel Divinity resource', () => {
+  const s = sheetOf(build('human', undefined, { str: 13, wis: 13, cha: 13 }, ['cleric', 'cleric', 'paladin', 'paladin', 'paladin']));
+  expect(s.resources.filter(r => r.name === 'Channel Divinity')).toEqual([{ name: 'Channel Divinity', max: 1, recharge: 'short' }]);
+});
+
 test('every authored SRD id exists', () => {
   for (const id of Object.keys(SRD_EFFECTS)) {
     expect(idx.get(id.split('/')[0]), id).toBeDefined();

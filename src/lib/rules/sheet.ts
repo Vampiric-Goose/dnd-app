@@ -1,7 +1,7 @@
 import { slug } from '../content/ids.ts';
 import { getKind } from '../character/choices.ts';
 import { attunedCount, carriedWeight } from '../items/inventory.ts';
-import type { Ability, Attack, Character, ClassDef, ItemDef, OverrideKey, Proficiencies, Scores, Sheet, Skill, Speeds, Spellcasting, When } from '../types.ts';
+import type { Ability, Attack, Character, ClassDef, ItemDef, OverrideKey, Proficiencies, Recharge, Scores, Sheet, Skill, Speeds, Spellcasting, When } from '../types.ts';
 import { ABILITIES, ATTUNEMENT_LIMIT, SKILL_ABILITY, abilityMod, averageHp, profBonus } from './constants.ts';
 import { gather, ofType } from './effects.ts';
 import type { SheetOpts } from './effects.ts';
@@ -203,7 +203,14 @@ export function computeSheet(c: Character, opts: SheetOpts): Sheet {
 
   // Resources
   const recharge = new Map(ofType(effects, 'resourceRecharge').map(r => [r.effect.name, r.effect.recharge]));
-  const resources = ofType(effects, 'resource').map(({ effect: e, classId }) => ({ name: e.name, max: num(e.max, classId), recharge: recharge.get(e.name) ?? e.recharge }));
+  // R27: one entry per name (multiclass Channel Divinity adds no uses): the highest max, the most frequent recharge.
+  const OFTEN: Recharge[] = ['short', 'long', 'dawn', 'dusk', 'none'];
+  const byName = new Map<string, Sheet['resources'][number]>();
+  for (const { effect: e, classId } of ofType(effects, 'resource')) {
+    const r = { name: e.name, max: num(e.max, classId), recharge: recharge.get(e.name) ?? e.recharge }, had = byName.get(e.name);
+    byName.set(e.name, had ? { name: e.name, max: Math.max(had.max, r.max), recharge: OFTEN.indexOf(r.recharge) < OFTEN.indexOf(had.recharge) ? r.recharge : had.recharge } : r);
+  }
+  const resources = [...byName.values()];
 
   // Damage types and notes
   const dmgOf = (kind: 'resistance' | 'immunity' | 'vulnerability') => ofType(effects, 'damage').filter(d => d.effect.kind === kind).map(d => d.effect.damageType);
