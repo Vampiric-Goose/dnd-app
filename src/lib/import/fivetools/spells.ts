@@ -1,10 +1,10 @@
 import { slug } from '../../content/ids.ts';
 import { renderTags } from '../../content/richtext.ts';
 import type { SpellDef } from '../../types.ts';
-import { arr, base, DROP_SOURCES, rich, type ClassRef, type Ctx, type Raw } from './common.ts';
+import { arr, base, DROP_SOURCES, rich, table, type ClassRef, type Ctx, type Raw } from './common.ts';
 
-const SCHOOL: Record<string, string> = { A: 'abjuration', C: 'conjuration', D: 'divination', E: 'enchantment', V: 'evocation', I: 'illusion', N: 'necromancy', T: 'transmutation' };
-const UNIT: Record<string, string> = { bonus: 'bonus action' };
+const SCHOOL = table<string>({ A: 'abjuration', C: 'conjuration', D: 'divination', E: 'enchantment', V: 'evocation', I: 'illusion', N: 'necromancy', T: 'transmutation' });
+const UNIT = table<string>({ bonus: 'bonus action' });
 const plural = (n: number, unit: string) => `${n} ${unit}${n === 1 ? '' : 's'}`;
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
@@ -48,7 +48,7 @@ function duration(list: Raw[]): string {
  */
 function classesOf(refs: ClassRef[], spellSource: string): string[] {
   const up = (s: unknown) => String(s).toUpperCase();
-  const ok = refs.filter(c => !c.variantOf || c.variantOf.some(s => up(s) === up(spellSource)));
+  const ok = refs.filter(c => typeof c.name === 'string' && (!c.variantOf || c.variantOf.some(s => up(s) === up(spellSource))));
   const classic = ok.filter(c => !DROP_SOURCES.has(up(c.source)));
   return [...new Set((classic.length ? classic : ok).map(c => slug(c.name)))];
 }
@@ -57,8 +57,8 @@ export const spell = (r: Raw, ctx: Ctx, id: string, name: string): SpellDef => {
   const c = r.components ?? {}, m = typeof c.m === 'string' ? c.m : typeof c.m?.text === 'string' ? c.m.text : undefined;
   const higher = arr(r.entriesHigherLevel).flatMap(e => (e?.entries ? arr(e.entries) : [e]));
   const refs: ClassRef[] = [
-    ...arr(r.classes?.fromClassList).map(x => ({ name: x.name, source: x.source })),
-    ...arr(r.classes?.fromClassListVariant).map(x => ({ name: x.name, source: x.source, variantOf: [x.definedInSource] })),
+    ...arr(r.classes?.fromClassList).map(x => ({ name: x?.name, source: x?.source })),
+    ...arr(r.classes?.fromClassListVariant).map(x => ({ name: x?.name, source: x?.source, variantOf: [x?.definedInSource] })),
     ...ctx.spellClasses(r.name, r.source),
   ];
   const durations = arr(r.duration);
@@ -85,13 +85,17 @@ export function spellLookup(json: Raw): Map<string, ClassRef[]> | undefined {
   const isLookup = top.length > 0 && top.every(v => v && typeof v === 'object' && !Array.isArray(v))
     && Object.values(top[0] as object).some((s: Raw) => s && typeof s === 'object' && ('class' in s || 'classVariant' in s));
   if (!isLookup) return undefined;
+  // Entries that aren't the expected shape are skipped, so one bad entry can't sink the whole file.
+  const isObj = (v: unknown): v is Raw => !!v && typeof v === 'object';
   const refs = (x: Raw, variant: boolean): ClassRef[] => (Array.isArray(x)
-    ? x.map((c: Raw) => ({ name: c.name, source: c.source, ...(variant && { variantOf: [c.definedInSource] }) }))
-    : Object.entries(x ?? {}).flatMap(([source, byName]) => Object.entries(byName as Record<string, Raw>)
-      .map(([name, v]) => ({ name, source, ...(variant && { variantOf: arr(v?.definedInSources) }) }))));
+    ? x.filter(c => isObj(c) && typeof c.name === 'string' && typeof c.source === 'string')
+      .map((c: Raw) => ({ name: c.name, source: c.source, ...(variant && { variantOf: [c.definedInSource] }) }))
+    : isObj(x) ? Object.entries(x).flatMap(([source, byName]) => (isObj(byName) ? Object.entries(byName as Record<string, Raw>) : [])
+      .map(([name, v]) => ({ name, source, ...(variant && { variantOf: arr(v?.definedInSources) }) }))) : []);
   const out = new Map<string, ClassRef[]>();
   for (const [src, spells] of Object.entries(json as Record<string, Record<string, Raw>>)) {
     for (const [name, s] of Object.entries(spells)) {
+      if (!isObj(s)) continue;
       const found = [...refs(s?.class, false), ...refs(s?.classVariant, true)];
       if (found.length) out.set(spellKey(name, src), [...(out.get(spellKey(name, src)) ?? []), ...found]);
     }

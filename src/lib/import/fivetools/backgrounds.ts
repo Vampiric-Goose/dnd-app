@@ -1,12 +1,12 @@
 import { renderTags } from '../../content/richtext.ts';
 import type { BackgroundDef, Trait } from '../../types.ts';
-import { arr, base, code, proficiencies, rich, type Ctx, type Raw } from './common.ts';
+import { arr, base, code, proficiencies, rich, table, type Ctx, type Raw } from './common.ts';
 
 const gp = (cp: number) => (cp % 100 === 0 ? `${cp / 100} gp` : cp % 10 === 0 ? `${cp / 10} sp` : `${cp} cp`);
-const EQUIPMENT_TYPE: Record<string, string> = {
+const EQUIPMENT_TYPE = table<string>({
   setGaming: 'gaming set', instrumentMusical: 'musical instrument', toolArtisan: "artisan's tools", focusSpellcastingArcane: 'arcane focus',
   focusSpellcastingDruidic: 'druidic focus', focusSpellcastingHoly: 'holy symbol', weaponSimple: 'simple weapon', weaponMartial: 'martial weapon',
-};
+});
 
 /** One `startingEquipment` item: `'name|src'`, `{ item, quantity, displayName, containsValue }`, `{ special }`, `{ equipmentType }` or `{ value }` (cp). */
 const label = (x: Raw): string => {

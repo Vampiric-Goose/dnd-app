@@ -182,6 +182,39 @@ test('bad input never throws and keeps the good parts', async () => {
   expect(r.warnings.some(w => w.includes('calculateProp'))).toBe(true);
 });
 
+test.each([
+  ['non-string name', { 'bad.json': { race: [{ name: 5, source: 'TST' }] } }, 'race "5": name is not a string'],
+  ['non-string source', { 'bad.json': { race: [{ name: 'X', source: 5 }] } }, 'race "X": source is not a string'],
+  ['null class entry (sources.json shape)', { 'bad.json': { TST: { Sp: { class: [null] } } } }, undefined],
+  ['null class source map (gendata shape)', { 'bad.json': { TST: { Sp: { class: { PHB: null } } } } }, undefined],
+])('malformed input never rejects: %s', async (_, bad, error) => {
+  const r = await run({ ...bad, 'good.json': { feat: [{ name: 'Goodfeat', source: 'TST', entries: ['Fine.'] }], spell: [{ name: 'Sp', source: 'TST', level: 1, school: 'V', entries: [] }] } });
+  expect(r.packs.flatMap(p => p.entities).map(e => e.name)).toEqual(expect.arrayContaining(['Goodfeat', 'Sp']));
+  if (error) expect(r.errors).toContainEqual({ file: 'bad.json', message: error });
+  else expect(r.errors).toEqual([]);
+});
+
+test('_mod paths cannot pollute Object.prototype', async () => {
+  const r = await run({ 'races.json': readFixture('races.json'), 'evil.json': { race: [{ name: 'Evilfolk', source: 'TST', _copy: { name: 'Testfolk', source: 'TST', _mod: {
+    '__proto__.polluted': { mode: 'setProp', value: 'yes' },
+    _: { mode: 'setProp', prop: 'constructor.prototype.polluted2', value: 'yes' },
+    entries: { mode: 'appendArr', items: 'Still fine.' },
+  } } }] } });
+  expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  expect(({} as Record<string, unknown>).polluted2).toBeUndefined();
+  expect(r.warnings.some(w => w.includes('__proto__.polluted'))).toBe(true);
+  expect(r.warnings.some(w => w.includes('constructor.prototype.polluted2'))).toBe(true);
+  expect(richToPlain(r.packs.flatMap(p => p.entities).find(e => e.name === 'Evilfolk')!.text)).toContain('Still fine.');
+});
+
+test('user-supplied codes that name Object.prototype members map to nothing', async () => {
+  const r = await run({ 'i.json': { baseitem: [{ name: 'Protoblade', source: 'TST', type: 'constructor', property: ['__proto__'], dmgType: 'toString' }] },
+    's.json': { spell: [{ name: 'Protospell', source: 'TST', level: 1, school: 'constructor', time: [{ number: 1, unit: 'toString' }], entries: [] }] } });
+  const all = r.packs.flatMap(p => p.entities);
+  expect(all.find(e => e.name === 'Protoblade')).toMatchObject({ type: 'other' });
+  expect(all.find(e => e.name === 'Protospell')).toMatchObject({ school: 'constructor', castingTime: '1 toString' });
+});
+
 test('Foundry overlay files are not content', async () => {
   const r = await run({ 'feats.json': { feat: [{ name: 'Realfeat', source: 'TST', entries: ['Real.'] }] },
     'foundry-feats.json': { feat: [{ name: 'Realfeat', source: 'TST', activities: [], migrationVersion: 3 }] } });

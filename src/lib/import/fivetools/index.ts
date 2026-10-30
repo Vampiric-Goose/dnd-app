@@ -40,6 +40,13 @@ const srdNames = (name: string): string[] => {
   const w = head.split(' ');
   return [name, ...w.slice(1).map((_, i) => `${w.slice(i + 1).join(' ')}, ${w.slice(0, i + 1).join(' ')}${paren}`)];
 };
+/** Why an entity can't even be keyed (files are untrusted), or undefined. */
+const invalid = (key: string, r: Raw): string | undefined => {
+  if (!r || typeof r !== 'object' || Array.isArray(r)) return 'not an object';
+  if (r.name !== undefined && typeof r.name !== 'string') return 'name is not a string';
+  if (r.source !== undefined && typeof r.source !== 'string') return 'source is not a string';
+  if (key === 'magicvariant' && r.inherits?.source !== undefined && typeof r.inherits.source !== 'string') return 'inherits.source is not a string';
+};
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /** FNV-1a over the pack content: sync, so mergePack stays sync. */
@@ -80,13 +87,16 @@ export async function import5etools(
     // Foundry VTT overlays (foundry*.json) reuse the content keys but every entry is a partial with `migrationVersion`.
     const foundry = keys.length > 0 && keys.flatMap(k => j[k]).every((e: Raw) => e && typeof e === 'object' && 'migrationVersion' in e);
     if (!keys.length || foundry) {
-      const l = spellLookup(j);
+      let l: Map<string, ClassRef[]> | undefined;
+      try { l = spellLookup(j); } catch (err) { errors.push({ file: f.name, message: message(err) }); continue; }
       if (l) lookups.push(l);
       else errors.push({ file: f.name, message: 'No recognised 5etools content' });
       continue;
     }
     for (const k of META_KEYS) for (const b of arr(j[k])) if (b?.id && b?.name) packNames.set(up(b.id), String(b.name));
     for (const k of CONTENT_KEYS) for (const r of arr(j[k])) {
+      const bad = invalid(k, r);
+      if (bad) { errors.push({ file: f.name, message: `${k} "${r?.name ?? '?'}": ${bad}` }); continue; }
       found.push({ file: f.name, key: k, r });
       const src = keySource(r);
       if (r?.name !== undefined && src) batch.set(rawKey(k, r.name, src), r);
@@ -101,6 +111,8 @@ export async function import5etools(
     try {
       // ponytail: class content is kept unresolved; its _copy keys need className/classSource (Task 12)
       const r = CLASS_KEYS.has(e.key) ? e.r : await resolveCopy(e.key, e.r, lookup, m => warnings.push(`${e.file}: ${label}: ${m}`));
+      const bad = invalid(e.key, r); // a copy can inherit a bad name or source
+      if (bad) fail(bad);
       if (DROP_SOURCES.has(up(sourceOf(e.key, r))) || r.edition === 'one') { skipped2024++; continue; }
       live.push({ ...e, r, label });
       if (r.name !== undefined && keySource(r)) raw.push([rawKey(e.key, r.name, keySource(r)!), r]);
@@ -121,7 +133,8 @@ export async function import5etools(
   const refs = new Map<string, string>();
   for (const { key, r } of live) {
     const kind = CONVERT[key]?.[0], name = nameOf(key, r);
-    if (kind && name !== undefined && r.source) refs.set(refKey(kind, name, r.source), srdTwin(kind, name, r)?.id ?? entityId(kind, name, r.source));
+    // A failure here resurfaces as this entity's conversion error in step 4.
+    try { if (kind && name !== undefined && r.source) refs.set(refKey(kind, name, r.source), srdTwin(kind, name, r)?.id ?? entityId(kind, name, r.source)); } catch { /* reported in step 4 */ }
   }
   const conv: Ctx = {
     index,

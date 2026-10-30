@@ -7,6 +7,7 @@ export const rawKey = (kind: string, name: string, source: string) => `${kind}|$
 // Not inherited by a copy unless `_preserve` names them (as 5etools does): a copy is a different entity.
 const UNCOPIED = ['srd', 'srd52', 'basicRules', 'basicRules2024', 'reprintedAs', 'otherSources', 'additionalSources', 'page', 'hasFluff', 'hasFluffImages', '_versions'];
 const SKIP_TXT = new Set(['name', 'type', 'source']);
+const UNSAFE = new Set(['__proto__', 'prototype', 'constructor']);
 
 const matches = (rep: Raw, el: Raw, i: number): boolean =>
   typeof rep === 'string' ? el === rep || el?.name === rep
@@ -19,6 +20,9 @@ const replaceTxt = (x: Raw, re: RegExp, by: string): Raw => mapStrings(x, s => s
 /** Applies one `_mod` entry to `root[path]` (a dotted path such as `inherits.entries`; `_` = root itself, `*` = every property for replaceTxt). */
 function applyMod(root: Raw, path: string, m: Raw, warn: (msg: string) => void): void {
   const parts = path === '_' || path === '*' ? [path] : path.split('.');
+  // Homebrew files are untrusted: a `__proto__`/`constructor`/`prototype` segment would walk into Object.prototype.
+  const bad = [...parts, ...(m?.prop !== undefined ? String(m.prop).split('.') : [])].find(k => UNSAFE.has(k));
+  if (bad !== undefined) { warn(`_mod path "${path}${m?.prop ? ` / ${m.prop}` : ''}" uses "${bad}"; skipped`); return; }
   const obj = parts.slice(0, -1).reduce((o, k) => (o[k] ??= {}), root), prop = parts[parts.length - 1];
   if (m === 'remove') { delete obj[prop]; return; }
   const items = () => structuredClone(arr(m.items));

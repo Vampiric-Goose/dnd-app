@@ -1,22 +1,22 @@
 import { renderTags } from '../../content/richtext.ts';
 import { entityId } from '../../content/ids.ts';
 import type { ItemDef, ItemType, Rarity, Recharge } from '../../types.ts';
-import { arr, base, code, mapStrings, type Ctx, type Raw } from './common.ts';
+import { arr, base, code, mapStrings, table, type Ctx, type Raw } from './common.ts';
 
-const TYPE: Record<string, ItemType> = {
+const TYPE = table<ItemType>({
   M: 'weapon', R: 'weapon', A: 'ammunition', LA: 'armor', MA: 'armor', HA: 'armor', S: 'shield', G: 'gear', SCF: 'gear',
   AT: 'tool', T: 'tool', INS: 'tool', GS: 'tool', P: 'potion', RG: 'ring', RD: 'rod', SC: 'scroll', ST: 'staff', WD: 'wand',
-};
-const DMG: Record<string, string> = {
+});
+const DMG = table<string>({
   B: 'bludgeoning', P: 'piercing', S: 'slashing', A: 'acid', C: 'cold', F: 'fire', O: 'force', L: 'lightning', N: 'necrotic', I: 'poison', Y: 'psychic', R: 'radiant', T: 'thunder',
-};
-const PROP: Record<string, string> = { A: 'ammunition', F: 'finesse', H: 'heavy', L: 'light', LD: 'loading', R: 'reach', S: 'special', T: 'thrown', '2H': 'two-handed', V: 'versatile' };
-const ARMOR: Record<string, 'light' | 'medium' | 'heavy'> = { LA: 'light', MA: 'medium', HA: 'heavy' };
-const SCF: Record<string, string> = { arcane: 'arcane-foci', druid: 'druidic-foci', holy: 'holy-symbols' };
-const CATEGORY: Record<string, string> = { INS: 'musical-instruments', AT: 'artisans-tools', GS: 'gaming-sets' };
-const RECHARGE: Record<string, Recharge> = { dawn: 'dawn', dusk: 'dusk', restShort: 'short', restLong: 'long' };
+});
+const PROP = table<string>({ A: 'ammunition', F: 'finesse', H: 'heavy', L: 'light', LD: 'loading', R: 'reach', S: 'special', T: 'thrown', '2H': 'two-handed', V: 'versatile' });
+const ARMOR = table<'light' | 'medium' | 'heavy'>({ LA: 'light', MA: 'medium', HA: 'heavy' });
+const SCF = table<string>({ arcane: 'arcane-foci', druid: 'druidic-foci', holy: 'holy-symbols' });
+const CATEGORY = table<string>({ INS: 'musical-instruments', AT: 'artisans-tools', GS: 'gaming-sets' });
+const RECHARGE = table<Recharge>({ dawn: 'dawn', dusk: 'dusk', restShort: 'short', restLong: 'long' });
 const RARITIES = new Set<string>(['common', 'uncommon', 'rare', 'very rare', 'legendary', 'artifact', 'varies']);
-const invert = (o: Record<string, string>) => Object.fromEntries(Object.entries(o).map(([k, v]) => [v, k]));
+const invert = (o: Record<string, string>) => table(Object.fromEntries(Object.entries(o).map(([k, v]) => [v, k])));
 const CODE_OF = { prop: invert(PROP), dmg: invert(DMG), armor: invert(ARMOR), scf: invert(SCF), category: invert(CATEGORY) };
 
 const bonus = (s: unknown): number | undefined => {
@@ -96,7 +96,7 @@ export function expandVariant(v: Raw, b: { view: Raw; def: ItemDef }, ctx: Ctx):
   const name = `${inh.namePrefix ?? ''}${inh.nameRemove ? b.def.name.replace(inh.nameRemove, '') : b.def.name}${inh.nameSuffix ?? ''}`;
   const vars: Raw = { ...b.view, ...inh, baseName: b.def.name };
   const entries = mapStrings(arr(inh.entries), s => s.replace(TEMPLATE, (m, k: string, f?: string) => {
-    const val = vars[k];
+    const val = Object.hasOwn(vars, k) ? vars[k] : undefined;
     if (val === undefined || typeof val === 'object') return m;
     return f === 'l' ? String(val).toLowerCase() : f === 'u' ? String(val).toUpperCase() : String(val);
   }));

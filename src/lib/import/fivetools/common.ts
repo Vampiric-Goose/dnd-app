@@ -20,6 +20,8 @@ export interface Ctx {
 /** One spell class-list entry; `variantOf` (the books defining it) marks a classVariant (an expanded class list). */
 export interface ClassRef { name: string; source: string; variantOf?: string[] }
 
+/** A code table with no prototype, so a user-supplied code like 'constructor' or '__proto__' misses instead of hitting Object.prototype. */
+export const table = <V>(o: Record<string, V>): Record<string, V> => Object.assign(Object.create(null), o);
 /** 'M|XPHB' -> 'M'. 5etools appends a source to codes and references. */
 export const code = (s: unknown): string => String(s).split('|')[0];
 export const arr = (x: unknown): Raw[] => (Array.isArray(x) ? x : x === undefined || x === null ? [] : [x]);
@@ -70,7 +72,7 @@ export function abilities(list: Raw): { bonuses: Partial<Scores>; choices: Choic
 
 /** Tool names in an SRD gear category ('artisans-tools'), for "any artisan's tool" choices. */
 const toolsIn = (ctx: Ctx, category: string) => ctx.index.all('item').filter(i => i.category === category).map(i => i.name.toLowerCase());
-const TOOL_ANY: Record<string, string> = { anyArtisansTool: 'artisans-tools', anyMusicalInstrument: 'musical-instruments', anyGamingSet: 'gaming-sets' };
+const TOOL_ANY = table<string>({ anyArtisansTool: 'artisans-tools', anyMusicalInstrument: 'musical-instruments', anyGamingSet: 'gaming-sets' });
 
 /** Skill/language/tool/weapon/armor proficiencies (first alternative each): `true` keys are fixed, `choose`/`any*` become choices. */
 export function proficiencies(r: Raw, ctx: Ctx): { proficiencies: Proficiencies; choices: Choice[] } {
