@@ -15,6 +15,14 @@ const matches = (rep: Raw, el: Raw, i: number): boolean =>
   : rep?.regex !== undefined ? new RegExp(rep.regex, rep.flags).test(typeof el === 'string' ? el : el?.name ?? '')
   : false;
 
+// Own properties only: an inherited member (`toString`, `valueOf`) is a shared builtin, never something to read or descend into.
+const own = (o: Raw, k: string): Raw => (Object.hasOwn(o, k) ? o[k] : undefined);
+/** `o[k]` when it is an own object, else a fresh object stored there (a non-object own value is replaced). */
+const child = (o: Raw, k: string): Raw => {
+  const v = own(o, k);
+  return v !== null && typeof v === 'object' ? v : (o[k] = {});
+};
+
 const replaceTxt = (x: Raw, re: RegExp, by: string): Raw => mapStrings(x, s => s.replace(re, by), SKIP_TXT);
 
 /** Applies one `_mod` entry to `root[path]` (a dotted path such as `inherits.entries`; `_` = root itself, `*` = every property for replaceTxt). */
@@ -23,10 +31,10 @@ function applyMod(root: Raw, path: string, m: Raw, warn: (msg: string) => void):
   // Homebrew files are untrusted: a `__proto__`/`constructor`/`prototype` segment would walk into Object.prototype.
   const bad = [...parts, ...(m?.prop !== undefined ? String(m.prop).split('.') : [])].find(k => UNSAFE.has(k));
   if (bad !== undefined) { warn(`_mod path "${path}${m?.prop ? ` / ${m.prop}` : ''}" uses "${bad}"; skipped`); return; }
-  const obj = parts.slice(0, -1).reduce((o, k) => (o[k] ??= {}), root), prop = parts[parts.length - 1];
-  if (m === 'remove') { delete obj[prop]; return; }
+  const obj = parts.slice(0, -1).reduce(child, root), prop = parts[parts.length - 1];
+  if (m === 'remove') { if (Object.hasOwn(obj, prop)) delete obj[prop]; return; }
   const items = () => structuredClone(arr(m.items));
-  const list = (): Raw[] => arr(obj[prop]);
+  const list = (): Raw[] => arr(own(obj, prop));
   switch (m.mode) {
     case 'appendArr': obj[prop] = [...list(), ...items()]; break;
     case 'appendIfNotExistsArr': {
@@ -50,15 +58,15 @@ function applyMod(root: Raw, path: string, m: Raw, warn: (msg: string) => void):
     }
     case 'replaceTxt': {
       const re = new RegExp(m.replace, m.flags ?? 'g');
-      if (prop === '*') for (const k of Object.keys(obj)) { if (!SKIP_TXT.has(k)) obj[k] = replaceTxt(obj[k], re, m.with ?? ''); }
-      else obj[prop] = replaceTxt(obj[prop], re, m.with ?? '');
+      if (prop === '*') for (const k of Object.keys(obj)) { if (!SKIP_TXT.has(k)) obj[k] = replaceTxt(own(obj, k), re, m.with ?? ''); }
+      else if (Object.hasOwn(obj, prop)) obj[prop] = replaceTxt(obj[prop], re, m.with ?? '');
       break;
     }
     case 'setProp': {
       if (m.prop === undefined) { obj[prop] = structuredClone(m.value); break; } // `"inherits.namePrefix": { mode: 'setProp', value }`
-      let at = prop === '_' ? obj : (obj[prop] ??= {});
+      let at = prop === '_' ? obj : child(obj, prop);
       const path = String(m.prop).split('.');
-      for (const k of path.slice(0, -1)) at = at[k] ??= {};
+      for (const k of path.slice(0, -1)) at = child(at, k);
       at[path[path.length - 1]] = structuredClone(m.value);
       break;
     }

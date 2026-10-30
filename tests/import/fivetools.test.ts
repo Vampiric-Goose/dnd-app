@@ -207,6 +207,23 @@ test('_mod paths cannot pollute Object.prototype', async () => {
   expect(richToPlain(r.packs.flatMap(p => p.entities).find(e => e.name === 'Evilfolk')!.text)).toContain('Still fine.');
 });
 
+test('_mod walks own properties only: inherited builtins are never descended into', async () => {
+  const toStringCall = Object.prototype.toString.call;
+  const r = await run({ 'races.json': readFixture('races.json'), 'evil.json': { race: [{ name: 'Builtinfolk', source: 'TST', _copy: { name: 'Testfolk', source: 'TST', _mod: {
+    'toString.call': { mode: 'setProp', value: 'pwned' },
+    _: { mode: 'setProp', prop: 'valueOf.polluted3', value: 'yes' },
+    hasOwnProperty: 'remove',
+  } } }] } });
+  expect(typeof Object.prototype.toString.call).toBe('function');
+  expect(Object.prototype.toString.call).toBe(toStringCall);
+  expect(((({}) as any).valueOf as any).polluted3).toBeUndefined();
+  expect(typeof Object.prototype.hasOwnProperty).toBe('function');
+  expect(r.errors).toEqual([]);
+  const stored = new Map(r.raw).get('race|builtinfolk|TST') as any;
+  expect(Object.hasOwn(stored, 'toString') && stored.toString).toEqual({ call: 'pwned' });
+  expect(Object.hasOwn(stored, 'valueOf') && stored.valueOf).toEqual({ polluted3: 'yes' });
+});
+
 test('user-supplied codes that name Object.prototype members map to nothing', async () => {
   const r = await run({ 'i.json': { baseitem: [{ name: 'Protoblade', source: 'TST', type: 'constructor', property: ['__proto__'], dmgType: 'toString' }] },
     's.json': { spell: [{ name: 'Protospell', source: 'TST', level: 1, school: 'constructor', time: [{ number: 1, unit: 'toString' }], entries: [] }] } });
