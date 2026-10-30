@@ -76,7 +76,7 @@ export const monk = cls({
   ],
 }, [
   feature('monk', 'Unarmored Defense', 1, { effects: [{ type: 'acBase', base: 10, abilities: ['dex', 'wis'], shieldAllowed: false }] }),
-  feature('monk', 'Martial Arts', 1),
+  feature('monk', 'Martial Arts', 1, { effects: [{ type: 'flag', flag: 'martialArts' }] }),
   feature('monk', 'Ki', 2, { effects: [{ type: 'resource', name: 'Ki', max: 'col[Ki Points]', recharge: 'short' }] }),
   feature('monk', 'Unarmored Movement', 2, { effects: [{ type: 'speed', mode: 'walk', value: 'col[Unarmored Movement]', when: 'unarmored' }] }),
   subclassPick('monk', 'Monastic Tradition', 3),
@@ -183,6 +183,33 @@ export const warlock = cls({
   asi('warlock', 4),
 ]);
 
+export const sorcerer = cls({
+  name: 'Sorcerer', hitDie: 6, saves: ['con', 'cha'], proficiencies: P({ weapons: ['dagger', 'dart', 'sling', 'quarterstaff', 'crossbow, light'] }),
+  skillChoice: { count: 2, from: ['arcana', 'deception', 'insight', 'intimidation', 'persuasion', 'religion'] },
+  multiclassPrereq: { all: { cha: 13 } }, subclassLevel: 1, subclassTitle: 'Sorcerous Origin', asiLevels: [4, 8, 12, 16, 19],
+  spellcasting: { ability: 'cha', progression: 'full', preparation: 'known', cantrips: [4, 4, 4, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6], known: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 12, 13, 13, 14, 14, 15, 15, 15, 15] },
+  table: [{ label: 'Sorcery Points', values: [0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20] }],
+}, [
+  feature('sorcerer', 'Spellcasting', 1),
+  subclassPick('sorcerer', 'Sorcerous Origin', 1),
+  feature('sorcerer', 'Font of Magic', 2, { effects: [{ type: 'resource', name: 'Sorcery Points', max: 'col[Sorcery Points]', recharge: 'long' }] }),
+  asi('sorcerer', 4),
+]);
+const draconicFeatures = [
+  feature('sorcerer', 'Draconic Resilience', 1, { effects: [{ type: 'bonus', target: 'hpPerLevel', value: 1 }, { type: 'acBase', base: 13, abilities: ['dex'], shieldAllowed: true }] }, 'Draconic'),
+];
+features.push(...draconicFeatures);
+export const draconic: SubclassDef = {
+  kind: 'subclass', id: 'subclass:draconic@FIX', name: 'Draconic', source: 'FIX', text: [], classId: sorcerer.id, shortName: 'Draconic',
+  features: draconicFeatures.map(f => ({ level: f.level, id: f.id })),
+};
+
+export const halfElf: RaceDef = {
+  kind: 'race', id: 'race:half-elf@FIX', name: 'Half-Elf', source: 'FIX', text: [], size: 'M', speed: { walk: 30 }, darkvision: 60,
+  abilityBonuses: { cha: 2 }, proficiencies: P({ languages: ['Common', 'Elvish'] }),
+  choices: [{ type: 'ability', count: 2, amount: 1, from: ['str', 'dex', 'con', 'int', 'wis'] }], traits: [],
+};
+
 export const human: RaceDef = {
   kind: 'race', id: 'race:human@FIX', name: 'Human', source: 'FIX', text: [], size: 'M', speed: { walk: 30 },
   abilityBonuses: { str: 1, dex: 1, con: 1, int: 1, wis: 1, cha: 1 }, proficiencies: P({ languages: ['Common'] }),
@@ -215,7 +242,9 @@ export const chainMail = item('Chain Mail', { type: 'armor', magic: false, weigh
 export const shield = item('Shield', { type: 'shield', magic: false, weight: 6, costCp: 1000, armor: { category: 'shield', ac: 2 } });
 export const longsword = item('Longsword', { type: 'weapon', magic: false, weight: 3, costCp: 1500,
   weapon: { category: 'martial', ranged: false, damage: '1d8', damageType: 'slashing', versatile: '1d10', properties: ['versatile'] } });
-export const halfPlate = item('Half Plate', { type: 'armor', magic: false, weight: 40, costCp: 75000, armor: { category: 'medium', ac: 15, dexCap: 2, stealthDisadvantage: true } });
+export const quarterstaff = item('Quarterstaff', { type: 'weapon', magic: false, weight: 4, costCp: 20,
+  weapon: { category: 'simple', ranged: false, damage: '1d6', damageType: 'bludgeoning', versatile: '1d8', properties: ['versatile'] } });
+export const halfPlate =item('Half Plate', { type: 'armor', magic: false, weight: 40, costCp: 75000, armor: { category: 'medium', ac: 15, dexCap: 2, stealthDisadvantage: true } });
 export const ringOfProtection = item('Ring of Protection', { type: 'ring', magic: true, rarity: 'rare', attunement: true, bonuses: { ac: 1, save: 1 } });
 export const gauntletsOfOgrePower = item('Gauntlets of Ogre Power', { type: 'wondrous', magic: true, rarity: 'uncommon', attunement: true, effects: [{ type: 'setScore', ability: 'str', value: 19 }] });
 export const potionFixture = item('Potion of Poison', { type: 'potion', magic: true, rarity: 'uncommon', consumable: true, weight: 0.5, costCp: 10000,
@@ -223,8 +252,8 @@ export const potionFixture = item('Potion of Poison', { type: 'potion', magic: t
 export const sack60 = item('Sack of 60lb', { type: 'gear', magic: false, weight: 60 });
 
 export const fixtureEntities: Entity[] = [
-  human, dwarf, hillDwarf, fighter, champion, monk, barbarian, bard, rogue, wizard, cleric, warlock, ...features, defense,
-  chainMail, shield, longsword, halfPlate, ringOfProtection, gauntletsOfOgrePower, potionFixture, sack60,
+  human, dwarf, hillDwarf, halfElf, fighter, champion, monk, barbarian, bard, rogue, wizard, cleric, warlock, sorcerer, draconic, ...features, defense,
+  chainMail, shield, longsword, quarterstaff, halfPlate, ringOfProtection, gauntletsOfOgrePower, potionFixture, sack60,
 ];
 const byId = new Map(fixtureEntities.map(e => [e.id, e]));
 const need = (id: string): Entity => byId.get(id) ?? (() => { throw new Error(`No fixture entity ${id}`); })();

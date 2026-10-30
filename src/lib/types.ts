@@ -19,7 +19,7 @@ export type Effect =
   | { type: 'speed'; mode: keyof Speeds; value: number | string; when?: When }
   | { type: 'resource'; name: string; max: string; recharge: Recharge }
   | { type: 'resourceRecharge'; name: string; recharge: Recharge }
-  | { type: 'flag'; flag: 'ignoreHeavyArmorSpeed' }
+  | { type: 'flag'; flag: 'ignoreHeavyArmorSpeed' | 'martialArts' }
   | { type: 'note'; text: string };
 export interface Trait { name: string; text: RichText; effects?: Effect[]; choices?: Choice[] }
 export type Choice =

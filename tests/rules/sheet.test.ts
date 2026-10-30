@@ -48,6 +48,27 @@ test('items: attunement, player view, setScore, override', () => {
   const o = computeSheet({ ...ring(true), overrides: { ac: 25 } }, dm);
   expect([o.ac, o.overridden]).toEqual([25, ['ac']]);
 });
+test('initiative is a Dex check (R21)', () => {
+  const champ = mkChar({ race: 'human', base: { dex: 13 }, levels: Array(7).fill('fighter'), answers: { subclass: ['subclass:champion@FIX'] } });
+  expect(computeSheet(champ, dm).initiative).toBe(4); // dex 14: 2 + ceil(3/2) from Remarkable Athlete
+});
+test('class-sourced hpPerLevel counts per level of that class (R22)', () => {
+  const hp = (levels: string[]) => computeSheet(mkChar({ race: 'human', base: { con: 9 }, levels, answers: { subclass: ['subclass:draconic@FIX'] } }), dm).maxHp;
+  expect([hp(['sorcerer', 'fighter']), hp(['sorcerer', 'sorcerer'])]).toEqual([6 + 1 + 6, 6 + 1 + 4 + 1]); // con 10: +0
+});
+test('martial arts (R23)', () => {
+  const unarmed = computeSheet(mkChar({ race: 'human', base: { dex: 15, str: 9 }, levels: ['monk'] }), dm).attacks.find(a => a.entryId === 'unarmed');
+  expect(unarmed).toMatchObject({ toHit: 5, damage: '1d4+3' });
+  const monk5 = computeSheet(mkChar({ race: 'human', base: { dex: 15, str: 9 }, levels: Array(5).fill('monk'), inventory: [['quarterstaff', true]] }), dm);
+  expect(monk5.attacks.find(a => a.name === 'Quarterstaff')).toMatchObject({ damage: '1d6+3', versatile: '1d8+3' });
+  expect(monk5.attacks.find(a => a.entryId === 'unarmed')!.damage).toBe('1d6+3');
+});
+test('custom origin replaces racial ability choices (R24)', () => {
+  const c = mkChar({ race: 'half-elf', base: {}, levels: ['fighter'], answers: { ability: ['str', 'wis'] } });
+  expect(computeSheet(c, dm).scores).toMatchObject({ str: 11, wis: 11, cha: 12, dex: 10 });
+  c.build.customOrigin = { dex: 2, con: 1 };
+  expect(computeSheet(c, dm).scores).toEqual({ str: 10, dex: 12, con: 11, int: 10, wis: 10, cha: 10 });
+});
 test('robust to missing content; encumbrance; resources', () => {
   const broken = mkChar({ race: 'human', base: {}, levels: ['fighter'] }); broken.build.levels.push({ classId: 'class:nope@X' });
   expect(() => computeSheet(broken, dm)).not.toThrow();

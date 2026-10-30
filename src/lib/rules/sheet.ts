@@ -50,7 +50,9 @@ export function computeSheet(c: Character, opts: SheetOpts): Sheet {
   if (c.build.customOrigin) raise(c.build.customOrigin);
   else { raise(race?.abilityBonuses); raise(sub?.abilityBonuses); }
   const fromFeat = (sourceId: string) => sourceId.startsWith('feat:');
-  for (const p of pending) if (p.choice.type === 'ability' && p.answer?.type === 'abilities' && !fromFeat(p.sourceId)) raise(p.answer.abilities);
+  // A custom origin replaces every racial increase, including race/subrace ability choices.
+  const racial = (sourceId: string) => [c.build.raceId, c.build.subraceId].includes(sourceId.split('/')[0]);
+  for (const p of pending) if (p.choice.type === 'ability' && p.answer?.type === 'abilities' && !fromFeat(p.sourceId) && !(c.build.customOrigin && racial(p.sourceId))) raise(p.answer.abilities);
   const featBonus = (id?: string) => raise(getKind(lookup, id, 'feat')?.abilityBonus, true);
   for (const { choice, answer: a, sourceId } of pending) {
     if (choice.type === 'asi' && a?.type === 'asi') { raise(a.abilities, true); featBonus(a.featId); }
@@ -118,7 +120,8 @@ export function computeSheet(c: Character, opts: SheetOpts): Sheet {
     const base = Math.max(exp ? 2 * prof : 0, proficient ? prof : 0, half(ab));
     return [sk, { bonus: override(`skill.${sk}`, mods[ab] + base + bonus(`skill.${sk}`) + bonus(`check.${ab}`)), proficient, expertise: exp }];
   })) as Sheet['skills'];
-  const initiative = override('initiative', mods.dex + (halves.some(h => !h.effect.abilities) ? Math.floor(prof / 2) : 0) + bonus('initiative'));
+  // Initiative is a Dex check (R21).
+  const initiative = override('initiative', mods.dex + half('dex') + bonus('check.dex') + bonus('initiative'));
   const passivePerception = override('passivePerception', 10 + skills.perception.bonus + bonus('passive.perception'));
 
   // AC
@@ -128,11 +131,13 @@ export function computeSheet(c: Character, opts: SheetOpts): Sheet {
   const ac = override('ac', base + (shield?.ac ?? 0) + itemBonus('ac') + bonus('ac'));
 
   // HP and hit dice
-  const hpPer = bonus('hpPerLevel');
+  // Class-sourced HP bonuses count per level of that class; race/feat/item ones every level (R22).
+  const hpPer = ofType(effects, 'bonus').filter(b => b.effect.target === 'hpPerLevel' && whenOk(b.effect.when));
   const maxHp = override('maxHp', steps.reduce((t, s, i) => {
     const die = s.cls?.hitDie ?? 0;
     const roll = i === 0 ? die : (c.build.levels[i].hpRoll ?? (die ? averageHp(die) : 0));
-    return t + Math.max(1, roll + mods.con + hpPer);
+    const extra = hpPer.filter(b => !b.classId || b.classId === s.classId).reduce((n, b) => n + num(b.effect.value, b.classId), 0);
+    return t + Math.max(1, roll + mods.con + extra);
   }, 0));
   const dice: Record<number, number> = {};
   for (const s of steps) if (s.cls) dice[s.cls.hitDie] = (dice[s.cls.hitDie] ?? 0) + 1;
@@ -156,20 +161,31 @@ export function computeSheet(c: Character, opts: SheetOpts): Sheet {
 
   // Attacks
   const weaponProfs = new Set([...profs.weapons].map(slug));
+  // Martial Arts (R23): only while wearing no armor and no shield (PHB).
+  const ma = whenOk('unarmored') ? ofType(effects, 'flag').find(f => f.effect.flag === 'martialArts') : undefined;
+  const maLevel = ma?.classId ? classLevel[ma.classId] : undefined;
+  const maCol = ma?.classId && maLevel ? (c.embedded[ma.classId] as ClassDef | undefined)?.table.find(t => t.label === 'Martial Arts')?.values[maLevel - 1] : undefined;
+  const maDie = typeof maCol === 'string' ? maCol : undefined;
+  const sides = (d: string) => Number(/d(\d+)/.exec(d)?.[1] ?? 0);
+  const withMa = (d: string) => (maDie && sides(maDie) > sides(d) ? maDie : d);
   const attacks: Attack[] = worn.filter(i => i.item.weapon).map(({ entry, item, active: on }) => {
     const w = item.weapon!;
-    const mod = w.properties.includes('finesse') ? Math.max(mods.str, mods.dex) : w.ranged ? mods.dex : mods.str;
-    const kind = w.ranged ? 'ranged' : 'melee';
     const names = [item.name, item.baseItemId?.split(':')[1]?.split('@')[0] ?? ''].map(slug);
+    const monkWeapon = !!ma && !w.ranged && (names.includes('shortsword') || (w.category === 'simple' && !w.properties.some(p => p === 'two-handed' || p === 'heavy')));
+    const mod = monkWeapon || w.properties.includes('finesse') ? Math.max(mods.str, mods.dex) : w.ranged ? mods.dex : mods.str;
+    const kind = w.ranged ? 'ranged' : 'melee';
     const proficient = weaponProfs.has(w.category) || names.some(n => weaponProfs.has(n));
     const dmg = mod + (on ? (item.bonuses?.damage ?? 0) : 0) + bonus(`damage.${kind}`);
+    const die = (d: string) => (monkWeapon ? withMa(d) : d) + signed(dmg);
     return {
       entryId: entry.id, name: item.name, damageType: w.damageType, properties: w.properties,
       toHit: mod + (proficient ? prof : 0) + (on ? (item.bonuses?.attack ?? 0) : 0) + bonus(`attack.${kind}`),
-      damage: w.damage + signed(dmg), ...(w.versatile && { versatile: w.versatile + signed(dmg) }),
+      damage: die(w.damage), ...(w.versatile && { versatile: die(w.versatile) }),
     };
   });
-  attacks.push({ entryId: 'unarmed', name: 'Unarmed Strike', toHit: mods.str + prof + bonus('attack.melee'), damage: String(1 + mods.str + bonus('damage.melee')), damageType: 'bludgeoning', properties: [] });
+  const unarmedMod = ma ? Math.max(mods.str, mods.dex) : mods.str, unarmedDmg = unarmedMod + bonus('damage.melee');
+  attacks.push({ entryId: 'unarmed', name: 'Unarmed Strike', toHit: unarmedMod + prof + bonus('attack.melee'),
+    damage: maDie ? maDie + signed(unarmedDmg) : String(1 + unarmedDmg), damageType: 'bludgeoning', properties: [] });
 
   // Spellcasting
   const casters = classes.flatMap(x => [x.cls.spellcasting, x.sub?.spellcasting].filter((sc): sc is Spellcasting => !!sc).map(sc => ({ classId: x.cls.id, sc, level: x.level })));
