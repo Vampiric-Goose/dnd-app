@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { db, resetDb } from '../src/lib/db.ts';
-import type { Pack } from '../src/lib/types.ts';
+import type { Character, Pack } from '../src/lib/types.ts';
 import { camp, char, item } from './fixtures/records.ts';
 
 beforeEach(resetDb);
@@ -19,6 +19,20 @@ test('campaign delete removes items, unassigns characters', async () => {
 test('write failure becomes StorageError', async () => {
   vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(() => { throw new DOMException('full', 'QuotaExceededError'); });
   await expect(db.characters.put(char('a'))).rejects.toThrow(/Could not save/);
+});
+
+test('a failed transaction commits nothing', async () => {
+  const empty = { campaigns: [], characters: [], items: [], packs: [], blobs: [] };
+  // 2nd put throws DataError synchronously (no id); the 1st must not survive.
+  await expect(db.restore({ ...empty, campaigns: [camp('c1')], characters: [{} as Character] })).rejects.toThrow(/Could not save/);
+  expect(await db.campaigns.get('c1')).toBeUndefined();
+  // a JS error inside the transaction body (pack without entities): no campaign, no orphan packs row
+  await expect(db.restore({ ...empty, campaigns: [camp('c1')], packs: [{ id: 'p' } as Pack] })).rejects.toThrow(/Could not save/);
+  expect(await db.campaigns.get('c1')).toBeUndefined();
+  expect(await db.packs.get('p')).toBeUndefined();
+  // same for putMany
+  await expect(db.raw5e.putMany([['a', 1], [{} as unknown as string, 2]])).rejects.toThrow(/Could not save/);
+  expect(await db.raw5e.getMany(['a'])).toEqual([undefined]);
 });
 
 test('list filters by campaign; put stamps updatedAt', async () => {

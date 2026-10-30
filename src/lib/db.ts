@@ -47,17 +47,32 @@ export async function resetDb(): Promise<void> {
   await deleteDB(NAME);
 }
 
-/** One readwrite transaction; any failure (including quota) surfaces as StorageError. */
+/**
+ * One readwrite transaction; any failure (including quota) surfaces as StorageError.
+ * A throw inside fn does not abort an IndexedDB transaction by itself, so earlier queued writes
+ * would commit; we abort explicitly to keep the transaction all-or-nothing.
+ * fn must await each request before starting the next: a request promise dropped by a throw
+ * would reject unhandled when the abort cancels it.
+ */
 async function write<N extends Stores>(names: N[], fn: (tx: IDBPTransaction<Schema, N[], 'readwrite'>) => Promise<unknown>): Promise<void> {
   try {
     const tx = (await open()).transaction(names, 'readwrite');
-    await Promise.all([fn(tx), tx.done]); // awaiting both keeps tx.done's rejection handled
+    try {
+      // tx.done is read first and the async wrapper turns a synchronous throw from fn into a rejection,
+      // so Promise.all always observes tx.done (it rejects once we abort)
+      await Promise.all([tx.done, (async () => fn(tx))()]);
+    } catch (e) {
+      try { tx.abort(); } catch { /* already finished or aborted */ }
+      throw e;
+    }
   } catch (e) {
     throw new StorageError('Could not save: ' + ((e as Error)?.message ?? e));
   }
 }
 
-const hex = (buf: ArrayBuffer) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+/** SHA-256 of the bytes, lowercase hex. This is the key blobs are stored under. */
+export const sha256Hex = async (data: ArrayBuffer) =>
+  [...new Uint8Array(await crypto.subtle.digest('SHA-256', data))].map((b) => b.toString(16).padStart(2, '0')).join('');
 
 function packMeta(p: Pack): PackMeta {
   const counts: PackMeta['counts'] = {};
@@ -100,10 +115,12 @@ export const db = {
     listMeta: async (): Promise<PackMeta[]> => (await open()).getAll('packMeta'),
     get: async (id: string) => (await open()).get('packs', id),
     put: (p: Pack) => write(['packs', 'packMeta'], async (tx) => {
-      await Promise.all([tx.objectStore('packs').put(p), tx.objectStore('packMeta').put(packMeta(p))]);
+      await tx.objectStore('packs').put(p);
+      await tx.objectStore('packMeta').put(packMeta(p));
     }),
     delete: (id: string) => write(['packs', 'packMeta'], async (tx) => {
-      await Promise.all([tx.objectStore('packs').delete(id), tx.objectStore('packMeta').delete(id)]);
+      await tx.objectStore('packs').delete(id);
+      await tx.objectStore('packMeta').delete(id);
     }),
   },
   raw5e: {
@@ -111,16 +128,16 @@ export const db = {
       const store = (await open()).transaction('raw5e').store;
       return Promise.all(keys.map((k) => store.get(k)));
     },
-    putMany: (entries: [string, unknown][]) => write(['raw5e'], (tx) => {
+    putMany: (entries: [string, unknown][]) => write(['raw5e'], async (tx) => {
       const store = tx.objectStore('raw5e');
-      return Promise.all(entries.map(([k, v]) => store.put(v, k)));
+      for (const [k, v] of entries) await store.put(v, k);
     }),
   },
   blobs: {
     /** Stores the blob and returns its SHA-256 hex. */
     put: async (blob: Blob): Promise<string> => {
       const data = await blob.arrayBuffer();
-      const hash = hex(await crypto.subtle.digest('SHA-256', data));
+      const hash = await sha256Hex(data);
       await write(['blobs'], (tx) => tx.objectStore('blobs').put({ hash, type: blob.type, data }));
       return hash;
     },
@@ -136,13 +153,14 @@ export const db = {
   },
   /** Backup import: one atomic upsert that keeps the records' own updatedAt. */
   restore: (s: Snapshot) => write(['campaigns', 'characters', 'items', 'packs', 'packMeta', 'blobs'], async (tx) => {
-    await Promise.all([
-      ...s.campaigns.map((r) => tx.objectStore('campaigns').put(r)),
-      ...s.characters.map((r) => tx.objectStore('characters').put(r)),
-      ...s.items.map((r) => tx.objectStore('items').put(r)),
-      ...s.packs.flatMap((p) => [tx.objectStore('packs').put(p), tx.objectStore('packMeta').put(packMeta(p))]),
-      ...s.blobs.map((r) => tx.objectStore('blobs').put(r)),
-    ]);
+    for (const r of s.campaigns) await tx.objectStore('campaigns').put(r);
+    for (const r of s.characters) await tx.objectStore('characters').put(r);
+    for (const r of s.items) await tx.objectStore('items').put(r);
+    for (const p of s.packs) {
+      await tx.objectStore('packs').put(p);
+      await tx.objectStore('packMeta').put(packMeta(p));
+    }
+    for (const r of s.blobs) await tx.objectStore('blobs').put(r);
   }),
 };
 
