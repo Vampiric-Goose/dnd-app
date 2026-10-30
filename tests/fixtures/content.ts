@@ -1,5 +1,5 @@
 // Hand-written content entities (source FIX, SRD 5.1 numbers) and a character builder for rules tests.
-import type { Character, Choice, ClassDef, Entity, FeatureDef, ItemDef, OptionalFeatureDef, PlayerView, Proficiencies, RaceDef, Scores, Skill, SubclassDef, SubraceDef } from '../../src/lib/types.ts';
+import type { Character, Choice, ClassDef, Entity, FeatureDef, ItemDef, OptionalFeatureDef, PlayerView, Proficiencies, RaceDef, Scores, Skill, SpellDef, SubclassDef, SubraceDef } from '../../src/lib/types.ts';
 import { featureId, slug } from '../../src/lib/content/ids.ts';
 import { enumerateChoices, walkLevels } from '../../src/lib/character/choices.ts';
 import { ContentIndex } from '../../src/lib/content/index.ts';
@@ -252,9 +252,14 @@ export const potionFixture = item('Potion of Poison', { type: 'potion', magic: t
   text: [{ p: 'Looks like healing. {{redact:r1}}It is poison.{{/redact}}' }] });
 export const sack60 = item('Sack of 60lb', { type: 'gear', magic: false, weight: 60 });
 
+const spell = (name: string, level: number, classes: string[]): SpellDef => ({ kind: 'spell', id: `spell:${slug(name)}@FIX`, name, source: 'FIX', text: [], level,
+  school: 'evocation', castingTime: '1 action', range: '120 feet', components: { v: true, s: true }, duration: 'Instantaneous', concentration: false, ritual: false, classes });
+export const magicMissile = spell('Magic Missile', 1, ['sorcerer', 'wizard']);
+export const shatter = spell('Shatter', 2, ['bard', 'sorcerer', 'warlock', 'wizard']);
+
 export const fixtureEntities: Entity[] = [
   human, dwarf, hillDwarf, halfElf, fighter, champion, monk, barbarian, bard, rogue, wizard, cleric, warlock, sorcerer, draconic, ...features, defense,
-  chainMail, shield, longsword, quarterstaff, halfPlate, ringOfProtection, gauntletsOfOgrePower, potionFixture, sack60,
+  chainMail, shield, longsword, quarterstaff, halfPlate, ringOfProtection, gauntletsOfOgrePower, potionFixture, sack60, magicMissile, shatter,
 ];
 const byId = new Map(fixtureEntities.map(e => [e.id, e]));
 export const fixtureIndex = (): ContentIndex =>

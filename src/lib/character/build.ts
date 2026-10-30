@@ -204,8 +204,9 @@ export function validateCharacter(c: Character, index: ContentIndex, settings: C
       const sp = spell(id);
       if (!sp) { add('spells', `Missing spell ${id}`); continue; }
       if (sp.level > lim.maxLevel) add('spells', `${sp.name} is level ${sp.level}; ${cls.name} casts up to level ${lim.maxLevel}`);
+      // R25: a warning only. Magical Secrets and expanded spell lists grant off-list spells, and no data field records them.
       // ponytail: subclass casters (Eldritch Knight, Arcane Trickster) borrow another list; only class casters are checked.
-      if (cls.spellcasting && sp.classes.length && !sp.classes.includes(slug(cls.name))) add('spells', `${sp.name} isn't on the ${cls.name} spell list`);
+      if (cls.spellcasting && sp.classes.length && !sp.classes.includes(slug(cls.name))) add('spells', `${sp.name} isn't on the ${cls.name} spell list`, undefined, false);
     }
     const count = (ids: string[], cantrip: boolean) => ids.filter(id => (spell(id)?.level === 0) === cantrip).length;
     const cantrips = new Set([...picked.known, ...picked.prepared].filter(id => spell(id)?.level === 0)).size;

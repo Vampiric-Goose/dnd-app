@@ -48,6 +48,13 @@ test('custom origin skips racial ability choices; new characters start empty', (
   expect(validateCharacter(n, idx, S).map(p => p.step)).toEqual(expect.arrayContaining(['race', 'class', 'abilities', 'background']));
   expect(addLevel(n, 'class:wizard@FIX', idx, S).character.build.levels).toEqual([{ classId: 'class:wizard@FIX' }]);
 });
+test('off-list spells warn (R25); spells above the max level block', () => {
+  const b = mkChar({ race: 'human', base: {}, levels: ['bard'] });
+  b.build.spells['class:bard@FIX'] = { known: ['spell:magic-missile@FIX', 'spell:shatter@FIX'], prepared: [] };
+  const ps = validateCharacter(b, idx, S);
+  expect(ps).toContainEqual(expect.objectContaining({ step: 'spells', message: "Magic Missile isn't on the Bard spell list", blocking: false }));
+  expect(ps).toContainEqual(expect.objectContaining({ step: 'spells', message: 'Shatter is level 2; Bard casts up to level 1', blocking: true }));
+});
 test('embedding makes the sheet independent of the index', () => {
   const c = embedContent(mkChar({ race: 'human', base: { int: 15 }, levels: ['wizard', 'wizard', 'wizard'] }), idx);
   const before = computeSheet(c, { settings: S, viewer: 'dm' });

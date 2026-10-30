@@ -13,6 +13,14 @@ test('long rest', () => {
   const f1 = mkChar({ race: 'human', base: {}, levels: ['fighter'] }); f1.state.hitDiceUsed = { 10: 1 };
   expect(longRest(f1, computeSheet(f1, dm)).state.hitDiceUsed[10]).toBe(0);
 });
+test('no long rest for the dead or at 0 HP (R26)', () => {
+  const c = mkChar({ race: 'human', base: {}, levels: ['fighter'] }), s = computeSheet(c, dm);
+  const dead = { ...c, state: { ...c.state, hp: 0, dead: true, exhaustion: 1 } };
+  const stable = { ...c, state: { ...c.state, hp: 0, stable: true, exhaustion: 1 } };
+  expect(longRest(dead, s)).toBe(dead);
+  expect(longRest(stable, s)).toBe(stable);
+  expect(longRest({ ...c, state: { ...c.state, hp: 1, stable: true } }, s).state).toMatchObject({ hp: 10, stable: false });
+});
 test('short rest', () => {
   const w = mkChar({ race: 'human', base: { con: 13 }, levels: ['warlock', 'warlock', 'warlock'] });
   w.state = { ...w.state, hp: 1, pactSlotsUsed: 2 };

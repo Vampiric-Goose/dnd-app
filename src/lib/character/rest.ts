@@ -29,8 +29,10 @@ export function shortRest(c: Character, spent: { die: number; rolls: number[] }[
   return applyHealing({ ...withState(c, { hitDiceUsed: used, pactSlotsUsed: 0, resourcesUsed }), inventory }, heal, sheet);
 }
 
-/** Full HP, half the hit dice back (largest first, at least 1), all slots and short/long resources and items, one less exhaustion. */
+/** Full HP, half the hit dice back (largest first, at least 1), all slots and short/long resources and items, one less exhaustion.
+ *  R26: no benefit when dead or below 1 HP (PHB p.186); the character comes back unchanged. */
 export function longRest(c: Character, sheet: Sheet): Character {
+  if (c.state.dead || c.state.hp <= 0) return c;
   const used = { ...c.state.hitDiceUsed };
   let regain = Math.max(1, Math.floor(sheet.totalLevel / 2));
   for (const { die } of sheet.hitDice) { // sorted largest die first
@@ -42,7 +44,7 @@ export function longRest(c: Character, sheet: Sheet): Character {
   return {
     ...withState(c, {
       hp: sheet.maxHp, tempHp: 0, hitDiceUsed: used, slotsUsed: [], pactSlotsUsed: 0, resourcesUsed,
-      exhaustion: Math.max(0, c.state.exhaustion - 1), deathSaves: NO_SAVES, stable: false, dead: false,
+      exhaustion: Math.max(0, c.state.exhaustion - 1), deathSaves: NO_SAVES, stable: false,
     }),
     inventory,
   };
