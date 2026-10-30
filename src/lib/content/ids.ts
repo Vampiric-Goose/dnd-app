@@ -3,6 +3,9 @@ import type { EntityKind } from '../types.ts';
 export const slug = (s: string): string =>
   s.normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase().replace(/['’]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 
+/** Search form of a name: lowercase, no diacritics or apostrophes ("Tasha's" and "tashas" match; "Zoë" and "zoe" too). */
+export const fold = (s: string): string => s.normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase().replace(/['’]/g, '');
+
 export const entityId = (kind: EntityKind, name: string, source: string): string =>
   `${kind}:${slug(name)}@${source.toUpperCase()}`;
 

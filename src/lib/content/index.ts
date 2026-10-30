@@ -1,5 +1,5 @@
 import type { Entity, EntityKind, EntityOfKind, Pack, SubclassDef } from '../types.ts';
-import { baseKey, slug, sourceOf } from './ids.ts';
+import { baseKey, fold, slug, sourceOf } from './ids.ts';
 
 const up = (s: string) => s.toUpperCase();
 const push = <T>(m: Map<string, T[]>, k: string, v: T) => { const l = m.get(k); if (l) l.push(v); else m.set(k, [v]); };
@@ -10,6 +10,7 @@ export class ContentIndex {
   #byKind = new Map<string, Entity[]>();
   #byName = new Map<string, Entity[]>(); // `${kind}|${slug(name)}`
   #byAlias = new Map<string, Entity>(); // `${baseKey}@${ALIAS}`
+  #folded = new WeakMap<Entity, string>(); // search form of each name, filled lazily
 
   constructor(packs: Pack[]) {
     for (const p of packs) for (const e of p.entities) this.#byId.set(e.id, e);
@@ -52,11 +53,12 @@ export class ContentIndex {
 
   /** Name matches, prefix matches first, then alphabetical. */
   search(q: string, kinds?: EntityKind[], limit = 200): Entity[] {
-    const n = q.trim().toLowerCase();
+    const n = fold(q.trim());
     const pool = kinds ? kinds.flatMap(k => this.#byKind.get(k) ?? []) : [...this.#byId.values()];
     const hits: { e: Entity; prefix: boolean; name: string }[] = [];
     for (const e of pool) {
-      const name = e.name.toLowerCase();
+      let name = this.#folded.get(e);
+      if (name === undefined) this.#folded.set(e, name = fold(e.name)); // folding 10k names per keystroke is slow; do it once per entity
       if (name.includes(n)) hits.push({ e, prefix: name.startsWith(n), name });
     }
     hits.sort((a, b) => Number(b.prefix) - Number(a.prefix) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));

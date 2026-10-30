@@ -64,3 +64,11 @@ test('patch text replacement, subclassesOf follows aliases, optionalFeatures by 
   expect(idx.subclassesOf('class:fighter@SRD').map(s => s.name)).toEqual(['Champion', 'Battle Master']);
   expect(idx.optionalFeatures(['FS:F']).map(e => e.name)).toEqual(['Dueling']);
 });
+
+test('search ignores case, diacritics and apostrophes', () => {
+  const idx = new ContentIndex([pack('SRD', [spell("Tasha's Hideous Laughter", 'SRD'), spell('Zoë’s Ward', 'SRD')])]);
+  expect(idx.search('TASHAS', ['spell']).map(e => e.name)).toEqual(["Tasha's Hideous Laughter"]);
+  expect(idx.search("tasha's hid", ['spell'])).toHaveLength(1);
+  expect(idx.search('zoe', ['spell'])).toHaveLength(1);
+  expect(idx.search('Zoë', ['spell'])).toHaveLength(1);
+});

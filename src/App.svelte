@@ -25,7 +25,7 @@
     ['characters/new', 'Creator'],
     ['characters/:id', 'Sheet'],
     ['characters/:id/level-up', 'LevelUp'],
-    ['compendium', 'Compendium'],
+    ['compendium', 'Compendium', () => import('./ui/pages/Compendium.svelte')],
     ['items', 'Items'],
     ['items/:id', 'ItemEditor'],
     ['loot', 'Loot'],
