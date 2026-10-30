@@ -4,7 +4,7 @@ import { afterEach, expect, test, vi } from 'vitest';
 import srdUrl from '../../src/data/srd.json?url';
 import { loadSrd } from '../../src/lib/content/srd.ts';
 import { db, resetDb } from '../../src/lib/db.ts';
-import type { ClassDef, OptionalFeatureDef, Pack, RaceDef, SpellDef, SubraceDef } from '../../src/lib/types.ts';
+import type { ClassDef, ItemDef, OptionalFeatureDef, Pack, RaceDef, SpellDef, SubclassDef, SubraceDef } from '../../src/lib/types.ts';
 
 const srd: Pack = JSON.parse(fs.readFileSync('src/data/srd.json', 'utf8'));
 const by = (id: string) => srd.entities.find(e => e.id === id)!;
@@ -37,6 +37,16 @@ test('items', () => {
   expect(by('item:weapon-2@SRD')).toMatchObject({ bonuses: { attack: 2, damage: 2 }, rarity: 'rare' });
   expect(by('spell:fireball@SRD')).toMatchObject({ level: 3, school: 'evocation', concentration: false });
   expect((by('spell:fireball@SRD') as SpellDef).classes).toEqual(expect.arrayContaining(['sorcerer', 'wizard']));
+});
+
+test('fix round 1: errata, unlimited, gear categories', () => {
+  const life = by('subclass:life@SRD') as SubclassDef;
+  expect(life.alwaysPrepared!.find(a => a.level === 7)!.spells).toEqual(['spell:death-ward@SRD', 'spell:guardian-of-faith@SRD']);
+  expect(JSON.stringify(life.text)).toContain('Cleric 7: Death Ward, Guardian of Faith');
+  expect((by('class:barbarian@SRD') as ClassDef).table.find(t => t.label === 'Rages')!.values[19]).toBe('Unlimited');
+  for (const s of ['amulet', 'emblem', 'reliquary']) expect((by(`item:${s}@SRD`) as ItemDef).category).toBe('holy-symbols');
+  const picks = (by('class:cleric@SRD') as ClassDef).startingEquipment.choices.flat().flatMap(o => o.items);
+  expect(picks).toContainEqual({ category: 'holy-symbols', quantity: 1 });
 });
 
 afterEach(async () => { vi.unstubAllGlobals(); await resetDb(); });

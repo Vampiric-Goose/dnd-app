@@ -10,7 +10,8 @@ const LABELS: Record<string, string> = {
 };
 const titleCase = (s: string) => s.split(/[_ ]/).map(w => w[0].toUpperCase() + w.slice(1)).join(' ');
 const cell = (key: string, v: Raw): number | string =>
-  key === 'unarmored_movement' ? `+${v} ft.` : key === 'bardic_inspiration_die' ? `d${v}`
+  v === 9999 ? 'Unlimited' // the data's "unlimited" (rages at 20); evalFormula reads 'Unlimited' as Infinity
+  : key === 'unarmored_movement' ? `+${v} ft.` : key === 'bardic_inspiration_die' ? `d${v}`
   : typeof v === 'object' ? `${v.dice_count}d${v.dice_value}` // martial_arts, sneak_attack
   : typeof v === 'boolean' ? (v ? 'Yes' : 'No') : v;
 
@@ -21,6 +22,15 @@ const METAMAGIC_COUNTS = [0, 0, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 4, 4, 
 const SUFFIX: Record<string, string> = { one: 'st', two: 'nd', few: 'rd', other: 'th' };
 const ordinal = new Intl.PluralRules('en', { type: 'ordinal' });
 const nth = (n: number) => n + SUFFIX[ordinal.select(n)];
+
+// Errata: corrections to the upstream 5e-database data, each checked against the SRD 5.1 text.
+const SUBCLASS_SPELL_ERRATA: Record<string, { level: number; spell: string }[]> = {
+  life: [{ level: 7, spell: 'Guardian of Faith' }], // upstream lists only Death Ward at cleric 7
+};
+const withErrata = (s: Raw): Raw => ({ ...s, spells: [...(s.spells ?? []), ...(SUBCLASS_SPELL_ERRATA[s.index] ?? []).map(e => ({
+  prerequisites: [{ type: 'level', index: `${s.class.index}-${e.level}`, name: `${s.class.name} ${e.level}` }],
+  spell: { name: e.spell },
+}))] });
 
 type Out = ClassDef | SubclassDef | FeatureDef | OptionalFeatureDef;
 
@@ -60,7 +70,7 @@ export function classes(read: Read): Out[] {
   for (const c of read('Classes')) {
     const classId = id('class', c.name);
     const levels = read('Levels').filter(l => l.class.index === c.index && !l.subclass).sort((a, b) => a.level - b.level);
-    const subclasses = read('Subclasses').filter(s => s.class.index === c.index);
+    const subclasses = read('Subclasses').filter(s => s.class.index === c.index).map(withErrata);
     const gained = F.filter(f => f.class.index === c.index && !f.parent && !optionIndexes.has(f.index));
     const subclassLevel = Math.min(...gained.filter(f => f.subclass).map(f => f.level));
     const subclassTitle: string = subclasses[0]?.subclass_flavor ?? fail(`${c.index} has no subclass`);

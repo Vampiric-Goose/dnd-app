@@ -3,6 +3,8 @@ import { base, fail, qty, rich, type Raw, type Read } from './misc.ts';
 
 const CP: Record<string, number> = { cp: 1, sp: 10, ep: 50, gp: 100, pp: 1000 };
 const GEAR: Record<string, ItemType> = { ammunition: 'ammunition', 'equipment-packs': 'pack' };
+// tool_category is a display string; these are its 5e-SRD-Equipment-Categories indexes
+const TOOL_CATEGORY: Record<string, string> = { "Artisan's Tools": 'artisans-tools', 'Gaming Sets': 'gaming-sets', 'Musical Instrument': 'musical-instruments', 'Other Tools': 'other-tools' };
 
 function equipment(e: Raw): ItemDef {
   const per = e.quantity ?? 1; // ammunition is sold in bundles; cost and weight are stored per piece
@@ -16,12 +18,14 @@ function equipment(e: Raw): ItemDef {
   if (e.speed) text.push({ p: `**Speed:** ${e.speed.quantity} ${e.speed.unit}` });
   if (e.capacity) text.push({ p: `**Carrying Capacity:** ${e.capacity}` });
   const ac = e.armor_class, r = e.weapon_range === 'Ranged' ? e.range : e.throw_range;
+  const category: string | undefined = e.gear_category?.index ?? (e.tool_category && (TOOL_CATEGORY[e.tool_category] ?? fail(`tool category ${e.tool_category}`)));
   return {
     ...base('item', e.name, text),
     type,
     magic: false,
     ...(e.weight !== undefined && { weight: e.weight / per }),
     costCp: (e.cost.quantity * (CP[e.cost.unit] ?? fail(`unit ${e.cost.unit}`))) / per,
+    ...(category && { category }), // what starting-equipment category picks (e.g. 'holy-symbols') resolve against
     ...(cat === 'weapon' && { weapon: {
       category: e.weapon_category.toLowerCase(),
       ranged: e.weapon_range === 'Ranged',
