@@ -2,7 +2,9 @@ import { expect, test } from 'vitest';
 import { addLevel, answerChoice, embedContent, listChoices, newCharacter, spellLimits, validateCharacter } from '../../src/lib/character/build.ts';
 import { computeSheet } from '../../src/lib/rules/sheet.ts';
 import { DEFAULT_SETTINGS } from '../../src/lib/settings.ts';
-import { fixtureIndex, mkChar } from '../fixtures/content.ts';
+import { enumerateChoices } from '../../src/lib/character/choices.ts';
+import type { Entity, OptionalFeatureDef } from '../../src/lib/types.ts';
+import { fixtureEntities, fixtureIndex, mkChar } from '../fixtures/content.ts';
 
 const idx = fixtureIndex(), S = DEFAULT_SETTINGS;
 test('choices appear per level and after subclass', () => {
@@ -25,6 +27,44 @@ test('subclass option progressions add optionalFeature choices at the step level
     ['3|subclass:battle-master@FIX/ofp:maneuvers|0', { type: 'optionalFeature', count: 3, featureTypes: ['MV:B'] }],
     ['7|subclass:battle-master@FIX/ofp:maneuvers|0', { type: 'optionalFeature', count: 2, featureTypes: ['MV:B'] }],
   ]);
+});
+
+// R29: whatever an answer picks contributes its own choices, recursively, with deterministic keys.
+const fs = 'feature:fighter:fighting-style:1@FIX';
+const walk = (extra: Entity[], choices: Record<string, string[]>) => {
+  const c = mkChar({ race: 'human', base: { str: 15 }, levels: ['fighter'] });
+  for (const [k, ids] of Object.entries(choices)) c.build.choices[k] = { type: 'ids', ids };
+  const all = new Map([...fixtureEntities, ...extra].map(e => [e.id, e]));
+  return enumerateChoices(c, id => all.get(id), S);
+};
+const opt = (name: string, choices: OptionalFeatureDef['choices']): OptionalFeatureDef =>
+  ({ kind: 'optionalFeature', id: `optionalFeature:${name}@FIX`, name, source: 'FIX', text: [], featureTypes: ['FS:F'], choices });
+
+test('a picked optional feature adds its choice, whose picked option trait adds another (R29)', () => {
+  const trick = opt('trick', [{ type: 'option', count: 1, options: [{ name: 'Deep Lore', text: [], choices: [{ type: 'skill', count: 1, from: 'any' }] }] }]);
+  const keys = walk([trick], { [`1|${fs}|0`]: [trick.id], [`1|${fs}/${trick.id}|0`]: ['Deep Lore'] }).map(p => [p.key, p.choice.type]);
+  expect(keys).toEqual(expect.arrayContaining([
+    [`1|${fs}|0`, 'optionalFeature'],
+    [`1|${fs}/${trick.id}|0`, 'option'],
+    [`1|${fs}/${trick.id}/option:deep-lore|0`, 'skill'],
+  ]));
+});
+
+test('a choice that picks its own entity terminates (R29)', () => {
+  const loop = opt('loop', [{ type: 'optionalFeature', count: 1, featureTypes: ['FS:F'] }]);
+  const answers: Record<string, string[]> = {};
+  let path = fs;
+  for (let i = 0; i < 12; i++) { answers[`1|${path}|0`] = [loop.id]; path += `/${loop.id}`; }
+  const nested = walk([loop], answers).filter(p => p.sourceId.startsWith(fs));
+  expect(nested.map(p => p.key)).toEqual([`1|${fs}|0`, `1|${fs}/${loop.id}|0`]); // the second pick of loop is already visited
+});
+
+test('nesting stops at the depth cap without throwing (R29)', () => {
+  const chain = Array.from({ length: 12 }, (_, i) => opt(`link-${i}`, [{ type: 'optionalFeature', count: 1, featureTypes: ['FS:F'] }]));
+  const answers: Record<string, string[]> = {};
+  let path = fs;
+  for (const l of chain) { answers[`1|${path}|0`] = [l.id]; path += `/${l.id}`; }
+  expect(walk(chain, answers).filter(p => p.sourceId.startsWith(fs))).toHaveLength(9); // the root choice plus 8 nested levels
 });
 
 test('ASI caps at 20', () => {

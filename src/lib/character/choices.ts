@@ -34,20 +34,39 @@ export function walkLevels(c: Character, lookup: Lookup, settings: CampaignSetti
   });
 }
 
-/** Every choice the build offers, in level order, with its answer from `build.choices` when there is one. */
+/** How deep answers may nest (a pick whose choice picks something with choices...); deeper picks add nothing. */
+const MAX_DEPTH = 8;
+
+/**
+ * Every choice the build offers, in level order, with its answer from `build.choices` when there is one.
+ * Recursive: whatever an answer picks (an option trait, or any entity: feat, optional feature, subclass...) adds its own
+ * choices at the same level. Keys: option traits `<owner>/option:<slug>`; feats their own id (as before); any other picked
+ * entity `<sourceId>/<entityId>`. A visited set per top-level source and a depth cap stop cycles.
+ */
 export function enumerateChoices(c: Character, lookup: Lookup, settings: CampaignSettings): PendingChoice[] {
   const out: PendingChoice[] = [];
-  const add = (level: number, sourceId: string, sourceName: string, choices: Choice[] | undefined) => choices?.forEach((choice, i) => {
-    const key = choiceKey(level, sourceId, i);
-    const answer = c.build.choices[key];
-    out.push({ key, level, sourceId, sourceName, choice, ...(answer && { answer }) });
-    if (answer?.type === 'ids' && choice.type === 'option') {
-      const owner = sourceId.split('/')[0];
-      for (const t of choice.options) if (answer.ids.includes(t.name)) add(level, `${owner}/option:${slug(t.name)}`, t.name, t.choices);
-    }
-    const featIds = answer?.type === 'ids' && choice.type === 'feat' ? answer.ids : answer?.type === 'asi' && answer.featId ? [answer.featId] : [];
-    for (const id of featIds) { const f = getKind(lookup, id, 'feat'); if (f) add(level, f.id, f.name, f.choices); }
-  });
+  const add = (level: number, sourceId: string, sourceName: string, choices: Choice[] | undefined, seen = new Set<string>(), depth = 0): void => {
+    if (depth > MAX_DEPTH) return;
+    choices?.forEach((choice, i) => {
+      const key = choiceKey(level, sourceId, i);
+      const answer = c.build.choices[key];
+      out.push({ key, level, sourceId, sourceName, choice, ...(answer && { answer }) });
+      if (answer?.type === 'ids' && choice.type === 'option') {
+        // Top-level options keep their original key (`<entity>/option:<slug>`); nested ones hang off their full path.
+        const owner = depth === 0 ? sourceId.split('/')[0] : sourceId;
+        for (const t of choice.options) if (answer.ids.includes(t.name)) add(level, `${owner}/option:${slug(t.name)}`, t.name, t.choices, seen, depth + 1);
+        return;
+      }
+      const ids = answer?.type === 'ids' ? answer.ids : answer?.type === 'asi' && answer.featId ? [answer.featId] : [];
+      for (const id of ids) {
+        const e = lookup(id); // skill/tool/language answers are names: no entity
+        if (!e?.choices?.length || seen.has(e.id)) continue;
+        seen.add(e.id);
+        // ponytail: a picked entity's optionalFeatureProgression only exists on subclasses, which walkLevels already steps through
+        add(level, e.kind === 'feat' ? e.id : `${sourceId}/${e.id}`, e.name, e.choices, seen, depth + 1);
+      }
+    });
+  };
 
   for (const r of [getKind(lookup, c.build.raceId, 'race'), getKind(lookup, c.build.subraceId, 'subrace')]) {
     if (!r) continue;
