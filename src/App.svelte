@@ -1,7 +1,16 @@
 <script lang="ts">
-  import type { Component } from 'svelte';
+  import { onMount, type Component } from 'svelte';
   import { APP_NAME } from './lib/app.ts';
+  import { requestPersistence } from './lib/db.ts';
   import { router } from './lib/router.svelte.ts';
+  import { startup } from './lib/store.svelte.ts';
+  import BackupBanner from './ui/BackupBanner.svelte';
+  import CampaignPicker from './ui/CampaignPicker.svelte';
+
+  onMount(() => {
+    void requestPersistence();
+    void startup();
+  });
 
   type Params = Record<string, string>;
   // Each page receives the route's `:name` captures as a `params` prop (pages may ignore it).
@@ -11,7 +20,7 @@
   // "Not built yet" placeholder; a later task adds its page with, for example,
   // () => import('./ui/pages/Characters.svelte'). Order matters: first match wins.
   const routes: [pattern: string, name: string, load?: Loader][] = [
-    ['', 'Campaigns'],
+    ['', 'Campaigns', () => import('./ui/pages/Campaigns.svelte')],
     ['characters', 'Characters'],
     ['characters/new', 'Creator'],
     ['characters/:id', 'Sheet'],
@@ -20,8 +29,8 @@
     ['items', 'Items'],
     ['items/:id', 'ItemEditor'],
     ['loot', 'Loot'],
-    ['packs', 'Packs'],
-    ['settings', 'CampaignSettings'],
+    ['packs', 'Packs', () => import('./ui/pages/Packs.svelte')],
+    ['settings', 'CampaignSettings', () => import('./ui/pages/CampaignSettings.svelte')],
     ['about', 'About', () => import('./ui/pages/About.svelte')],
   ];
 
@@ -59,7 +68,7 @@
 <div class="shell">
   <header>
     <strong>{APP_NAME}</strong>
-    <div class="campaign-slot"><!-- Task 13: current-campaign picker --></div>
+    <div class="campaign-slot"><CampaignPicker /></div>
   </header>
 
   <nav aria-label="Main">
@@ -69,6 +78,7 @@
   </nav>
 
   <main>
+    <BackupBanner />
     {#if !current}
       <h1>Page not found</h1>
       <p><a href="#/">Back to Campaigns</a></p>
