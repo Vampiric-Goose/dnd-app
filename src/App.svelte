@@ -22,10 +22,10 @@
   // () => import('./ui/pages/Characters.svelte'). Order matters: first match wins.
   const routes: [pattern: string, name: string, load?: Loader][] = [
     ['', 'Campaigns', () => import('./ui/pages/Campaigns.svelte')],
-    ['characters', 'Characters'],
-    ['characters/new', 'Creator'],
+    ['characters', 'Characters', () => import('./ui/pages/Characters.svelte')],
+    ['characters/new', 'Creator', () => import('./ui/creator/Creator.svelte')],
     ['characters/:id', 'Sheet'],
-    ['characters/:id/level-up', 'LevelUp'],
+    ['characters/:id/level-up', 'LevelUp', () => import('./ui/creator/LevelUp.svelte')],
     ['compendium', 'Compendium', () => import('./ui/pages/Compendium.svelte')],
     ['items', 'Items'],
     ['items/:id', 'ItemEditor'],
