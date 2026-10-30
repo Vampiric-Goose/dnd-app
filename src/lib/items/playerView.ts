@@ -51,6 +51,19 @@ export function playerItem(item: ItemDef, view?: PlayerView): ItemDef {
   return out;
 }
 
+/**
+ * The item as the compendium shows it (R31). DM: the true item with every redaction revealed and the markers
+ * removed (`text` and `curse`). Player: `playerItem` through the item's `defaultView` (homebrew), or with no
+ * view, which still strips markers fail-closed.
+ */
+export function displayItem(item: ItemDef & { defaultView?: PlayerView }, viewer: 'dm' | 'player'): ItemDef {
+  if (viewer === 'player') return playerItem(item, item.defaultView);
+  const all = (t: RichText) => redact(t, new Set(redactionIds(t)));
+  const out: ItemDef = { ...item, text: all(item.text) };
+  if (item.curse) out.curse = all(item.curse);
+  return out;
+}
+
 /** Shows one hidden field to the player. */
 export const revealField = (view: PlayerView, f: HideableField): PlayerView =>
   ({ ...view, hidden: view.hidden.filter(h => h !== f), revealed: [...view.revealed] });

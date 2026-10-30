@@ -5,6 +5,7 @@
   import { router } from '../../lib/router.svelte.ts';
   import { app, getIndex } from '../../lib/store.svelte.ts';
   import type { Entity, EntityKind, ItemDef } from '../../lib/types.ts';
+  import { displayItem } from '../../lib/items/playerView.ts';
   import EntityDetail from '../EntityDetail.svelte';
   import VirtualList from '../VirtualList.svelte';
 
@@ -165,7 +166,8 @@
       <p class="muted count" aria-live="polite">{shown.length} {shown.length === 1 ? 'entry' : 'entries'}</p>
       <div class="listwrap">
         <VirtualList items={shown} {selected} label={tabs.find((t) => t.id === tab)?.label ?? 'Entries'} onselect={(e) => go(e.id)}>
-          {#snippet row(e)}
+          {#snippet row(raw)}
+            {@const e = raw.kind === 'item' ? displayItem(raw, app.viewer) : raw}
             <span class="name">{e.name}</span>
             <span class="muted small">{sub(e)}</span>
           {/snippet}

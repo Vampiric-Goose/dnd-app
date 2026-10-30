@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest';
 import { entityId } from '../../src/lib/content/ids.ts';
 import { richToPlain } from '../../src/lib/content/richtext.ts';
-import { identify, playerItem, revealField, revealRedaction } from '../../src/lib/items/playerView.ts';
+import { displayItem, identify, playerItem, revealField, revealRedaction } from '../../src/lib/items/playerView.ts';
 import { attunedCount, carriedWeight, makeEntry, rechargeEntry, refreshEntry, transfer, useCharge, useItem } from '../../src/lib/items/inventory.ts';
 import type { ItemDef, PlayerView } from '../../src/lib/types.ts';
 
@@ -145,4 +145,19 @@ test('identify reveals every marker in text, curse and choices, with nothing hid
   expect(JSON.stringify(known)).not.toContain('██████');
   expect([known.name, known.id, known.rarity, known.effects, known.curse]).toEqual(['Idol of Ruin', cursed.id, 'rare', cursed.effects, [{ p: 'B' }]]);
   expect(playerItem(e.item).text).toEqual([{ p: '██████' }]); // no view at all stays closed
+});
+
+test('displayItem: DM sees the true text without markers, player sees the cover and bars (R31)', () => {
+  const cursed = { ...potion, curse: [{ p: 'Cursed. {{redact:c1}}You cannot let go.{{/redact}}' }], defaultView: { name: 'Cloudy red potion', hidden: ['rarity'], revealed: [] } as PlayerView };
+  const dm = displayItem(cursed, 'dm');
+  expect([dm.name, dm.rarity]).toEqual(['Potion of Poison', 'uncommon']);
+  expect(dm.text).toEqual([{ p: 'Looks like healing. It is poison.' }]);
+  expect(dm.curse).toEqual([{ p: 'Cursed. You cannot let go.' }]);
+  expect(JSON.stringify(dm)).not.toContain('{{');
+  const pl = displayItem(cursed, 'player');
+  expect([pl.name, pl.rarity]).toEqual(['Cloudy red potion', undefined]);
+  expect(pl.text).toEqual([{ p: 'Looks like healing. ██████' }]);
+  expect(pl.curse).toEqual([{ p: 'Cursed. ██████' }]);
+  expect(displayItem(potion, 'player').text).toEqual([{ p: 'Looks like healing. ██████' }]); // no defaultView: still fail-closed
+  expect('curse' in displayItem(potion, 'dm')).toBe(false);
 });

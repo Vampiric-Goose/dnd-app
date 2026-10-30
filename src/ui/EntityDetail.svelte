@@ -1,9 +1,13 @@
 <script lang="ts">
   import type { ContentIndex } from '../lib/content/index.ts';
   import type { Ability, Entity, Proficiencies, RichText as RT, Scores } from '../lib/types.ts';
+  import { displayItem } from '../lib/items/playerView.ts';
+  import { app } from '../lib/store.svelte.ts';
   import RichText from './RichText.svelte';
 
-  let { entity, index }: { entity: Entity; index?: ContentIndex } = $props();
+  let { entity: raw, index }: { entity: Entity; index?: ContentIndex } = $props();
+  // Items go through displayItem (R31): the DM sees the true text, the player the cover and bars.
+  const entity = $derived<Entity>(raw.kind === 'item' ? displayItem(raw, app.viewer) : raw);
 
   const ordinal = (n: number) => `${n}${[, 'st', 'nd', 'rd'][n % 100 > 10 && n % 100 < 14 ? 0 : n % 10] ?? 'th'}`;
   const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
