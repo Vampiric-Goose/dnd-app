@@ -76,6 +76,25 @@
     }),
   );
 
+  // Subclasses and subraces are listed indented under their parent, never as flat rows. A
+  // child that matches the filters brings its parent along so it always has context.
+  const parentOf = (e: Entity) => (e.kind === 'subclass' ? e.classId : e.kind === 'subrace' ? e.raceId : undefined);
+  const rows = $derived.by<Entity[]>(() => {
+    const kids = new Map<string, Entity[]>();
+    for (const e of shown) { const p = parentOf(e); if (p) kids.set(p, [...(kids.get(p) ?? []), e]); }
+    if (!kids.size) return shown;
+    const top = shown.filter((e) => !parentOf(e));
+    const have = new Set(top.map((e) => e.id));
+    const orphans: Entity[] = [];
+    for (const [p, list] of kids) {
+      if (have.has(p)) continue;
+      const parent = index?.get(p);
+      if (parent) { top.push(parent); have.add(p); } else orphans.push(...list);
+    }
+    top.sort((a, b) => a.name.localeCompare(b.name));
+    return [...top.flatMap((e) => [e, ...(kids.get(e.id) ?? [])]), ...orphans];
+  });
+
   const selected = $derived(homebrew.find((h) => h.id === select) ?? index?.get(select));
 
   function reset(id: string) {
@@ -163,13 +182,13 @@
     {:else if !index}
       <p class="muted">Loading…</p>
     {:else}
-      <p class="muted count" aria-live="polite">{shown.length} {shown.length === 1 ? 'entry' : 'entries'}</p>
+      <p class="muted count" aria-live="polite">{rows.length} {rows.length === 1 ? 'entry' : 'entries'}</p>
       <div class="listwrap">
-        <VirtualList items={shown} {selected} label={tabs.find((t) => t.id === tab)?.label ?? 'Entries'} onselect={(e) => go(e.id)}>
+        <VirtualList items={rows} {selected} label={tabs.find((t) => t.id === tab)?.label ?? 'Entries'} onselect={(e) => go(e.id)}>
           {#snippet row(raw)}
             {@const e = raw.kind === 'item' ? displayItem(raw, app.viewer) : raw}
-            <span class="name">{e.name}</span>
-            <span class="muted small">{sub(e)}</span>
+            <span class="name" class:child={!!parentOf(e)}>{e.name}</span>
+            <span class="muted small" class:child={!!parentOf(e)}>{sub(e)}</span>
           {/snippet}
         </VirtualList>
       </div>
@@ -200,6 +219,7 @@
   .listwrap { height: 60dvh; min-height: 16rem; }
   .name, .small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.25; }
   .small { font-size: 0.75rem; }
+  .child { padding-left: 1.25rem; }
   .detail { min-width: 0; }
   .placeholder { display: none; }
 
