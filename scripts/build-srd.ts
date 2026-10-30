@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Entity, Pack } from '../src/lib/types.ts';
 import { classes } from './srd/classes.ts';
-import { SRD_EFFECTS } from './srd/effects.ts';
+import { effectTarget, SRD_EFFECTS } from './srd/effects.ts';
 import { items } from './srd/items.ts';
 import { backgrounds, conditions, fail, feats, type Raw } from './srd/misc.ts';
 import { races } from './srd/races.ts';
@@ -25,7 +25,7 @@ for (const e of entities) {
 }
 
 for (const [key, add] of Object.entries(SRD_EFFECTS)) {
-  const e = byId.get(key) ?? fail(`SRD_EFFECTS: no entity ${key}`);
+  const e = effectTarget(id => byId.get(id), key) ?? fail(`SRD_EFFECTS: nothing at ${key}`);
   if (add.effects) e.effects = [...(e.effects ?? []), ...add.effects];
   if (add.choices) e.choices = [...(e.choices ?? []), ...add.choices];
 }
