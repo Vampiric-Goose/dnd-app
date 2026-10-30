@@ -1,0 +1,49 @@
+// Dry-runs the 5etools importer over a local data folder and prints what it would import:
+//   npm run import-check -- <5etools>/data
+import { readdirSync, readFileSync } from 'node:fs';
+import { join, relative } from 'node:path';
+import { ContentIndex } from '../src/lib/content/index.ts';
+import { import5etools } from '../src/lib/import/fivetools/index.ts';
+import type { Pack } from '../src/lib/types.ts';
+
+const dir = process.argv[2];
+if (!dir) {
+  console.error('usage: npm run import-check -- <folder with 5etools json>');
+  process.exit(2);
+}
+
+const files: { name: string; json: unknown }[] = [];
+const unreadable: string[] = [];
+for (const e of readdirSync(dir, { recursive: true, withFileTypes: true })) {
+  if (!e.isFile() || !e.name.endsWith('.json')) continue;
+  const path = join(e.parentPath, e.name), name = relative(dir, path);
+  try { files.push({ name, json: JSON.parse(readFileSync(path, 'utf8')) }); } catch (err) { unreadable.push(`${name}: ${(err as Error).message}`); }
+}
+
+const srd: Pack = JSON.parse(readFileSync(new URL('../src/data/srd.json', import.meta.url), 'utf8'));
+// The importer resolves `_copy` from the batch itself; nothing is stored between runs here.
+const r = await import5etools(files, { index: new ContentIndex([srd]), rawLookup: async () => undefined });
+
+const NONE = 'No recognised 5etools content';
+const skipped = r.errors.filter(e => e.message === NONE), errors = r.errors.filter(e => e.message !== NONE);
+const total: Record<string, number> = {};
+console.log(`Read ${files.length} json files under ${dir}\n\nPacks (entities by kind, SRD patches):`);
+for (const p of [...r.packs].sort((a, b) => a.source.localeCompare(b.source))) {
+  const counts: Record<string, number> = {};
+  for (const e of p.entities) { counts[e.kind] = (counts[e.kind] ?? 0) + 1; total[e.kind] = (total[e.kind] ?? 0) + 1; }
+  const kinds = Object.entries(counts).map(([k, n]) => `${k} ${n}`).join(', ');
+  console.log(`  ${p.source.padEnd(12)} ${p.name}: ${kinds || '-'}${p.patches.length ? `; patches ${p.patches.length}` : ''}`);
+}
+const patches = r.packs.reduce((n, p) => n + p.patches.length, 0);
+console.log(`\nTotal: ${Object.entries(total).map(([k, n]) => `${k} ${n}`).join(', ')}; SRD patches ${patches}`);
+const classRaw = r.raw.filter(([k]) => /^(class|subclass|classFeature|subclassFeature)\|/.test(k)).length;
+console.log(`Raw entities kept: ${r.raw.length} (class content not converted yet: ${classRaw})`);
+console.log(`Skipped 2024 entities: ${r.skipped2024}`);
+console.log(`\nSkipped files (${NONE}): ${skipped.length}`);
+for (const s of skipped) console.log(`  ${s.file}`);
+console.log(`\nUnreadable files: ${unreadable.length}`);
+for (const u of unreadable) console.log(`  ${u}`);
+console.log(`\nErrors: ${errors.length}`);
+for (const e of errors) console.log(`  ${e.file}: ${e.message}`);
+console.log(`\nWarnings: ${r.warnings.length}`);
+for (const w of r.warnings) console.log(`  ${w}`);

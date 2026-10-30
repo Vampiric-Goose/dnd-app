@@ -1,0 +1,23 @@
+{
+  "race": [
+    {
+      "name": "Testfolk", "source": "TST", "size": ["M"], "speed": { "walk": 30, "climb": true },
+      "ability": [{ "str": 2, "choose": { "from": ["dex", "con"], "count": 1 } }],
+      "darkvision": 60, "resist": ["fire"],
+      "skillProficiencies": [{ "perception": true }],
+      "languageProficiencies": [{ "common": true, "deep speech": true }],
+      "toolProficiencies": [{ "tinker's tools|phb": true }],
+      "weaponProficiencies": [{ "battleaxe|phb": true }],
+      "armorProficiencies": [{ "light": true }],
+      "entries": [
+        "Testfolk are invented for tests.",
+        { "type": "entries", "name": "Climber", "entries": ["You can climb at your walking speed. See {@condition prone}."] }
+      ]
+    }
+  ],
+  "subrace": [
+    { "name": "Hill", "source": "TST", "raceName": "Testfolk", "raceSource": "TST", "ability": [{ "wis": 1 }],
+      "entries": [{ "type": "entries", "name": "Hill Toughness", "entries": ["You are tough."] }] },
+    { "source": "TST", "raceName": "Testfolk", "raceSource": "TST" }
+  ]
+}
