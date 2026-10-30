@@ -1,10 +1,11 @@
 import { expect, test } from 'vitest';
+import { entityId } from '../../src/lib/content/ids.ts';
 import { richToPlain } from '../../src/lib/content/richtext.ts';
 import { identify, playerItem, revealField, revealRedaction } from '../../src/lib/items/playerView.ts';
 import { attunedCount, carriedWeight, makeEntry, rechargeEntry, refreshEntry, transfer, useCharge, useItem } from '../../src/lib/items/inventory.ts';
 import type { ItemDef, PlayerView } from '../../src/lib/types.ts';
 
-const item = (name: string): ItemDef => ({ id: name.toLowerCase().replace(/\W+/g, '-'), kind: 'item', name, source: 'test', text: [], type: 'other', magic: false });
+const item = (name: string): ItemDef => ({ id: entityId('item', name, 'test'), kind: 'item', name, source: 'test', text: [], type: 'other', magic: false });
 
 const potion = { ...item('Potion of Poison'), rarity: 'uncommon', consumable: true, text: [{ p: 'Looks like healing. {{redact:r1}}It is poison.{{/redact}}' }] } as ItemDef;
 test('player view hides, redacts, reveals, identifies', () => {
@@ -13,7 +14,12 @@ test('player view hides, redacts, reveals, identifies', () => {
   expect([p.name, p.rarity, p.text]).toEqual(['Cloudy red potion', undefined, [{ p: 'Looks like healing. ██████' }]]);
   expect(richToPlain(playerItem(potion, revealRedaction(view, 'r1')).text)).toContain('It is poison.');
   expect(playerItem(potion, revealField(view, 'rarity')).rarity).toBe('uncommon');
-  expect(identify(makeEntry(potion, { view })).view).toBeUndefined();
+  // R19: identify is a fully revealed view (replaces the brief's `view` toBeUndefined assertion).
+  const entry = identify(makeEntry(potion, { view: { ...view, hidden: ['rarity'] } }));
+  const known = playerItem(entry.item, entry.view);
+  expect([known.name, known.id, known.rarity]).toEqual(['Potion of Poison', potion.id, 'uncommon']);
+  expect(richToPlain(known.text)).toBe('Looks like healing. It is poison.');
+  expect(entry.view).toEqual({ hidden: [], revealed: ['r1'] });
   expect(playerItem(potion).text).toEqual([{ p: 'Looks like healing. ██████' }]); // no view: markers never leak
 });
 test('hidden bonuses/effects/curse', () => {
@@ -77,4 +83,66 @@ test('useCharge clamps; recharge ignores items without charges or with recharge 
   const shortWand = useCharge(makeEntry({ ...item('Wand'), charges: { max: 4, recharge: 'short' } }), 4);
   expect(rechargeEntry(shortWand, 'long').chargesUsed).toBe(0);
   expect(rechargeEntry(shortWand, 'dusk').chargesUsed).toBe(4);
+});
+
+// Fix round 1: R18 opaque covered id, R20 allowlist and no shared objects, R19 identify reveals all.
+const idol = {
+  ...item('Idol of Ruin'), magic: true, costCp: 5000, rarity: 'rare', weight: 2, aliases: ['Doom idol'], baseItemId: 'item:statuette@test',
+  weapon: { category: 'simple', ranged: false, damage: '1d4', damageType: 'bludgeoning', properties: ['light'] },
+  effects: [{ type: 'note', text: 'secret effect' }],
+  choices: [{ type: 'option', count: 1, options: [{ name: 'Boon', text: [{ p: 'Open. {{redact:o1}}Secret boon.{{/redact}}' }], effects: [{ type: 'note', text: 'n' }],
+    choices: [{ type: 'option', count: 1, options: [{ name: 'Deeper', text: [{ p: '{{redact:o2}}Deep secret.{{/redact}}' }] }] }] }] }],
+  futureField: 'not allowlisted',
+} as unknown as ItemDef;
+const covered: PlayerView = { name: 'Plain statuette', hidden: [], revealed: [] };
+
+test('a cover name gives an opaque id and drops base item and aliases (R18)', () => {
+  const p = playerItem({ ...potion, aliases: ['Poison draught'], baseItemId: 'item:potion-of-healing@test' } as ItemDef, { name: 'Cloudy red potion', hidden: [], revealed: [] });
+  expect(p.id).toBe('item:cloudy-red-potion@HIDDEN');
+  expect([p.aliases, p.baseItemId, p.source]).toEqual([undefined, undefined, 'test']);
+  expect(JSON.stringify(p)).not.toMatch(/poison/i); // no real name anywhere: id, aliases, text
+  const open = playerItem(idol); // no cover name: the real identity stays
+  expect([open.id, open.aliases, open.baseItemId]).toEqual([idol.id, ['Doom idol'], 'item:statuette@test']);
+  expect(playerItem(idol, { hidden: ['rarity'], revealed: [] }).id).toBe(idol.id); // hiding a field is not a cover name
+});
+test('output is built from an allowlist (R20)', () => {
+  expect(Object.keys(playerItem(idol)).sort()).toEqual(Object.keys(idol).filter(k => k !== 'futureField').sort());
+  expect('futureField' in playerItem(idol, covered)).toBe(false);
+});
+test('hidden effects drop choices; shown choices are redacted (R20)', () => {
+  const hiddenFx = playerItem(idol, { hidden: ['effects'], revealed: [] });
+  expect([hiddenFx.effects, 'choices' in hiddenFx]).toEqual([[], false]);
+  const text = (view: PlayerView) => JSON.stringify(playerItem(idol, view).choices);
+  expect(text({ hidden: [], revealed: [] })).not.toMatch(/Secret boon|Deep secret/);
+  expect(text({ hidden: [], revealed: [] })).toContain('Open. ██████');
+  expect(text({ hidden: [], revealed: ['o1'] })).toMatch(/Secret boon/);
+  expect(text({ hidden: [], revealed: ['o1'] })).not.toMatch(/Deep secret/); // nested trait choices too
+  expect(text({ hidden: [], revealed: ['o1', 'o2'] })).toMatch(/Deep secret/);
+});
+test('rarity hidden: the item reads as mundane (R20)', () => {
+  const hidden = playerItem(idol, { hidden: ['rarity'], revealed: [] });
+  expect([hidden.rarity, hidden.costCp, hidden.magic]).toEqual([undefined, undefined, false]);
+  expect('costCp' in hidden).toBe(false);
+  const shown = playerItem(idol, covered);
+  expect([shown.rarity, shown.costCp, shown.magic]).toEqual(['rare', 5000, true]);
+});
+test('the output shares no objects with the input (R20)', () => {
+  const before = JSON.stringify(idol);
+  for (const view of [undefined, covered, { hidden: [], revealed: ['o1', 'o2'] }] as (PlayerView | undefined)[]) {
+    const p = playerItem(idol, view);
+    p.effects!.push({ type: 'note', text: 'injected' });
+    p.weapon!.damage = '9d9'; p.weapon!.properties.push('x');
+    (p.text as { p: string }[]).push({ p: 'injected' });
+    (p.choices![0] as { options: { name: string }[] }).options[0].name = 'injected';
+    expect(JSON.stringify(idol)).toBe(before);
+  }
+});
+test('identify reveals every marker in text, curse and choices, with nothing hidden (R19)', () => {
+  const cursed = { ...idol, text: [{ p: '{{redact:t1}}A{{/redact}}' }], curse: [{ p: '{{redact:c1}}B{{/redact}}' }] } as ItemDef;
+  const e = identify(makeEntry(cursed, { view: { name: 'Plain statuette', text: [{ p: 'cover' }], hidden: ['rarity', 'effects'], revealed: [] } }));
+  expect(e.view).toEqual({ hidden: [], revealed: ['t1', 'c1', 'o1', 'o2'] });
+  const known = playerItem(e.item, e.view);
+  expect(JSON.stringify(known)).not.toContain('██████');
+  expect([known.name, known.id, known.rarity, known.effects, known.curse]).toEqual(['Idol of Ruin', cursed.id, 'rare', cursed.effects, [{ p: 'B' }]]);
+  expect(playerItem(e.item).text).toEqual([{ p: '██████' }]); // no view at all stays closed
 });
