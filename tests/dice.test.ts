@@ -40,3 +40,11 @@ test('rolling details', () => {
   expect(r.total).toBeGreaterThanOrEqual(3);
   expect(r.total).toBeLessThanOrEqual(18);
 });
+
+test('R16: whitespace only around signs, upper-case D', () => {
+  expect(parseDice('  1d20 + 5  ')).toEqual([{ count: 1, sides: 20, sign: 1 }, { const: 5, sign: 1 }]);
+  expect(parseDice('2D6')).toEqual(parseDice('2d6'));
+  expect(parseDice('4D6DL1')).toEqual(parseDice('4d6kh3'));
+  for (const bad of ['1d20 5', '1 d20', '2 d 6', '1d20 kh1'])
+    expect(() => parseDice(bad), bad).toThrow('Bad dice: ' + bad);
+});

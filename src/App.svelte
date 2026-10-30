@@ -6,6 +6,7 @@
   import { startup } from './lib/store.svelte.ts';
   import BackupBanner from './ui/BackupBanner.svelte';
   import CampaignPicker from './ui/CampaignPicker.svelte';
+  import DiceTray from './ui/DiceTray.svelte';
 
   onMount(() => {
     void requestPersistence();
@@ -96,6 +97,8 @@
     {/if}
   </main>
 </div>
+
+<DiceTray />
 
 <style>
   .shell {

@@ -7,8 +7,8 @@ const TERM = /^([+-]?)(?:(\d{0,3})d(\d{1,4})(?:(kh|kl|dl)(\d{1,3}))?|(\d{1,9}))$
 
 export function parseDice(expr: string): DiceTerm[] {
   const bad = () => new Error('Bad dice: ' + expr);
-  // Split before each sign so every term after the first carries one; '2d6++3' leaves a bare '+' that fails TERM.
-  return expr.replace(/\s+/g, '').split(/(?=[+-])/).map((part): DiceTerm => {
+  // Whitespace survives only away from signs, so '1d20 5' fails TERM. Split before each sign so every term after the first carries one; '2d6++3' leaves a bare '+' that fails TERM.
+  return expr.trim().toLowerCase().replace(/\s*([+-])\s*/g, '$1').split(/(?=[+-])/).map((part): DiceTerm => {
     const m = TERM.exec(part);
     if (!m) throw bad();
     const sign = m[1] === '-' ? -1 : 1;
