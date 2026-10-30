@@ -57,7 +57,7 @@ export async function saveBackup(opts: { campaignId?: string; includePacks: bool
   a.download = `dnd-app-backup-${name.replace(/[^\w-]+/g, '-')}-${new Date().toISOString().slice(0, 10)}.json`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
-  app.lastBackupAt = Date.now();
+  if (opts.campaignId === undefined) app.lastBackupAt = Date.now(); // matches exportBackup: only full exports count
 }
 
 // One cached index at a time: the key is the sorted pack ids plus their hashes, so a re-import invalidates it.

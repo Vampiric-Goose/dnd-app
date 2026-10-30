@@ -86,7 +86,7 @@ test('importRecord never overwrites', async () => {
   expect([fresh.kind, fresh.data.id]).toEqual(['item', 'i']);
 });
 
-test('campaign export is scoped; packs only when asked; stamps lastBackupAt', async () => {
+test('campaign export is scoped; packs only when asked; only a full export stamps lastBackupAt', async () => {
   const pack: Pack = { id: 'p1', name: 'Book', source: 'X', importedAt: 1, hash: 'h', entities: [], patches: [] };
   await db.packs.put(pack); await db.packs.put({ ...pack, id: 'p2' });
   await db.campaigns.put({ ...camp('c1'), enabledPacks: ['p1'] }); await db.campaigns.put(camp('c2'));
@@ -101,11 +101,12 @@ test('campaign export is scoped; packs only when asked; stamps lastBackupAt', as
   expect(one.characters.map((c: { id: string }) => c.id)).toEqual(['a']);
   expect(one.items.map((c: { id: string }) => c.id)).toEqual(['i1']);
   expect(one.packs.map((p: { id: string }) => p.id)).toEqual(['p1']);
-  expect(typeof await db.meta.get('lastBackupAt')).toBe('number');
+  expect(await db.meta.get('lastBackupAt')).toBeUndefined(); // a campaign export is not a full backup
 
   const all = await json({ includePacks: false });
   expect([all.campaigns.length, all.characters.length, all.items.length, all.packs.length]).toEqual([2, 3, 2, 0]);
   expect((await json({ includePacks: true })).packs).toHaveLength(2);
+  expect(typeof await db.meta.get('lastBackupAt')).toBe('number');
 });
 
 test('importBackup upserts by id and keeps timestamps', async () => {

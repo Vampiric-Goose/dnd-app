@@ -91,7 +91,8 @@ export async function exportBackup(opts: { campaignId?: string; includePacks: bo
   const exportedAt = Date.now();
   const file = json({ format: 'dnd-app-backup', version: 1, exportedAt, campaigns, characters, items, packs, blobs });
   // The built file must not be lost over a bookkeeping write (a full disk is when you need a backup most).
-  await db.meta.set('lastBackupAt', exportedAt).catch((err) => console.warn('Could not record backup time', err));
+  // Only a whole-library export counts as "backed up": one campaign's file leaves the rest unprotected.
+  if (opts.campaignId === undefined) await db.meta.set('lastBackupAt', exportedAt).catch((err) => console.warn('Could not record backup time', err));
   return file;
 }
 

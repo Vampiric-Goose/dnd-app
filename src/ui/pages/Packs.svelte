@@ -1,10 +1,11 @@
 <script lang="ts">
   import { db } from '../../lib/db.ts';
+  import { splitImportErrors } from '../../lib/import/summary.ts';
   import { getFullIndex } from '../../lib/store.svelte.ts';
   import type { Pack, PackMeta } from '../../lib/types.ts';
 
   type Counts = PackMeta['counts'];
-  type Summary = { packs: { name: string; source: string; counts: Counts; patches: number }[]; errors: { file: string; message: string }[]; warnings: string[]; skipped2024: number; files: number };
+  type Summary = { packs: { name: string; source: string; counts: Counts; patches: number }[]; errors: { file: string; message: string }[]; skipped: string[]; warnings: string[]; skipped2024: number; files: number };
 
   let packs: PackMeta[] = $state([]);
   let busy = $state(false);
@@ -69,7 +70,7 @@
           for (const en of p.entities) counts[en.kind] = (counts[en.kind] ?? 0) + 1;
           return { name: p.name, source: p.source, counts, patches: p.patches.length };
         }),
-        errors: [...readErrors, ...res.errors],
+        ...splitImportErrors([...readErrors, ...res.errors]),
         warnings: res.warnings,
         skipped2024: res.skipped2024,
         files: files.length,
@@ -126,6 +127,14 @@
       <p>No content was imported.</p>
     {/if}
     {#if summary.skipped2024}<p>Skipped {summary.skipped2024} entries from the 2024 rules (this app uses the 2014 rules).</p>{/if}
+    {#if summary.skipped.length}
+      <details>
+        <summary class="muted">Skipped {summary.skipped.length} {summary.skipped.length === 1 ? "file" : "files"} with no recognised content</summary>
+        <ul>
+          {#each summary.skipped as name}<li>{name}</li>{/each}
+        </ul>
+      </details>
+    {/if}
     {#if summary.errors.length}
       <details open={summary.errors.length <= 10}>
         <summary>{summary.errors.length} {summary.errors.length === 1 ? 'error' : 'errors'}</summary>
