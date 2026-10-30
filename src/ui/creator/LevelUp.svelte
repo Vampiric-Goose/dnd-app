@@ -50,13 +50,16 @@
   const blocked = $derived(!!preview?.problems.some((p) => p.blocking));
   let added = $state(0);
   let notes: string[] = $state([]);
+  const hpRolls: Record<string, number> = {}; // `level|classId` → the roll made for it on this page
 
   function addOne() {
     if (!c || !index || blocked) return;
     const cls = index.resolve(classId);
     if (cls?.kind !== 'class') return;
     const lv = c.build.levels.length + 1;
-    const hpRoll = settings.hpMethod === 'roll' ? roll(`HP: ${cls.name}, character level ${lv}`, `1d${cls.hitDie}`).total : undefined;
+    // A level re-added after Start over keeps its first roll, so starting over can't fish for better HP.
+    const key = `${lv}|${cls.id}`;
+    const hpRoll = settings.hpMethod === 'roll' ? (hpRolls[key] ??= roll(`HP: ${cls.name}, character level ${lv}`, `1d${cls.hitDie}`).total) : undefined;
     const r = addLevel(c, classId, index, settings, hpRoll);
     if (r.problems.some((p) => p.blocking)) return;
     c = r.character;

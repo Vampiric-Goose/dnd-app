@@ -196,9 +196,9 @@ export function validateCharacter(c: Character, index: ContentIndex, settings: C
   }
 
   for (const lim of spellLimits(embedded, settings)) {
-    const picked = b.spells[lim.classId];
+    const picked = b.spells[lim.classId] ?? { known: [], prepared: [] };
     const cls = getKind(lookup, lim.classId, 'class');
-    if (!picked || !cls) continue;
+    if (!cls) continue;
     const spell = (id: string) => getKind(lookup, id, 'spell');
     for (const id of new Set([...picked.known, ...picked.prepared])) {
       const sp = spell(id);
@@ -216,6 +216,11 @@ export function validateCharacter(c: Character, index: ContentIndex, settings: C
     if (lim.known !== undefined && count(picked.known, false) > lim.known) add('spells', `${cls.name}: ${count(picked.known, false)} ${book ? 'spellbook spells' : 'spells known'} of ${lim.known}`, undefined, !book);
     if (lim.prepared !== undefined && count(picked.prepared, false) > lim.prepared) add('spells', `${cls.name}: ${count(picked.prepared, false)} prepared of ${lim.prepared}`);
     if (book) for (const id of picked.prepared) if (!picked.known.includes(id)) add('spells', `${spell(id)?.name ?? id} must be in the spellbook to prepare it`);
+    // R34: too few blocks too (soften() makes it a warning with overrides on).
+    const short = (have: number, want: number | undefined, what: string) => { if (want !== undefined && have < want) add('spells', `${cls.name}: pick ${want - have} more ${want - have === 1 ? what.slice(0, -1) : what}`); };
+    short(cantrips, lim.cantrips, 'cantrips');
+    short(count(picked.known, false), lim.known, book ? 'spellbook spells' : 'spells');
+    short(count(picked.prepared, false), lim.prepared, 'prepared spells');
   }
 
   if (!c.name.trim()) add('details', 'Name your character');

@@ -4,7 +4,8 @@ import { computeSheet } from '../../src/lib/rules/sheet.ts';
 import { DEFAULT_SETTINGS } from '../../src/lib/settings.ts';
 import { enumerateChoices } from '../../src/lib/character/choices.ts';
 import type { Entity, OptionalFeatureDef } from '../../src/lib/types.ts';
-import { fixtureEntities, fixtureIndex, mkChar } from '../fixtures/content.ts';
+import { ContentIndex } from '../../src/lib/content/index.ts';
+import { fixtureEntities, fixtureIndex, magicMissile, mkChar } from '../fixtures/content.ts';
 
 const idx = fixtureIndex(), S = DEFAULT_SETTINGS;
 test('choices appear per level and after subclass', () => {
@@ -103,6 +104,24 @@ test('off-list spells warn (R25); spells above the max level block', () => {
   const ps = validateCharacter(b, idx, S);
   expect(ps).toContainEqual(expect.objectContaining({ step: 'spells', message: "Magic Missile isn't on the Bard spell list", blocking: false }));
   expect(ps).toContainEqual(expect.objectContaining({ step: 'spells', message: 'Shatter is level 2; Bard casts up to level 1', blocking: true }));
+});
+test('too few spells block; with overrides they warn (R34)', () => {
+  const w = mkChar({ race: 'human', base: { int: 15 }, levels: ['wizard'] });
+  const spells = (s: typeof S) => validateCharacter(w, idx, s).filter(p => p.step === 'spells');
+  expect(spells(S)).toEqual(expect.arrayContaining([
+    expect.objectContaining({ message: 'Wizard: pick 3 more cantrips', blocking: true }),
+    expect.objectContaining({ message: 'Wizard: pick 6 more spellbook spells', blocking: true }),
+  ]));
+  expect(spells({ ...S, allowOverrides: true }).length).toBeGreaterThan(0);
+  expect(spells({ ...S, allowOverrides: true }).every(p => !p.blocking)).toBe(true);
+  // A full pick (3 cantrips, 6 in the book, level + Int mod prepared) clears them.
+  const extra = Array.from({ length: 9 }, (_, i) => ({ ...magicMissile, id: `spell:s${i}@FIX`, name: `S${i}`, level: i < 3 ? 0 : 1 }));
+  const big = new ContentIndex([{ id: 'fix', name: 'Fixture', source: 'FIX', importedAt: 0, hash: 'fix', entities: [...fixtureEntities, ...extra], patches: [] }]);
+  const book = extra.slice(3).map(e => e.id);
+  const prepared = spellLimits(embedContent(w, big), S)[0].prepared!;
+  expect(prepared).toBeGreaterThan(1);
+  w.build.spells['class:wizard@FIX'] = { known: [...extra.slice(0, 3).map(e => e.id), ...book], prepared: book.slice(0, prepared) };
+  expect(validateCharacter(w, big, S).filter(p => p.step === 'spells')).toEqual([]);
 });
 test('embedding makes the sheet independent of the index', () => {
   const c = embedContent(mkChar({ race: 'human', base: { int: 15 }, levels: ['wizard', 'wizard', 'wizard'] }), idx);

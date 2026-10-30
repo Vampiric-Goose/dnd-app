@@ -16,12 +16,16 @@
   let preview = $state('');
   let error = $state('');
   let busy = $state(false);
+  let destroyed = false; // a load or resize that finishes after the step closes must not create an unrevoked URL
   const show = (b: Blob | undefined) => {
     if (preview) URL.revokeObjectURL(preview);
-    preview = b ? URL.createObjectURL(b) : '';
+    preview = b && !destroyed ? URL.createObjectURL(b) : '';
   };
   if (c.details.portrait) db.blobs.get(c.details.portrait).then(show, () => {});
-  onDestroy(() => show(undefined));
+  onDestroy(() => {
+    destroyed = true;
+    show(undefined);
+  });
 
   async function onPortrait(e: Event & { currentTarget: HTMLInputElement }) {
     const file = e.currentTarget.files?.[0];

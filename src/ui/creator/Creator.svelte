@@ -12,7 +12,9 @@
   import ChoicesStep from './ChoicesStep.svelte';
   import ClassStep from './ClassStep.svelte';
   import DetailsStep from './DetailsStep.svelte';
-  import EquipmentStep, { type Equip } from './EquipmentStep.svelte';
+  import { equipmentSources, startingInventory, type Equip } from '../../lib/character/equipment.ts';
+  import { untrack } from 'svelte';
+  import EquipmentStep from './EquipmentStep.svelte';
   import { message } from './labels.ts';
   import RaceStep from './RaceStep.svelte';
   import ReviewStep from './ReviewStep.svelte';
@@ -38,6 +40,21 @@
       (ix) => { if (s === seq) { index = ix; loadError = ''; } },
       (e) => { if (s === seq) loadError = message(e); },
     );
+  });
+
+  /** The starting kit (or gold) from the picks, for the current first class and background (R35). */
+  function withKit(ch: Character, ix: ContentIndex): Character {
+    const item = (id: string) => { const e = ix.resolve(id); return e?.kind === 'item' ? e : undefined; };
+    const { inventory, gp } = startingInventory(equipmentSources(ch, (id) => ix.resolve(id)), $state.snapshot(equip) as Equip, item);
+    return { ...ch, inventory, currency: { ...ch.currency, gp } };
+  }
+  // Re-applied whenever the first class, the background or a pick changes, even if the Equipment step is never opened.
+  const kitKey = $derived(`${c.build.levels[0]?.classId ?? ''}|${c.build.backgroundId}`);
+  $effect(() => {
+    kitKey;
+    JSON.stringify(equip); // track every pick
+    const ix = index;
+    if (ix) untrack(() => { const k = withKit(c, ix); c.inventory = k.inventory; c.currency.gp = k.currency.gp; });
   });
 
   const settings = $derived(app.campaigns.find((x) => x.id === c.campaignId)?.settings ?? DEFAULT_SETTINGS);
@@ -75,7 +92,7 @@
     saving = true;
     saveError = '';
     try {
-      const done = embedContent($state.snapshot(c) as Character, index);
+      const done = embedContent(withKit($state.snapshot(c) as Character, index), index);
       done.state = { ...done.state, hp: computeSheet(done, { settings, viewer: 'dm' }).maxHp };
       await db.characters.put(done);
       navigate(`characters/${done.id}`);
@@ -99,7 +116,7 @@
       <li>
         <button type="button" aria-current={step === id ? 'step' : undefined} onclick={() => go(id)}>
           {i + 1}. {label}
-          {#if n && id !== 'review'}<span class="badge" class:warn={!block} aria-label="{n} {n === 1 ? 'problem' : 'problems'}">{n}</span>{/if}
+          {#if n && id !== 'review'}<span class="badge" class:warn={!block} aria-hidden="true">{n}</span><span class="sr-only">, {n} {n === 1 ? 'problem' : 'problems'}</span>{/if}
         </button>
       </li>
     {/each}
@@ -130,7 +147,7 @@
   {:else if step === 'choices'}
     <ChoicesStep bind:c {index} {settings} {sheet} {problems} />
   {:else if step === 'equipment'}
-    <EquipmentStep bind:c bind:equip {index} />
+    <EquipmentStep {c} bind:equip {index} />
   {:else if step === 'spells'}
     <SpellsStep bind:c {index} {settings} />
   {:else if step === 'details'}
@@ -182,6 +199,15 @@
 
   .badge.warn {
     background: var(--muted);
+  }
+
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
 
   .problems {
