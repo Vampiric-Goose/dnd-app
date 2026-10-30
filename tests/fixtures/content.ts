@@ -2,6 +2,7 @@
 import type { Character, Choice, ClassDef, Entity, FeatureDef, ItemDef, OptionalFeatureDef, PlayerView, Proficiencies, RaceDef, Scores, Skill, SubclassDef, SubraceDef } from '../../src/lib/types.ts';
 import { featureId, slug } from '../../src/lib/content/ids.ts';
 import { enumerateChoices, walkLevels } from '../../src/lib/character/choices.ts';
+import { ContentIndex } from '../../src/lib/content/index.ts';
 import { makeEntry } from '../../src/lib/items/inventory.ts';
 import { DEFAULT_SETTINGS } from '../../src/lib/settings.ts';
 
@@ -256,6 +257,8 @@ export const fixtureEntities: Entity[] = [
   chainMail, shield, longsword, quarterstaff, halfPlate, ringOfProtection, gauntletsOfOgrePower, potionFixture, sack60,
 ];
 const byId = new Map(fixtureEntities.map(e => [e.id, e]));
+export const fixtureIndex = (): ContentIndex =>
+  new ContentIndex([{ id: 'fix', name: 'Fixture', source: 'FIX', importedAt: 0, hash: 'fix', entities: fixtureEntities, patches: [] }]);
 const need = (id: string): Entity => byId.get(id) ?? (() => { throw new Error(`No fixture entity ${id}`); })();
 
 type InvSpec = [slug: string, equipped: boolean, attuned?: boolean, view?: PlayerView];
