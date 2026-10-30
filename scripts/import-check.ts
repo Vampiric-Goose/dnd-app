@@ -36,8 +36,7 @@ for (const p of [...r.packs].sort((a, b) => a.source.localeCompare(b.source))) {
 }
 const patches = r.packs.reduce((n, p) => n + p.patches.length, 0);
 console.log(`\nTotal: ${Object.entries(total).map(([k, n]) => `${k} ${n}`).join(', ')}; SRD patches ${patches}`);
-const classRaw = r.raw.filter(([k]) => /^(class|subclass|classFeature|subclassFeature)\|/.test(k)).length;
-console.log(`Raw entities kept: ${r.raw.length} (class content not converted yet: ${classRaw})`);
+console.log(`Raw entities kept: ${r.raw.length}`);
 console.log(`Skipped 2024 entities: ${r.skipped2024}`);
 console.log(`\nSkipped files (${NONE}): ${skipped.length}`);
 for (const s of skipped) console.log(`  ${s.file}`);

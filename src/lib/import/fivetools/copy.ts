@@ -74,13 +74,17 @@ function applyMod(root: Raw, path: string, m: Raw, warn: (msg: string) => void):
   }
 }
 
-/** The entity with its `_copy` chain resolved (batch first, then stored raw entities, both through `lookup`). */
-export async function resolveCopy(kind: string, e: Raw, lookup: Lookup, warn: (msg: string) => void, depth = 0): Promise<Raw> {
+/**
+ * The entity with its `_copy` chain resolved (batch first, then stored raw entities, both through `lookup`).
+ * `keyOf` builds the lookup key from the `_copy` object (class-family records key on their parent class too).
+ */
+export async function resolveCopy(kind: string, e: Raw, lookup: Lookup, warn: (msg: string) => void,
+  keyOf: (kind: string, c: Raw) => string = (k, c) => rawKey(k, c.name, c.source), depth = 0): Promise<Raw> {
   if (!e?._copy) return e;
   if (depth > 20) fail('_copy chain too deep');
   const c = e._copy;
-  const src = (await lookup(rawKey(kind, c.name, c.source))) ?? fail(`_copy source "${c.name}" (${c.source}) not found`);
-  const parent = structuredClone(await resolveCopy(kind, src, lookup, warn, depth + 1));
+  const src = (await lookup(keyOf(kind, c))) ?? fail(`_copy source "${c.name}" (${c.source}) not found`);
+  const parent = structuredClone(await resolveCopy(kind, src, lookup, warn, keyOf, depth + 1));
   for (const k of UNCOPIED) if (!c._preserve?.[k]) delete parent[k];
   const { _copy, ...own } = e;
   const out = { ...parent, ...structuredClone(own) };

@@ -1,0 +1,86 @@
+{
+  "class": [
+    {
+      "name": "Testclass", "source": "TST", "edition": "classic",
+      "hd": { "number": 1, "faces": 10 },
+      "proficiency": ["str", "con"],
+      "startingProficiencies": {
+        "armor": ["light", { "proficiency": "shield", "full": "shields (wooden only)" }],
+        "weapons": ["simple", "{@item longsword|phb|longswords}", { "proficiency": "firearms", "optional": true }],
+        "tools": ["{@item tinker's tools|PHB}"],
+        "toolProficiencies": [{ "tinker's tools": true }],
+        "skills": [{ "choose": { "from": ["athletics", "perception", "survival"], "count": 2 } }]
+      },
+      "multiclassing": { "requirements": { "or": [{ "str": 13, "dex": 13 }] }, "proficienciesGained": { "armor": ["light"] } },
+      "startingEquipment": { "default": ["(a) a {@item longsword|phb} or (b) a {@item spear|phb}", "a test kit"], "goldAlternative": "{@dice 4d4 × 10|4d4 × 10|Starting Gold}" },
+      "classFeatures": [
+        "Battle Training|Testclass|TST|1",
+        "Variant Trick|Testclass|TST|2|TCE",
+        { "classFeature": "Test Path|Testclass|TST|3", "gainSubclassFeature": true },
+        "Ability Score Improvement|Testclass|TST|4",
+        "Expertise|Testclass|TST|6",
+        "Ability Score Improvement|Testclass|TST|8"
+      ],
+      "subclassTitle": "Test Path",
+      "casterProgression": "1/2",
+      "spellcastingAbility": "wis",
+      "preparedSpells": "<$level$> / 2 + <$wis_mod$>",
+      "classTableGroups": [
+        {
+          "colLabels": ["{@filter Tricks|classes}", "Test Die", "Bonus", "Speed"],
+          "rows": [
+            [1, { "type": "dice", "toRoll": [{ "number": 1, "faces": 6 }] }, { "type": "bonus", "value": 2 }, { "type": "bonusSpeed", "value": 0 }],
+            [1, { "type": "dice", "toRoll": [{ "number": 1, "faces": 6 }] }, { "type": "bonus", "value": 2 }, { "type": "bonusSpeed", "value": 10 }],
+            [2, { "type": "dice", "toRoll": [{ "number": 1, "faces": 6 }] }, { "type": "bonus", "value": 2 }, { "type": "bonusSpeed", "value": 10 }],
+            [2, "1d6", "+2", "+10 ft."], [2, "1d6", "+2", "+10 ft."], [3, "1d8", "+2", "+10 ft."], [3, "1d8", "+2", "+10 ft."], [3, "1d8", "+2", "+10 ft."],
+            [3, "1d8", "+3", "+10 ft."], [4, "1d8", "+3", "+20 ft."], [4, "1d8", "+3", "+20 ft."], [4, "1d10", "+3", "+20 ft."], [4, "1d10", "+3", "+20 ft."],
+            [5, "1d10", "+3", "+20 ft."], [5, "1d10", "+3", "+20 ft."], [5, "1d10", "+4", "+20 ft."], [5, "1d12", "+4", "+20 ft."], [6, "1d12", "+4", "+30 ft."],
+            [6, "1d12", "+4", "+30 ft."], ["Unlimited", "1d12", "+4", "+30 ft."]
+          ]
+        },
+        {
+          "title": "Spell Slots per Spell Level",
+          "colLabels": ["1st"],
+          "rowsSpellProgression": [[0], [2], [3], [3], [4], [4], [4], [4], [4], [4], [4], [4], [4], [4], [4], [4], [4], [4], [4], [4]]
+        }
+      ],
+      "optionalfeatureProgression": [{ "name": "Fighting Style", "featureType": ["FS:F"], "progression": { "2": 1 } }]
+    },
+    {
+      "name": "Fighter", "source": "PHB", "srd": true, "edition": "classic",
+      "hd": { "number": 1, "faces": 10 },
+      "proficiency": ["str", "con"],
+      "classFeatures": ["Second Wind|Fighter||1", "Martial Versatility|Fighter||4|TCE"],
+      "subclassTitle": "Martial Archetype"
+    },
+    { "name": "Fighter", "source": "XPHB", "edition": "one", "hd": { "number": 1, "faces": 10 }, "proficiency": ["str", "con"], "classFeatures": [] }
+  ],
+  "classFeature": [
+    { "name": "Battle Training", "source": "TST", "className": "Testclass", "classSource": "TST", "level": 1, "entries": ["You train for invented battles."] },
+    { "name": "Variant Trick", "source": "TCE", "className": "Testclass", "classSource": "TST", "level": 2, "isClassFeatureVariant": true, "entries": ["An optional test trick."] },
+    { "name": "Test Path", "source": "TST", "className": "Testclass", "classSource": "TST", "level": 3, "entries": ["Choose a test path."] },
+    { "name": "Ability Score Improvement", "source": "TST", "className": "Testclass", "classSource": "TST", "level": 4, "entries": ["Raise scores."] },
+    { "name": "Expertise", "source": "TST", "className": "Testclass", "classSource": "TST", "level": 6, "entries": ["Double proficiency in two skills."] },
+    { "name": "Ability Score Improvement", "source": "TST", "className": "Testclass", "classSource": "TST", "level": 8, "entries": ["Raise scores."] },
+    { "name": "Second Wind", "source": "PHB", "srd": true, "className": "Fighter", "classSource": "PHB", "level": 1, "entries": ["Book text for a breather."] },
+    { "name": "Martial Versatility", "source": "TCE", "className": "Fighter", "classSource": "PHB", "level": 4, "isClassFeatureVariant": true, "entries": ["Swap a style."] }
+  ],
+  "subclass": [
+    {
+      "name": "Champion of Tests", "shortName": "Champ", "source": "TST", "className": "Testclass", "classSource": "TST",
+      "subclassFeatures": ["Champ|Testclass|TST|Champ|TST|3", "Big Hit|Testclass|TST|Champ|TST|7"]
+    },
+    { "name": "Battle Master", "shortName": "Battle Master", "source": "PHB", "className": "Fighter", "classSource": "PHB", "subclassFeatures": [] },
+    {
+      "name": "Battle Master", "shortName": "Battle Master", "source": "PHB", "className": "Fighter", "classSource": "XPHB",
+      "_copy": { "name": "Battle Master", "source": "PHB", "shortName": "Battle Master", "className": "Fighter", "classSource": "PHB" }
+    }
+  ],
+  "subclassFeature": [
+    {
+      "name": "Champ", "source": "TST", "className": "Testclass", "classSource": "TST", "subclassShortName": "Champ", "subclassSource": "TST", "level": 3,
+      "entries": ["Champions of tests hit hard."]
+    },
+    { "name": "Big Hit", "source": "TST", "className": "Testclass", "classSource": "TST", "subclassShortName": "Champ", "subclassSource": "TST", "level": 7, "entries": ["Hit bigger."] }
+  ]
+}

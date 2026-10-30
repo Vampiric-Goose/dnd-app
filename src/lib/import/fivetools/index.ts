@@ -3,6 +3,7 @@ import type { ContentIndex } from '../../content/index.ts';
 import { entityId, slug } from '../../content/ids.ts';
 import type { Entity, EntityKind, EntityPatch, ItemDef, Pack } from '../../types.ts';
 import { background } from './backgrounds.ts';
+import { CLASS_KEYS, classRawKey, importClasses } from './classes.ts';
 import { DROP_SOURCES, arr, fail, type ClassRef, type Ctx, type Raw } from './common.ts';
 import { condition } from './conditions.ts';
 import { rawKey, resolveCopy } from './copy.ts';
@@ -22,8 +23,6 @@ const CONVERT: Record<string, [EntityKind, Converter]> = {
   optionalfeature: ['optionalFeature', optionalFeature], condition: ['condition', condition], spell: ['spell', spell],
   baseitem: ['item', item], item: ['item', item],
 };
-// ponytail: class content is recognised and kept in `raw`, but converted by Task 12's class importer
-const CLASS_KEYS = new Set(['class', 'subclass', 'classFeature', 'subclassFeature']);
 const CONTENT_KEYS = [...Object.keys(CONVERT), 'magicvariant', ...CLASS_KEYS];
 const META_KEYS = ['book', 'adventure'];
 // A reference to one of these books' items falls back to the SRD entity of the same name (their SRD subset).
@@ -34,6 +33,9 @@ const nameOf = (key: string, r: Raw): string | undefined => (key === 'subrace' ?
 // A magic variant's items take inherits.source; it is keyed (for _copy) by its own source when it has one.
 const sourceOf = (key: string, r: Raw): string | undefined => (key === 'magicvariant' ? r.inherits?.source ?? r.source : r.source);
 const keySource = (r: Raw): string | undefined => r?.source ?? r?.inherits?.source;
+/** The `_copy` / raw-store key; class-family records carry their parent class in it (names collide across classes). */
+const keyOf = (key: string, r: Raw): string | undefined =>
+  CLASS_KEYS.has(key) ? classRawKey(key, r) : r?.name !== undefined && keySource(r) ? rawKey(key, r.name, keySource(r)!) : undefined;
 /** The name, then noun-first forms ("Light Crossbow" -> "Crossbow, Light"), which is how the SRD names much of its gear. */
 const srdNames = (name: string): string[] => {
   const [, head, paren = ''] = /^(.*?)(\s*\(.*\))?$/.exec(name)!;
@@ -98,24 +100,29 @@ export async function import5etools(
       const bad = invalid(k, r);
       if (bad) { errors.push({ file: f.name, message: `${k} "${r?.name ?? '?'}": ${bad}` }); continue; }
       found.push({ file: f.name, key: k, r });
-      const src = keySource(r);
-      if (r?.name !== undefined && src) batch.set(rawKey(k, r.name, src), r);
+      const rk = keyOf(k, r);
+      if (rk) batch.set(rk, r);
     }
   }
 
-  // 2. Resolve _copy (batch first, then stored raw entities); drop 2024 content.
+  // 2. Resolve _copy (batch first, then stored raw entities); drop 2024 content, including subclasses and features of a 2024 class.
   const lookup = async (key: string) => batch.get(key) ?? (await ctx.rawLookup(key));
+  const is2024 = (key: string, r: Raw) => DROP_SOURCES.has(up(sourceOf(key, r))) || r?.edition === 'one';
+  const classes2024 = new Set(found.filter(e => e.key === 'class' && is2024(e.key, e.r)).map(e => `${String(e.r.name).toLowerCase()}|${up(e.r.source)}`));
+  const parent2024 = (key: string, r: Raw) => CLASS_KEYS.has(key) && key !== 'class'
+    && (DROP_SOURCES.has(up(r.classSource)) || classes2024.has(`${String(r.className).toLowerCase()}|${up(r.classSource || 'PHB')}`));
   const live: { file: string; key: string; r: Raw; label: string }[] = [];
   for (const e of found) {
     const label = `${e.key} "${e.r?.name ?? '?'}"`;
     try {
-      // ponytail: class content is kept unresolved; its _copy keys need className/classSource (Task 12)
-      const r = CLASS_KEYS.has(e.key) ? e.r : await resolveCopy(e.key, e.r, lookup, m => warnings.push(`${e.file}: ${label}: ${m}`));
+      if (parent2024(e.key, e.r)) { skipped2024++; continue; } // before _copy: a 2024 class's copies need not resolve
+      const r = await resolveCopy(e.key, e.r, lookup, m => warnings.push(`${e.file}: ${label}: ${m}`), CLASS_KEYS.has(e.key) ? classRawKey : undefined);
       const bad = invalid(e.key, r); // a copy can inherit a bad name or source
       if (bad) fail(bad);
-      if (DROP_SOURCES.has(up(sourceOf(e.key, r))) || r.edition === 'one') { skipped2024++; continue; }
+      if (is2024(e.key, r) || parent2024(e.key, r)) { skipped2024++; continue; }
       live.push({ ...e, r, label });
-      if (r.name !== undefined && keySource(r)) raw.push([rawKey(e.key, r.name, keySource(r)!), r]);
+      const rk = keyOf(e.key, r);
+      if (rk) raw.push([rk, r]);
     } catch (err) {
       errors.push({ file: e.file, message: `${label}: ${message(err)}` });
     }
@@ -145,9 +152,13 @@ export async function import5etools(
 
   // 4. Convert. An entity overlapping the SRD becomes a text patch on it.
   const packs = new Map<string, { entities: Map<string, Entity>; patches: Map<string, EntityPatch> }>();
+  const pack = (source: string) => {
+    let p = packs.get(source);
+    if (!p) packs.set(source, p = { entities: new Map(), patches: new Map() });
+    return p;
+  };
   const emit = (def: Entity, twin: Entity | undefined) => {
-    let p = packs.get(def.source);
-    if (!p) packs.set(def.source, p = { entities: new Map(), patches: new Map() });
+    const p = pack(def.source);
     // An empty text (mundane gear often has none) would blank the SRD's own description.
     if (twin) p.patches.set(twin.id, { targetId: twin.id, alias: def.source, ...(def.text.length && { text: def.text }) });
     else p.entities.set(def.id, def);
@@ -168,6 +179,13 @@ export async function import5etools(
       errors.push({ file, message: `${label}: ${message(err)}` });
     }
   }
+
+  await importClasses(live.filter(e => CLASS_KEYS.has(e.key)), conv, ctx.rawLookup, {
+    entity: e => pack(e.source).entities.set(e.id, e),
+    patch: (source, pt) => pack(source).patches.set(pt.targetId, pt),
+    error: (file, msg) => errors.push({ file, message: msg }),
+    warn: msg => warnings.push(msg),
+  });
 
   // 5. Magic variants against every base item in the batch or the index.
   const inBatch = new Set(bases.map(b => b.def.id));
