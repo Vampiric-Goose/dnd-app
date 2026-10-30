@@ -26,6 +26,13 @@ test('Testclass converts', async () => {
   expect([sub.classId, sub.shortName, sub.features.map(x => x.level)]).toEqual(['class:testclass@TST', 'Champ', [3, 7]]);
 });
 
+test('subclass optional-feature progression (R28)', async () => {
+  const r = await run({ 'class-testclass.json': readFixture('class-testclass.json') });
+  const sub = r.packs.flatMap(p => p.entities).find(e => e.kind === 'subclass' && e.name === 'Champion of Tests') as SubclassDef;
+  expect(sub.optionalFeatureProgression).toEqual([{ name: 'Test Maneuvers', featureTypes: ['MV:T'], counts: [0, 0, 3, 3, 3, 3, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5] }]);
+  expect((r.packs.flatMap(p => p.entities).find(e => e.name === 'Battle Master') as SubclassDef).optionalFeatureProgression).toBeUndefined();
+});
+
 test('PHB Fighter merges into SRD; PHB subclasses attach', async () => {
   const r = await run({ 'class-testclass.json': readFixture('class-testclass.json') }); // fixture index has class:fighter@SRD, feature:fighter:second-wind:1@SRD
   const phb = r.packs.find(p => p.source === 'PHB')!;

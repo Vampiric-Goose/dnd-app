@@ -65,9 +65,9 @@ export function enumerateChoices(c: Character, lookup: Lookup, settings: Campaig
     } else if (cls && s.classLevel === 1 && cls.multiclassSkillChoice) {
       add(s.level, `${cls.id}/skills`, cls.name, [{ type: 'skill', ...cls.multiclassSkillChoice }]);
     }
-    for (const row of cls?.optionalFeatureProgression ?? []) {
+    for (const owner of [cls, s.sub]) for (const row of owner?.optionalFeatureProgression ?? []) {
       const n = (row.counts[s.classLevel - 1] ?? 0) - (row.counts[s.classLevel - 2] ?? 0);
-      if (n > 0) add(s.level, `${cls!.id}/ofp:${slug(row.name)}`, row.name, [{ type: 'optionalFeature', count: n, featureTypes: row.featureTypes }]);
+      if (n > 0) add(s.level, `${owner!.id}/ofp:${slug(row.name)}`, row.name, [{ type: 'optionalFeature', count: n, featureTypes: row.featureTypes }]);
     }
     for (const f of s.features) add(s.level, f.id, f.name, f.choices);
   }

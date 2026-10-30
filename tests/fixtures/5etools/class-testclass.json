@@ -68,7 +68,8 @@
   "subclass": [
     {
       "name": "Champion of Tests", "shortName": "Champ", "source": "TST", "className": "Testclass", "classSource": "TST",
-      "subclassFeatures": ["Champ|Testclass|TST|Champ|TST|3", "Big Hit|Testclass|TST|Champ|TST|7"]
+      "subclassFeatures": ["Champ|Testclass|TST|Champ|TST|3", "Big Hit|Testclass|TST|Champ|TST|7"],
+      "optionalfeatureProgression": [{ "name": "Test Maneuvers", "featureType": ["MV:T"], "progression": { "3": 3, "7": 5 } }]
     },
     { "name": "Battle Master", "shortName": "Battle Master", "source": "PHB", "className": "Fighter", "classSource": "PHB", "subclassFeatures": [] },
     {

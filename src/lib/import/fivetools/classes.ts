@@ -112,6 +112,9 @@ function counts(p: Raw): number[] {
   return Array.from({ length: 20 }, (_, i) => (n = p && Object.hasOwn(p, String(i + 1)) ? Number(p[i + 1]) : n));
 }
 
+/** `optionalfeatureProgression` (classes and subclasses). */
+const ofp = (r: Raw) => arr(r.optionalfeatureProgression).map(o => ({ name: String(o?.name ?? ''), featureTypes: arr(o?.featureType).map(String), counts: counts(o?.progression) }));
+
 function multiclassPrereq(req: Raw): MulticlassPrereq | undefined {
   const pick = (o: Raw) => Object.fromEntries(Object.entries(o && typeof o === 'object' ? o : {}).filter(([k, v]) => isAbility(k) && typeof v === 'number'));
   const all = pick(req), any = pick(arr(req?.or)[0]);
@@ -278,7 +281,7 @@ export async function importClasses(live: Live[], ctx: Ctx, rawLookup: (key: str
           ...(sc && { spellcasting: { ...sc, ...(ap.length && { alwaysPrepared: ap }) } }),
           table: arr(r.classTableGroups).filter(g => !g?.rowsSpellProgression).flatMap(g =>
             arr(g.colLabels).map((l, i) => ({ label: renderTags(String(l)), values: arr(g.rows).map(row => cell(arr(row)[i])) }))),
-          optionalFeatureProgression: arr(r.optionalfeatureProgression).map(o => ({ name: String(o?.name ?? ''), featureTypes: arr(o?.featureType).map(String), counts: counts(o?.progression) })),
+          optionalFeatureProgression: ofp(r),
           ...(start.choices.length && { choices: start.choices }),
         };
         emit(def, twin);
@@ -289,6 +292,8 @@ export async function importClasses(live: Live[], ctx: Ctx, rawLookup: (key: str
           classId, shortName: String(r.shortName ?? r.name),
           features: await expand('subclassFeature', arr(r.subclassFeatures), label),
           ...(sc && { spellcasting: sc }), ...(ap.length && { alwaysPrepared: ap }),
+          // Battle Master maneuvers, Rune Knight runes, Four Elements disciplines. An SRD-overlap patch doesn't carry it (the SRD subclass models its own).
+          ...(ofp(r).length && { optionalFeatureProgression: ofp(r) }),
         };
         emit(def, twin);
       } else {

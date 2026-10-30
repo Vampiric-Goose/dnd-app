@@ -18,6 +18,15 @@ test('choices appear per level and after subclass', () => {
   c = addLevel(c, 'class:fighter@FIX', idx, S).character;
   expect(listChoices(c, idx, S).some(p => p.level === 4 && p.choice.type === 'asi')).toBe(true);
 });
+test('subclass option progressions add optionalFeature choices at the step levels (R28)', () => {
+  const c = mkChar({ race: 'human', base: { str: 15 }, levels: Array(7).fill('fighter'), answers: { subclass: ['subclass:battle-master@FIX'] } });
+  const ofp = listChoices(c, idx, S).filter(p => p.sourceId === 'subclass:battle-master@FIX/ofp:maneuvers');
+  expect(ofp.map(p => [p.key, p.choice])).toEqual([
+    ['3|subclass:battle-master@FIX/ofp:maneuvers|0', { type: 'optionalFeature', count: 3, featureTypes: ['MV:B'] }],
+    ['7|subclass:battle-master@FIX/ofp:maneuvers|0', { type: 'optionalFeature', count: 2, featureTypes: ['MV:B'] }],
+  ]);
+});
+
 test('ASI caps at 20', () => {
   let c = mkChar({ race: 'human', base: { str: 18 }, levels: ['fighter', 'fighter', 'fighter', 'fighter'] });
   const asi = listChoices(c, idx, S).find(p => p.choice.type === 'asi')!;

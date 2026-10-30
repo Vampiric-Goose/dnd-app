@@ -64,6 +64,12 @@ export const champion: SubclassDef = {
   features: championFeatures.map(f => ({ level: f.level, id: f.id })),
 };
 
+// Test-only: a subclass with an option progression (maneuvers 3 at fighter 3, 5 at fighter 7).
+export const battleMaster: SubclassDef = {
+  kind: 'subclass', id: 'subclass:battle-master@FIX', name: 'Battle Master', source: 'FIX', text: [], classId: fighter.id, shortName: 'Battle Master', features: [],
+  optionalFeatureProgression: [{ name: 'Maneuvers', featureTypes: ['MV:B'], counts: [0, 0, 3, 3, 3, 3, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5] }],
+};
+
 export const monk = cls({
   name: 'Monk', hitDie: 8, saves: ['str', 'dex'], proficiencies: P({ weapons: ['simple', 'shortsword'] }),
   skillChoice: { count: 2, from: ['acrobatics', 'athletics', 'history', 'insight', 'religion', 'stealth'] },
@@ -258,7 +264,7 @@ export const magicMissile = spell('Magic Missile', 1, ['sorcerer', 'wizard']);
 export const shatter = spell('Shatter', 2, ['bard', 'sorcerer', 'warlock', 'wizard']);
 
 export const fixtureEntities: Entity[] = [
-  human, dwarf, hillDwarf, halfElf, fighter, champion, monk, barbarian, bard, rogue, wizard, cleric, warlock, sorcerer, draconic, ...features, defense,
+  human, dwarf, hillDwarf, halfElf, fighter, champion, battleMaster, monk, barbarian, bard, rogue, wizard, cleric, warlock, sorcerer, draconic, ...features, defense,
   chainMail, shield, longsword, quarterstaff, halfPlate, ringOfProtection, gauntletsOfOgrePower, potionFixture, sack60, magicMissile, shatter,
 ];
 const byId = new Map(fixtureEntities.map(e => [e.id, e]));
