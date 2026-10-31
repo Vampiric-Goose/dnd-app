@@ -3,9 +3,9 @@ import { addLevel, answerChoice, embedContent, listChoices, newCharacter, spellL
 import { computeSheet } from '../../src/lib/rules/sheet.ts';
 import { DEFAULT_SETTINGS } from '../../src/lib/settings.ts';
 import { enumerateChoices } from '../../src/lib/character/choices.ts';
-import type { Entity, OptionalFeatureDef } from '../../src/lib/types.ts';
+import type { ClassDef, Entity, OptionalFeatureDef } from '../../src/lib/types.ts';
 import { ContentIndex } from '../../src/lib/content/index.ts';
-import { fixtureEntities, fixtureIndex, magicMissile, mkChar } from '../fixtures/content.ts';
+import { cleric, fixtureEntities, fixtureIndex, magicMissile, mkChar } from '../fixtures/content.ts';
 
 const idx = fixtureIndex(), S = DEFAULT_SETTINGS;
 test('choices appear per level and after subclass', () => {
@@ -105,9 +105,13 @@ test('off-list spells warn (R25); spells above the max level block', () => {
   expect(ps).toContainEqual(expect.objectContaining({ step: 'spells', message: "Magic Missile isn't on the Bard spell list", blocking: false }));
   expect(ps).toContainEqual(expect.objectContaining({ step: 'spells', message: 'Shatter is level 2; Bard casts up to level 1', blocking: true }));
 });
+// 3 wizard cantrips and 6 more 1st-level wizard spells, so a Wizard 1's full limits are reachable.
+const extraSpells = Array.from({ length: 9 }, (_, i) => ({ ...magicMissile, id: `spell:s${i}@FIX`, name: `S${i}`, level: i < 3 ? 0 : 1 }));
+const indexWith = (...extra: Entity[]) => new ContentIndex([{ id: 'fix', name: 'Fixture', source: 'FIX', importedAt: 0, hash: 'fix', entities: [...fixtureEntities, ...extra], patches: [] }]);
 test('too few spells block; with overrides they warn (R34)', () => {
   const w = mkChar({ race: 'human', base: { int: 15 }, levels: ['wizard'] });
-  const spells = (s: typeof S) => validateCharacter(w, idx, s).filter(p => p.step === 'spells');
+  const big = indexWith(...extraSpells);
+  const spells = (s: typeof S) => validateCharacter(w, big, s).filter(p => p.step === 'spells');
   expect(spells(S)).toEqual(expect.arrayContaining([
     expect.objectContaining({ message: 'Wizard: pick 3 more cantrips', blocking: true }),
     expect.objectContaining({ message: 'Wizard: pick 6 more spellbook spells', blocking: true }),
@@ -115,13 +119,31 @@ test('too few spells block; with overrides they warn (R34)', () => {
   expect(spells({ ...S, allowOverrides: true }).length).toBeGreaterThan(0);
   expect(spells({ ...S, allowOverrides: true }).every(p => !p.blocking)).toBe(true);
   // A full pick (3 cantrips, 6 in the book, level + Int mod prepared) clears them.
-  const extra = Array.from({ length: 9 }, (_, i) => ({ ...magicMissile, id: `spell:s${i}@FIX`, name: `S${i}`, level: i < 3 ? 0 : 1 }));
-  const big = new ContentIndex([{ id: 'fix', name: 'Fixture', source: 'FIX', importedAt: 0, hash: 'fix', entities: [...fixtureEntities, ...extra], patches: [] }]);
+  const extra = extraSpells;
   const book = extra.slice(3).map(e => e.id);
   const prepared = spellLimits(embedContent(w, big), S)[0].prepared!;
   expect(prepared).toBeGreaterThan(1);
   w.build.spells['class:wizard@FIX'] = { known: [...extra.slice(0, 3).map(e => e.id), ...book], prepared: book.slice(0, prepared) };
   expect(validateCharacter(w, big, S).filter(p => p.step === 'spells')).toEqual([]);
+});
+test('a half-caster at level 1 (no spell slots yet) has no spell shortfall', () => {
+  const paladin = { ...cleric, id: 'class:paladin@FIX', name: 'Paladin', features: [],
+    spellcasting: { ability: 'cha', progression: 'half', preparation: 'prepared', preparedFormula: 'level/2+mod:cha' } } as ClassDef;
+  const ix = indexWith(paladin, ...extraSpells.map(s => ({ ...s, classes: ['paladin'] })));
+  const p = mkChar({ race: 'human', base: { cha: 16 }, levels: ['cleric'] }); // mkChar only knows fixture classes
+  p.build.levels = [{ classId: paladin.id }];
+  expect(spellLimits(embedContent(p, ix), S)[0]).toMatchObject({ maxLevel: 0 });
+  expect(validateCharacter(p, ix, S).filter(x => x.step === 'spells')).toEqual([]);
+});
+test('a shortfall is capped at the spells that exist', () => {
+  // The fixture index holds no wizard cantrips and one 1st-level wizard spell (Magic Missile).
+  const w = mkChar({ race: 'human', base: { int: 15 }, levels: ['wizard'] });
+  const spells = () => validateCharacter(w, idx, S).filter(p => p.step === 'spells').map(p => p.message);
+  expect(spells()).toEqual(['Wizard: pick 1 more spellbook spell']);
+  w.build.spells['class:wizard@FIX'] = { known: [magicMissile.id], prepared: [] };
+  expect(spells()).toEqual(['Wizard: pick 1 more prepared spell']); // only one spell is in the book
+  w.build.spells['class:wizard@FIX'].prepared = [magicMissile.id];
+  expect(spells()).toEqual([]);
 });
 test('embedding makes the sheet independent of the index', () => {
   const c = embedContent(mkChar({ race: 'human', base: { int: 15 }, levels: ['wizard', 'wizard', 'wizard'] }), idx);

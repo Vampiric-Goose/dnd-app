@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { embedContent, spellLimits } from '../../lib/character/build.ts';
-  import { fold, slug } from '../../lib/content/ids.ts';
+  import { embedContent, spellLimits, spellPool } from '../../lib/character/build.ts';
+  import { fold } from '../../lib/content/ids.ts';
   import type { ContentIndex } from '../../lib/content/index.ts';
   import type { CampaignSettings, Character, SpellDef } from '../../lib/types.ts';
   import { byName } from './labels.ts';
@@ -18,13 +18,12 @@
     const name = cls?.name ?? lim.classId;
     const book = cls?.kind === 'class' && !!cls.spellcasting?.spellbook;
     // ponytail: subclass casters (Eldritch Knight, Arcane Trickster) borrow a list no data field names, so they see every spell.
-    const listSlug = cls?.kind === 'class' && cls.spellcasting ? slug(cls.name) : undefined;
-    const onList = spells.filter((s) => (!listSlug || s.classes.includes(listSlug)) && s.level <= lim.maxLevel);
+    const onList = spellPool(spells, cls?.kind === 'class' ? cls : undefined, lim.maxLevel); // the same pool validation caps shortfalls at
     const picked = c.build.spells[lim.classId] ?? { known: [], prepared: [] };
     const out: Section[] = [];
     if (lim.cantrips) out.push({ key: `${lim.classId}|c`, title: 'Cantrips', list: 'known', cantrip: true, max: lim.cantrips, pool: onList.filter((s) => s.level === 0) });
-    if (lim.known !== undefined) out.push({ key: `${lim.classId}|k`, title: book ? 'Spellbook' : 'Spells known', list: 'known', cantrip: false, max: lim.known, pool: onList.filter((s) => s.level > 0), extra: book });
-    if (lim.prepared !== undefined) {
+    if (lim.known !== undefined && lim.maxLevel >= 1) out.push({ key: `${lim.classId}|k`, title: book ? 'Spellbook' : 'Spells known', list: 'known', cantrip: false, max: lim.known, pool: onList.filter((s) => s.level > 0), extra: book });
+    if (lim.prepared !== undefined && lim.maxLevel >= 1) {
       const pool = book ? picked.known.map(spell).filter((s): s is SpellDef => !!s && s.level > 0) : onList.filter((s) => s.level > 0);
       out.push({ key: `${lim.classId}|p`, title: book ? 'Prepared (from your spellbook)' : 'Prepared', list: 'prepared', cantrip: false, max: lim.prepared, pool });
     }
@@ -57,14 +56,15 @@
 
 {#each sections as cl (cl.classId)}
   <section>
-    <h3>{cl.name} <span class="muted">(spells up to level {cl.maxLevel})</span></h3>
+    <h3>{cl.name} {#if cl.maxLevel}<span class="muted">(spells up to level {cl.maxLevel})</span>{/if}</h3>
+    {#if !cl.sections.length}<p class="muted">No spells to pick until this class has spell slots.</p>{/if}
     {#each cl.sections as s (s.key)}
       {@const ids = cl.picked[s.list]}
       {@const n = count(ids, s.cantrip)}
       {@const v = visible(s, ids)}
       <fieldset class="card">
         <legend>{s.title}: <span class:error={n > s.max && !s.extra}>{n} / {s.max}</span></legend>
-        {#if n < s.max}<p class="muted">Pick {s.max - n} more.</p>{/if}
+        {#if n < Math.min(s.max, s.pool.length)}<p class="muted">Pick {Math.min(s.max, s.pool.length) - n} more.</p>{/if}
         <div class="row">
           <input type="search" aria-label="Search {s.title}" placeholder="Search…" value={q[s.key] ?? ''} oninput={(e) => (q[s.key] = e.currentTarget.value)} />
           {#if !s.cantrip && cl.maxLevel > 1}

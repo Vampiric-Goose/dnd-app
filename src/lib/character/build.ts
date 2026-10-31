@@ -3,7 +3,7 @@ import type { ContentIndex } from '../content/index.ts';
 import { isStandardArray, pointBuyCost } from '../rules/abilities.ts';
 import { ABILITIES, POINT_BUY_BUDGET, SKILL_ABILITY, STANDARD_ARRAY } from '../rules/constants.ts';
 import { computeSheet } from '../rules/sheet.ts';
-import type { Ability, CampaignSettings, Character, ChoiceAnswer, ClassDef, Entity, MulticlassPrereq, Scores, Sheet } from '../types.ts';
+import type { Ability, CampaignSettings, Character, ChoiceAnswer, ClassDef, Entity, MulticlassPrereq, Scores, Sheet, SpellDef } from '../types.ts';
 import { enumerateChoices, getKind } from './choices.ts';
 import type { Lookup, PendingChoice } from './choices.ts';
 
@@ -97,6 +97,12 @@ export function spellLimits(c: Character, settings: CampaignSettings): { classId
     const level = c.build.levels.filter(l => l.classId === classId).length;
     return { classId, cantrips, ...(book ? { known: 6 + 2 * (level - 1) } : known !== undefined && { known }), ...(prepared !== undefined && { prepared }), maxLevel };
   });
+}
+
+/** The spells a casting class picks from, up to `maxLevel`: its own list, or every spell for a subclass caster (no data field names its list). */
+export function spellPool(spells: SpellDef[], cls: ClassDef | undefined, maxLevel: number): SpellDef[] {
+  const list = cls?.spellcasting ? slug(cls.name) : undefined;
+  return spells.filter(s => (!list || s.classes.includes(list)) && s.level <= maxLevel);
 }
 
 /** What's wrong with one answered (or unanswered) choice, or undefined. */
@@ -216,11 +222,18 @@ export function validateCharacter(c: Character, index: ContentIndex, settings: C
     if (lim.known !== undefined && count(picked.known, false) > lim.known) add('spells', `${cls.name}: ${count(picked.known, false)} ${book ? 'spellbook spells' : 'spells known'} of ${lim.known}`, undefined, !book);
     if (lim.prepared !== undefined && count(picked.prepared, false) > lim.prepared) add('spells', `${cls.name}: ${count(picked.prepared, false)} prepared of ${lim.prepared}`);
     if (book) for (const id of picked.prepared) if (!picked.known.includes(id)) add('spells', `${spell(id)?.name ?? id} must be in the spellbook to prepare it`);
-    // R34: too few blocks too (soften() makes it a warning with overrides on).
-    const short = (have: number, want: number | undefined, what: string) => { if (want !== undefined && have < want) add('spells', `${cls.name}: pick ${want - have} more ${want - have === 1 ? what.slice(0, -1) : what}`); };
-    short(cantrips, lim.cantrips, 'cantrips');
-    short(count(picked.known, false), lim.known, book ? 'spellbook spells' : 'spells');
-    short(count(picked.prepared, false), lim.prepared, 'prepared spells');
+    // R34: too few blocks too (soften() makes it a warning with overrides on). Each target is capped at what can be
+    // picked: the class's pool in the index (a wizard prepares from the book), and nothing leveled before 1st-level slots.
+    const pool = spellPool(index.all('spell'), cls, lim.maxLevel), poolCantrips = pool.filter(s => s.level === 0).length;
+    const short = (have: number, want: number | undefined, most: number, what: string) => {
+      const n = want === undefined ? 0 : Math.min(want, most) - have;
+      if (n > 0) add('spells', `${cls.name}: pick ${n} more ${n === 1 ? what.slice(0, -1) : what}`);
+    };
+    short(cantrips, lim.cantrips, poolCantrips, 'cantrips');
+    if (lim.maxLevel >= 1) {
+      short(count(picked.known, false), lim.known, pool.length - poolCantrips, book ? 'spellbook spells' : 'spells');
+      short(count(picked.prepared, false), lim.prepared, book ? count(picked.known, false) : pool.length - poolCantrips, 'prepared spells');
+    }
   }
 
   if (!c.name.trim()) add('details', 'Name your character');

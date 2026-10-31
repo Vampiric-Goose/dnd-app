@@ -27,6 +27,7 @@
   let c: Character = $state(fresh);
   // Step state that outlives a step's component: the rolled-score pool and the equipment picks.
   let rolls: number[] = $state([]);
+  let hpRolls: Record<string, number> = $state({}); // `level|classId` → its HP roll, kept so re-picking can't fish
   let equip: Equip = $state({ mode: 'pack', picks: {}, cats: {}, gold: { dice: '', times: 1 } });
 
   // The SRD plus the character's campaign's packs; a character in no campaign sees every pack (spec 3.2).
@@ -139,7 +140,7 @@
   {#if step === 'race'}
     <RaceStep bind:c {index} />
   {:else if step === 'class'}
-    <ClassStep bind:c {index} {settings} />
+    <ClassStep bind:c bind:hpRolls {index} {settings} />
   {:else if step === 'abilities'}
     <AbilitiesStep bind:c bind:rolls {settings} {sheet} />
   {:else if step === 'background'}
