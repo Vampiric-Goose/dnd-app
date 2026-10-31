@@ -7,6 +7,7 @@
   import BackupBanner from './ui/BackupBanner.svelte';
   import CampaignPicker from './ui/CampaignPicker.svelte';
   import DiceTray from './ui/DiceTray.svelte';
+  import Toast from './ui/Toast.svelte';
 
   onMount(() => {
     void requestPersistence();
@@ -24,7 +25,7 @@
     ['', 'Campaigns', () => import('./ui/pages/Campaigns.svelte')],
     ['characters', 'Characters', () => import('./ui/pages/Characters.svelte')],
     ['characters/new', 'Creator', () => import('./ui/creator/Creator.svelte')],
-    ['characters/:id', 'Sheet'],
+    ['characters/:id', 'Sheet', () => import('./ui/sheet/Sheet.svelte')],
     ['characters/:id/level-up', 'LevelUp', () => import('./ui/creator/LevelUp.svelte')],
     ['compendium', 'Compendium', () => import('./ui/pages/Compendium.svelte')],
     ['items', 'Items'],
@@ -100,6 +101,7 @@
 </div>
 
 <DiceTray />
+<Toast />
 
 <style>
   .shell {
@@ -126,7 +128,7 @@
 
   main {
     grid-area: main;
-    padding: 0 1rem 1rem;
+    padding: 0 1rem 4.5rem; /* the floating Dice button must never cover the last controls on a page */
     min-width: 0;
     overflow-wrap: anywhere; /* long URLs, such as the SRD attribution's, must not widen the page */
   }

@@ -57,9 +57,10 @@ export function enumerateChoices(c: Character, lookup: Lookup, settings: Campaig
         for (const t of choice.options) if (answer.ids.includes(t.name)) add(level, `${owner}/option:${slug(t.name)}`, t.name, t.choices, seen, depth + 1);
         return;
       }
+      if (choice.type === 'skill' || choice.type === 'tool' || choice.type === 'language' || choice.type === 'expertise') return; // answers are names, not entity ids: a lookup would only add a "Missing" warning
       const ids = answer?.type === 'ids' ? answer.ids : answer?.type === 'asi' && answer.featId ? [answer.featId] : [];
       for (const id of ids) {
-        const e = lookup(id); // skill/tool/language answers are names: no entity
+        const e = lookup(id);
         if (!e?.choices?.length || seen.has(e.id)) continue;
         seen.add(e.id);
         // ponytail: a picked entity's optionalFeatureProgression only exists on subclasses, which walkLevels already steps through

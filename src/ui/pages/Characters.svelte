@@ -1,5 +1,6 @@
 <script lang="ts">
   import { importRecord } from '../../lib/backup.ts';
+  import { characterSummary } from '../../lib/character/play.ts';
   import { db } from '../../lib/db.ts';
   import { navigate } from '../../lib/router.svelte.ts';
   import { app } from '../../lib/store.svelte.ts';
@@ -25,14 +26,6 @@
 
   const shown = $derived(chars.filter((c) => filter === 'all' || (filter === 'none' ? !c.campaignId : c.campaignId === filter)));
   const campaignName = (id?: string) => app.campaigns.find((x) => x.id === id)?.name;
-
-  // Reads the embedded copies, so it works whatever books are loaded.
-  function summary(c: Character): string {
-    const n: Record<string, number> = {};
-    for (const l of c.build.levels) n[l.classId] = (n[l.classId] ?? 0) + 1;
-    const race = c.embedded[c.build.subraceId ?? '']?.name ?? c.embedded[c.build.raceId]?.name;
-    return [race, Object.entries(n).map(([id, lv]) => `${c.embedded[id]?.name ?? id} ${lv}`).join(' / ')].filter(Boolean).join(' · ');
-  }
 
   async function onImport(e: Event & { currentTarget: HTMLInputElement }) {
     const file = e.currentTarget.files?.[0];
@@ -92,7 +85,7 @@
       <li class="card">
         <div class="row">
           <a href="#/characters/{c.id}"><strong>{c.name || 'Unnamed'}</strong></a>
-          <span class="muted">{summary(c)}</span>
+          <span class="muted">{characterSummary(c)}</span>
           {#if campaignName(c.campaignId)}<span class="muted">· {campaignName(c.campaignId)}</span>{/if}
         </div>
         <div class="row">

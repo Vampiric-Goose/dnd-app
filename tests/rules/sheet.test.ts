@@ -69,6 +69,10 @@ test('custom origin replaces racial ability choices (R24)', () => {
   c.build.customOrigin = { dex: 2, con: 1 };
   expect(computeSheet(c, dm).scores).toEqual({ str: 10, dex: 12, con: 11, int: 10, wis: 10, cha: 10 });
 });
+test('skill and expertise answers are names: no "Missing" warnings', () => {
+  const rogue = mkChar({ race: 'human', base: {}, levels: ['rogue'], answers: { skill: ['stealth', 'acrobatics', 'perception', 'insight'], expertise: ['stealth', 'acrobatics'] } });
+  expect(computeSheet(rogue, dm).warnings).toEqual([]);
+});
 test('robust to missing content; encumbrance; resources', () => {
   const broken = mkChar({ race: 'human', base: {}, levels: ['fighter'] }); broken.build.levels.push({ classId: 'class:nope@X' });
   expect(() => computeSheet(broken, dm)).not.toThrow();

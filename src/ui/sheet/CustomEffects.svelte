@@ -1,0 +1,113 @@
+<script lang="ts">
+  import { blankValues, buildEffect, describeEffect, EFFECT_FIELDS, EFFECT_LABEL, EFFECT_TYPES, type FieldValue } from '../../lib/character/customEffect.ts';
+  import { ABILITIES } from '../../lib/rules/constants.ts';
+  import type { Character, Effect } from '../../lib/types.ts';
+  import { ABILITY_NAMES } from '../creator/labels.ts';
+
+  let { c, update }: { c: Character; update: (fn: (c: Character) => Character) => void } = $props();
+
+  let type: Effect['type'] = $state(EFFECT_TYPES[0]);
+  let values: Record<string, FieldValue> = $state(blankValues(EFFECT_TYPES[0]));
+  let error = $state('');
+
+  function pick(t: Effect['type']) {
+    type = t;
+    values = blankValues(t);
+    error = '';
+  }
+
+  function add(e: SubmitEvent) {
+    e.preventDefault();
+    const r = buildEffect(type, values);
+    if ('error' in r) return void (error = r.error);
+    update((x) => ({ ...x, customEffects: [...x.customEffects, r.effect] }));
+    pick(type);
+  }
+
+  const toggleAbility = (name: string, a: string, on: boolean) => {
+    const list = (values[name] as string[]).filter((x) => x !== a);
+    values[name] = on ? [...list, a] : list;
+  };
+</script>
+
+<section aria-labelledby="effects-h">
+  <h2 id="effects-h">Custom effects</h2>
+  <div class="card">
+    <p class="muted">Add a bonus, proficiency or other effect that is not part of the character's build. It applies to every number on the sheet.</p>
+
+    {#if c.customEffects.length}
+      <ul class="plain">
+        {#each c.customEffects as e, i (i)}
+          <li class="row">
+            <span class="grow">{describeEffect(e)}</span>
+            <button type="button" class="danger" aria-label="Remove custom effect: {describeEffect(e)}" onclick={() => update((x) => ({ ...x, customEffects: x.customEffects.filter((_, k) => k !== i) }))}>Remove</button>
+          </li>
+        {/each}
+      </ul>
+    {/if}
+
+    <form onsubmit={add}>
+      <div class="field">
+        <label for="ce-type">Type</label>
+        <select id="ce-type" value={type} onchange={(e) => pick(e.currentTarget.value as Effect['type'])}>
+          {#each EFFECT_TYPES as t (t)}<option value={t}>{EFFECT_LABEL[t]}</option>{/each}
+        </select>
+      </div>
+
+      {#each EFFECT_FIELDS[type] as f (f.name)}
+        {#if f.kind === 'check'}
+          <label class="check"><input type="checkbox" checked={values[f.name] === true} onchange={(e) => (values[f.name] = e.currentTarget.checked)} /> {f.label}</label>
+        {:else if f.kind === 'abilities'}
+          <fieldset>
+            <legend>{f.label}</legend>
+            <div class="row">
+              {#each ABILITIES as a (a)}
+                <label class="check"><input type="checkbox" checked={(values[f.name] as string[]).includes(a)} onchange={(e) => toggleAbility(f.name, a, e.currentTarget.checked)} /> {ABILITY_NAMES[a]}</label>
+              {/each}
+            </div>
+          </fieldset>
+        {:else}
+          <div class="field">
+            <label for="ce-{f.name}">{f.label}{f.optional ? ' (optional)' : ''}</label>
+            {#if f.kind === 'select'}
+              <select id="ce-{f.name}" value={values[f.name]} onchange={(e) => (values[f.name] = e.currentTarget.value)}>
+                {#if f.optional}<option value="">Always</option>{/if}
+                {#each f.options ?? [] as o (o)}<option value={o}>{o}</option>{/each}
+              </select>
+            {:else if f.kind === 'longtext'}
+              <textarea id="ce-{f.name}" rows="3" value={values[f.name] as string} oninput={(e) => (values[f.name] = e.currentTarget.value)}></textarea>
+            {:else}
+              <input id="ce-{f.name}" type="text" inputmode={f.kind === 'integer' ? 'numeric' : undefined} autocomplete="off" value={values[f.name] as string} oninput={(e) => (values[f.name] = e.currentTarget.value)} />
+            {/if}
+          </div>
+        {/if}
+      {/each}
+
+      {#if error}<p role="alert" class="error">{error}</p>{/if}
+      <button type="submit" class="primary">Add effect</button>
+    </form>
+  </div>
+</section>
+
+<style>
+  .grow {
+    flex: 1 1 12rem;
+  }
+
+  fieldset {
+    border: 1px solid var(--border);
+    border-radius: 0.35rem;
+    margin: 0.75rem 0;
+  }
+
+  textarea {
+    font: inherit;
+    color: inherit;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 0.35rem;
+    padding: 0.4rem 0.7rem;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+</style>
