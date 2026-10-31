@@ -94,7 +94,7 @@ test('B2: kept entries over 200 MB in total are refused', async () => {
   const fifteen = new Uint8Array(15 * 1024 * 1024).fill(32);
   const many = Object.fromEntries(Array.from({ length: 20 }, (_, i) => [`${top}bestiary/bestiary-${i}.json`, fifteen]));
   await expect(readDataZip(once(zipSync({ ...markers, ...many })))).rejects.toThrow(ZIP_TOO_BIG);
-});
+}, 60_000); // builds and inflates ~300 MB: seconds on CI runners
 
 test('B3: the homebrew 5 MB cap holds when sizes are only in data descriptors', async () => {
   const six = new Uint8Array(6 * 1024 * 1024).fill(32);
@@ -109,8 +109,9 @@ test('B4: a zip with 160,000 entries reads in linear time', async () => {
   const t = performance.now();
   const r = await readDataZip(pieces(zip, [65536]));
   expect(paths(r)).toEqual(['only.json']);
-  expect(performance.now() - t).toBeLessThan(2500); // ~0.3 s linear; fflate's own per-entry unshift made this ~5 s
-});
+  // ~0.3 s linear here, ~2 s on CI runners; fflate's own per-entry unshift made this 5–8 s here, so ~20 s on CI.
+  expect(performance.now() - t).toBeLessThan(10_000);
+}, 60_000);
 
 test('B5: a file that is not a zip, or a zip with no .json, is an error', async () => {
   await expect(readDataZip(once(new Uint8Array(4096).map((_, i) => (i * 7919) & 255)))).rejects.toThrow(ZIP_NO_JSON);
