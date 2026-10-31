@@ -32,10 +32,17 @@ const withErrata = (s: Raw): Raw => ({ ...s, spells: [...(s.spells ?? []), ...(S
   spell: { name: e.spell },
 }))] });
 
+// Features upstream gives the whole class that the SRD 5.1 prints under one subclass: feature index -> subclass index.
+// (Oath Spells stays a paladin feature: its text is about every oath's list.)
+const SUBCLASS_FEATURE_ERRATA: Record<string, string> = { 'supreme-healing': 'life' }; // Life Domain, 17th level
+
 type Out = ClassDef | SubclassDef | FeatureDef | OptionalFeatureDef;
 
 export function classes(read: Read): Out[] {
-  const F = read('Features');
+  const F = read('Features').map(f => {
+    const s = SUBCLASS_FEATURE_ERRATA[f.index];
+    return s ? { ...f, subclass: read('Subclasses').find(x => x.index === s) ?? fail(`errata: unknown subclass ${s}`) } : f;
+  });
   const byUrl = (file: string, url: string): Raw => read(file).find(x => x.url === url) ?? fail(`unknown ${url}`);
   const feat = (index: string): Raw => F.find(f => f.index === index) ?? fail(`unknown feature ${index}`);
   // Features offered as options (fighting styles, invocations, terrains...) aren't gained by level. Twinned Spell lacks a `parent`.

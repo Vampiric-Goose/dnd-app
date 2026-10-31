@@ -49,6 +49,15 @@ test('fix round 1: errata, unlimited, gear categories', () => {
   expect(picks).toContainEqual({ category: 'holy-symbols', quantity: 1 });
 });
 
+test('I9: Supreme Healing is a Life domain feature at 17, not every cleric\'s; Oath Spells (about every oath) stays on the paladin', () => {
+  const cleric = by('class:cleric@SRD') as ClassDef, life = by('subclass:life@SRD') as SubclassDef;
+  expect(srd.entities.some(e => e.id === 'feature:cleric:supreme-healing:17@SRD')).toBe(false);
+  expect(cleric.features.map(f => f.id).filter(id => id.includes('supreme-healing'))).toEqual([]);
+  expect(life.features.at(-1)).toEqual({ level: 17, id: 'feature:cleric:life:supreme-healing:17@SRD' });
+  expect(by('feature:cleric:life:supreme-healing:17@SRD')).toMatchObject({ level: 17, classId: 'class:cleric@SRD', subclassId: 'subclass:life@SRD' });
+  expect((by('class:paladin@SRD') as ClassDef).features).toContainEqual({ level: 3, id: 'feature:paladin:oath-spells:3@SRD' });
+});
+
 afterEach(async () => { vi.unstubAllGlobals(); await resetDb(); });
 test('loadSrd fetches once, then serves the cached pack while the url matches', async () => {
   const fetchMock = vi.fn(async () => new Response(JSON.stringify(srd)));
