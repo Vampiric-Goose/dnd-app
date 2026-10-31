@@ -63,6 +63,20 @@ test('I2: an HP average with no formula is saved untouched; dice and special as 
   expect(assembleHp('special', { formula: '', fixed: '', special: ' varies ' })).toEqual({ special: 'varies' });
 });
 
+test('I4: dice mode keeps the printed HP while the built formula is the starting one; a change re-derives it', () => {
+  const start = { hp: { average: 30, formula: '9d8 + 18' }, formula: '9d8 + 9' }; // printed off the hit-die rule
+  expect(assembleHp('dice', { formula: '9d8 + 9', fixed: '', special: '' }, start)).toEqual({ average: 30, formula: '9d8 + 18' });
+  expect(assembleHp('dice', { formula: '10d8 + 10', fixed: '', special: '' }, start)).toEqual({ average: 55, formula: '10d8 + 10' });
+  expect(assembleHp('dice', { formula: '2d6', fixed: '', special: '' }, { hp: { average: 9 }, formula: '2d6' })).toEqual({ average: 7, formula: '2d6' });
+});
+
+test('M1/M6: a "constructor" count is 0; an unclosed {@damage tag is read quickly', () => {
+  expect(estimateDpr(m([t('Multiattack', 'It makes constructor attacks.'), t('Slam', '+4 to hit. Hit: 5 (1d6 + 2) bludgeoning damage.')]))).toBe(5);
+  const t0 = performance.now();
+  expect(estimateDpr(m([t('Slam', `{@damage ${'1'.repeat(20_000)}`)]))).toBe(0);
+  expect(performance.now() - t0).toBeLessThan(500);
+});
+
 test('estimateAttack returns the highest attack bonus and save DC', () => {
   expect(estimateAttack(m([t('Bite', '+14 to hit, Hit: 1 (1d2)'), t('Claw', '+9 to hit'), t('Breath', 'DC 21 Dexterity'), t('Fear', 'DC 19 Wisdom')]))).toEqual({ attack: 14, dc: 21 });
   expect(estimateAttack(m([t('Bite', '{@hit 5} to hit, {@dc 12}')]))).toEqual({ attack: 5, dc: 12 });

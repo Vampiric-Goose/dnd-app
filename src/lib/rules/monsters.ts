@@ -29,9 +29,9 @@ export function crValue(cr: string): number | undefined {
 }
 export const crXp = (cr: string): number | undefined => row(cr)?.xp;
 export const crProf = (cr: string): number | undefined => row(cr)?.prof;
-/** The XP a monster is worth: the book's own figure when it prints one (Reduced Threat, CR 0 with 0 XP), else its CR's. */
 /** A usable XP figure: a finite number, not negative. */
 export const okXp = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x) && x >= 0;
+/** The XP a monster is worth: the book's own figure when it prints one (Reduced Threat, CR 0 with 0 XP), else its CR's. */
 export const monsterXp = (m: { xp?: number; cr: string }): number | undefined => m.xp ?? crXp(m.cr);
 
 /** '2d6+2' → 9 (averages round down, as in the Monster Manual); accepts U+2212 and U+2013 minus signs. */

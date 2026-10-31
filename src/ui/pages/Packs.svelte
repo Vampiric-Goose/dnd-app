@@ -5,6 +5,7 @@
   import { splitImportErrors } from '../../lib/import/summary.ts';
   import { refreshCampaigns, getFullIndex } from '../../lib/store.svelte.ts';
   import type { Pack, PackMeta, SpellDef } from '../../lib/types.ts';
+  import { leaveGuard } from '../../lib/router.svelte.ts';
   import PasteDialog from '../PasteDialog.svelte';
   import SpellEditor from '../spells/SpellEditor.svelte';
 
@@ -289,7 +290,7 @@
 </div>
 
 <div class="row">
-  <button type="button" aria-expanded={pasteSpell} disabled={!!spellDraft} onclick={() => { pasteSpell = !pasteSpell; spellNotice = ''; }}>Paste a spell</button>
+  <button type="button" aria-expanded={pasteSpell} disabled={!!spellDraft} onclick={() => { if (!pasteSpell || leaveGuard.fn?.() !== false) pasteSpell = !pasteSpell; spellNotice = ''; }}>Paste a spell</button>
   {#if spellNotice}<p role="status">{spellNotice}</p>{/if}
 </div>
 {#if pasteSpell}
@@ -389,7 +390,7 @@
     </div>
     {#if deleting?.id === p.id}
       <div role="alertdialog" aria-label="Confirm delete" class="row">
-        <p>Delete “{p.name}”? This removes its {countText(p.counts)} from this device. Campaigns that use it lose that content, and characters built from it may show missing entries. You can import the files again later.</p>
+        <p>Delete “{p.name}”? This removes its {countText(p.counts)} from this device. Campaigns that use it lose that content, and characters built from it may show missing entries. {p.id === 'pack:MYSPELLS' ? "These are spells you pasted; they can't be imported again." : 'You can import the files again later.'}</p>
         <button class="danger" onclick={confirmDelete}>Delete book</button>
         <button onclick={() => (deleting = undefined)}>Keep it</button>
       </div>

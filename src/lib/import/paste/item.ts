@@ -1,6 +1,6 @@
 import { newHomebrewId } from '../../items/homebrew.ts';
 import type { ItemDef, ItemType, Rarity } from '../../types.ts';
-import { cleanPasted, rich } from './clean.ts';
+import { cleanPasted, refusal, rich } from './clean.ts';
 
 // Pure (no Svelte/Vite/DOM), loaded lazily by the paste dialog. Reads a 2014 magic item in the book's layout into a draft ItemDef.
 // Never throws: what it can't read becomes a note.
@@ -12,9 +12,12 @@ const TYPES: Record<string, ItemType> = {
 const RARITY = /\b(very rare|uncommon|common|rare|legendary|artifact|rarity varies)\b/i;
 const LINE = new RegExp(`^(${Object.keys(TYPES).join('|')})\\b\\s*(?:\\(([^)]*)\\))?\\s*,`, 'i');
 
-export function parseItemText(s: string): { draft: ItemDef; notes: string[] } {
+/** `refused`: the paste was not read (see `refusal`); the dialog shows it instead of opening the editor. */
+export function parseItemText(s: string): { draft: ItemDef; notes: string[]; refused?: string } {
   const notes: string[] = [];
   const d: ItemDef = { kind: 'item', id: newHomebrewId(), name: 'Pasted item', source: 'Homebrew', text: [], type: 'wondrous', magic: true };
+  const refused = refusal(s, 'item');
+  if (refused) return { draft: d, notes, refused };
   const lines = cleanPasted(s).split('\n').filter(Boolean);
   if (!lines.length) return { draft: d, notes: ['Nothing to read: paste an item.'] };
   let i = 0;

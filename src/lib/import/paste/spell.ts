@@ -1,7 +1,7 @@
 import { slug } from '../../content/ids.ts';
 import type { SpellDef } from '../../types.ts';
 import { uid } from '../../uid.ts';
-import { cleanPasted, rich } from './clean.ts';
+import { cleanPasted, refusal, rich } from './clean.ts';
 
 // Pure (no Svelte/Vite/DOM), loaded lazily by the paste dialog. Reads a 2014 spell in the book's layout into a draft SpellDef.
 // Never throws: what it can't read becomes a note.
@@ -15,9 +15,12 @@ export function blankSpell(): SpellDef {
   return { kind: 'spell', id: newSpellId(), name: 'Pasted spell', source: MY_SPELLS, text: [], level: 1, school: 'evocation', castingTime: '1 action', range: 'Self', components: {}, duration: 'Instantaneous', concentration: false, ritual: false, classes: [] };
 }
 
-export function parseSpellText(s: string): { draft: SpellDef; notes: string[] } {
+/** `refused`: the paste was not read (see `refusal`); the dialog shows it instead of opening the editor. */
+export function parseSpellText(s: string): { draft: SpellDef; notes: string[]; refused?: string } {
   const notes: string[] = [];
   const d = blankSpell();
+  const refused = refusal(s, 'spell');
+  if (refused) return { draft: d, notes, refused };
   const lines = cleanPasted(s).split('\n').filter(Boolean);
   if (!lines.length) return { draft: d, notes: ['Nothing to read: paste a spell.'] };
   const seen = new Set<string>();

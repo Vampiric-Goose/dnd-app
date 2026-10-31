@@ -113,6 +113,18 @@ test('campaign export is scoped; packs only when asked; only a full export stamp
   expect(typeof await db.meta.get('lastBackupAt')).toBe('number');
 });
 
+test('I5: the "My spells" pack is in every backup, packs ticked or not; M3: a newer one here counts as newer', async () => {
+  const mine: Pack = { id: 'pack:MYSPELLS', name: 'My spells', source: 'MYSPELLS', homebrew: true, importedAt: 5, hash: 'h', entities: [], patches: [] };
+  await db.packs.put(mine); await db.packs.put({ ...mine, id: 'p1', source: 'X', homebrew: undefined });
+  await db.campaigns.put(camp('c1')); // does not enable My spells
+  const json = async (o: Parameters<typeof exportBackup>[0]) => JSON.parse(await (await exportBackup(o)).text());
+  expect((await json({ includePacks: false })).packs.map((p: Pack) => p.id)).toEqual(['pack:MYSPELLS']);
+  expect((await json({ campaignId: 'c1', includePacks: false })).packs.map((p: Pack) => p.id)).toEqual(['pack:MYSPELLS']);
+  const file = await exportBackup({ includePacks: false });
+  await db.packs.put({ ...mine, importedAt: 9 }); // a spell saved after the backup
+  expect((await readBackup(file)).newer).toBe(1);
+});
+
 test('importBackup upserts by id and keeps timestamps', async () => {
   await db.campaigns.put(camp('c1')); await db.characters.put({ ...char('a', 'c1'), name: 'Old' });
   const file = await exportBackup({ includePacks: false });

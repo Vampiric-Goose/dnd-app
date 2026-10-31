@@ -7,7 +7,7 @@
 
   let newName = $state('');
   let renaming: { id: string; name: string } | undefined = $state();
-  let deleting: { id: string; name: string; items: number; characters: number } | undefined = $state();
+  let deleting: { id: string; name: string; items: number; monsters: number; characters: number } | undefined = $state();
   let includeBooks = $state(false);
   let error = $state('');
   let notice = $state('');
@@ -55,7 +55,7 @@
 
   const askDelete = (id: string, name: string) =>
     run(async () => {
-      deleting = { id, name, items: (await db.items.list(id)).length, characters: (await db.characters.list(id)).length };
+      deleting = { id, name, items: (await db.items.list(id)).length, monsters: (await db.monsters.list(id)).length, characters: (await db.characters.list(id)).length };
     });
 
   const confirmDelete = () =>
@@ -140,7 +140,7 @@
           <div role="alertdialog" aria-label="Confirm delete" class="row">
             <p>
               Delete “{deleting.name}”? This removes the campaign, its settings, its Unassigned items, and its {deleting.items} custom
-              {deleting.items === 1 ? 'item' : 'items'}. Its {deleting.characters}
+              {deleting.items === 1 ? 'item' : 'items'} and {deleting.monsters} {deleting.monsters === 1 ? 'monster' : 'monsters'}. Its {deleting.characters}
               {deleting.characters === 1 ? 'character stays' : 'characters stay'} but {deleting.characters === 1 ? 'is' : 'are'} no longer in a campaign. This cannot be undone.
             </p>
             <button class="danger" disabled={busy} onclick={confirmDelete}>Delete campaign</button>

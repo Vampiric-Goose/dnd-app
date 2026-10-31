@@ -165,7 +165,7 @@ function monsterEdits(data: MonsterDef, fields: Record<string, string | boolean>
   const ac = int(changed('app.ac'));
   if (ac !== undefined && out.ac.length) { out.ac[0].value = ac; edits.push('AC'); }
   const hp = int(changed('app.hp'));
-  if (hp !== undefined && hp >= 0) { out.hp = 'special' in data.hp ? { average: hp } : { ...data.hp, average: hp }; edits.push('HP'); }
+  if (hp !== undefined && hp >= 1) { out.hp = { average: hp }; edits.push('HP'); } // I4: no formula, so the editor keeps it
   const cr = changed('app.cr');
   if (cr && CR_LADDER.includes(cr)) { out.cr = cr; delete out.xp; edits.push('CR'); } // a printed XP belonged to the old CR
   for (const a of ABILITIES) {

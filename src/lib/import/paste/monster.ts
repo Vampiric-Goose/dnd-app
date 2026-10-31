@@ -4,7 +4,7 @@ import { blankMonster, newMonsterId } from '../../monsters/homebrew.ts';
 import { spellLine } from '../../monsters/library.ts';
 import { splitList } from '../../monsters/editing.ts';
 import type { MonsterDef, Size, Skill, Trait } from '../../types.ts';
-import { cleanPasted, rich } from './clean.ts';
+import { cleanPasted, refusal, rich } from './clean.ts';
 
 // Pure (no Svelte/Vite/DOM), loaded lazily by the paste dialog. Reads a 2014 stat block in the book's layout into a draft
 // MonsterDef. Never throws: what it can't read becomes a note, and unrecognised lines go into the nearest trait's text.
@@ -28,6 +28,10 @@ function traitStart(l: string): [string, string] | undefined {
 
 const signedNum = (s: string) => Number(s.replace(/\s/g, ''));
 
+// A line of the score row: ability names, scores and "(+2)" / "(+ 2)" modifiers only. The `\b`s keep the digits unambiguous.
+const SCORE_LINE = /^(?:\s*(?:(?:STR|DEX|CON|INT|WIS|CHA)\b|\d{1,2}\b|\(\s*[+-]?\s*\d+\s*\)))+\s*$/i;
+const scoresIn = (l: string): number[] => (l.replace(/\(\s*[+-]?\s*\d+\s*\)/g, ' ').match(/\b\d{1,2}\b/g) ?? []).map(Number);
+
 function speed(s: string, notes: string[]): MonsterDef['speed'] {
   const out: MonsterDef['speed'] = { walk: Number(/^(\d+)/.exec(s)?.[1] ?? 0) };
   let rest = s.replace(/^\d+ ?ft\.?,?\s*/, '');
@@ -41,10 +45,13 @@ function speed(s: string, notes: string[]): MonsterDef['speed'] {
   return out;
 }
 
-export function parseMonsterText(s: string): { draft: MonsterDef; notes: string[] } {
+/** `refused`: the paste was not read (see `refusal`); the dialog shows it instead of opening the editor. */
+export function parseMonsterText(s: string): { draft: MonsterDef; notes: string[]; refused?: string } {
   const notes: string[] = [];
   const { campaignId: _c, updatedAt: _u, ...blank } = blankMonster('');
   const m: MonsterDef = { ...blank, id: newMonsterId(), name: '' };
+  const refused = refusal(s, 'monster');
+  if (refused) return { draft: { ...m, name: 'Pasted monster' }, notes, refused };
   try {
     read(s, m, notes);
   } catch (e) { // defence in depth: a parser bug must not lose the paste
@@ -85,21 +92,24 @@ function read(s: string, m: MonsterDef, notes: string[]): void {
     } else if ((x = /^Hit Points (.+)$/i.exec(l))) { m.hp = { special: x[1] }; seen.add('hp'); }
     else if ((x = /^Speed (.+)$/i.exec(l))) { m.speed = speed(x[1], notes); seen.add('speed'); }
     else if (/^STR\b/i.test(l)) {
-      // One line or six: take the first six scores after the header, skipping the "(+2)" modifiers.
-      let text = '';
-      for (; i < lines.length; i++) {
-        text += ' ' + lines[i];
-        const nums = text.replace(/\([+-]?\d+\)/g, ' ').match(/\b\d{1,2}\b/g) ?? [];
-        if (nums.length >= 6) { ABILITIES.forEach((a, k) => (m.scores[a] = +nums[k])); seen.add('scores'); break; }
-      }
-      if (!seen.has('scores')) notes.push('The ability score row (STR … CHA) has fewer than six scores; 10 was used for the rest.');
+      // One line or several: the first six scores after the header, skipping the "(+2)" modifiers. I2: only lines made of ability
+      // names, scores and modifiers belong to the row; the first other line ends it and is read as a header.
+      const nums = scoresIn(l);
+      while (nums.length < 6 && SCORE_LINE.test(lines[i + 1] ?? '')) nums.push(...scoresIn(lines[++i]));
+      nums.slice(0, 6).forEach((n, k) => (m.scores[ABILITIES[k]] = n));
+      seen.add('scores');
+      if (nums.length < 6) notes.push('The ability score row (STR … CHA) has fewer than six scores; 10 was used for the rest. Check which score is missing.');
     }
     else if ((x = /^Saving Throws (.+)$/i.exec(l))) {
       for (const [, a, n] of x[1].matchAll(/\b(str|dex|con|int|wis|cha)\w*\s*([+-]\s?\d+)/gi)) m.saves[ABBR[a.toLowerCase()]] = signedNum(n);
     } else if ((x = /^Skills (.+)$/i.exec(l))) {
-      for (const [, name, n] of x[1].matchAll(/([A-Za-z][A-Za-z ]*?)\s*([+-]\s?\d+)/g)) {
+      // One anchored match per comma-separated part: an unanchored search backtracked quadratically on a long line (I3).
+      for (const part of x[1].split(',')) {
+        const hit = /^\s*([A-Za-z][A-Za-z ]*?)\s*([+-]\s?\d+)/.exec(part);
+        if (!hit) continue;
+        const [, name, n] = hit;
         const k = name.trim().toLowerCase().replace(/\s+/g, '-') as Skill;
-        if (k in SKILL_ABILITY) m.skills[k] = signedNum(n);
+        if (Object.hasOwn(SKILL_ABILITY, k)) m.skills[k] = signedNum(n); // M1: not "constructor" and friends
         else notes.push(`Unknown skill "${name.trim()}" was left out.`);
       }
     } else if ((x = /^Damage Vulnerabilities (.+)$/i.exec(l))) m.vulnerable = splitList(x[1]);

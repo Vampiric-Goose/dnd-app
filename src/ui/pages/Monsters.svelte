@@ -5,7 +5,7 @@
   import { rehome } from '../../lib/monsters/editing.ts';
   import { duplicateMonster, soundMonster } from '../../lib/monsters/homebrew.ts';
   import { filterMonsters, monsterType, SIZE_NAMES } from '../../lib/monsters/library.ts';
-  import { navigate, router } from '../../lib/router.svelte.ts';
+  import { leaveGuard, navigate, router } from '../../lib/router.svelte.ts';
   import { CR_LADDER, crValue } from '../../lib/rules/monsters.ts';
   import { app, getIndex } from '../../lib/store.svelte.ts';
   import type { MonsterDef, Size, StoredMonster } from '../../lib/types.ts';
@@ -70,9 +70,11 @@
   // the editor instead of the library.
   const editing = $derived(router.path[1] === 'new' || router.path[2] === 'edit');
   const from = $derived(router.query.get('from') ?? (router.query.has('pasted') ? 'pasted' : ''));
+  // M2: the pasted draft is dropped once its editor is left (saved, or discarded), so Back can't reopen it as a second copy.
+  $effect(() => { if (from !== 'pasted') pasted.monster = undefined; });
   async function loadEditor(campaignId: string, id: string | undefined, from: string): Promise<{ initial?: StoredMonster; draft?: MonsterDef; notes?: string[] }> {
     if (from === 'pasted') {
-      if (!pasted.monster) throw new Error('The pasted stat block is gone (the page was reloaded). Paste it again.');
+      if (!pasted.monster) throw new Error('The pasted stat block is gone (it was saved or discarded, or the page was reloaded). Paste it again.');
       return pasted.monster;
     }
     if (id) {
@@ -212,7 +214,7 @@
       <div class="row actions">
         {#if app.campaign}
           <button type="button" class="primary" onclick={() => navigate('monsters/new')}>New monster</button>
-          <button type="button" aria-expanded={pasting} onclick={() => (pasting = !pasting)}>Paste a stat block</button>
+          <button type="button" aria-expanded={pasting} onclick={() => { if (!pasting || leaveGuard.fn?.() !== false) pasting = !pasting; }}>Paste a stat block</button>
           <label class="file"><span>Import monster (.json / .pdf)</span>
             <input type="file" accept=".json,.pdf,application/json,application/pdf" onchange={onImport} />
           </label>

@@ -6,7 +6,7 @@
   import { customize, importedItem } from '../../lib/items/homebrew.ts';
   import { makeEntry } from '../../lib/items/inventory.ts';
   import { stripStored } from '../../lib/items/rows.ts';
-  import { navigate } from '../../lib/router.svelte.ts';
+  import { leaveGuard, navigate } from '../../lib/router.svelte.ts';
   import { app } from '../../lib/store.svelte.ts';
   import { toast } from '../../lib/toast.svelte.ts';
   import type { Campaign, Character, ItemDef, PlayerView } from '../../lib/types.ts';
@@ -190,7 +190,7 @@
     {#if dm}
       <div class="row actions">
         <button type="button" class="primary" onclick={() => navigate('items/new')}>New item</button>
-        <button type="button" aria-expanded={pasting} onclick={() => (pasting = !pasting)}>Paste an item</button>
+        <button type="button" aria-expanded={pasting} onclick={() => { if (!pasting || leaveGuard.fn?.() !== false) pasting = !pasting; }}>Paste an item</button>
         <label class="file"><span>Import item (.json / .pdf)</span>
           <input type="file" accept=".json,.pdf,application/json,application/pdf" onchange={onImport} />
         </label>

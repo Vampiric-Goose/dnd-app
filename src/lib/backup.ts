@@ -7,6 +7,7 @@ import { campaignProblem, characterProblem, isRec, problem, SHAPES, type Rec } f
 import type { Campaign, Character, Pack, StoredItem, StoredMonster } from './types.ts';
 import { uid } from './uid.ts';
 
+const MY_SPELLS_PACK = 'pack:MYSPELLS'; // R3: the pasted spells (SpellEditor)
 const json = (o: unknown) => new Blob([JSON.stringify(o)], { type: 'application/json' });
 const parse = async (file: Blob): Promise<Rec | undefined> => {
   try {
@@ -53,7 +54,7 @@ async function blobRecords(o: Rec): Promise<BlobRecord[]> {
 
 /**
  * Whole library, or one campaign (its characters, items and monsters, plus the packs it enables when
- * includePacks). Images always travel with it.
+ * includePacks). Images and the "My spells" pack always travel with it.
  */
 export async function exportBackup(opts: { campaignId?: string; includePacks: boolean }): Promise<Blob> {
   let campaigns: Campaign[], characters: Character[], items: StoredItem[], monsters: StoredMonster[], packIds: string[];
@@ -70,9 +71,11 @@ export async function exportBackup(opts: { campaignId?: string; includePacks: bo
     characters = await db.characters.list(c.id);
     items = await db.items.list(c.id);
     monsters = await db.monsters.list(c.id);
-    packIds = c.enabledPacks;
+    packIds = [...new Set([...c.enabledPacks, MY_SPELLS_PACK])];
   }
-  const packs = opts.includePacks ? (await Promise.all(packIds.map((id) => db.packs.get(id)))).filter((p): p is Pack => !!p && restorablePack(p)) : []; // never the cached SRD
+  // I5: "My spells" holds spells typed in on this device, which can't be imported again, so it always travels (when it exists).
+  const wanted = packIds.filter((id) => opts.includePacks || id === MY_SPELLS_PACK);
+  const packs = (await Promise.all(wanted.map((id) => db.packs.get(id)))).filter((p): p is Pack => !!p && restorablePack(p)); // never the cached SRD
   // ponytail: every blob, even for one campaign; filter by referenced hashes once maps make this heavy
   const blobs = (await db.blobs.all()).map(({ hash, type, data }) => ({ hash, type, base64: toBase64(data) }));
   const exportedAt = Date.now();

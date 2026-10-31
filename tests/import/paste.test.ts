@@ -121,6 +121,47 @@ At Higher Levels. When you cast this spell using a spell slot of 3rd level or hi
   expect(parseSpellText('Spark Flick\nEvocation cantrip').draft).toMatchObject({ level: 0, school: 'evocation' });
 });
 
+test('I1/R8: a 2024-style stat block or spell is refused, not read; a 2014 one is not', () => {
+  // Invented text in the 2024 layout.
+  const monster = parseMonsterText('Reed Stalker\nSmall Fey, Neutral\nAC 14 Initiative +3 (13)\nHP 10 (3d6)\nSpeed 30 ft.\nMOD SAVE MOD SAVE MOD SAVE\nCR 1/2 (XP 100; PB +2)');
+  expect(monster.refused).toBe('This looks like a 2024 stat block, which this app does not use.');
+  expect(parseMonsterText('Reed Stalker\nCR 1/2 (XP 100; PB +2)').refused).toBeDefined();
+  expect(parseMonsterText('AC 14\nInitiative −1 (9)').refused).toBeDefined();
+  expect(parseMonsterText(BOG_LURKER).refused).toBeUndefined();
+  expect(parseSpellText('Ember Lattice\nLevel 2 Evocation (Sorcerer, Wizard)\nCasting Time: Action').refused).toBe('This looks like a 2024 spell, which this app does not use.');
+  expect(parseSpellText('Ember Lattice\n2nd-level evocation\nUsing a Higher-Level Spell Slot. More embers.').refused).toBeDefined();
+  expect(parseSpellText('Ember Lattice\n2nd-level evocation\nCasting Time: 1 action').refused).toBeUndefined();
+});
+
+test('I3: a paste longer than one entry is refused before it is read', () => {
+  const book = 'The lurker waits in the reeds\n'.repeat(2000); // 60,000 characters
+  for (const r of [parseMonsterText(book), parseSpellText(book), parseItemText(book)]) expect(r.refused).toMatch(/more than one entry/);
+  const t = performance.now();
+  parseMonsterText(`Bog Lurker\nSkills ${'a'.repeat(45_000)}`); // was quadratic in the Skills regex
+  expect(performance.now() - t).toBeLessThan(500);
+});
+
+test('I2: the score row stops at the first line that is not scores, and a short row always gets a note', () => {
+  const five = parseMonsterText(BOG_LURKER.replace('14 (+2) 12 (+1) 13 (+1) 6 (-2) 11 (+0) 5 (-3)', '14 (+2) 12 (+1) 13 (+1) 6 (-2) 11 (+0)'));
+  expect(five.draft.saves).toEqual({ con: 3, wis: 2 }); // the Saving Throws line was not eaten
+  expect(five.draft.scores).toEqual({ str: 14, dex: 12, con: 13, int: 6, wis: 11, cha: 10 });
+  expect(five.notes.join(' ')).toMatch(/fewer than six scores/);
+  const spaced = parseMonsterText(BOG_LURKER.replace('14 (+2) 12 (+1) 13 (+1) 6 (-2) 11 (+0) 5 (-3)', '14 (+ 2) 12 (+ 1) 13 (+ 1) 6 (- 2) 11 (+ 0) 5 (- 3)'));
+  expect(spaced.draft.scores).toEqual({ str: 14, dex: 12, con: 13, int: 6, wis: 11, cha: 5 });
+  expect(spaced.notes).toEqual([]);
+  const tall = parseMonsterText(BOG_LURKER.replace('STR DEX CON INT WIS CHA\n14 (+2) 12 (+1) 13 (+1) 6 (-2) 11 (+0) 5 (-3)', 'STR\n14 (+2)\nDEX\n12 (+1)\nCON\n13 (+1)\nINT\n6 (-2)\nWIS\n11 (+0)\nCHA\n5 (-3)'));
+  expect(tall.draft.scores).toEqual({ str: 14, dex: 12, con: 13, int: 6, wis: 11, cha: 5 });
+  expect(tall.notes).toEqual([]);
+});
+
+test('M1: a skill named like an Object.prototype key is left out with a note', () => {
+  const { draft: m, notes } = parseMonsterText(BOG_LURKER.replace('Skills Stealth +5, Perception +2', 'Skills Constructor +3, Stealth +5'));
+  expect(m.skills).toEqual({ stealth: 5 });
+  expect(Object.hasOwn(m.skills, 'constructor')).toBe(false);
+  expect(notes.join(' ')).toMatch(/Unknown skill "Constructor"/);
+  expect(soundMonster(m)).toBe(true);
+});
+
 test('item: type, rarity and attunement', () => {
   const { draft: it, notes } = parseItemText('Cloak of Moth Wings\nWondrous item, very rare (requires attunement by a sorcerer or wizard)\nWhile wearing this cloak you can\nglide on silent wings.');
   expect(notes).toEqual([]);

@@ -7,10 +7,10 @@ import { duplicateMonster } from './homebrew.ts';
 
 // Raw 5etools text keeps its tags ('{@damage 2d6 + 3}', '{@hit 5}', '{@dc 13}'); imported and SRD text reads '10 (2d6 + 3)', '+5 to hit', 'DC 13'.
 const plain = (r: RichText) => richToPlain(r);
-const DAMAGE = /\{@damage ([^}|]+)[^}]*\}|(\d+) \(\s*\d*d\d+[^)]*\)/g;
+const DAMAGE = /\{@damage ([^}|]+)(?:\|[^}]*)?\}|(\d+) \(\s*\d*d\d+[^)]*\)/g; // M6: no overlapping runs, so an unclosed tag is linear
 const WORDS: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
 
-const count = (w: string): number => WORDS[w.toLowerCase()] ?? (Number(w) || 0);
+const count = (w: string): number => (Object.hasOwn(WORDS, w.toLowerCase()) ? WORDS[w.toLowerCase()] : Number(w) || 0); // M1: not 'constructor'
 const attackRoll = (s: string) => /to hit|\{@hit/i.test(s);
 
 /**
@@ -68,9 +68,15 @@ export function estimateDpr(m: MonsterDef): number {
 /** HP as the editor saves it. `fixed`: an average with no formula (as some books print it) is kept exactly as typed. */
 export type HpMode = 'dice' | 'fixed' | 'special';
 export const hpModeFor = (hp: MonsterDef['hp']): HpMode => ('special' in hp ? 'special' : hp.formula ? 'dice' : 'fixed');
-export function assembleHp(mode: HpMode, v: { formula: string; fixed: string; special: string }): MonsterDef['hp'] {
+/**
+ * `start`: the HP the editor opened with and the formula it built from the starting hit dice, size and Constitution. I4: while
+ * dice mode still builds that same formula, the printed HP is kept (a formula off the hit-die rule, or a PDF HP edit, isn't
+ * re-derived by an unrelated save).
+ */
+export function assembleHp(mode: HpMode, v: { formula: string; fixed: string; special: string }, start?: { hp: MonsterDef['hp']; formula: string }): MonsterDef['hp'] {
   if (mode === 'special') return { special: v.special.trim() };
   if (mode === 'fixed') return { average: Number(v.fixed) };
+  if (start && 'formula' in start.hp && start.hp.formula && v.formula === start.formula) return { ...start.hp };
   return { average: hpAverage(v.formula) ?? 0, formula: v.formula };
 }
 

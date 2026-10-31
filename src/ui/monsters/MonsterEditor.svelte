@@ -7,7 +7,7 @@
   import { SIZE_NAMES } from '../../lib/monsters/library.ts';
   import { leaveGuard, navigate } from '../../lib/router.svelte.ts';
   import { ABILITIES, abilityMod, ALIGNMENTS, SKILL_ABILITY } from '../../lib/rules/constants.ts';
-  import { CR_LADDER, crProf, hitDieFor, hpAverage, hpFormula, monsterXp, suggestCr } from '../../lib/rules/monsters.ts';
+  import { CR_LADDER, crProf, hitDieFor, hpFormula, monsterXp, suggestCr } from '../../lib/rules/monsters.ts';
   import { app } from '../../lib/store.svelte.ts';
   import type { Ability, MonsterDef, RichText, Size, Skill, StoredMonster, Trait } from '../../lib/types.ts';
   import { ABILITY_NAMES, message, signed, titleCase } from '../creator/labels.ts';
@@ -41,7 +41,9 @@
   // Fields that need typing room keep their own strings; `assembled` folds them into the monster and problem() checks them.
   let hpMode = $state<HpMode>(hpModeFor(start.hp)); // I2: an average with no formula stays as it is until the DM picks hit dice
   let hpFixed = $state('average' in start.hp ? String(start.hp.average) : '');
-  let hpCount = $state(String('formula' in start.hp && /^\s*(\d+)\s*d/.exec(start.hp.formula ?? '')?.[1] || 1));
+  const startCount = Number('formula' in start.hp && /^\s*(\d+)\s*d/.exec(start.hp.formula ?? '')?.[1] || 1);
+  let hpCount = $state(String(startCount));
+  const hpStart = { hp: start.hp, formula: hpFormula(startCount, start.size[0] ?? 'M', start.scores.con) }; // I4: see assembleHp
   let hpSpecial = $state('special' in start.hp ? start.hp.special : '');
   let speeds = $state(Object.fromEntries(SPEEDS.map((k) => [k, start.speed[k] === undefined ? '' : String(start.speed[k])])) as Record<(typeof SPEEDS)[number], string>);
   const passiveDefault = (x: MonsterDef) => 10 + (x.skills.perception ?? abilityMod(x.scores.wis));
@@ -60,7 +62,7 @@
     out.type = out.type.trim();
     out.alignment = out.alignment.trim();
     out.ac = out.ac.map((a) => (a.from?.trim() ? { value: a.value, from: a.from.trim() } : { value: a.value }));
-    out.hp = assembleHp(hpMode, { formula, fixed: hpFixed, special: hpSpecial });
+    out.hp = assembleHp(hpMode, { formula, fixed: hpFixed, special: hpSpecial }, hpStart);
     const sp: StoredMonster['speed'] = { walk: num(speeds.walk) ?? 0 };
     for (const k of SPEEDS.slice(1)) { const v = num(speeds[k]); if (v) sp[k] = v; }
     if (sp.fly && m.speed.hover) sp.hover = true;
@@ -218,7 +220,7 @@
     {:else if hpMode === 'dice'}
       <div class="row">
         <div class="field"><label for="mo-hd">Hit dice (d{hitDieFor(size)} for {SIZE_NAMES[size]})</label><input id="mo-hd" type="text" inputmode="numeric" autocomplete="off" bind:value={hpCount} /></div>
-        <p aria-live="polite">{#if formula}<strong>{hpAverage(formula)}</strong> ({formula}){/if}</p>
+        <p aria-live="polite">{#if formula && 'formula' in assembled.hp}<strong>{assembled.hp.average}</strong> ({assembled.hp.formula}){/if}</p>
       </div>
     {:else}
       <div class="field"><label for="mo-hps">Special hit points</label><input id="mo-hps" type="text" autocomplete="off" placeholder="equal to the summoner's level × 5" bind:value={hpSpecial} /></div>

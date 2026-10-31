@@ -22,7 +22,7 @@ test('name and HP edited in a PDF reader come back and are listed', async () => 
   doc.getForm().getTextField('app.hp').setText('300');
   const r = await importPdf(await doc.save()) as { data: MonsterDef; edits: string[] };
   expect(r.data.name).toBe('Cinder Tyrant');
-  expect(r.data.hp).toEqual({ average: 300, formula: '19d12 + 133' });
+  expect(r.data.hp).toEqual({ average: 300 }); // I4: no formula, so the editor opens it as "Average only" and keeps it
   expect(r.edits).toEqual(['Name', 'HP']);
   expect(dragon.name).toBe('Adult Red Dragon'); // the export's record is untouched
 });
@@ -35,9 +35,11 @@ test('AC, CR and a score edit; a CR edit drops a printed XP; junk values are ign
   f.getTextField('app.cr').setText('18');
   f.getTextField('app.score.str').setText('29');
   f.getTextField('app.score.dex').setText('lots'); // not a number
+  f.getTextField('app.hp').setText('0'); // I4: HP must be 1 or more
   const r = await importPdf(await doc.save()) as { data: MonsterDef; edits: string[] };
   expect([r.data.ac[0].value, r.data.cr, r.data.scores.str, r.data.scores.dex, r.data.xp]).toEqual([20, '18', 29, 10, undefined]);
   expect(r.edits).toEqual(['AC', 'CR', 'Strength']);
+  expect(r.data.hp).toEqual(dragon.hp);
 });
 
 test('40 long traits overflow onto more pages and still round-trip', async () => {

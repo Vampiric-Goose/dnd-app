@@ -6,6 +6,24 @@ import type { Block, RichText } from '../../types.ts';
 // A line ending in one of these words (or a comma) stopped mid-sentence, so the next line continues it.
 const OPEN_END = /(,|\b(?:a|an|the|of|and|or|to|with|its|their|in|on|by|for|from|that|than|as|at|is|are|be|can|must|takes?|deals?))$/i;
 
+/** I3: a stat block is under 10 KB; more than this is a whole page or book, which the parsers must not chew on the main thread. */
+export const MAX_PASTE = 50_000;
+
+/**
+ * Why a paste is refused before it is read, else undefined: too long to be one entry (I3), or R8: laid out like the 2024 books
+ * ("AC 15 Initiative +2", "CR 1/4 (XP 50; PB +2)", a "MOD SAVE" score table; "Level 2 Evocation", "Using a Higher-Level Spell
+ * Slot"). Items look the same in both editions, so only their length is checked.
+ */
+export function refusal(s: string, kind: 'monster' | 'spell' | 'item'): string | undefined {
+  if (s.length > MAX_PASTE) return 'That is more than one entry. Paste one stat block, spell or item at a time.';
+  const sign = '[+\\-−–]';
+  if (kind === 'monster' && ((/^\s*AC \d+/m.test(s) && new RegExp(`Initiative ${sign}\\s?\\d`).test(s)) || /\bCR \S+ \(XP [\d,]+; PB/.test(s) || /\bMOD\s+SAVE\b/.test(s))) {
+    return 'This looks like a 2024 stat block, which this app does not use.';
+  }
+  if (kind === 'spell' && (/^\s*Level \d \w+/m.test(s) || /Using a Higher-Level Spell Slot/i.test(s))) return 'This looks like a 2024 spell, which this app does not use.';
+  return undefined;
+}
+
 /**
  * NFKC (so ligatures such as 'ﬁ' become 'fi'), minus signs and dashes before a number become '-', spaces collapsed, and a line
  * broken mid-sentence joined to the next: one ending in a hyphen, a comma or an unfinished word ("the", "of"), or followed by a

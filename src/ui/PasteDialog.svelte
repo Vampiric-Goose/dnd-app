@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { ItemDef, MonsterDef, SpellDef } from '../lib/types.ts';
+  import { leaveGuard } from '../lib/router.svelte.ts';
   import { message } from './creator/labels.ts';
 
   type Kind = 'monster' | 'spell' | 'item';
@@ -18,11 +19,21 @@
   let busy = $state(false);
   let error = $state('');
 
+  // M5: typed or pasted text isn't thrown away by navigating off without a word.
+  const guard = () => !text.trim() || confirm('Discard the pasted text?');
+  const release = () => { if (leaveGuard.fn === guard) leaveGuard.fn = undefined; };
+  $effect(() => {
+    leaveGuard.fn = guard;
+    return release;
+  });
+
   async function read() {
     busy = true;
     error = '';
     try {
       const r = await parse[kind](text);
+      if (r.refused) { error = r.refused; return; } // I3 / R8: too long, or 2024
+      release(); // the editor this opens holds the draft now
       onread(r.draft, r.notes);
     } catch (e) {
       error = `Could not read the text: ${message(e)}`;

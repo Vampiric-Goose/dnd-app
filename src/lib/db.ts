@@ -99,6 +99,9 @@ const maybe = <T>(f: (x: T) => T, x: T | undefined) => (x === undefined ? x : f(
 
 export interface Snapshot { campaigns: Campaign[]; characters: Character[]; items: StoredItem[]; monsters?: StoredMonster[] /* absent in old backups */; packs: Pack[]; blobs: BlobRecord[] }
 
+type Stamped = { id: string; updatedAt?: unknown; importedAt?: unknown };
+const stamp = (r: Stamped) => r.updatedAt ?? r.importedAt; // M3: packs carry importedAt, not updatedAt
+
 export const db = {
   // R54: characters and campaigns pass through strip2024 / stripLoot on every read and write (a read strips only the copy in memory).
   campaigns: {
@@ -214,11 +217,12 @@ export const db = {
     const tx = (await open()).transaction(['campaigns', 'characters', 'items', 'monsters', 'packs', 'blobs']);
     let replaced = 0, newer = 0;
     for (const name of ['campaigns', 'characters', 'items', 'monsters', 'packs'] as const) {
-      for (const r of (s[name] ?? []) as { id: string; updatedAt?: unknown }[]) {
-        const had = (await tx.objectStore(name).get(r.id)) as { updatedAt?: unknown } | undefined;
+      for (const r of (s[name] ?? []) as Stamped[]) {
+        const had = (await tx.objectStore(name).get(r.id)) as Stamped | undefined;
         if (!had) continue;
         replaced++;
-        if (typeof r.updatedAt === 'number' && typeof had.updatedAt === 'number' && had.updatedAt > r.updatedAt) newer++;
+        const a = stamp(r), b = stamp(had);
+        if (typeof a === 'number' && typeof b === 'number' && b > a) newer++;
       }
     }
     for (const b of s.blobs) if (await tx.objectStore('blobs').getKey(b.hash)) replaced++;

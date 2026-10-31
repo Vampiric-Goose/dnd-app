@@ -12,6 +12,9 @@
   let { params }: { params: Record<string, string> } = $props();
 
   const campaign = $derived(app.campaign);
+  // M2: the pasted draft is dropped once its editor is left (saved, or discarded), so Back can't reopen it as a second copy.
+  const fromPaste = $derived(params.id === 'new' && router.query.has('pasted'));
+  $effect(() => { if (!fromPaste) pasted.item = undefined; });
 
   const blank = (campaignId: string): StoredItem => ({ id: '', kind: 'item', name: '', source: 'Homebrew', text: [], type: 'wondrous', magic: true, campaignId, updatedAt: 0 });
 
@@ -19,7 +22,7 @@
   async function load(campaignId: string, id: string): Promise<StoredItem> {
     // `items/new?pasted=1`: the paste dialog's draft, unsaved until Save.
     if (id === 'new' && router.query.has('pasted')) {
-      if (!pasted.item) throw new Error('The pasted item is gone (the page was reloaded). Paste it again.');
+      if (!pasted.item) throw new Error('The pasted item is gone (it was saved or discarded, or the page was reloaded). Paste it again.');
       return { ...blank(campaignId), ...pasted.item.draft, id: '', source: 'Homebrew', campaignId, updatedAt: 0 };
     }
     if (id === 'new') return blank(campaignId);
