@@ -3,12 +3,16 @@
   import type { Character } from '../../lib/types.ts';
   import EntityDetail from '../EntityDetail.svelte';
   import FilterSelect from '../FilterSelect.svelte';
-  import { byName, entityOption } from './labels.ts';
+  import VersionToggle from '../VersionToggle.svelte';
+  import { byName, entityOption, versions } from './labels.ts';
 
   let { c = $bindable(), index }: { c: Character; index: ContentIndex } = $props();
 
-  const races = $derived(index.all('race').sort(byName));
+  // One option per race name; a book's own version of it is picked with the ruleset toggle.
+  const groups = $derived(versions(index.all('race')));
   const race = $derived(index.resolve(c.build.raceId));
+  const group = $derived(race ? groups.find((g) => g.some((r) => r.id === race.id)) : undefined);
+  const options = $derived(groups.map((g) => ({ value: g.find((r) => r.id === race?.id)?.id ?? g[0].id, label: g[0].name })));
   const subraces = $derived(race ? index.all('subrace').filter((s) => index.resolve(s.raceId)?.id === race.id).sort(byName) : []);
   const subrace = $derived(c.build.subraceId ? index.resolve(c.build.subraceId) : undefined);
 
@@ -18,7 +22,10 @@
   }
 </script>
 
-<FilterSelect id="race" label="Race" options={races.map(entityOption)} value={race?.id ?? c.build.raceId} onchange={setRace} />
+<FilterSelect id="race" label="Race" {options} value={race?.id ?? c.build.raceId} onchange={setRace} />
+{#if race && group && group.length > 1}
+  <VersionToggle versions={group} value={race.id} label={(s) => index.label(s)} onchange={(id) => id !== race.id && setRace(id)} />
+{/if}
 {#if subraces.length}
   <FilterSelect id="subrace" label="Subrace" options={subraces.map(entityOption)} value={subrace?.id ?? c.build.subraceId ?? ''}
     onchange={(id) => (id ? (c.build.subraceId = id) : delete c.build.subraceId)} />

@@ -8,7 +8,9 @@
   import { soundItem } from '../../lib/items/homebrew.ts';
   import { displayItem } from '../../lib/items/playerView.ts';
   import EntityDetail from '../EntityDetail.svelte';
+  import VersionToggle from '../VersionToggle.svelte';
   import VirtualList from '../VirtualList.svelte';
+  import { versions } from '../creator/labels.ts';
 
   const tabs: { id: string; label: string; kinds: EntityKind[] }[] = [
     { id: 'spell', label: 'Spells', kinds: ['spell'] },
@@ -83,11 +85,14 @@
 
   // Subclasses and subraces are listed indented under their parent, never as flat rows. A
   // child that matches the filters brings its parent along so it always has context.
+  // Races with the same name from different books are one row; the detail has a ruleset toggle.
   const parentOf = (e: Entity) => (e.kind === 'subclass' ? e.classId : e.kind === 'subrace' ? e.raceId : undefined);
+  const raceVersions = $derived(new Map(index ? versions(index.all('race')).map((g) => [fold(g[0].name), g] as const) : []));
+  const siblings = (e: Entity) => (e.kind === 'race' && raceVersions.get(fold(e.name))) || [e];
   const rows = $derived.by<Entity[]>(() => {
     const kids = new Map<string, Entity[]>();
     for (const e of shown) { const p = parentOf(e); if (p) kids.set(p, [...(kids.get(p) ?? []), e]); }
-    if (!kids.size) return shown;
+    if (!kids.size && tab !== 'race') return shown;
     const top = shown.filter((e) => !parentOf(e));
     const have = new Set(top.map((e) => e.id));
     const orphans: Entity[] = [];
@@ -96,8 +101,9 @@
       const parent = index?.get(p);
       if (parent) { top.push(parent); have.add(p); } else orphans.push(...list);
     }
-    top.sort((a, b) => a.name.localeCompare(b.name));
-    return [...top.flatMap((e) => [e, ...(kids.get(e.id) ?? [])]), ...orphans];
+    // One row per name (the selected version if it is one of them), with every version's subraces under it.
+    const groups = tab === 'race' ? versions(top) : top.sort((a, b) => a.name.localeCompare(b.name)).map((e) => [e]);
+    return [...groups.flatMap((g) => [g.find((e) => e === selected) ?? g[0], ...g.flatMap((e) => kids.get(e.id) ?? [])]), ...orphans];
   });
 
   const selected = $derived(homebrew.find((h) => h.id === select) ?? index?.get(select));
@@ -118,7 +124,9 @@
       : e.kind === 'subclass' ? 'Subclass'
       : e.kind === 'subrace' ? 'Subrace'
       : '';
-    return [what, index?.label(e.source) ?? e.source].filter(Boolean).join(' · ');
+    const all = siblings(e);
+    const from = all.length > 1 ? `${all.length} versions: ${all.map((v) => v.source).join(', ')}` : (index?.label(e.source) ?? e.source);
+    return [what, from].filter(Boolean).join(' · ');
   }
 
   // On a phone the detail replaces the list: put focus on its back button so keyboard users are not left behind.
@@ -204,6 +212,9 @@
     {#if selected}
       <button type="button" class="back" onclick={() => go()} {@attach focusOnPhone}>&larr; Back to list</button>
       <div class="card">
+        {#if siblings(selected).length > 1}
+          <VersionToggle versions={siblings(selected)} value={selected.id} label={(s) => index?.label(s) ?? s} onchange={(id) => go(id)} />
+        {/if}
         <EntityDetail entity={selected} {index} />
       </div>
     {:else if select && index}
