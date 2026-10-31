@@ -15,6 +15,13 @@ test('SRD monsters exist and stage 1 content is unchanged', () => {
   expect(new Set(srd.entities.map((e) => e.id)).size).toBe(srd.entities.length);
 });
 
+test('M4/R10: the upstream errors are corrected', () => {
+  expect(mon('cult-fanatic').hp).toEqual({ average: 33, formula: '6d8 + 6' });
+  expect([mon('black-bear'), mon('swarm-of-ravens'), mon('half-red-dragon-veteran')].map((m) => m.skills.perception)).toEqual([3, 5, 3]);
+  expect([mon('blink-dog').passive, mon('spider').passive]).toEqual([13, 10]);
+  expect(mon('basilisk').ac).toEqual([{ value: 15, from: 'natural armor' }]);
+});
+
 test('goblin', () => {
   const g = mon('goblin');
   expect(g).toMatchObject({

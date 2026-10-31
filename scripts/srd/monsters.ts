@@ -67,38 +67,53 @@ function languageList(s: string | undefined): string[] {
   return out;
 }
 
+// Errata: corrections to the upstream 5e-database data, each checked against the SRD 5.1 stat block (the MM prints the same one).
+const ERRATA: Record<string, (m: MonsterDef) => void> = {
+  'Cult Fanatic': (m) => { m.hp = { average: 33, formula: '6d8 + 6' }; }, // upstream 22 (6d8 - 5), impossible with Con 12
+  'Black Bear': (m) => { m.skills.perception = 3; }, // upstream drops the skill; the printed passive 13 already counts it
+  'Swarm of Ravens': (m) => { m.skills.perception = 5; }, // upstream drops the skill; passive 15 counts it
+  'Half-Red Dragon Veteran': (m) => { m.skills.perception = 3; }, // upstream drops the skill; passive 12 counts it
+  'Blink Dog': (m) => { m.passive = 13; }, // upstream 10, though it has Perception +3
+  Spider: (m) => { m.passive = 10; }, // upstream 12; Wis 10 and no Perception
+  Basilisk: (m) => { m.ac = [{ value: 15, from: 'natural armor' }]; }, // upstream 12
+};
+
 export function convertMonsters(raw: Raw[]): MonsterDef[] {
-  return raw.map((m): MonsterDef => {
-    const who = `monster ${m.name}`;
-    const speed: MonsterDef['speed'] = { walk: m.speed.walk === undefined ? 0 : feet(m.speed.walk, who) };
-    for (const k of ['fly', 'swim', 'climb', 'burrow'] as const) if (m.speed[k] !== undefined) speed[k] = feet(m.speed[k], who);
-    if (m.speed.hover) speed.hover = true;
+  const out = raw.map(convert);
+  for (const [name, fix] of Object.entries(ERRATA)) fix(out.find((m) => m.name === name) ?? fail(`errata: unknown monster ${name}`));
+  return out;
+}
 
-    const saves = Object.fromEntries(bonuses(m, 'saving-throw-')) as MonsterDef['saves'];
-    const skills = Object.fromEntries(bonuses(m, 'skill-').map(([k, v]) => [k in SKILL_ABILITY ? k : fail(`${who}: unknown skill ${k}`), v])) as Partial<Record<Skill, number>>;
+function convert(m: Raw): MonsterDef {
+  const who = `monster ${m.name}`;
+  const speed: MonsterDef['speed'] = { walk: m.speed.walk === undefined ? 0 : feet(m.speed.walk, who) };
+  for (const k of ['fly', 'swim', 'climb', 'burrow'] as const) if (m.speed[k] !== undefined) speed[k] = feet(m.speed[k], who);
+  if (m.speed.hover) speed.hover = true;
 
-    const { passive_perception: passive, ...senseMap } = m.senses;
-    const senses = Object.keys(senseMap).sort((a, b) => SENSE_ORDER.indexOf(a) - SENSE_ORDER.indexOf(b)).map((k) => `${k} ${senseMap[k]}`);
+  const saves = Object.fromEntries(bonuses(m, 'saving-throw-')) as MonsterDef['saves'];
+  const skills = Object.fromEntries(bonuses(m, 'skill-').map(([k, v]) => [k in SKILL_ABILITY ? k : fail(`${who}: unknown skill ${k}`), v])) as Partial<Record<Skill, number>>;
 
-    const legendary = traits(m.legendary_actions);
-    return {
-      ...base('monster', m.name, []),
-      size: [SIZE[m.size] ?? fail(`${who}: size ${m.size}`)],
-      type: m.subtype ? `${m.type} (${m.subtype})` : m.type,
-      alignment: m.alignment,
-      ac: armorClasses(m.armor_class),
-      hp: { average: m.hit_points, formula: String(m.hit_points_roll).replace(/\s*([+-])\s*/, ' $1 ') },
-      speed,
-      scores: Object.fromEntries(ABILITY_KEYS.map(([k, long]) => [k, m[long]])) as MonsterDef['scores'],
-      saves, skills,
-      vulnerable: m.damage_vulnerabilities, resist: m.damage_resistances, immune: m.damage_immunities,
-      conditionImmune: m.condition_immunities.map((c: Raw) => c.index),
-      senses, passive: passive ?? fail(`${who}: no passive perception`),
-      languages: languageList(m.languages),
-      cr: CR[m.challenge_rating] ?? String(m.challenge_rating),
-      traits: traits(m.special_abilities), actions: traits(m.actions), bonusActions: [], reactions: traits(m.reactions),
-      legendary,
-      ...(legendary.length && { legendaryCount: 3 }),
-    };
-  });
+  const { passive_perception: passive, ...senseMap } = m.senses;
+  const senses = Object.keys(senseMap).sort((a, b) => SENSE_ORDER.indexOf(a) - SENSE_ORDER.indexOf(b)).map((k) => `${k} ${senseMap[k]}`);
+
+  const legendary = traits(m.legendary_actions);
+  return {
+    ...base('monster', m.name, []),
+    size: [SIZE[m.size] ?? fail(`${who}: size ${m.size}`)],
+    type: m.subtype ? `${m.type} (${m.subtype})` : m.type,
+    alignment: m.alignment,
+    ac: armorClasses(m.armor_class),
+    hp: { average: m.hit_points, formula: String(m.hit_points_roll).replace(/\s*([+-])\s*/, ' $1 ') },
+    speed,
+    scores: Object.fromEntries(ABILITY_KEYS.map(([k, long]) => [k, m[long]])) as MonsterDef['scores'],
+    saves, skills,
+    vulnerable: m.damage_vulnerabilities, resist: m.damage_resistances, immune: m.damage_immunities,
+    conditionImmune: m.condition_immunities.map((c: Raw) => c.index),
+    senses, passive: passive ?? fail(`${who}: no passive perception`),
+    languages: languageList(m.languages),
+    cr: CR[m.challenge_rating] ?? String(m.challenge_rating),
+    traits: traits(m.special_abilities), actions: traits(m.actions), bonusActions: [], reactions: traits(m.reactions),
+    legendary,
+    ...(legendary.length && { legendaryCount: 3 }),
+  };
 }
