@@ -77,7 +77,7 @@ export const sha256Hex = async (data: ArrayBuffer) =>
 function packMeta(p: Pack): PackMeta {
   const counts: PackMeta['counts'] = {};
   for (const e of p.entities) counts[e.kind] = (counts[e.kind] ?? 0) + 1;
-  return { id: p.id, name: p.name, source: p.source, importedAt: p.importedAt, hash: p.hash, counts };
+  return { id: p.id, name: p.name, source: p.source, ...(p.homebrew && { homebrew: true }), importedAt: p.importedAt, hash: p.hash, counts };
 }
 
 export interface Snapshot { campaigns: Campaign[]; characters: Character[]; items: StoredItem[]; packs: Pack[]; blobs: BlobRecord[] }
@@ -121,6 +121,22 @@ export const db = {
     delete: (id: string) => write(['packs', 'packMeta'], async (tx) => {
       await tx.objectStore('packs').delete(id);
       await tx.objectStore('packMeta').delete(id);
+    }),
+    /**
+     * R52: removes a pack, drops it from every campaign's enabledPacks and forgets its stored raw entities (raw keys end in
+     * `|SOURCE`), all in one transaction. Characters keep the content they embedded.
+     */
+    remove: (id: string) => write(['packs', 'packMeta', 'campaigns', 'raw5e'], async (tx) => {
+      const source = (await tx.objectStore('packMeta').get(id))?.source ?? (await tx.objectStore('packs').get(id))?.source;
+      await tx.objectStore('packs').delete(id);
+      await tx.objectStore('packMeta').delete(id);
+      const campaigns = tx.objectStore('campaigns');
+      for (const c of await campaigns.getAll()) {
+        if (c.enabledPacks.includes(id)) await campaigns.put({ ...c, enabledPacks: c.enabledPacks.filter((x) => x !== id), updatedAt: Date.now() });
+      }
+      if (source === undefined) return;
+      const raw = tx.objectStore('raw5e'), suffix = '|' + source.toUpperCase();
+      for (const k of await raw.getAllKeys()) if (typeof k === 'string' && k.endsWith(suffix)) await raw.delete(k);
     }),
   },
   raw5e: {

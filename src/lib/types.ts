@@ -64,8 +64,8 @@ export type Entity = RaceDef | SubraceDef | ClassDef | SubclassDef | FeatureDef 
 export type EntityKind = Entity['kind'];
 export type EntityOfKind<K extends EntityKind> = Extract<Entity, { kind: K }>;
 export interface EntityPatch { targetId: string; alias: string; text?: RichText; addFeatures?: FeatureRef[] }
-export interface Pack { id: string; name: string; source: string; importedAt: number; hash: string; entities: Entity[]; patches: EntityPatch[] }
-export interface PackMeta { id: string; name: string; source: string; importedAt: number; hash: string; counts: Partial<Record<EntityKind, number>> }
+export interface Pack { id: string; name: string; source: string; homebrew?: boolean; importedAt: number; hash: string; entities: Entity[]; patches: EntityPatch[] }
+export interface PackMeta { id: string; name: string; source: string; homebrew?: boolean; importedAt: number; hash: string; counts: Partial<Record<EntityKind, number>> }
 export type HideableField = 'rarity' | 'attunement' | 'bonuses' | 'effects' | 'charges' | 'curse';
 export interface PlayerView { name?: string; text?: RichText; hidden: HideableField[]; revealed: string[] }
 export interface InventoryEntry { id: string; item: ItemDef; sourceId?: string; quantity: number; equipped: boolean; attuned: boolean; chargesUsed: number; notes: string; view?: PlayerView }

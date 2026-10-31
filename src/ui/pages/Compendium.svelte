@@ -113,7 +113,7 @@
       : e.kind === 'subclass' ? 'Subclass'
       : e.kind === 'subrace' ? 'Subrace'
       : '';
-    return [what, e.source].filter(Boolean).join(' · ');
+    return [what, index?.label(e.source) ?? e.source].filter(Boolean).join(' · ');
   }
 
   // On a phone the detail replaces the list: put focus on its back button so keyboard users are not left behind.
@@ -137,7 +137,7 @@
       <label class="field">Source
         <select bind:value={source}>
           <option value="">All</option>
-          {#each sources as s}<option value={s}>{s}</option>{/each}
+          {#each sources as s}<option value={s}>{index?.label(s) ?? s}</option>{/each}
         </select>
       </label>
       {#if tab === 'spell'}

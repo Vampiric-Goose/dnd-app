@@ -1,5 +1,6 @@
 import type { Entity, EntityKind, EntityOfKind, Pack, SubclassDef } from '../types.ts';
 import { baseKey, fold, slug, sourceOf } from './ids.ts';
+import { sourceLabel } from './sources.ts';
 
 const up = (s: string) => s.toUpperCase();
 const push = <T>(m: Map<string, T[]>, k: string, v: T) => { const l = m.get(k); if (l) l.push(v); else m.set(k, [v]); };
@@ -12,7 +13,10 @@ export class ContentIndex {
   #byAlias = new Map<string, Entity>(); // `${baseKey}@${ALIAS}`
   #folded = new WeakMap<Entity, string>(); // search form of each name, filled lazily
 
+  #homebrew = new Set<string>(); // sources of the packs imported as homebrew
+
   constructor(packs: Pack[]) {
+    for (const p of packs) if (p.homebrew) this.#homebrew.add(up(p.source));
     for (const p of packs) for (const e of p.entities) this.#byId.set(e.id, e);
     for (const p of packs) for (const patch of p.patches) {
       const target = this.#byId.get(patch.targetId);
@@ -37,6 +41,9 @@ export class ContentIndex {
   }
 
   get(id: string): Entity | undefined { return this.#byId.get(id); }
+
+  /** What to show for an entity's source id: the book's name, or Homebrew (id). */
+  label(source: string): string { return sourceLabel(source, this.#homebrew.has(up(source))); }
 
   all<K extends EntityKind>(kind: K): EntityOfKind<K>[] { return [...(this.#byKind.get(kind) ?? [])] as EntityOfKind<K>[]; }
 

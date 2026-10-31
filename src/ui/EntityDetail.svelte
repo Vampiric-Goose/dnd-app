@@ -93,7 +93,7 @@
     {:else if entity.kind === 'optionalFeature'}Option ({list(entity.featureTypes)})
     {:else if entity.kind === 'feature'}Feature, {nameOf(entity.classId)} level {entity.level}
     {:else}{cap(entity.kind)}{/if}
-    · {entity.source}
+    · <span title={entity.source}>{index?.label(entity.source) ?? entity.source}</span>
   </p>
 
   {#if entity.kind === 'spell'}

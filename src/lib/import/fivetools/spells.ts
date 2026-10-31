@@ -1,7 +1,7 @@
 import { slug } from '../../content/ids.ts';
 import { renderTags } from '../../content/richtext.ts';
 import type { SpellDef } from '../../types.ts';
-import { arr, base, DROP_SOURCES, rich, table, type ClassRef, type Ctx, type Raw } from './common.ts';
+import { arr, base, rich, table, type ClassRef, type Ctx, type Raw } from './common.ts';
 
 const SCHOOL = table<string>({ A: 'abjuration', C: 'conjuration', D: 'divination', E: 'enchantment', V: 'evocation', I: 'illusion', N: 'necromancy', T: 'transmutation' });
 const UNIT = table<string>({ bonus: 'bonus action' });
@@ -43,14 +43,13 @@ function duration(list: Raw[]): string {
 
 /**
  * A spell's class slugs. A classVariant counts only when the spell's own book defines it (XGE's new spells), not when a
- * later book adds an older spell to a list (TCE's optional expanded lists). 2014 lists win; a spell only on 2024 lists
- * (from a 2024-era book that isn't dropped) keeps those.
+ * later book adds an older spell to a list (TCE's optional expanded lists). Lists from a source the importer rejects (2024
+ * books, unknown sources) are ignored entirely (R52): a spell is on 2014-sourced lists only, however few that leaves.
  */
-function classesOf(refs: ClassRef[], spellSource: string): string[] {
+function classesOf(refs: ClassRef[], spellSource: string, listed: Ctx['listed']): string[] {
   const up = (s: unknown) => String(s).toUpperCase();
-  const ok = refs.filter(c => typeof c.name === 'string' && (!c.variantOf || c.variantOf.some(s => up(s) === up(spellSource))));
-  const classic = ok.filter(c => !DROP_SOURCES.has(up(c.source)));
-  return [...new Set((classic.length ? classic : ok).map(c => slug(c.name)))];
+  const ok = refs.filter(c => typeof c.name === 'string' && listed(String(c.source)) && (!c.variantOf || c.variantOf.some(s => up(s) === up(spellSource))));
+  return [...new Set(ok.map(c => slug(c.name)))];
 }
 
 export const spell = (r: Raw, ctx: Ctx, id: string, name: string): SpellDef => {
@@ -69,7 +68,7 @@ export const spell = (r: Raw, ctx: Ctx, id: string, name: string): SpellDef => {
     components: { ...(c.v && { v: true }), ...(c.s && { s: true }), ...(m !== undefined && { m: renderTags(m) }) },
     duration: duration(durations), concentration: durations.some(d => d.concentration === true), ritual: r.meta?.ritual === true,
     ...(higher.length && { higherLevels: rich(higher) }),
-    classes: classesOf(refs, r.source),
+    classes: classesOf(refs, r.source, ctx.listed),
   };
 };
 

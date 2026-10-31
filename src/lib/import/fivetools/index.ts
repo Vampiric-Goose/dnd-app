@@ -4,7 +4,8 @@ import { entityId, slug } from '../../content/ids.ts';
 import type { Entity, EntityKind, EntityPatch, ItemDef, Pack } from '../../types.ts';
 import { background } from './backgrounds.ts';
 import { CLASS_KEYS, classRawKey, importClasses } from './classes.ts';
-import { DROP_SOURCES, arr, fail, type ClassRef, type Ctx, type Raw } from './common.ts';
+import { classifySource, is2024Source, sourceInfo, type SourceVerdict } from '../../content/sources.ts';
+import { arr, fail, type ClassRef, type Ctx, type Raw } from './common.ts';
 import { condition } from './conditions.ts';
 import { rawKey, resolveCopy } from './copy.ts';
 import { feat } from './feats.ts';
@@ -13,9 +14,12 @@ import { optionalFeature } from './optionalFeatures.ts';
 import { race, subrace, subraceName } from './races.ts';
 import { spell, spellKey, spellLookup } from './spells.ts';
 
-export { DROP_SOURCES };
-
-export interface ImportResult { packs: Pack[]; raw: [string, unknown][]; errors: { file: string; message: string }[]; skipped2024: number; warnings: string[] }
+/** Entities the importer refused, by upper-cased source: 2024 rules, or a source that is neither official 2014 nor declared homebrew. */
+export interface Skipped { rules2024: Record<string, number>; unknown: Record<string, number> }
+export interface ImportResult {
+  packs: Pack[]; raw: [string, unknown][]; errors: { file: string; message: string }[]; warnings: string[];
+  skipped2024: number; skippedUnknown: number; skipped: Skipped;
+}
 
 type Converter = (r: Raw, ctx: Ctx, id: string, name: string) => Entity;
 const CONVERT: Record<string, [EntityKind, Converter]> = {
@@ -25,10 +29,23 @@ const CONVERT: Record<string, [EntityKind, Converter]> = {
 };
 const CONTENT_KEYS = [...Object.keys(CONVERT), 'magicvariant', ...CLASS_KEYS];
 const META_KEYS = ['book', 'adventure'];
-// A reference to one of these books' items falls back to the SRD entity of the same name (their SRD subset).
-const CORE = new Set(['PHB', 'DMG', 'MM', 'XPHB', 'XDMG', 'XMM']);
+// A reference to a core book's item falls back to the SRD entity of the same name (the book's SRD subset).
+const isCore = (source: string) => sourceInfo(source)?.kind === 'core';
 
 const up = (s: unknown) => String(s).toUpperCase();
+/** The source ids a file declares as its own homebrew (`_meta.sources[].json`). Official data files declare none. */
+const declaredIn = (j: Raw): Set<string> => new Set(j && typeof j === 'object' && !Array.isArray(j)
+  ? arr(j._meta?.sources).map(s => (typeof s === 'string' ? s : s?.json)).filter((s): s is string => typeof s === 'string' && !!s).map(up) : []);
+const NOT_DECLARED: ReadonlySet<string> = new Set();
+type Reject = '2024' | 'unknown';
+/** Every raw key ends in `|SOURCE`. */
+const keySourceOf = (key: string) => key.slice(key.lastIndexOf('|') + 1);
+/** A `_copy` named a source the importer rejects; the entity is skipped, never built from it. */
+class CopyRejected extends Error {
+  why: Reject;
+  source: string;
+  constructor(why: Reject, source: string) { super(`_copy source ${source} is not 2014 official content`); this.why = why; this.source = source; }
+}
 const nameOf = (key: string, r: Raw): string | undefined => (key === 'subrace' ? subraceName(r) : r.name);
 // A magic variant's items take inherits.source; it is keyed (for _copy) by its own source when it has one.
 const sourceOf = (key: string, r: Raw): string | undefined => (key === 'magicvariant' ? r.inherits?.source ?? r.source : r.source);
@@ -77,12 +94,22 @@ export async function import5etools(
 ): Promise<ImportResult> {
   const { index } = ctx;
   const errors: ImportResult['errors'] = [], warnings: string[] = [], raw: [string, unknown][] = [];
-  let skipped2024 = 0;
+  const skipped: Skipped = { rules2024: {}, unknown: {} };
+  const unknownIn = new Map<string, Map<string, number>>(); // file -> source -> entries skipped as unrecognised
+  const homebrewSources = new Set<string>(), allDeclared = new Set<string>();
   const packNames = new Map<string, string>(), lookups: Map<string, ClassRef[]>[] = [];
+  const tally = (why: Reject, source: string, file: string) => {
+    const s = up(source);
+    if (why === '2024') { skipped.rules2024[s] = (skipped.rules2024[s] ?? 0) + 1; return; }
+    skipped.unknown[s] = (skipped.unknown[s] ?? 0) + 1;
+    const f = unknownIn.get(file) ?? new Map<string, number>();
+    f.set(s, (f.get(s) ?? 0) + 1);
+    unknownIn.set(file, f);
+  };
 
   // 1. Collect entities; spell-class lookup files and book lists are side data.
-  const found: { file: string; key: string; r: Raw }[] = [];
-  const batch = new Map<string, Raw>();
+  const found: { file: string; key: string; r: Raw; declared: ReadonlySet<string> }[] = [];
+  const batch = new Map<string, { r: Raw; declared: ReadonlySet<string> }>();
   for (const f of files) {
     const j = f.json as Raw;
     const keys = j && typeof j === 'object' && !Array.isArray(j) ? [...CONTENT_KEYS, ...META_KEYS].filter(k => Array.isArray(j[k])) : [];
@@ -95,37 +122,79 @@ export async function import5etools(
       else errors.push({ file: f.name, message: 'No recognised 5etools content' });
       continue;
     }
+    const declared = declaredIn(j);
+    for (const s of declared) allDeclared.add(s);
     for (const k of META_KEYS) for (const b of arr(j[k])) if (b?.id && b?.name) packNames.set(up(b.id), String(b.name));
     for (const k of CONTENT_KEYS) for (const r of arr(j[k])) {
       const bad = invalid(k, r);
       if (bad) { errors.push({ file: f.name, message: `${k} "${r?.name ?? '?'}": ${bad}` }); continue; }
-      found.push({ file: f.name, key: k, r });
+      found.push({ file: f.name, key: k, r, declared });
       const rk = keyOf(k, r);
-      if (rk) batch.set(rk, r);
+      if (rk) batch.set(rk, { r, declared });
     }
   }
 
-  // 2. Resolve _copy (batch first, then stored raw entities); drop 2024 content, including subclasses and features of a 2024 class.
-  const lookup = async (key: string) => batch.get(key) ?? (await ctx.rawLookup(key));
-  const is2024 = (key: string, r: Raw) => DROP_SOURCES.has(up(sourceOf(key, r))) || r?.edition === 'one';
-  const classes2024 = new Set(found.filter(e => e.key === 'class' && is2024(e.key, e.r)).map(e => `${String(e.r.name).toLowerCase()}|${up(e.r.source)}`));
-  const parent2024 = (key: string, r: Raw) => CLASS_KEYS.has(key) && key !== 'class'
-    && (DROP_SOURCES.has(up(r.classSource)) || classes2024.has(`${String(r.className).toLowerCase()}|${up(r.classSource || 'PHB')}`));
+  // 2. Whitelist (R52): an entity is imported only from an official 2014 source, or from one its own file declares as homebrew.
+  // Never from the 2024 rules or `edition: "one"`, and never through a `_copy` or a class that is itself refused.
+  // Then resolve _copy (batch first, then stored raw entities).
+  /** The reason to refuse this record, or undefined (a record with no source is left to fail in conversion). */
+  const refusal = (key: string, r: Raw, declared: ReadonlySet<string>): { why: Reject; source: string } | undefined => {
+    const s = sourceOf(key, r);
+    if (r?.edition === 'one') return { why: '2024', source: s ?? '?' };
+    if (s === undefined) return undefined;
+    const v: SourceVerdict = classifySource(s, declared);
+    return v === '2024' || v === 'unknown' ? { why: v, source: s } : undefined;
+  };
+  const rejectedClasses = new Map<string, Reject>(); // `class|SOURCE` of every class in the batch that is refused
+  for (const e of found) {
+    const x = e.key === 'class' ? refusal(e.key, e.r, e.declared) : undefined;
+    if (x) rejectedClasses.set(`${String(e.r.name).toLowerCase()}|${up(e.r.source)}`, x.why);
+  }
+  const parentRefusal = (key: string, r: Raw): { why: Reject; source: string } | undefined => {
+    if (!CLASS_KEYS.has(key) || key === 'class') return undefined;
+    if (r.classSource && is2024Source(String(r.classSource))) return { why: '2024', source: String(r.classSource) };
+    const why = rejectedClasses.get(`${String(r.className).toLowerCase()}|${up(r.classSource || 'PHB')}`);
+    return why && { why, source: String(r.classSource || 'PHB') };
+  };
+  const stored = async (key: string) => { // raw entities kept from earlier imports may predate this whitelist
+    const r = await ctx.rawLookup(key) as Raw;
+    return r && (is2024Source(keySourceOf(key)) || r.edition === 'one' || is2024Source(String(sourceOf(key.split('|')[0], r)))) ? undefined : r;
+  };
+  const lookup = async (key: string) => {
+    const src = keySourceOf(key);
+    if (is2024Source(src)) throw new CopyRejected('2024', src);
+    const hit = batch.get(key);
+    if (!hit) return stored(key);
+    const x = refusal(key.split('|')[0], hit.r, hit.declared);
+    if (x) throw new CopyRejected(x.why, x.source);
+    return hit.r;
+  };
   const live: { file: string; key: string; r: Raw; label: string }[] = [];
   for (const e of found) {
     const label = `${e.key} "${e.r?.name ?? '?'}"`;
     try {
-      if (parent2024(e.key, e.r)) { skipped2024++; continue; } // before _copy: a 2024 class's copies need not resolve
+      const early = refusal(e.key, e.r, e.declared) ?? parentRefusal(e.key, e.r); // before _copy: a refused class's copies need not resolve
+      if (early) { tally(early.why, early.source, e.file); continue; }
       const r = await resolveCopy(e.key, e.r, lookup, m => warnings.push(`${e.file}: ${label}: ${m}`), CLASS_KEYS.has(e.key) ? classRawKey : undefined);
       const bad = invalid(e.key, r); // a copy can inherit a bad name or source
       if (bad) fail(bad);
-      if (is2024(e.key, r) || parent2024(e.key, r)) { skipped2024++; continue; }
+      const late = refusal(e.key, r, e.declared) ?? parentRefusal(e.key, r);
+      if (late) { tally(late.why, late.source, e.file); continue; }
+      const s = sourceOf(e.key, r);
+      if (s !== undefined && classifySource(s, e.declared) === 'homebrew') homebrewSources.add(up(s));
       live.push({ ...e, r, label });
       const rk = keyOf(e.key, r);
       if (rk) raw.push([rk, r]);
     } catch (err) {
-      errors.push({ file: e.file, message: `${label}: ${message(err)}` });
+      if (err instanceof CopyRejected) {
+        tally(err.why, err.source, e.file);
+        if (err.why === '2024') warnings.push(`${e.file}: ${label}: skipped, it is a copy of ${err.source} (2024 rules)`);
+      } else errors.push({ file: e.file, message: `${label}: ${message(err)}` });
     }
+  }
+  for (const [file, by] of unknownIn) {
+    const n = [...by.values()].reduce((a, b) => a + b, 0);
+    warnings.push(`${file}: Skipped ${n} ${n === 1 ? 'entry' : 'entries'} from unrecognised sources: ${[...by.keys()].join(', ')} (not 2014 official books, and not declared as homebrew)`);
   }
 
   // 3. Every batch entity's final id: its SRD counterpart's when it overlaps (it becomes a patch), else its own.
@@ -145,8 +214,9 @@ export async function import5etools(
   }
   const conv: Ctx = {
     index,
+    listed: source => { const v = classifySource(source, allDeclared); return v === 'official' || v === 'homebrew'; },
     ref: (kind, name, source) => refs.get(refKey(kind, name, source)) ?? index.find(kind, name, source)?.id
-      ?? (CORE.has(up(source)) ? index.find(kind, name, 'SRD')?.id : undefined) ?? entityId(kind, name, source),
+      ?? (isCore(source) ? index.find(kind, name, 'SRD')?.id : undefined) ?? entityId(kind, name, source),
     spellClasses: (name, source) => lookups.flatMap(l => l.get(spellKey(name, source)) ?? []),
   };
 
@@ -180,7 +250,7 @@ export async function import5etools(
     }
   }
 
-  await importClasses(live.filter(e => CLASS_KEYS.has(e.key)), conv, ctx.rawLookup, {
+  await importClasses(live.filter(e => CLASS_KEYS.has(e.key)), conv, stored, {
     entity: e => pack(e.source).entities.set(e.id, e),
     patch: (source, pt) => pack(source).patches.set(pt.targetId, pt),
     error: (file, msg) => errors.push({ file, message: msg }),
@@ -206,9 +276,11 @@ export async function import5etools(
 
   return {
     packs: [...packs].map(([source, p]) => finish({
-      id: `pack:${source}`, name: packNames.get(source) ?? source, source, importedAt: 0, hash: '',
+      id: `pack:${source}`, name: packNames.get(source) ?? source, source, ...(homebrewSources.has(source) && { homebrew: true }), importedAt: 0, hash: '',
       entities: [...p.entities.values()], patches: [...p.patches.values()],
     })),
-    raw, errors, skipped2024, warnings,
+    raw, errors, warnings, skipped,
+    skipped2024: Object.values(skipped.rules2024).reduce((a, b) => a + b, 0),
+    skippedUnknown: Object.values(skipped.unknown).reduce((a, b) => a + b, 0),
   };
 }

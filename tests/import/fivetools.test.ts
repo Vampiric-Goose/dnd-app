@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 import { richToPlain } from '../../src/lib/content/richtext.ts';
-import { DROP_SOURCES, mergePack } from '../../src/lib/import/fivetools/index.ts';
+import { mergePack } from '../../src/lib/import/fivetools/index.ts';
 import type { BackgroundDef, FeatDef, ItemDef, Pack, RaceDef, SpellDef, SubraceDef } from '../../src/lib/types.ts';
 import { readFixture, run } from '../fixtures/import.ts';
 
@@ -32,7 +32,7 @@ test('SRD overlap becomes a patch; 2024 is dropped', async () => {
   expect(phb.patches).toEqual([{ targetId: 'race:dwarf@SRD', alias: 'PHB', text: [{ p: 'Full text.' }] }]);
   expect(phb.entities.some(e => e.id === 'race:dwarf@PHB')).toBe(false);
   expect(r.skipped2024).toBe(1);
-  expect(DROP_SOURCES.has('XPHB')).toBe(true);
+  expect(r.skipped.rules2024).toEqual({ XPHB: 1 });
 });
 
 test('an empty-text SRD overlap patches only the alias; lineage races get the custom-lineage choice', async () => {
@@ -161,11 +161,11 @@ test('_copy with appendArr', async () => {
 
 test('_copy from rawLookup with replaceArr, removeArr, replaceTxt, setProp', async () => {
   const { import5etools } = await import('../../src/lib/import/fivetools/index.ts');
-  const { srdIdx } = await import('../fixtures/import.ts');
+  const { srdIdx, asTst } = await import('../fixtures/import.ts');
   const stored = { name: 'Oldfolk', source: 'TST', srd: true, size: ['S'], speed: 25, entries: ['Old text.', { type: 'entries', name: 'A', entries: ['a'] }, { type: 'entries', name: 'B', entries: ['b'] }] };
-  const r = await import5etools([{ name: 'n.json', json: { race: [{ name: 'Newfolk', source: 'TST', _copy: { name: 'Oldfolk', source: 'TST', _mod: {
+  const r = await import5etools([{ name: 'n.json', json: asTst({ race: [{ name: 'Newfolk', source: 'TST', _copy: { name: 'Oldfolk', source: 'TST', _mod: {
     entries: [{ mode: 'replaceArr', replace: 'A', items: { type: 'entries', name: 'A2', entries: ['a2'] } }, { mode: 'removeArr', names: 'B' }, { mode: 'replaceTxt', replace: 'Old', with: 'New' }],
-    _: { mode: 'setProp', prop: 'speed', value: 35 } } } }] } }],
+    _: { mode: 'setProp', prop: 'speed', value: 35 } } } }] }) }],
   { index: srdIdx, rawLookup: async k => (k === 'race|oldfolk|TST' ? stored : undefined) });
   const nf = r.packs.flatMap(p => p.entities).find(e => e.name === 'Newfolk') as RaceDef;
   expect(nf).toMatchObject({ size: 'S', speed: { walk: 35 }, traits: [{ name: 'A2' }] });

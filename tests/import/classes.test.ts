@@ -3,7 +3,7 @@ import { ContentIndex } from '../../src/lib/content/index.ts';
 import { featureId } from '../../src/lib/content/ids.ts';
 import { import5etools } from '../../src/lib/import/fivetools/index.ts';
 import type { ClassDef, FeatureDef, Pack, SubclassDef } from '../../src/lib/types.ts';
-import { readFixture, run } from '../fixtures/import.ts';
+import { asTst, readFixture, run } from '../fixtures/import.ts';
 import { srdPackFixture } from '../fixtures/srdPack.ts';
 
 test('Testclass converts', async () => {
@@ -80,7 +80,7 @@ test('SRD feature matching ignores parenthetical suffixes but never crosses leve
       S('Improved Critical', 3), S('Option A', 3, { srd: undefined }),
     ],
   };
-  const r = await import5etools([{ name: 'x.json', json }], { index: new ContentIndex([srd]), rawLookup: async () => undefined });
+  const r = await import5etools([{ name: 'x.json', json: asTst(json) }], { index: new ContentIndex([srd]), rawLookup: async () => undefined });
   expect(r.errors).toEqual([]);
   const phb = r.packs.find(p => p.source === 'PHB')!;
   const targets = phb.patches.map(p => p.targetId);

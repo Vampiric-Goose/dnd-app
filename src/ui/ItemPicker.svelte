@@ -51,7 +51,7 @@
     <VirtualList items={hits} label="Items" onselect={pick}>
       {#snippet row(i: ItemDef)}
         <strong>{nameOf(i)}</strong>
-        <small class="muted">{[seen(i).type, seen(i).magic ? seen(i).rarity : undefined, stored(i) ? 'homebrew' : i.source].filter(Boolean).join(' · ')}</small>
+        <small class="muted">{[seen(i).type, seen(i).magic ? seen(i).rarity : undefined, stored(i) ? 'homebrew' : pool.index.label(i.source)].filter(Boolean).join(' · ')}</small>
       {/snippet}
     </VirtualList>
   </div>

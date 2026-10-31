@@ -6,12 +6,11 @@ import type { Ability, Choice, EntityKind, Proficiencies, RichText, Scores, Skil
 
 export type Raw = any; // 5etools JSON, unvalidated: an unexpected shape throws and fails only that entity
 export const fail = (msg: string): never => { throw new Error(msg); };
-/** 2024-rules sources; the app is 2014 rules only. */
-export const DROP_SOURCES = new Set(['XPHB', 'XDMG', 'XMM']);
-
 /** Converter context, built once per import batch. */
 export interface Ctx {
   index: ContentIndex;
+  /** May a class list from this source count? Official 2014 books and the batch's declared homebrew sources only (R52). */
+  listed(source: string): boolean;
   /** The id a reference resolves to: a batch entity (its SRD target if it became a patch), else the index, else the id it would get. */
   ref(kind: EntityKind, name: string, source: string): string;
   /** Class-list entries for a spell from the spell-class lookup files in the batch. */

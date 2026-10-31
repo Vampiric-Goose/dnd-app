@@ -1,6 +1,7 @@
 import { exportBackup } from './backup.ts';
 import { ContentIndex } from './content/index.ts';
 import { loadSrd } from './content/srd.ts';
+import { packAllowed } from './content/sources.ts';
 import { db } from './db.ts';
 import type { Campaign } from './types.ts';
 
@@ -67,7 +68,8 @@ let cache: { key: string; index: Promise<ContentIndex> } | undefined;
 
 async function build(ids: string[] | undefined): Promise<ContentIndex> {
   const srd = await loadSrd();
-  const metas = (await db.packs.listMeta()).filter((m) => m.id !== srd.id);
+  // R52: a stored pack from a 2024 or unknown source never reaches the index, even before the user removes it.
+  const metas = (await db.packs.listMeta()).filter((m) => m.id !== srd.id && packAllowed(m));
   const chosen = (ids ? metas.filter((m) => ids.includes(m.id)) : metas).sort((a, b) => (a.id < b.id ? -1 : 1));
   const key = [srd.hash, ...chosen.map((m) => `${m.id}:${m.hash}`)].join('|');
   if (cache?.key === key) return cache.index;

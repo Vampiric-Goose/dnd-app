@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { packAllowed, sourceLabel } from '../../lib/content/sources.ts';
   import { db } from '../../lib/db.ts';
   import { app, saveCampaign } from '../../lib/store.svelte.ts';
   import type { Campaign, CampaignSettings, PackMeta } from '../../lib/types.ts';
@@ -34,7 +35,7 @@
   let error = $state('');
 
   $effect(() => {
-    db.packs.listMeta().then((m) => (packs = m.filter((p) => p.id !== 'srd')), (e) => (error = String(e)));
+    db.packs.listMeta().then((m) => (packs = m.filter((p) => p.id !== 'srd' && packAllowed(p))), (e) => (error = String(e)));
   });
 
   // Edits a copy, then saves it; the store re-reads the campaign so the controls show what was stored.
@@ -108,7 +109,7 @@
   {#each packs as p (p.id)}
     <label class="check">
       <input type="checkbox" checked={c.enabledPacks.includes(p.id)} onchange={(e) => togglePack(p.id, e)} />
-      <span>{p.name} <span class="muted">({p.source})</span></span>
+      <span>{#if p.name === p.source}{sourceLabel(p.source, p.homebrew)}{:else}{p.name} <span class="muted">({p.source})</span>{/if}</span>
     </label>
   {:else}
     <p class="muted">No books imported yet. <a href="#/packs">Import books</a>.</p>

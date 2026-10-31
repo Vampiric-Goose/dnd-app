@@ -1,11 +1,12 @@
 <script lang="ts">
+  import { packAllowed, sourceLabel } from '../../lib/content/sources.ts';
   import { db } from '../../lib/db.ts';
   import { splitImportErrors } from '../../lib/import/summary.ts';
-  import { getFullIndex } from '../../lib/store.svelte.ts';
+  import { refreshCampaigns, getFullIndex } from '../../lib/store.svelte.ts';
   import type { Pack, PackMeta } from '../../lib/types.ts';
 
   type Counts = PackMeta['counts'];
-  type Summary = { packs: { name: string; source: string; counts: Counts; patches: number }[]; errors: { file: string; message: string }[]; skipped: string[]; warnings: string[]; skipped2024: number; files: number };
+  type Summary = { packs: { name: string; source: string; counts: Counts; patches: number }[]; errors: { file: string; message: string }[]; skipped: string[]; warnings: string[]; skipped2024: number; skippedUnknown: number; files: number };
 
   let packs: PackMeta[] = $state([]);
   let busy = $state(false);
@@ -13,12 +14,17 @@
   let summary: Summary | undefined = $state.raw();
   let error = $state('');
   let deleting: PackMeta | undefined = $state();
+  let removing: PackMeta | undefined = $state();
 
   const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
   const listPacks = () => db.packs.listMeta().then((m) => (packs = m.filter((p) => p.id !== 'srd')));
   $effect(() => {
     listPacks().catch((e) => (error = message(e)));
   });
+  // R52: packs stored before the whitelist (or restored from a backup) may hold 2024 or unknown content.
+  const official = $derived(packs.filter(packAllowed));
+  const unofficial = $derived(packs.filter((p) => !packAllowed(p)));
+  const title = (p: PackMeta) => (p.name === p.source ? sourceLabel(p.source, p.homebrew) : p.name);
 
   const countText = (c: Counts) =>
     Object.entries(c).map(([k, n]) => `${n} ${k}`).join(', ') || 'nothing';
@@ -73,6 +79,7 @@
         ...splitImportErrors([...readErrors, ...res.errors]),
         warnings: res.warnings,
         skipped2024: res.skipped2024,
+        skippedUnknown: res.skippedUnknown,
         files: files.length,
       };
       await listPacks();
@@ -91,6 +98,20 @@
       await db.packs.delete(d.id);
       await listPacks();
       deleting = undefined;
+    } catch (err) {
+      error = message(err);
+    }
+  }
+
+  /** Removes a pack that is not 2014 official content, and drops it from every campaign, in one transaction. */
+  async function confirmRemove() {
+    const d = removing;
+    if (!d) return;
+    try {
+      await db.packs.remove(d.id);
+      await refreshCampaigns();
+      await listPacks();
+      removing = undefined;
     } catch (err) {
       error = message(err);
     }
@@ -127,6 +148,7 @@
       <p>No content was imported.</p>
     {/if}
     {#if summary.skipped2024}<p>Skipped {summary.skipped2024} entries from the 2024 rules (this app uses the 2014 rules).</p>{/if}
+    {#if summary.skippedUnknown}<p>Skipped {summary.skippedUnknown} entries from unrecognised sources (not 2014 official books, and not declared as homebrew). The warnings list the files and sources.</p>{/if}
     {#if summary.skipped.length}
       <details>
         <summary class="muted">Skipped {summary.skipped.length} {summary.skipped.length === 1 ? "file" : "files"} with no recognised content</summary>
@@ -154,11 +176,38 @@
   </section>
 {/if}
 
+{#if unofficial.length}
+  <section class="card" aria-label="Packs that are not 2014 official content">
+    <h2 class="error">Not 2014 official content</h2>
+    <p role="alert" class="error">
+      These packs are not 2014 official content: {unofficial.map((p) => sourceLabel(p.source)).join(', ')}.
+      The app ignores them everywhere (the compendium, the character creator, campaign settings) until you remove them.
+    </p>
+    {#each unofficial as p (p.id)}
+      <div class="card">
+        <strong>{title(p)}</strong>{#if p.name !== p.source} <span class="muted">({p.source})</span>{/if}
+        <div>{countText(p.counts)}</div>
+        <div class="muted">Imported {new Date(p.importedAt).toLocaleDateString()}</div>
+        <div class="row">
+          <button class="danger" aria-label="Remove {title(p)}" onclick={() => (removing = p)}>Remove</button>
+        </div>
+        {#if removing?.id === p.id}
+          <div role="alertdialog" aria-label="Confirm remove" class="row">
+            <p>Remove “{title(p)}”? This deletes its {countText(p.counts)} from this device and turns it off in every campaign. Characters keep the content they already embedded.</p>
+            <button class="danger" onclick={confirmRemove}>Remove pack</button>
+            <button onclick={() => (removing = undefined)}>Keep it</button>
+          </div>
+        {/if}
+      </div>
+    {/each}
+  </section>
+{/if}
+
 <h2>Imported books</h2>
 <p class="muted">The System Reference Document 5.1 is built in. Enable imported books per campaign in Settings.</p>
-{#each packs as p (p.id)}
+{#each official as p (p.id)}
   <div class="card">
-    <strong>{p.name}</strong>{#if p.name !== p.source} <span class="muted">({p.source})</span>{/if}
+    <strong>{title(p)}</strong>{#if p.name !== p.source} <span class="muted">({p.source})</span>{/if}{#if p.homebrew && p.name !== p.source} <span class="muted">· Homebrew</span>{/if}
     <div>{countText(p.counts)}</div>
     <div class="muted">Imported {new Date(p.importedAt).toLocaleDateString()}</div>
     <div class="row">
