@@ -42,6 +42,7 @@
     ['Items', 'items'],
     ['Loot', 'loot'],
     ['Packs', 'packs'],
+    ['Settings', 'settings'],
     ['About', 'about'],
   ];
 
