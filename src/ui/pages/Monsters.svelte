@@ -10,7 +10,7 @@
   import { app, getIndex } from '../../lib/store.svelte.ts';
   import type { MonsterDef, Size, StoredMonster } from '../../lib/types.ts';
   import { message } from '../creator/labels.ts';
-  import { download, fileName } from '../download.ts';
+  import { download, downloadPdf, fileName } from '../download.ts';
   import MonsterEditor from '../monsters/MonsterEditor.svelte';
   import StatBlock from '../monsters/StatBlock.svelte';
   import VirtualList from '../VirtualList.svelte';
@@ -82,12 +82,14 @@
   }
 
   // R49: an imported monster whose id is this campaign's already waits here for Replace or Keep both.
-  let clash: { file: StoredMonster; monster: StoredMonster; existing: string } | undefined = $state.raw();
+  let clash: { file: StoredMonster; monster: StoredMonster; existing: string; edits: string[] } | undefined = $state.raw();
   let keepBtn: HTMLButtonElement | undefined = $state();
   let notice = $state('');
   $effect(() => { if (clash) keepBtn?.focus(); });
 
-  // importRecord doesn't save: this is where the monster is put, re-homed into this campaign (see rehome).
+  const isPdf = (f: File) => f.type === 'application/pdf' || /\.pdf$/i.test(f.name);
+
+  // importRecord and importPdf don't save: this is where the monster is put, re-homed into this campaign (see rehome).
   async function onImport(e: Event & { currentTarget: HTMLInputElement }) {
     const file = e.currentTarget.files?.[0];
     e.currentTarget.value = '';
@@ -95,19 +97,29 @@
     error = notice = '';
     clash = undefined;
     try {
-      const rec = await importRecord(file);
-      if (rec.kind !== 'monster') throw new Error(`That file is a${rec.kind === 'item' ? 'n item. Import it on the Items page' : ' character. Import it on the Characters page'}.`);
-      const existing = await db.monsters.get(rec.data.id);
-      const { monster, clash: asks } = rehome(rec.data, app.campaign.id, existing);
-      if (asks) clash = { file: rec.data, monster, existing: existing!.name };
-      else await put(monster);
+      let data: StoredMonster, edits: string[] = [];
+      if (isPdf(file)) {
+        const { importPdf } = await import('../../lib/pdf/importPdf.ts'); // pdf-lib's own chunk, loaded only now
+        const rec = await importPdf(new Uint8Array(await file.arrayBuffer()));
+        if (rec.kind !== 'monster') throw new Error(`That file is a${rec.kind === 'item' ? 'n item. Import it on the Items page' : ' character. Import it on the Characters page'}.`);
+        data = { campaignId: '', updatedAt: 0, ...rec.data };
+        edits = rec.edits;
+      } else {
+        const rec = await importRecord(file);
+        if (rec.kind !== 'monster') throw new Error(`That file is a${rec.kind === 'item' ? 'n item. Import it on the Items page' : ' character. Import it on the Characters page'}.`);
+        data = rec.data;
+      }
+      const existing = await db.monsters.get(data.id);
+      const { monster, clash: asks } = rehome(data, app.campaign.id, existing);
+      if (asks) clash = { file: data, monster, existing: existing!.name, edits };
+      else await put(monster, edits);
     } catch (err) {
       error = message(err);
     }
   }
-  async function put(x: StoredMonster) {
+  async function put(x: StoredMonster, edits: string[]) {
     await db.monsters.put(x);
-    notice = `Imported ${x.name}.`;
+    notice = `Imported ${x.name}.${edits.length ? ` Changes made in the PDF were applied: ${edits.join(', ')}.` : ''}`;
     load();
     go(x.id);
   }
@@ -115,9 +127,19 @@
     const k = clash!;
     clash = undefined;
     try {
-      await put(how === 'keep' ? duplicateMonster(k.file, app.campaign!.id) : k.monster);
+      await put(how === 'keep' ? duplicateMonster(k.file, app.campaign!.id) : k.monster, k.edits);
     } catch (err) {
       error = message(err);
+    }
+  }
+
+  async function exportPdf(m: MonsterDef) {
+    error = '';
+    try {
+      const { exportMonsterPdf } = await import('../../lib/pdf/exportPdf.ts');
+      downloadPdf(await exportMonsterPdf(m), fileName(m.name, 'pdf', 'monster'));
+    } catch (e) {
+      error = `Could not export the PDF: ${message(e)}`;
     }
   }
 
@@ -173,8 +195,8 @@
       <div class="row actions">
         {#if app.campaign}
           <button type="button" class="primary" onclick={() => navigate('monsters/new')}>New monster</button>
-          <label class="file"><span>Import monster (.json)</span>
-            <input type="file" accept=".json,application/json" onchange={onImport} />
+          <label class="file"><span>Import monster (.json / .pdf)</span>
+            <input type="file" accept=".json,.pdf,application/json,application/pdf" onchange={onImport} />
           </label>
         {:else}
           <p class="muted">Open a campaign to make monsters.</p>
@@ -244,6 +266,7 @@
               {#if isOwn}<button type="button" onclick={() => navigate(`monsters/${selected!.id}/edit`)}>Edit</button>{/if}
             {/if}
             <button type="button" onclick={() => exportJson(selected!)}>Export JSON</button>
+            <button type="button" onclick={() => exportPdf(selected!)}>Export PDF</button>
           </div>
           <StatBlock monster={selected} {index} />
         </div>

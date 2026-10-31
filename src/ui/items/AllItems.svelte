@@ -157,7 +157,7 @@
       if (isPdf(file)) {
         const { importPdf } = await import('../../lib/pdf/importPdf.ts'); // pdf-lib's own chunk, loaded only now
         const rec = await importPdf(new Uint8Array(await file.arrayBuffer()));
-        if (rec.kind !== 'item') throw new Error('That file is a character. Import it on the Characters page.');
+        if (rec.kind !== 'item') throw new Error(rec.kind === 'monster' ? 'That file is a monster. Import it on the Monsters page.' : 'That file is a character. Import it on the Characters page.');
         data = rec.data;
       } else {
         const rec = await importRecord(file);

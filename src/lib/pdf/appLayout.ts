@@ -2,9 +2,11 @@ import { APP_NAME } from '../app.ts';
 import { featureList, spellList } from '../character/play.ts';
 import { richToPlain } from '../content/richtext.ts';
 import { playerItem } from '../items/playerView.ts';
-import { ABILITIES, SKILL_ABILITY } from '../rules/constants.ts';
+import { ABILITIES, abilityMod, SKILL_ABILITY } from '../rules/constants.ts';
 import { DEFAULT_SETTINGS } from '../settings.ts';
-import type { Ability, CampaignSettings, Character, ItemDef, Sheet, Skill } from '../types.ts';
+import { legendaryIntro } from '../monsters/library.ts';
+import { crProf, monsterXp } from '../rules/monsters.ts';
+import type { Ability, CampaignSettings, Character, ItemDef, MonsterDef, Sheet, Skill, Trait } from '../types.ts';
 import { toWinAnsi } from './winansi.ts';
 
 // Pure except for the drawing (which takes pdf-lib as an argument, so this file never imports it at runtime).
@@ -20,7 +22,7 @@ export const SKILLS = Object.keys(SKILL_ABILITY) as Skill[];
 export const skillLabel = (s: Skill) => s.split('-').map((w) => (w === 'of' ? w : w[0].toUpperCase() + w.slice(1))).join(' ');
 const cap = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 // Fields that hold several lines. Every other field is one line, so a newline in its value becomes a space.
-const MULTILINE = new Set(['app.attacks', 'app.profs', 'app.features', 'app.spells', 'app.slots', 'app.inventory', 'app.notes', 'app.item.details', 'app.item.text']);
+const MULTILINE = new Set(['app.attacks', 'app.profs', 'app.features', 'app.spells', 'app.slots', 'app.inventory', 'app.notes', 'app.item.details', 'app.item.text', 'app.details', 'app.traits']);
 const clean = (v: Record<string, string>) => Object.fromEntries(Object.entries(v).map(([k, x]) => [k, MULTILINE.has(k) ? toWinAnsi(x) : toWinAnsi(x).replace(/\n/g, ' ')]));
 const signed = (n: number) => (n >= 0 ? `+${n}` : String(n));
 // ponytail: not Object.groupBy (iOS 16 lacks it)
@@ -90,8 +92,61 @@ export function itemFieldValues(item: ItemDef): Record<string, string> {
   return clean({ 'app.item.name': item.name, 'app.item.type': cap(item.type), 'app.item.rarity': cap(item.rarity ?? ''), 'app.item.details': details, 'app.item.text': text });
 }
 
+const SIZES: Record<string, string> = { T: 'Tiny', S: 'Small', M: 'Medium', L: 'Large', H: 'Huge', G: 'Gargantuan' };
+const joined = (xs: readonly string[]) => xs.join(xs.some((x) => x.includes(',')) ? '; ' : ', ');
+
+/** A trait list as plain text: "Name. text", one trait per paragraph. */
+const traitText = (ts: Trait[]) => ts.map((t) => `${t.name}${/[.!?:]$/.test(t.name) ? '' : '.'} ${richToPlain(t.text)}`).join('\n\n');
+
+/**
+ * Visible values of the monster stat block. Name, AC (main value), HP (average), CR and the six scores are the fields an import
+ * reads back as edits; the rest is display only (the full record rides in app.data).
+ */
+export function monsterFieldValues(m: MonsterDef): Record<string, string> {
+  const xp = monsterXp(m), prof = crProf(m.cr);
+  const { walk, hover, note, ...rest } = m.speed;
+  const details: [string, string][] = [
+    ['Saving Throws', ABILITIES.filter((a) => m.saves[a] !== undefined).map((a) => `${cap(a)} ${signed(m.saves[a]!)}`).join(', ')],
+    ['Skills', Object.entries(m.skills).map(([s, n]) => `${skillLabel(s as Skill)} ${signed(n)}`).join(', ')],
+    ['Damage Vulnerabilities', joined(m.vulnerable)],
+    ['Damage Resistances', joined(m.resist)],
+    ['Damage Immunities', joined(m.immune)],
+    ['Condition Immunities', joined(m.conditionImmune)],
+    ['Senses', [...m.senses, `passive Perception ${m.passive}`].join(', ')],
+    ['Languages', m.languages.join(', ') || '-'],
+  ];
+  const sections: [string, string][] = [
+    ['', traitText(m.traits)],
+    ['Actions', traitText(m.actions)],
+    ['Bonus Actions', traitText(m.bonusActions)],
+    ['Reactions', traitText(m.reactions)],
+    ['Legendary Actions', m.legendary.length ? [m.legendaryIntro?.length ? richToPlain(m.legendaryIntro) : legendaryIntro(m), traitText(m.legendary)].join('\n\n') : ''],
+    ['Mythic Actions', m.mythic?.length ? [m.mythicIntro?.length ? richToPlain(m.mythicIntro) : '', traitText(m.mythic)].filter(Boolean).join('\n\n') : ''],
+    ['Lair Actions', m.lair?.length ? richToPlain(m.lair) : ''],
+    ['Regional Effects', m.regional?.length ? richToPlain(m.regional) : ''],
+  ];
+  const v: Record<string, string> = {
+    'app.name': m.name,
+    'app.meta': `${m.size.map((s) => SIZES[s]).join(' or ')} ${m.type}, ${m.alignment}`,
+    'app.ac': String(m.ac[0]?.value ?? ''),
+    'app.acNote': m.ac.map((a, i) => (i === 0 ? a.from ?? '' : `${a.value}${a.from ? ` (${a.from})` : ''}`)).filter(Boolean).join(', '),
+    'app.hp': 'special' in m.hp ? m.hp.special : String(m.hp.average),
+    'app.hpFormula': 'special' in m.hp ? '' : m.hp.formula ?? '',
+    'app.speed': [`${walk} ft.`, ...Object.entries(rest).map(([k, n]) => `${k} ${n} ft.${k === 'fly' && hover ? ' (hover)' : ''}`)].join(', ') + (note ? `, ${note}` : ''),
+    'app.cr': m.cr,
+    'app.xp': [xp !== undefined && `${xp.toLocaleString('en-US')} XP`, prof !== undefined && `PB ${signed(prof)}`].filter(Boolean).join(', '),
+    'app.details': details.filter(([, x]) => x).map(([k, x]) => `${k}: ${x}`).join('\n'),
+    'app.traits': sections.filter(([, x]) => x).map(([h, x]) => (h ? `${h.toUpperCase()}\n${x}` : x)).join('\n\n'),
+  };
+  for (const a of ABILITIES) {
+    v[`app.score.${a}`] = String(m.scores[a]);
+    v[`app.mod.${a}`] = signed(abilityMod(m.scores[a]));
+  }
+  return clean(v);
+}
+
 // The hidden field's payload: base64 of the UTF-8 JSON envelope.
-export interface Envelope { format: 'dnd-app-character' | 'dnd-app-item'; version: 1; data: unknown; settings?: CampaignSettings; viewer?: Viewer; cuts?: Record<string, number> }
+export interface Envelope { format: 'dnd-app-character' | 'dnd-app-item' | 'dnd-app-monster'; version: 1; data: unknown; settings?: CampaignSettings; viewer?: Viewer; cuts?: Record<string, number> }
 export function encodeEnvelope(e: Envelope): string {
   const bytes = new TextEncoder().encode(JSON.stringify(e));
   let s = '';
@@ -278,6 +333,33 @@ export async function drawItem(lib: Lib, doc: import('pdf-lib').PDFDocument, val
   p.boxed('Rarity', 'app.item.rarity', 316, 116, 260, 20);
   p.boxed('Details', 'app.item.details', M, 160, 540, 130, { multi: true, size: 8 });
   p.boxed('Description', 'app.item.text', M, 314, 540, 430, { multi: true, size: 8 });
+  drawOverflow(lib, doc, font, bold, overflow);
+  return page;
+}
+
+/** One stat-block page; traits and actions that don't fit go on extra pages, as for the character sheet. */
+export async function drawMonster(lib: Lib, doc: import('pdf-lib').PDFDocument, values: Record<string, string>): Promise<import('pdf-lib').PDFPage> {
+  const font = await doc.embedFont(lib.StandardFonts.Helvetica), bold = await doc.embedFont(lib.StandardFonts.HelveticaBold);
+  const overflow: Overflow = { pages: [], cuts: {} };
+  const page = doc.addPage([W, H]);
+  const p = painter(lib, doc, page, font, bold, values, overflow);
+  p.title('Monster', `${APP_NAME} stat block`);
+  p.boxed('Name', 'app.name', M, 70, 360, 24, { size: 12 });
+  p.boxed('Challenge rating', 'app.cr', 406, 70, 60, 24, { size: 12, center: true });
+  p.boxed('XP and proficiency bonus', 'app.xp', 472, 70, 104, 24, { size: 8 });
+  p.boxed('Size, type, alignment', 'app.meta', M, 116, 540, 20);
+  p.boxed('Armor class', 'app.ac', M, 158, 50, 26, { size: 12, center: true });
+  p.boxed('Armor', 'app.acNote', 92, 158, 160, 26, { size: 8 });
+  p.boxed('Hit points', 'app.hp', 258, 158, 70, 26, { size: 12, center: true });
+  p.boxed('Hit dice', 'app.hpFormula', 334, 158, 90, 26, { size: 9, center: true });
+  p.boxed('Speed', 'app.speed', 430, 158, 146, 26, { size: 8 });
+  ABILITIES.forEach((a, i) => {
+    const x = M + i * 91;
+    p.boxed(ABILITY_LABEL[a], `app.score.${a}`, x, 206, 50, 26, { size: 12, center: true });
+    p.field(`app.mod.${a}`, x + 54, 206, 30, 26, { size: 9, center: true });
+  });
+  p.boxed('Defenses, senses and languages', 'app.details', M, 254, 540, 90, { multi: true, size: 8 });
+  p.boxed('Traits and actions', 'app.traits', M, 366, 540, 390, { multi: true, size: 8 });
   drawOverflow(lib, doc, font, bold, overflow);
   return page;
 }

@@ -1,11 +1,13 @@
-import { strip2024 } from '../character/strip2024.ts';
+import { is2024, strip2024 } from '../character/strip2024.ts';
 import type { ContentIndex } from '../content/index.ts';
+import { soundMonster } from '../monsters/homebrew.ts';
 import { characterProblem, isRec, problem, SHAPES } from '../recordShape.ts';
-import { parseAlignment } from '../rules/constants.ts';
+import { ABILITIES, parseAlignment } from '../rules/constants.ts';
+import { CR_LADDER } from '../rules/monsters.ts';
 import { computeSheet } from '../rules/sheet.ts';
 import { DEFAULT_SETTINGS } from '../settings.ts';
-import type { Ability, CampaignSettings, Character, ItemDef, OverrideKey, Sheet, Skill } from '../types.ts';
-import { ABILITY_LABEL, appFieldValues, cutShown, decodeEnvelope, PayloadTooLarge, readPayload, SKILLS, skillLabel, withoutMarker, type Viewer } from './appLayout.ts';
+import type { Ability, CampaignSettings, Character, ItemDef, MonsterDef, OverrideKey, Sheet, Skill } from '../types.ts';
+import { ABILITY_LABEL, appFieldValues, cutShown, decodeEnvelope, monsterFieldValues, PayloadTooLarge, readPayload, SKILLS, skillLabel, withoutMarker, type Viewer } from './appLayout.ts';
 import { FIELD_MAPS } from './fieldmap.ts';
 import { toWinAnsi } from './winansi.ts';
 
@@ -13,7 +15,7 @@ import { toWinAnsi } from './winansi.ts';
 // A PDF is a user's file: every failure below is a plain Error with a message fit to show, never a crash.
 
 /** `playerView`: the file was exported in Player view, so secret item details are not in it (R51). */
-export type ImportedPdf = { kind: 'character'; data: Character; edits: string[]; playerView?: boolean } | { kind: 'item'; data: ItemDef };
+export type ImportedPdf = { kind: 'character'; data: Character; edits: string[]; playerView?: boolean } | { kind: 'item'; data: ItemDef } | { kind: 'monster'; data: MonsterDef; edits: string[] };
 
 /** What a field map may need: the content index itself, or a function that loads it (called only when a map matches). */
 export type IndexSource = ContentIndex | (() => ContentIndex | undefined | Promise<ContentIndex | undefined>);
@@ -87,9 +89,14 @@ export async function importPdf(bytes: Uint8Array, index?: IndexSource): Promise
 function fromData(payload: string, fields: Record<string, string | boolean>): ImportedPdf {
   let env: unknown;
   try { env = decodeEnvelope(payload); } catch (e) { throw damaged(`its embedded data cannot be decoded (${reason(e)})`); }
-  if (!isRec(env) || (env.format !== 'dnd-app-character' && env.format !== 'dnd-app-item')) throw new Error('This PDF holds data this app does not recognise (unknown format)');
+  if (!isRec(env) || (env.format !== 'dnd-app-character' && env.format !== 'dnd-app-item' && env.format !== 'dnd-app-monster')) throw new Error('This PDF holds data this app does not recognise (unknown format)');
   if (env.version !== 1) throw new Error(`This PDF was made by a newer version of the app (data version ${String(env.version)})`);
 
+  if (env.format === 'dnd-app-monster') {
+    if (!soundMonster(env.data)) throw damaged('monster is not a readable stat block');
+    if (is2024(env.data)) throw new Error('This monster is from the 2024 rules, which this app does not use.'); // R60
+    return { kind: 'monster', ...monsterEdits(env.data as MonsterDef, fields) };
+  }
   if (env.format === 'dnd-app-item') {
     const why = problem(env.data, SHAPES.item);
     if (why) throw damaged(`item ${why}`);
@@ -138,4 +145,32 @@ function applyEdits(data: Character, settings: CampaignSettings, viewer: Viewer,
     edits.push(f.label);
   }
   return { data: out, edits: [...new Set(edits)] };
+}
+
+/**
+ * The monster stat block's editable fields (name, main AC, HP average, CR, the six scores), compared with what the embedded record
+ * prints. A changed, usable value replaces that field; everything else comes from the record. The record itself is never mutated.
+ */
+function monsterEdits(data: MonsterDef, fields: Record<string, string | boolean>): { data: MonsterDef; edits: string[] } {
+  const expected = monsterFieldValues(data);
+  const out: MonsterDef = { ...data, ac: data.ac.map((a) => ({ ...a })), scores: { ...data.scores } };
+  const edits: string[] = [];
+  const changed = (name: string): string | undefined => {
+    const raw = fields[name];
+    return typeof raw === 'string' && lines(raw).trim() !== expected[name].trim() ? lines(raw).trim() : undefined;
+  };
+  const int = (s: string | undefined) => (s !== undefined && /^-?\d+$/.test(s) ? Number(s) : undefined);
+  const name = changed('app.name');
+  if (name) { out.name = name; edits.push('Name'); }
+  const ac = int(changed('app.ac'));
+  if (ac !== undefined && out.ac.length) { out.ac[0].value = ac; edits.push('AC'); }
+  const hp = int(changed('app.hp'));
+  if (hp !== undefined && hp >= 0) { out.hp = 'special' in data.hp ? { average: hp } : { ...data.hp, average: hp }; edits.push('HP'); }
+  const cr = changed('app.cr');
+  if (cr && CR_LADDER.includes(cr)) { out.cr = cr; delete out.xp; edits.push('CR'); } // a printed XP belonged to the old CR
+  for (const a of ABILITIES) {
+    const n = int(changed(`app.score.${a}`));
+    if (n !== undefined && n >= 1 && n <= 30) { out.scores[a] = n; edits.push(ABILITY_LABEL[a]); }
+  }
+  return { data: out, edits };
 }

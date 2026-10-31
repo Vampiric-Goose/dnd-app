@@ -1,7 +1,7 @@
 import { APP_NAME } from '../app.ts';
 import { playerCharacter } from '../items/playerView.ts';
-import type { CampaignSettings, Character, ItemDef, Sheet } from '../types.ts';
-import { addDataField, appFieldValues, drawCharacter, drawItem, encodeEnvelope, itemFieldValues, type Viewer } from './appLayout.ts';
+import type { CampaignSettings, Character, ItemDef, MonsterDef, Sheet } from '../types.ts';
+import { addDataField, appFieldValues, drawCharacter, drawItem, drawMonster, encodeEnvelope, itemFieldValues, monsterFieldValues, type Viewer } from './appLayout.ts';
 
 // pdf-lib is reached only through `await import('pdf-lib')`, so it stays in its own lazy chunk.
 
@@ -29,5 +29,16 @@ export async function exportItemPdf(item: ItemDef): Promise<Uint8Array> {
   doc.setCreator(APP_NAME);
   const page = await drawItem(lib, doc, itemFieldValues(item));
   addDataField(lib, doc, page, encodeEnvelope({ format: 'dnd-app-item', version: 1, data: item }));
+  return doc.save();
+}
+
+/** One monster stat block (DM information: the Monsters page offers it only in DM view). Only one-line fields are read back, so cuts aren't stored. */
+export async function exportMonsterPdf(m: MonsterDef): Promise<Uint8Array> {
+  const lib = await import('pdf-lib');
+  const doc = await lib.PDFDocument.create();
+  doc.setTitle(`${m.name} (${APP_NAME})`);
+  doc.setCreator(APP_NAME);
+  const page = await drawMonster(lib, doc, monsterFieldValues(m));
+  addDataField(lib, doc, page, encodeEnvelope({ format: 'dnd-app-monster', version: 1, data: m }));
   return doc.save();
 }

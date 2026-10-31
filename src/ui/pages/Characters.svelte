@@ -51,7 +51,7 @@
       if (isPdf(file)) {
         const { importPdf } = await import('../../lib/pdf/importPdf.ts'); // pdf-lib's own chunk, loaded only now
         const rec = await importPdf(new Uint8Array(await file.arrayBuffer()), () => getFullIndex().catch(() => undefined)); // the index loads only if a field map needs it
-        if (rec.kind !== 'character') throw new Error('That file is an item. Import it on the Items page (All items tab).');
+        if (rec.kind !== 'character') throw new Error(rec.kind === 'monster' ? 'That file is a monster. Import it on the Monsters page.' : 'That file is an item. Import it on the Items page (All items tab).');
         c = rec.data;
         edits = rec.edits;
         playerView = !!rec.playerView;
