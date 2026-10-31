@@ -1,4 +1,4 @@
-import { strip2024 } from './character/strip2024.ts';
+import { is2024, strip2024 } from './character/strip2024.ts';
 import { restorablePack } from './content/sources.ts';
 import { db, sha256Hex, type BlobRecord, type Snapshot } from './db.ts';
 import { playerCharacter } from './items/playerView.ts';
@@ -80,9 +80,9 @@ export async function exportBackup(opts: { campaignId?: string; includePacks: bo
   return file;
 }
 
-export type BackupCounts = { campaigns: number; characters: number; items: number; packs: number; skippedPacks?: string[] };
-/** A validated backup waiting for the user's yes (R57). `newer`: records stored here with a later updatedAt, which it would replace. */
-export interface BackupPlan { snapshot: Snapshot; counts: BackupCounts; newer: number }
+export type BackupCounts = { campaigns: number; characters: number; items: number; packs: number; skippedPacks?: string[]; skippedItems?: string[] };
+/** A validated backup waiting for the user's yes (R57). `replaced`: records stored here it would overwrite; `newer`: how many of those are newer than the file's copy. */
+export interface BackupPlan { snapshot: Snapshot; counts: BackupCounts; replaced: number; newer: number }
 
 /** Backup import, step 1 of 2 (R57): parses and validates the whole file and counts what it would do. Writes nothing. */
 export async function readBackup(file: Blob): Promise<BackupPlan> {
@@ -99,8 +99,12 @@ export async function readBackup(file: Blob): Promise<BackupPlan> {
   // R52: never the built-in SRD (id `srd`) nor a pack claiming a reserved source; the caller is told which were left out.
   const skippedPacks = snapshot.packs.filter((p) => !restorablePack(p)).map((p) => p.id);
   snapshot.packs = snapshot.packs.filter(restorablePack);
-  const counts = { campaigns: snapshot.campaigns.length, characters: snapshot.characters.length, items: snapshot.items.length, packs: snapshot.packs.length, ...(skippedPacks.length && { skippedPacks }) };
-  return { snapshot, counts, newer: await db.countNewer(snapshot) };
+  // R60: nor a 2024 item (by source, id or base item); also reported.
+  const skippedItems = snapshot.items.filter(is2024).map((i) => i.id);
+  snapshot.items = snapshot.items.filter((i) => !is2024(i));
+  const counts = { campaigns: snapshot.campaigns.length, characters: snapshot.characters.length, items: snapshot.items.length, packs: snapshot.packs.length,
+    ...(skippedPacks.length && { skippedPacks }), ...(skippedItems.length && { skippedItems }) };
+  return { snapshot, counts, ...(await db.countReplaced(snapshot)) };
 }
 
 /** Step 2, only once the user has confirmed: upserts by id in one transaction, keeping each record's own updatedAt. */
@@ -143,7 +147,8 @@ export function restoreSecrets(imported: Character, stored: Character): Characte
       const s = real.get(e.id);
       if (!s) return e;
       const { view: _v, sourceId: _s, ...play } = e;
-      return { ...play, item: s.item, ...(s.view && { view: s.view }), ...(s.sourceId !== undefined && { sourceId: s.sourceId }) };
+      // R60/3: hidden charges reach the file with no count (I8), so the stored count stays; shown charges take the file's.
+      return { ...play, item: s.item, chargesUsed: e.item.charges ? e.chargesUsed : s.chargesUsed, ...(s.view && { view: s.view }), ...(s.sourceId !== undefined && { sourceId: s.sourceId }) };
     }),
   };
 }

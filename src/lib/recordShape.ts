@@ -45,5 +45,15 @@ export function characterProblem(r: unknown): string | undefined {
   return entriesProblem(c.inventory as unknown[], 'inventory');
 }
 
+/** R60/4: only what the Characters list itself reads (name, build.levels, embedded). The full characterProblem stays on import. */
+export function characterListProblem(r: unknown): string | undefined {
+  const shallow = problem(r, SHAPES.character);
+  if (shallow) return shallow;
+  const c = r as Rec;
+  if (typeof c.name !== 'string') return 'has no name';
+  if (!Array.isArray((c.build as Rec).levels)) return 'has no build.levels list';
+  if (!isRec(c.embedded)) return 'has no embedded';
+}
+
 /** A campaign, with its loot entries checked like a character's inventory. */
 export const campaignProblem = (r: unknown): string | undefined => problem(r, SHAPES.campaign) ?? entriesProblem((r as Rec).loot as unknown[], 'loot');

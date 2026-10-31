@@ -315,7 +315,7 @@ export class PayloadTooLarge extends Error {}
  */
 export function readPayload(f: import('pdf-lib').PDFTextField, max = Infinity): string {
   const v = f.acroField.getValue() as { asBytes?: () => Uint8Array; sizeInBytes?: () => number } | undefined;
-  if ((v?.sizeInBytes?.() ?? 0) > max * 4 + 6) throw new PayloadTooLarge(); // 4: a hex UTF-16 string spends 4 digits per character; 6: delimiters and mark
+  if ((v?.sizeInBytes?.() ?? 0) > max * 8 + 6) throw new PayloadTooLarge(); // a generous bound (hex UTF-16 spends 4 digits a character, escapes more); 6: delimiters and mark
   const bytes = v?.asBytes?.();
   if (!bytes) return f.getText() ?? '';
   return bytes[0] === 0xfe && bytes[1] === 0xff ? new TextDecoder('utf-16be').decode(bytes.subarray(2)) : new TextDecoder('latin1').decode(bytes);

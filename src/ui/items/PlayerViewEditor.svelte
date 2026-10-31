@@ -65,7 +65,7 @@
 
 <div class="field">
   <label for="pv-name">Name players see (optional cover name)</label>
-  <input id="pv-name" type="text" autocomplete="off" value={view?.name ?? ''} oninput={(e) => set({ name: e.currentTarget.value || undefined })} />
+  <input id="pv-name" type="text" autocomplete="off" value={view?.name ?? ''} oninput={(e) => set({ name: e.currentTarget.value.trim() || undefined })} />
 </div>
 
 <div class="field">

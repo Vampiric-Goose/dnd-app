@@ -1,4 +1,4 @@
-import { strip2024, stripLoot } from './character/strip2024.ts';
+import { is2024, strip2024, stripLoot } from './character/strip2024.ts';
 import { restorablePack } from './content/sources.ts';
 import { deleteDB, openDB, type DBSchema, type IDBPDatabase, type IDBPTransaction, type StoreNames } from 'idb';
 import type { Campaign, Character, Pack, PackMeta, StoredItem } from './types.ts';
@@ -113,8 +113,12 @@ export const db = {
     delete: (id: string) => write(['characters'], (tx) => tx.objectStore('characters').delete(id)),
   },
   items: {
-    list: async (campaignId: string) => (await open()).getAllFromIndex('items', 'campaignId', campaignId),
-    get: async (id: string) => (await open()).get('items', id),
+    // R60: a stored 2024 item (an old import, a crafted file) is hidden, never deleted, like R54's stripping.
+    list: async (campaignId: string) => (await (await open()).getAllFromIndex('items', 'campaignId', campaignId)).filter((i) => !is2024(i)),
+    get: async (id: string) => {
+      const i = await (await open()).get('items', id);
+      return is2024(i) ? undefined : i;
+    },
     put: (i: StoredItem) => write(['items'], (tx) => tx.objectStore('items').put({ ...i, updatedAt: Date.now() })),
     delete: (id: string) => write(['items'], (tx) => tx.objectStore('items').delete(id)),
   },
@@ -179,20 +183,29 @@ export const db = {
     for (const c of characters) await tx.objectStore('characters').put({ ...strip2024(c), updatedAt: Date.now() });
     if (campaign) await tx.objectStore('campaigns').put({ ...stripLoot(campaign), updatedAt: Date.now() });
   }),
-  /** R57: how many of these records are stored here with a later updatedAt (a backup import would replace them with older copies). */
-  countNewer: async (s: Pick<Snapshot, 'campaigns' | 'characters' | 'items'>): Promise<number> => {
-    const tx = (await open()).transaction(['campaigns', 'characters', 'items']);
-    let n = 0;
-    for (const name of ['campaigns', 'characters', 'items'] as const) {
-      for (const r of s[name] as { id: string; updatedAt: number }[]) if (((await tx.objectStore(name).get(r.id))?.updatedAt ?? -Infinity) > r.updatedAt) n++;
+  /**
+   * R57: what a backup import would overwrite here. `replaced`: stored records with the same key (campaigns, characters, items, packs,
+   * blobs); `newer`: those of them with a later updatedAt than the file's copy. A record with no numeric updatedAt counts only as replaced.
+   */
+  countReplaced: async (s: Snapshot): Promise<{ replaced: number; newer: number }> => {
+    const tx = (await open()).transaction(['campaigns', 'characters', 'items', 'packs', 'blobs']);
+    let replaced = 0, newer = 0;
+    for (const name of ['campaigns', 'characters', 'items', 'packs'] as const) {
+      for (const r of s[name] as { id: string; updatedAt?: unknown }[]) {
+        const had = (await tx.objectStore(name).get(r.id)) as { updatedAt?: unknown } | undefined;
+        if (!had) continue;
+        replaced++;
+        if (typeof r.updatedAt === 'number' && typeof had.updatedAt === 'number' && had.updatedAt > r.updatedAt) newer++;
+      }
     }
-    return n;
+    for (const b of s.blobs) if (await tx.objectStore('blobs').getKey(b.hash)) replaced++;
+    return { replaced, newer };
   },
   /** Backup import: one atomic upsert that keeps the records' own updatedAt. */
   restore: (s: Snapshot) => write(['campaigns', 'characters', 'items', 'packs', 'packMeta', 'blobs'], async (tx) => {
     for (const r of s.campaigns) await tx.objectStore('campaigns').put(stripLoot(r));
     for (const r of s.characters) await tx.objectStore('characters').put(strip2024(r));
-    for (const r of s.items) await tx.objectStore('items').put(r);
+    for (const r of s.items.filter((i) => !is2024(i))) await tx.objectStore('items').put(r); // R60
     for (const p of s.packs.filter(restorablePack)) { // the built-in SRD always comes from the shipped asset (R52)
       await tx.objectStore('packs').put(p);
       await tx.objectStore('packMeta').put(packMeta(p));

@@ -1,4 +1,5 @@
 import { effectOk } from '../character/customEffect.ts';
+import { is2024 } from '../character/strip2024.ts';
 import { isRichText } from '../content/richtext.ts';
 import { isRec } from '../recordShape.ts';
 import { uid } from '../uid.ts';
@@ -11,6 +12,8 @@ const RARITIES: readonly Rarity[] = ['common', 'uncommon', 'rare', 'very rare', 
 const RECHARGES: readonly Recharge[] = ['short', 'long', 'dawn', 'dusk', 'none'];
 const BONUS_KEYS = ['attack', 'damage', 'ac', 'save', 'spellAttack', 'spellDc'] as const;
 
+const NO_2024 = 'This item is from the 2024 rules, which this app does not use.';
+
 /** A fresh homebrew id. Not the name: a rename must not leave a stale slug. */
 export const newHomebrewId = (): string => `item:homebrew-${uid().slice(0, 8)}@HOMEBREW`;
 
@@ -19,6 +22,7 @@ export const newHomebrewId = (): string => `item:homebrew-${uid().slice(0, 8)}@H
  * It carries no default player view. An item that already has a base (a "+1 Longsword") keeps it, so proficiency still works.
  */
 export function customize(item: ItemDef, campaignId: string): StoredItem {
+  if (is2024(item)) throw new Error(NO_2024); // R60: the index already leaves these out; defence in depth
   const { defaultView: _v, ...copy } = structuredClone(item) as ItemDef & { defaultView?: PlayerView };
   return { ...copy, id: newHomebrewId(), source: 'Homebrew', campaignId, baseItemId: item.baseItemId ?? item.id, updatedAt: Date.now() };
 }
@@ -88,6 +92,7 @@ const present = (v: unknown) => v !== undefined && !(Array.isArray(v) && !v.leng
 export function importedItem(data: unknown, campaignId: string): { item: StoredItem; ignored: string[] } {
   if (!isRec(data)) throw new Error('That file does not hold an item.');
   const d = data;
+  if (is2024(d)) throw new Error(NO_2024); // R60: its source, id or base item is 2024 content
   if (!str(d.name) || !d.name.trim()) throw new Error('The item has no name.');
   if (d.text !== undefined && !isRichText(d.text)) throw new Error(`The item "${d.name}" has a damaged description (text).`);
   if (!oneOf(ITEM_TYPES, d.type)) throw new Error(`The item "${d.name}" has an unknown type.`);

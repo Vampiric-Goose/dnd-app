@@ -1,15 +1,16 @@
 <script lang="ts">
-  import { importRecord, keepBoth, restoreSecrets } from '../../lib/backup.ts';
+  import { exportRecord, importRecord, keepBoth, restoreSecrets } from '../../lib/backup.ts';
   import { characterSummary } from '../../lib/character/play.ts';
   import { db } from '../../lib/db.ts';
-  import { characterProblem } from '../../lib/recordShape.ts';
+  import { characterListProblem } from '../../lib/recordShape.ts';
   import { navigate } from '../../lib/router.svelte.ts';
   import { app, getFullIndex } from '../../lib/store.svelte.ts';
   import type { Character } from '../../lib/types.ts';
   import { message } from '../creator/labels.ts';
+  import { download, fileName } from '../download.ts';
 
   let chars: Character[] = $state.raw([]);
-  let damaged: Character[] = $state.raw([]); // stored records that fail characterProblem: listing them would throw
+  let damaged: Character[] = $state.raw([]); // stored records the list itself can't read (R60/4: only that; the full check is for imports)
   let confirmingRemove = $state(false);
   let loaded = $state(false);
   let filter = $state('all'); // 'all', 'none' or a campaign id
@@ -20,8 +21,8 @@
   async function load() {
     try {
       const all = await db.characters.list();
-      damaged = all.filter((c) => characterProblem(c));
-      chars = all.filter((c) => !characterProblem(c)).sort((a, b) => a.name.localeCompare(b.name));
+      damaged = all.filter((c) => characterListProblem(c));
+      chars = all.filter((c) => !characterListProblem(c)).sort((a, b) => a.name.localeCompare(b.name));
     } catch (e) {
       error = message(e);
     }
@@ -145,6 +146,12 @@
     <p role="status">{damaged.length} damaged {damaged.length === 1 ? 'character' : 'characters'} hidden</p>
     {#if !confirmingRemove}<button onclick={() => (confirmingRemove = true)}>Remove damaged characters</button>{/if}
   </div>
+  <!-- the raw record, so its data can be rescued before it is removed -->
+  <ul class="plain row">
+    {#each damaged as d (d.id)}
+      <li><button onclick={() => download(exportRecord('character', d), fileName(typeof d.name === 'string' ? d.name : '', 'json'))}>Export {typeof d.name === 'string' && d.name ? d.name : d.id}</button></li>
+    {/each}
+  </ul>
   {#if confirmingRemove}
     <div role="alertdialog" aria-label="Confirm removing damaged characters" class="row">
       <p>Permanently remove {damaged.length} damaged {damaged.length === 1 ? 'character' : 'characters'}? This cannot be undone.</p>

@@ -3,13 +3,14 @@ import { beforeEach, expect, test } from 'vitest';
 import { importRecord } from '../src/lib/backup.ts';
 import { strip2024, stripLoot } from '../src/lib/character/strip2024.ts';
 import { db, resetDb } from '../src/lib/db.ts';
+import { customize, importedItem } from '../src/lib/items/homebrew.ts';
 import { makeEntry } from '../src/lib/items/inventory.ts';
 import { exportCharacterPdf } from '../src/lib/pdf/exportPdf.ts';
 import { importPdf } from '../src/lib/pdf/importPdf.ts';
 import { computeSheet } from '../src/lib/rules/sheet.ts';
 import { DEFAULT_SETTINGS } from '../src/lib/settings.ts';
 import type { Campaign, Character, Entity, ItemDef } from '../src/lib/types.ts';
-import { camp, char, importBackup } from './fixtures/records.ts';
+import { camp, char, importBackup, item } from './fixtures/records.ts';
 
 beforeEach(resetDb);
 
@@ -86,4 +87,49 @@ test('a PDF whose embedded character carries 2024 content imports without it', a
   const bytes = await exportCharacterPdf(c, computeSheet(c, { settings: DEFAULT_SETTINGS, viewer: 'dm' }));
   const r = await importPdf(bytes);
   clean(r.data as Character);
+});
+
+// ---- R60: items too, including a customized copy that remembers a 2024 base ----
+
+const based: ItemDef = { ...fine, id: 'item:homebrew-1@HOMEBREW', name: 'My Sword', source: 'Homebrew', baseItemId: 'item:longsword@XPHB' };
+
+test('R60/1: an inventory or loot entry whose item has a 2024 baseItemId is stripped', () => {
+  const c = strip2024({ ...char('a'), inventory: [makeEntry(based), makeEntry(fine)] });
+  expect(c.inventory.map((e) => e.item.id)).toEqual([fine.id]);
+  expect(stripLoot({ ...camp('c1'), loot: [makeEntry(based), makeEntry(fine)] }).loot.map((e) => e.item.id)).toEqual([fine.id]);
+});
+
+test('R60/2: an item file from the 2024 rules is refused (source, id suffix or baseItemId); customize refuses a 2024 item', () => {
+  const file = { name: 'Sword', type: 'weapon', text: [] };
+  expect(() => importedItem({ ...file, source: 'XPHB' }, 'c1')).toThrow('This item is from the 2024 rules');
+  expect(() => importedItem({ ...file, id: 'item:sword@XDMG' }, 'c1')).toThrow('This item is from the 2024 rules');
+  expect(() => importedItem({ ...file, baseItemId: 'item:longsword@XPHB' }, 'c1')).toThrow('This item is from the 2024 rules');
+  expect(importedItem({ ...file, source: 'PHB', baseItemId: 'item:longsword@PHB' }, 'c1').item.name).toBe('Sword'); // control
+  expect(() => customize(xItem, 'c1')).toThrow('This item is from the 2024 rules');
+  expect(() => customize(based, 'c1')).toThrow('This item is from the 2024 rules');
+});
+
+test('R60/2: a backup holding a 2024 item stores nothing for it and says so', async () => {
+  const items = [{ ...item('ok', 'c1') }, { ...item('item:x@XPHB', 'c1') }, { ...item('b', 'c1'), baseItemId: 'item:longsword@XPHB' }];
+  const r = await importBackup(new Blob([JSON.stringify({ format: 'dnd-app-backup', version: 1, campaigns: [camp('c1')], items })]));
+  expect(r).toMatchObject({ items: 1, skippedItems: ['item:x@XPHB', 'b'] });
+  expect((await db.items.list('c1')).map((i) => i.id)).toEqual(['ok']);
+  await db.restore({ campaigns: [], characters: [], packs: [], blobs: [], items: [{ ...item('item:y@XPHB', 'c1') }] }); // restore refuses them too
+  const { openDB } = await import('idb');
+  const raw = await openDB('dnd-app');
+  expect(await raw.get('items', 'item:y@XPHB')).toBeUndefined();
+  raw.close();
+});
+
+test('R60/2: db.items.list and get hide a stored 2024 record (hidden, not deleted)', async () => {
+  await db.items.put(item('ok', 'c1'));
+  const { openDB } = await import('idb');
+  const raw = await openDB('dnd-app');
+  await raw.put('items', item('item:z@XPHB', 'c1'));
+  await raw.put('items', { ...item('w', 'c1'), baseItemId: 'item:longsword@XPHB' });
+  expect((await db.items.list('c1')).map((i) => i.id)).toEqual(['ok']);
+  expect(await db.items.get('item:z@XPHB')).toBeUndefined();
+  expect(await db.items.get('w')).toBeUndefined();
+  expect(await raw.get('items', 'item:z@XPHB')).toBeDefined(); // still stored
+  raw.close();
 });

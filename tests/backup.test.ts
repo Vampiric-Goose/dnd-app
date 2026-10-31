@@ -134,9 +134,20 @@ test('R57: reading a backup writes nothing and counts the newer records it would
   const plan = await readBackup(file);
   expect(plan.counts).toEqual({ campaigns: 1, characters: 1, items: 0, packs: 0 });
   expect(plan.newer).toBe(1); // a (c1 was not touched since)
+  expect(plan.replaced).toBe(2); // c1 and a
   expect((await db.characters.get('a'))!.name).toBe('Newer'); // nothing written yet
   expect(await applyBackup(plan)).toEqual(plan.counts);
   expect((await db.characters.get('a'))!.name).toBe('Old');
+});
+
+test('R60/7: the confirm counts packs, blobs and records without updatedAt as replaced', async () => {
+  const p: Pack = { id: 'p1', name: 'Book', source: 'PHB', importedAt: 1, hash: 'h', entities: [], patches: [] };
+  await db.packs.put(p);
+  const hash = await db.blobs.put(new Blob(['abc'], { type: 'text/plain' }));
+  await db.characters.put(char('a'));
+  const { updatedAt: _u, ...noStamp } = char('a');
+  const plan = await readBackup(backup({ packs: [p], characters: [noStamp], blobs: [{ hash, type: 'text/plain', base64: 'YWJj' }] }));
+  expect([plan.replaced, plan.newer]).toEqual([3, 0]);
 });
 
 test('a Player-view character file is the player-safe copy and says so (R51)', async () => {
@@ -164,4 +175,15 @@ test('R56: Replace from a Player-view file restores the real item, view and sour
   expect(merged.inventory[1]).toEqual({ ...stored.inventory[1], equipped: false, attuned: false });
   expect(merged.inventory[2]).toEqual(played.inventory[2]);
   expect(merged.name).toBe(played.name);
+  // R60/3: a wand whose charges are hidden reaches the file with no charge count (I8); Replace keeps the 5 used, not 0.
+  const wand = { ...stored.inventory[1], id: 'wand', item: { ...stored.inventory[1].item, id: 'item:wand@FIX', name: 'Wand', charges: { max: 7, recharge: 'dawn' as const } }, chargesUsed: 5, view: { hidden: ['charges' as const], revealed: [] } };
+  const withWand = { ...stored, inventory: [...stored.inventory, wand] };
+  const back = (await importRecord(exportRecord('character', withWand, 'player'))).data as Character;
+  expect(back.inventory[2].chargesUsed).toBe(0);
+  expect(restoreSecrets(back, withWand).inventory[2].chargesUsed).toBe(5);
+  // shown charges: the file's count wins
+  const shownWand = { ...withWand, inventory: [...stored.inventory, { ...wand, view: undefined }] };
+  const played2 = (await importRecord(exportRecord('character', shownWand, 'player'))).data as Character;
+  played2.inventory[2] = { ...played2.inventory[2], chargesUsed: 2 };
+  expect(restoreSecrets(played2, shownWand).inventory[2].chargesUsed).toBe(2);
 });

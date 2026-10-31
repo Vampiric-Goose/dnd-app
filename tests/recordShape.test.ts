@@ -6,7 +6,7 @@ import { effectOk } from '../src/lib/character/customEffect.ts';
 import { resetDb } from '../src/lib/db.ts';
 import { importedItem, soundItem } from '../src/lib/items/homebrew.ts';
 import { makeEntry } from '../src/lib/items/inventory.ts';
-import { campaignProblem, characterProblem } from '../src/lib/recordShape.ts';
+import { campaignProblem, characterListProblem, characterProblem } from '../src/lib/recordShape.ts';
 import { computeSheet } from '../src/lib/rules/sheet.ts';
 import { DEFAULT_SETTINGS } from '../src/lib/settings.ts';
 import type { Character, Effect, ItemDef, Pack } from '../src/lib/types.ts';
@@ -35,6 +35,10 @@ test('characterProblem checks what the sheet and the lists read', () => {
     [{ ...c, inventory: [makeEntry({ ...item('i', 'c'), effects: [badProf] })] }, 'has a damaged inventory entry (1)'],
   ];
   for (const [bad, why] of cases) expect(characterProblem(bad), why).toBe(why);
+  // R60/4: the list hides only what it can't show; a bad custom effect or currency is still listed
+  expect(characterListProblem({ ...c, customEffects: [badProf], currency: undefined })).toBeUndefined();
+  for (const i of [0, 2, 3]) expect(characterListProblem(cases[i][0]), cases[i][1]).toBe(cases[i][1]);
+  expect(characterListProblem(cases[1][0])).toBeUndefined();
   expect(campaignProblem(camp('c1'))).toBeUndefined();
   expect(campaignProblem({ ...camp('c1'), loot: [{ id: 'e', quantity: 1 }] })).toBe('has a damaged loot entry (1)');
 });
