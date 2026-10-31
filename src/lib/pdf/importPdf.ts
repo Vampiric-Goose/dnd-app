@@ -1,3 +1,4 @@
+import { strip2024 } from '../character/strip2024.ts';
 import type { ContentIndex } from '../content/index.ts';
 import { isRec, problem, SHAPES } from '../recordShape.ts';
 import { computeSheet } from '../rules/sheet.ts';
@@ -76,7 +77,7 @@ export async function importPdf(bytes: Uint8Array, index?: IndexSource): Promise
   try { data = map.toCharacter(fields, typeof index === 'function' ? await index() : index); } catch (e) { throw new Error(`Could not read this ${map.id} sheet: ${reason(e)}`); }
   const why = problem(data, SHAPES.character);
   if (why) throw new Error(`Could not read this ${map.id} sheet: character ${why}`);
-  return { kind: 'character', data, edits: [] };
+  return { kind: 'character', data: strip2024(data), edits: [] };
 }
 
 function fromData(payload: string, fields: Record<string, string | boolean>): ImportedPdf {
@@ -94,7 +95,9 @@ function fromData(payload: string, fields: Record<string, string | boolean>): Im
   if (why) throw damaged(`character ${why}`);
   const settings = { ...DEFAULT_SETTINGS, ...(isRec(env.settings) ? env.settings : {}) } as CampaignSettings;
   const viewer: Viewer = env.viewer === 'player' ? 'player' : 'dm';
-  return { kind: 'character', ...applyEdits(env.data as Character, settings, viewer, fields, isRec(env.cuts) ? env.cuts : {}), ...(viewer === 'player' && { playerView: true }) };
+  // Edits are found against the data as exported; 2024 content is stripped from the result (R54).
+  const r = applyEdits(env.data as Character, settings, viewer, fields, isRec(env.cuts) ? env.cuts : {});
+  return { kind: 'character', data: strip2024(r.data), edits: r.edits, ...(viewer === 'player' && { playerView: true }) };
 }
 
 /** Compares each editable field with what the data itself produces; a different value is an edit made in a PDF reader. */

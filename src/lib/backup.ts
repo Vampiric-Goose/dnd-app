@@ -1,3 +1,4 @@
+import { strip2024 } from './character/strip2024.ts';
 import { restorablePack } from './content/sources.ts';
 import { db, sha256Hex, type BlobRecord } from './db.ts';
 import { playerCharacter } from './items/playerView.ts';
@@ -113,7 +114,7 @@ export async function importRecord(file: Blob): Promise<{ kind: 'character'; dat
   if (!o || !kind || o.version !== 1) throw new Error('Not a dnd-app character or item file');
   const why = problem(o.data, SHAPES[kind]);
   if (why) throw new Error(`Record file is damaged: ${kind} ${why}`);
-  const data = o.data as Character | StoredItem;
+  const data = kind === 'character' ? strip2024(o.data as Character) : o.data as StoredItem; // R54
   const taken = !!(await (kind === 'character' ? db.characters.get(data.id) : db.items.get(data.id)));
   return { kind, data, taken, playerView: kind === 'character' && o.viewer === 'player' } as { kind: 'character'; data: Character; taken: boolean; playerView: boolean } | { kind: 'item'; data: StoredItem; taken: boolean; playerView: boolean };
 }

@@ -1,3 +1,4 @@
+import { strip2024, stripLoot } from './character/strip2024.ts';
 import { restorablePack } from './content/sources.ts';
 import { deleteDB, openDB, type DBSchema, type IDBPDatabase, type IDBPTransaction, type StoreNames } from 'idb';
 import type { Campaign, Character, Pack, PackMeta, StoredItem } from './types.ts';
@@ -81,13 +82,16 @@ function packMeta(p: Pack): PackMeta {
   return { id: p.id, name: p.name, source: p.source, ...(p.homebrew && { homebrew: true }), importedAt: p.importedAt, hash: p.hash, counts };
 }
 
+const maybe = <T>(f: (x: T) => T, x: T | undefined) => (x === undefined ? x : f(x));
+
 export interface Snapshot { campaigns: Campaign[]; characters: Character[]; items: StoredItem[]; packs: Pack[]; blobs: BlobRecord[] }
 
 export const db = {
+  // R54: characters and campaigns pass through strip2024 / stripLoot on every read and write (a read strips only the copy in memory).
   campaigns: {
-    list: async () => (await open()).getAll('campaigns'),
-    get: async (id: string) => (await open()).get('campaigns', id),
-    put: (c: Campaign) => write(['campaigns'], (tx) => tx.objectStore('campaigns').put({ ...c, updatedAt: Date.now() })),
+    list: async () => (await (await open()).getAll('campaigns')).map(stripLoot),
+    get: async (id: string) => maybe(stripLoot, await (await open()).get('campaigns', id)),
+    put: (c: Campaign) => write(['campaigns'], (tx) => tx.objectStore('campaigns').put({ ...stripLoot(c), updatedAt: Date.now() })),
     /** Removes the campaign and its items; its characters stay, unassigned. */
     delete: (id: string) => write(['campaigns', 'characters', 'items'], async (tx) => {
       await tx.objectStore('campaigns').delete(id);
@@ -100,10 +104,10 @@ export const db = {
   characters: {
     list: async (campaignId?: string) => {
       const d = await open();
-      return campaignId === undefined ? d.getAll('characters') : d.getAllFromIndex('characters', 'campaignId', campaignId);
+      return (await (campaignId === undefined ? d.getAll('characters') : d.getAllFromIndex('characters', 'campaignId', campaignId))).map(strip2024);
     },
-    get: async (id: string) => (await open()).get('characters', id),
-    put: (c: Character) => write(['characters'], (tx) => tx.objectStore('characters').put({ ...c, updatedAt: Date.now() })),
+    get: async (id: string) => maybe(strip2024, await (await open()).get('characters', id)),
+    put: (c: Character) => write(['characters'], (tx) => tx.objectStore('characters').put({ ...strip2024(c), updatedAt: Date.now() })),
     delete: (id: string) => write(['characters'], (tx) => tx.objectStore('characters').delete(id)),
   },
   items: {
@@ -170,13 +174,13 @@ export const db = {
   },
   /** R44: characters and a campaign in one transaction (an item transfer touches both sides), stamping updatedAt like put. */
   saveTogether: ({ characters = [], campaign }: { characters?: Character[]; campaign?: Campaign }) => write(['characters', 'campaigns'], async (tx) => {
-    for (const c of characters) await tx.objectStore('characters').put({ ...c, updatedAt: Date.now() });
-    if (campaign) await tx.objectStore('campaigns').put({ ...campaign, updatedAt: Date.now() });
+    for (const c of characters) await tx.objectStore('characters').put({ ...strip2024(c), updatedAt: Date.now() });
+    if (campaign) await tx.objectStore('campaigns').put({ ...stripLoot(campaign), updatedAt: Date.now() });
   }),
   /** Backup import: one atomic upsert that keeps the records' own updatedAt. */
   restore: (s: Snapshot) => write(['campaigns', 'characters', 'items', 'packs', 'packMeta', 'blobs'], async (tx) => {
-    for (const r of s.campaigns) await tx.objectStore('campaigns').put(r);
-    for (const r of s.characters) await tx.objectStore('characters').put(r);
+    for (const r of s.campaigns) await tx.objectStore('campaigns').put(stripLoot(r));
+    for (const r of s.characters) await tx.objectStore('characters').put(strip2024(r));
     for (const r of s.items) await tx.objectStore('items').put(r);
     for (const p of s.packs.filter(restorablePack)) { // the built-in SRD always comes from the shipped asset (R52)
       await tx.objectStore('packs').put(p);

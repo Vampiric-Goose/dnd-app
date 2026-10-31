@@ -249,7 +249,7 @@ export const packAllowed = (p: { id?: string; source: string; homebrew?: boolean
 export const restorablePack = (p: { id: string; source: string }): boolean => p.id !== 'srd' && !isReservedSource(p.source);
 
 /** The source an entity or patch target id names: the text after its last `@`. */
-const idSource = (id: string): string => id.slice(id.lastIndexOf('@') + 1);
+export const idSource = (id: string): string => id.slice(id.lastIndexOf('@') + 1);
 
 /** Is a stored entity trustworthy? Its id must carry its own source (so it cannot replace another source's entity), and that source can be neither 2024 nor reserved. */
 export const entityAllowed = (e: { id: string; source: string }): boolean =>
