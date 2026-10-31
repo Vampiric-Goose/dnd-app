@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { estimateAttack, estimateDpr, joinList, rehome, splitList } from '../../src/lib/monsters/editing.ts';
+import { assembleHp, estimateAttack, estimateDpr, hpModeFor, joinList, rehome, splitList } from '../../src/lib/monsters/editing.ts';
 import { blankMonster } from '../../src/lib/monsters/homebrew.ts';
 import type { MonsterDef, StoredMonster, Trait } from '../../src/lib/types.ts';
 
@@ -12,16 +12,55 @@ test('estimateDpr: the best action, times a Multiattack count; raw tags and prin
   expect(estimateDpr(m([]))).toBe(0);
 });
 
-test('estimateDpr adds "plus" damage, skips "or" alternatives, and never multiplies a saving-throw action', () => {
+test('estimateDpr adds "plus" damage and stops at an "or" alternative', () => {
   expect(estimateDpr(m([t('Bite', 'Hit: 19 (2d10 + 8) piercing damage plus 7 (2d6) fire damage.')]))).toBe(26);
   expect(estimateDpr(m([t('Longsword', 'Hit: 6 (1d8 + 2) slashing damage, or 7 (1d10 + 2) slashing damage if used with two hands.')]))).toBe(6);
-  const dragon = m([
-    t('Multiattack', 'It then makes three attacks: one with its bite and two with its claws.'),
-    t('Bite', '+14 to hit. Hit: 19 (2d10 + 8) piercing damage plus 7 (2d6) fire damage.'),
-    t('Fire Breath', 'Each creature must make a DC 21 Dexterity saving throw, taking 63 (18d6) fire damage on a failed save.'),
-  ]);
-  expect(estimateDpr(dragon)).toBe(78);
   expect(estimateDpr(m([t('Multiattack', 'makes three attacks'), t('Breath', 'a DC 21 Dexterity saving throw, taking 90 (20d8) fire damage')]))).toBe(90);
+});
+
+// Invented stat blocks in the book's phrasing (I3).
+test('estimateDpr: "makes two melee weapon attacks" is 2 × the best attack', () => {
+  const sentinel = m([t('Multiattack', 'The sentinel makes two melee weapon attacks.'), t('Maul', 'Melee Weapon Attack: +5 to hit, reach 5 ft., one target. Hit: 10 (2d6 + 3) bludgeoning damage.')]);
+  expect(estimateDpr(sentinel)).toBe(20);
+});
+
+test('estimateDpr sums named attacks with their counts, counting save damage that rides on a hit', () => {
+  const wyrm = m([
+    t('Multiattack', 'The wyrm makes two attacks: one with its bite and one with its stinger. While flying, it can use its claws in place of one other attack.'),
+    t('Bite', 'Melee Weapon Attack: +7 to hit, reach 10 ft., one creature. Hit: 11 (2d6 + 4) piercing damage.'),
+    t('Claws', 'Melee Weapon Attack: +7 to hit, reach 5 ft., one target. Hit: 13 (2d8 + 4) slashing damage.'),
+    t('Stinger', 'Melee Weapon Attack: +7 to hit, reach 10 ft., one creature. Hit: 11 (2d6 + 4) piercing damage. The target must make a DC 15 Constitution saving throw, taking 24 (7d6) poison damage on a failed save, or half as much damage on a successful one.'),
+  ]);
+  expect(estimateDpr(wyrm)).toBe(46); // 11 + (11 + 24)
+  const fiend = m([
+    t('Multiattack', 'The fiend makes three attacks: two with its claws and one with its sting.'),
+    t('Claw', 'Melee Weapon Attack: +8 to hit, reach 10 ft., one target. Hit: 8 (1d8 + 4) slashing damage.'),
+    t('Sting', 'Melee Weapon Attack: +8 to hit, reach 10 ft., one target. Hit: 13 (2d8 + 4) piercing damage plus 17 (5d6) poison damage, and the target must succeed on a DC 14 Constitution saving throw or become poisoned for 1 minute.'),
+  ]);
+  expect(estimateDpr(fiend)).toBe(46); // 2 × 8 + (13 + 17)
+  const drake = m([
+    t('Multiattack', 'The drake can use its Frightful Presence. It then makes three attacks: one with its bite and two with its claws.'),
+    t('Bite', '+14 to hit. Hit: 19 (2d10 + 8) piercing damage plus 7 (2d6) fire damage.'),
+    t('Claw', '+14 to hit. Hit: 15 (2d6 + 8) slashing damage.'),
+    t('Fire Breath', 'Each creature must make a DC 21 Dexterity saving throw, taking 45 (13d6) fire damage on a failed save.'),
+  ]);
+  expect(estimateDpr(drake)).toBe(56); // 26 + 2 × 15 beats the 45 breath
+  drake.actions[3] = t('Fire Breath', 'Each creature must make a DC 21 Dexterity saving throw, taking 63 (18d6) fire damage on a failed save.');
+  expect(estimateDpr(drake)).toBe(63); // a stronger single action wins
+});
+
+test('number words one to six count attacks', () => {
+  const words = ['one', 'two', 'three', 'four', 'five', 'six'];
+  words.forEach((w, i) => expect(estimateDpr(m([t('Multiattack', `It makes ${w} attacks.`), t('Slam', '+4 to hit. Hit: 5 (1d6 + 2) bludgeoning damage.')]))).toBe(5 * (i + 1)));
+});
+
+test('I2: an HP average with no formula is saved untouched; dice and special as before', () => {
+  expect(hpModeFor({ average: 52 })).toBe('fixed');
+  expect(hpModeFor({ average: 7, formula: '2d6' })).toBe('dice');
+  expect(hpModeFor({ special: 'varies' })).toBe('special');
+  expect(assembleHp('fixed', { formula: '1d8', fixed: '52', special: '' })).toEqual({ average: 52 });
+  expect(assembleHp('dice', { formula: '4d6 + 8', fixed: '52', special: '' })).toEqual({ average: 22, formula: '4d6 + 8' });
+  expect(assembleHp('special', { formula: '', fixed: '', special: ' varies ' })).toEqual({ special: 'varies' });
 });
 
 test('estimateAttack returns the highest attack bonus and save DC', () => {

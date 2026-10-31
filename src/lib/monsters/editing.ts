@@ -10,39 +10,68 @@ const plain = (r: RichText) => richToPlain(r);
 const DAMAGE = /\{@damage ([^}|]+)[^}]*\}|(\d+) \(\s*\d*d\d+[^)]*\)/g;
 const WORDS: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
 
-/** The average damage of one use: the first amount, plus each one joined to it by "plus" (an "or …" alternative doesn't add). */
+const count = (w: string): number => WORDS[w.toLowerCase()] ?? (Number(w) || 0);
+const attackRoll = (s: string) => /to hit|\{@hit/i.test(s);
+
+/**
+ * The average damage of one use: the first amount, plus each one joined to it by "plus", or by "taking" (save damage riding on a
+ * hit: the DMG assumes the save fails). An "or …" alternative (versatile two-handed damage) ends the count. Printed averages are
+ * used as printed; `{@damage XdY}` tags by their dice average.
+ */
 function actionDamage(s: string): number {
   let total = 0, last = -1;
   for (const m of s.matchAll(DAMAGE)) {
-    const v = m[1] !== undefined ? hpAverage(m[1]) ?? 0 : +m[2];
-    if (last < 0 || /\bplus\b/i.test(s.slice(last, m.index))) total += v;
+    const between = last < 0 ? '' : s.slice(last, m.index);
+    if (/\bor\b/i.test(between)) break;
+    if (last < 0 || /\b(plus|taking)\b/i.test(between)) total += m[1] !== undefined ? hpAverage(m[1]) ?? 0 : +m[2];
     last = m.index + m[0].length;
   }
   return total;
 }
 
-/** "makes two attacks", "makes 3 melee attacks" in a Multiattack entry → N (1 when there is none). */
-function attacksPerTurn(m: MonsterDef): number {
+const key = (name: string) => name.replace(/\s*\(.*$/, '').trim().toLowerCase().replace(/s$/, ''); // 'Claws (Recharge 5–6)' → 'claw'
+
+/**
+ * A Multiattack entry's damage: "makes three attacks: one with its bite and two with its claws" sums the named actions with their
+ * counts; "makes two melee weapon attacks" (or a list naming an action it can't find) is N × the best attack-roll action.
+ */
+function multiattack(m: MonsterDef, damage: Map<string, number>, bestAttack: number): number {
   for (const t of [...m.actions, ...m.traits]) {
     if (!/multiattack/i.test(t.name)) continue;
-    const n = /makes (\w+) (?:\w+ )?attacks/i.exec(plain(t.text))?.[1]?.toLowerCase();
-    if (n) return WORDS[n] ?? (Number(n) || 1);
+    const s = plain(t.text);
+    const head = /makes (\w+) (?:[\w-]+ ){0,2}attacks(:[^.]*)?/i.exec(s);
+    if (!head) continue;
+    const named = [...(head[2] ?? '').matchAll(/\b(\w+) with its ([\w' -]+?)(?=,| and |$)/gi)];
+    if (named.length && named.every((x) => count(x[1]) && damage.has(key(x[2])))) return named.reduce((sum, x) => sum + count(x[1]) * damage.get(key(x[2]))!, 0);
+    return count(head[1]) * bestAttack;
   }
-  return 1;
+  return 0;
 }
 
 /**
- * Best-effort damage per round: the highest-average action, ×N when a Multiattack entry says "makes N attacks". An action that
- * calls for a saving throw (a breath weapon) is not multiplied. ponytail: no recharge averaging over three rounds as the DMG suggests.
+ * Best-effort damage per round (for the CR suggestion): the better of the Multiattack total and the strongest single action
+ * (a breath weapon). ponytail: no recharge averaging over three rounds as the DMG suggests.
  */
 export function estimateDpr(m: MonsterDef): number {
-  const n = attacksPerTurn(m);
-  let best = 0;
+  const damage = new Map<string, number>();
+  let best = 0, bestAttack = 0, bestNoSave = 0;
   for (const t of m.actions) {
-    const s = plain(t.text);
-    best = Math.max(best, actionDamage(s) * (/saving throw/i.test(s) ? 1 : n));
+    const s = plain(t.text), d = actionDamage(s);
+    damage.set(key(t.name), Math.max(d, damage.get(key(t.name)) ?? 0));
+    best = Math.max(best, d);
+    if (attackRoll(s)) bestAttack = Math.max(bestAttack, d);
+    if (!/saving throw/i.test(s)) bestNoSave = Math.max(bestNoSave, d); // hand-typed attacks may lack "to hit"
   }
-  return best;
+  return Math.max(best, multiattack(m, damage, bestAttack || bestNoSave));
+}
+
+/** HP as the editor saves it. `fixed`: an average with no formula (as some books print it) is kept exactly as typed. */
+export type HpMode = 'dice' | 'fixed' | 'special';
+export const hpModeFor = (hp: MonsterDef['hp']): HpMode => ('special' in hp ? 'special' : hp.formula ? 'dice' : 'fixed');
+export function assembleHp(mode: HpMode, v: { formula: string; fixed: string; special: string }): MonsterDef['hp'] {
+  if (mode === 'special') return { special: v.special.trim() };
+  if (mode === 'fixed') return { average: Number(v.fixed) };
+  return { average: hpAverage(v.formula) ?? 0, formula: v.formula };
 }
 
 /** The highest attack bonus ('+N to hit') and save DC ('DC N') among the actions. */

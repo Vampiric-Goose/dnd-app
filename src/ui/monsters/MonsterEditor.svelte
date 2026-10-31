@@ -2,7 +2,7 @@
   import { tick } from 'svelte';
   import { db } from '../../lib/db.ts';
   import { editableToRich, richToEditable } from '../../lib/items/textEdit.ts';
-  import { estimateAttack, estimateDpr, joinList, splitList } from '../../lib/monsters/editing.ts';
+  import { assembleHp, estimateAttack, estimateDpr, hpModeFor, joinList, splitList, type HpMode } from '../../lib/monsters/editing.ts';
   import { blankMonster, duplicateMonster, newMonsterId, soundMonster } from '../../lib/monsters/homebrew.ts';
   import { SIZE_NAMES } from '../../lib/monsters/library.ts';
   import { leaveGuard, navigate } from '../../lib/router.svelte.ts';
@@ -39,7 +39,8 @@
   let delBtn: HTMLButtonElement | undefined = $state();
 
   // Fields that need typing room keep their own strings; `assembled` folds them into the monster and problem() checks them.
-  let hpMode = $state<'dice' | 'special'>('special' in start.hp ? 'special' : 'dice');
+  let hpMode = $state<HpMode>(hpModeFor(start.hp)); // I2: an average with no formula stays as it is until the DM picks hit dice
+  let hpFixed = $state('average' in start.hp ? String(start.hp.average) : '');
   let hpCount = $state(String('formula' in start.hp && /^\s*(\d+)\s*d/.exec(start.hp.formula ?? '')?.[1] || 1));
   let hpSpecial = $state('special' in start.hp ? start.hp.special : '');
   let speeds = $state(Object.fromEntries(SPEEDS.map((k) => [k, start.speed[k] === undefined ? '' : String(start.speed[k])])) as Record<(typeof SPEEDS)[number], string>);
@@ -59,7 +60,7 @@
     out.type = out.type.trim();
     out.alignment = out.alignment.trim();
     out.ac = out.ac.map((a) => (a.from?.trim() ? { value: a.value, from: a.from.trim() } : { value: a.value }));
-    out.hp = hpMode === 'special' ? { special: hpSpecial.trim() } : { average: hpAverage(formula) ?? 0, formula };
+    out.hp = assembleHp(hpMode, { formula, fixed: hpFixed, special: hpSpecial });
     const sp: StoredMonster['speed'] = { walk: num(speeds.walk) ?? 0 };
     for (const k of SPEEDS.slice(1)) { const v = num(speeds[k]); if (v) sp[k] = v; }
     if (sp.fly && m.speed.hover) sp.hover = true;
@@ -68,6 +69,7 @@
     for (const k of Object.keys(lists) as (keyof typeof lists)[]) out[k] = splitList(lists[k]);
     out.passive = num(passive) ?? passiveDefault(out);
     for (const k of Object.keys(texts) as (keyof typeof texts)[]) {
+      if (texts[k] === edit(start[k])) continue; // M2: untouched rich text is saved as it came (no plain-text round trip)
       const r = editableToRich(texts[k]);
       if (r.length) out[k] = r;
       else delete out[k];
@@ -77,7 +79,7 @@
   });
 
   // Unsaved work: everything the editor holds, compared with what it held at the last load or save.
-  const snapshotKey = (id = m.id) => JSON.stringify([{ ...$state.snapshot(m), id }, hpMode, hpCount, hpSpecial, speeds, passive, lists, texts]);
+  const snapshotKey = (id = m.id) => JSON.stringify([{ ...$state.snapshot(m), id }, hpMode, hpCount, hpFixed, hpSpecial, speeds, passive, lists, texts]);
   let baseline = $state(snapshotKey());
   const dirty = $derived((!saved && !!draft) || snapshotKey() !== baseline);
 
@@ -114,6 +116,7 @@
     if (!x.type) return 'Give the monster a type, such as humanoid or dragon.';
     if (!x.ac.length || x.ac.some((a) => !Number.isFinite(a.value))) return 'Each armor class needs a number.';
     if (hpMode === 'dice' && !(whole(hpCount) && +hpCount > 0 && +hpCount < 1000)) return 'Hit dice must be a whole number from 1 to 999.';
+    if (hpMode === 'fixed' && !(whole(hpFixed) && +hpFixed > 0)) return 'Average hit points must be a whole number, 1 or more.';
     if (hpMode === 'special' && !hpSpecial.trim()) return 'Describe the special hit points, or switch to hit dice.';
     if (ABILITIES.some((a) => !Number.isInteger(m.scores[a]) || m.scores[a] < 1 || m.scores[a] > 30)) return 'Ability scores must be whole numbers from 1 to 30.';
     for (const k of SPEEDS) if (speeds[k].trim() && !whole(speeds[k])) return `${titleCase(k)} speed must be a whole number of feet (or blank).`;
@@ -196,7 +199,7 @@
       <div class="row">
         <div class="field"><label for="mo-ac-{i}">Armor class</label><input id="mo-ac-{i}" type="number" bind:value={a.value} /></div>
         <div class="field"><label for="mo-acf-{i}">From (optional)</label><input id="mo-acf-{i}" type="text" autocomplete="off" placeholder="natural armor" value={a.from ?? ''} oninput={(e) => (a.from = e.currentTarget.value)} /></div>
-        {#if m.ac.length > 1}<button type="button" class="danger" onclick={() => m.ac.splice(i, 1)}>Remove</button>{/if}
+        {#if m.ac.length > 1}<button type="button" class="danger" aria-label="Remove armor class {i + 1}" onclick={() => m.ac.splice(i, 1)}>Remove</button>{/if}
       </div>
     {/each}
     <button type="button" onclick={() => m.ac.push({ value: m.ac[0]?.value ?? 10 })}>Add another armor class</button>
@@ -206,9 +209,13 @@
     <legend>Hit points</legend>
     <div class="row">
       <label class="check"><input type="radio" name="mo-hp" value="dice" bind:group={hpMode} /> Hit dice</label>
+      <label class="check"><input type="radio" name="mo-hp" value="fixed" bind:group={hpMode} /> Average only</label>
       <label class="check"><input type="radio" name="mo-hp" value="special" bind:group={hpMode} /> Special</label>
     </div>
-    {#if hpMode === 'dice'}
+    {#if hpMode === 'fixed'}
+      <div class="field narrow"><label for="mo-hpf">Average hit points</label><input id="mo-hpf" type="text" inputmode="numeric" autocomplete="off" bind:value={hpFixed} /></div>
+      <p class="muted">No formula. Choose “Hit dice” to work one out from size and Constitution.</p>
+    {:else if hpMode === 'dice'}
       <div class="row">
         <div class="field"><label for="mo-hd">Hit dice (d{hitDieFor(size)} for {SIZE_NAMES[size]})</label><input id="mo-hd" type="text" inputmode="numeric" autocomplete="off" bind:value={hpCount} /></div>
         <p aria-live="polite">{#if formula}<strong>{hpAverage(formula)}</strong> ({formula}){/if}</p>

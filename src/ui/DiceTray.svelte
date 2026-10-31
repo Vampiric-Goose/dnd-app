@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { natD20, roll, rollLog, rollMode, rollVisibility } from '../lib/rolls.svelte.ts';
+  import { natD20, roll, rollLog, rollMode, rollVisibility, shownRolls } from '../lib/rolls.svelte.ts';
+  import { app } from '../lib/store.svelte.ts';
 
   const DICE = [4, 6, 8, 10, 12, 20, 100];
   const MODES = [['normal', 'Normal'], ['adv', 'Advantage'], ['dis', 'Disadvantage']] as const;
@@ -65,7 +66,7 @@
     <label class="check"><input type="checkbox" bind:checked={rollVisibility.public} /> Public roll</label>
 
     <ol class="plain log" role="log" aria-label="Roll log">
-      {#each rollLog as r (r.id)}
+      {#each shownRolls(rollLog, app.viewer) as r (r.id)}
         {@const nat = natD20(r.detail)}
         <li class:nat20={nat === 'nat20'} class:nat1={nat === 'nat1'}>
           <strong class="total">{r.total}</strong>

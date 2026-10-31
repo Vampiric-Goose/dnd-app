@@ -12,16 +12,19 @@ export const rollMode: { value: 'normal' | 'adv' | 'dis' } = $state({ value: 'no
 /** Stored on each entry for stage 3 (shared logs); the tray's toggle writes it. */
 export const rollVisibility: { public: boolean } = $state({ public: true });
 
-/** Rolls with the tray's current mode, logs it, and resets the mode. Throws the parser's message on bad input. */
-export function roll(label: string, expr: string, opts: { crit?: boolean } = {}): RollEntry {
+/** Rolls with the tray's current mode, logs it, and resets the mode. `public` overrides the tray's toggle (R6: stat-block rolls are always private). Throws the parser's message on bad input. */
+export function roll(label: string, expr: string, opts: { crit?: boolean; public?: boolean } = {}): RollEntry {
   const advantage = rollMode.value === 'normal' ? undefined : rollMode.value;
   const { total, detail } = rollDice(expr, { advantage, crit: opts.crit });
-  const entry: RollEntry = { id: uid(), label, expr, total, detail, at: Date.now(), public: rollVisibility.public };
+  const entry: RollEntry = { id: uid(), label, expr, total, detail, at: Date.now(), public: opts.public ?? rollVisibility.public };
   rollLog.unshift(entry);
   if (rollLog.length > CAP) rollLog.length = CAP;
   rollMode.value = 'normal';
   return entry;
 }
+
+/** R6: the entries this viewer may see. Player view hides private rolls (the DM's monster rolls), so switching views never shows them. */
+export const shownRolls = (log: readonly RollEntry[], viewer: 'dm' | 'player'): readonly RollEntry[] => (viewer === 'dm' ? log : log.filter((r) => r.public));
 
 /** 'nat20' / 'nat1' when the roll's kept d20 shows that face. Reads the first d20 term of `detail` (as rollDice formats it). */
 export function natD20(detail: string): 'nat20' | 'nat1' | undefined {

@@ -4,7 +4,7 @@
   import { characterSummary } from '../../lib/character/play.ts';
   import { db, StorageError } from '../../lib/db.ts';
   import { navigate } from '../../lib/router.svelte.ts';
-  import { natD20, rollLog } from '../../lib/rolls.svelte.ts';
+  import { natD20, rollLog, shownRolls } from '../../lib/rolls.svelte.ts';
   import { computeSheet } from '../../lib/rules/sheet.ts';
   import { DEFAULT_SETTINGS } from '../../lib/settings.ts';
   import { transfer } from '../../lib/items/inventory.ts';
@@ -149,7 +149,7 @@
     }
   }
 
-  const last = $derived(rollLog[0]);
+  const last = $derived(shownRolls(rollLog, app.viewer)[0]); // R6: never a private (monster) roll in Player view
   const nat = $derived(last && natD20(last.detail));
 
   // R46: sheet edits (overrides, custom effects) are the DM's, through one Edit mode. Not saved; it never outlives the DM view or the page.

@@ -106,7 +106,8 @@
     return [...groups.flatMap((g) => [g.find((e) => e === selected) ?? g[0], ...g.flatMap((e) => kids.get(e.id) ?? [])]), ...orphans];
   });
 
-  const selected = $derived(homebrew.find((h) => h.id === select) ?? index?.get(select));
+  // The Compendium never shows monsters (R2): a `monster:` deep link reads as not found, in either view.
+  const selected = $derived(homebrew.find((h) => h.id === select) ?? (index?.get(select)?.kind === 'monster' ? undefined : index?.get(select)));
 
   function reset(id: string) {
     tab = id;

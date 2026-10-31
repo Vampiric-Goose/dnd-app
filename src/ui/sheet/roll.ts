@@ -3,7 +3,7 @@ import { toast } from '../../lib/toast.svelte.ts';
 import { message } from '../creator/labels.ts';
 
 /** Rolls an expression into the dice tray's log. A bad expression (say, odd imported damage text) becomes a toast. */
-export function rollTo(label: string, expr: string, opts: { crit?: boolean } = {}): RollEntry | undefined {
+export function rollTo(label: string, expr: string, opts: { crit?: boolean; public?: boolean } = {}): RollEntry | undefined {
   try {
     return roll(label, expr, opts);
   } catch (e) {

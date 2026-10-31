@@ -40,6 +40,7 @@
     ['Proficiency Bonus', prof !== undefined ? signed(prof) : ''],
   ] as [string, string][]).filter(([, v]) => v));
 
+  const secret = (label: string, expr: string) => rollTo(label, expr, { public: false }); // R6: stat-block rolls are always private
   const label = (t: Trait, hit: boolean) => `${m.name}: ${t.name.replace(/\s*\(.*\)$/, '')} ${hit ? 'attack' : 'damage'}`;
   const ended = (name: string) => (/[.!?:]$/.test(name) ? name : `${name}.`);
   const isSpells = (t: Trait) => /spellcasting/i.test(t.name);
@@ -51,7 +52,7 @@
     {#snippet body()}
       {#each rollParts(span.t) as p}
         {#if 'expr' in p && t}
-          <button type="button" class="roll" aria-label="Roll {label(t, p.hit)}, {p.t}" onclick={() => rollTo(label(t, p.hit), p.expr)}>{p.t}</button>
+          <button type="button" class="roll" aria-label="Roll {label(t, p.hit)}, {p.t}" onclick={() => secret(label(t, p.hit), p.expr)}>{p.t}</button>
         {:else}{p.t}{/if}
       {/each}
     {/snippet}
@@ -117,7 +118,7 @@
   <hr />
   <p><strong>Armor Class</strong> {ac}</p>
   <p><strong>Hit Points</strong>
-    {#if 'special' in m.hp}{m.hp.special}{:else}{@const f = m.hp.formula}{m.hp.average}{#if f}{' '}(<button type="button" class="roll" aria-label="Roll {m.name} hit points, {f}" onclick={() => rollTo(`${m.name}: hit points`, f.replace(/[−–]/g, '-'))}>{f}</button>){/if}{/if}
+    {#if 'special' in m.hp}{m.hp.special}{:else}{@const f = m.hp.formula}{m.hp.average}{#if f}{' '}(<button type="button" class="roll" aria-label="Roll {m.name} hit points, {f}" onclick={() => secret(`${m.name}: hit points`, f.replace(/[−–]/g, '-'))}>{f}</button>){/if}{/if}
   </p>
   <p><strong>Speed</strong> {speed}</p>
   <hr />
