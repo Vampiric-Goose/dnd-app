@@ -61,7 +61,26 @@ export interface ItemDef extends Base { kind: 'item'; type: ItemType; magic: boo
   charges?: { max: number; recharge: Recharge; rechargeAmount?: string };
   redactionSeq?: number /* I3: highest redaction id ever issued for this item; never shown to players */ }
 export interface ConditionDef extends Base { kind: 'condition' }
-export type Entity = RaceDef | SubraceDef | ClassDef | SubclassDef | FeatureDef | OptionalFeatureDef | BackgroundDef | FeatDef | SpellDef | ItemDef | ConditionDef;
+export interface MonsterDef extends Base {
+  kind: 'monster';
+  size: Size[]; // usually one; some 5etools monsters list several ("Medium or Small")
+  type: string; // display form, e.g. 'humanoid (goblinoid)', 'swarm of Tiny beasts'
+  alignment: string; // display form, e.g. 'neutral evil', 'unaligned', 'any alignment'
+  ac: { value: number; from?: string }[]; // first entry is the main AC
+  hp: { average: number; formula?: string } | { special: string };
+  speed: Speeds & { hover?: boolean; note?: string };
+  scores: Scores;
+  saves: Partial<Record<Ability, number>>; // printed bonuses
+  skills: Partial<Record<Skill, number>>; // printed bonuses
+  vulnerable: string[]; resist: string[]; immune: string[]; conditionImmune: string[]; // display strings
+  senses: string[]; passive: number; languages: string[];
+  cr: string; // '0', '1/8', '1/4', '1/2', '1'…'30', or '—'
+  traits: Trait[]; actions: Trait[]; bonusActions: Trait[]; reactions: Trait[];
+  legendary: Trait[]; legendaryCount?: number; legendaryIntro?: RichText;
+  mythic?: Trait[]; lair?: RichText; regional?: RichText;
+  environment?: string[];
+} // spellcasting and innate spellcasting are traits (or actions) whose text lists the spells
+export type Entity = RaceDef | SubraceDef | ClassDef | SubclassDef | FeatureDef | OptionalFeatureDef | BackgroundDef | FeatDef | SpellDef | ItemDef | ConditionDef | MonsterDef;
 export type EntityKind = Entity['kind'];
 export type EntityOfKind<K extends EntityKind> = Extract<Entity, { kind: K }>;
 export interface EntityPatch { targetId: string; alias: string; text?: RichText; addFeatures?: FeatureRef[] }
@@ -71,6 +90,7 @@ export type HideableField = 'rarity' | 'attunement' | 'bonuses' | 'effects' | 'c
 export interface PlayerView { name?: string; text?: RichText; hidden: HideableField[]; revealed: string[] }
 export interface InventoryEntry { id: string; item: ItemDef; sourceId?: string; quantity: number; equipped: boolean; attuned: boolean; chargesUsed: number; notes: string; view?: PlayerView }
 export interface StoredItem extends ItemDef { campaignId: string; defaultView?: PlayerView; updatedAt: number }
+export interface StoredMonster extends MonsterDef { campaignId: string; updatedAt: number }
 export type OverrideKey = 'ac' | 'initiative' | 'speed' | 'maxHp' | 'prof' | 'passivePerception' | 'spellDc' | 'spellAttack' | `score.${Ability}` | `save.${Ability}` | `skill.${Skill}`;
 export interface Character {
   id: string; name: string; campaignId?: string; ownerId?: string; updatedAt: number; imported?: 'unverified';
