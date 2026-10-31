@@ -251,12 +251,13 @@ export const restorablePack = (p: { id: string; source: string }): boolean => p.
 /** The source an entity or patch target id names: the text after its last `@`. */
 export const idSource = (id: string): string => id.slice(id.lastIndexOf('@') + 1);
 
-/** Is a stored entity trustworthy? Its id must carry its own source (so it cannot replace another source's entity), and that source can be neither 2024 nor reserved. */
+/** Is a stored entity trustworthy? Its id and source must be strings, its id must carry its own source (so it cannot replace another source's entity), and that source can be neither 2024 nor reserved. */
 export const entityAllowed = (e: { id: string; source: string }): boolean =>
-  idSource(e.id).toUpperCase() === up(e.source) && !is2024Source(e.source) && !isReservedSource(e.source);
+  typeof e.id === 'string' && typeof e.source === 'string' && idSource(e.id).toUpperCase() === up(e.source) && !is2024Source(e.source) && !isReservedSource(e.source);
 
 /** May a stored pack patch other sources' entities? Only official 2014 books can (5etools' SRD-overlap text); never homebrew or anything else. */
 export const mayPatch = (p: { source: string }): boolean => !!entry(p.source) && !is2024Source(p.source);
 
 /** Is a stored patch trustworthy? Neither its alias nor the entity it targets belongs to the 2024 rules. */
-export const patchAllowed = (x: { alias: string; targetId: string }): boolean => !is2024Source(x.alias) && !is2024Source(idSource(x.targetId));
+export const patchAllowed = (x: { alias: string; targetId: string }): boolean =>
+  typeof x.alias === 'string' && typeof x.targetId === 'string' && !is2024Source(x.alias) && !is2024Source(idSource(x.targetId));

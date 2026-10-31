@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { OFFICIAL_2014, RULES_2024, classifySource, is2024Source, packAllowed, sourceInfo, sourceLabel } from '../../src/lib/content/sources.ts';
+import { OFFICIAL_2014, RULES_2024, classifySource, entityAllowed, is2024Source, packAllowed, patchAllowed, sourceInfo, sourceLabel } from '../../src/lib/content/sources.ts';
 
 test('lookups are case-insensitive and keep the 5etools display form', () => {
   expect(sourceInfo('phb')).toEqual({ name: "Player's Handbook (2014)", kind: 'core', official: true });
@@ -88,4 +88,13 @@ test('packAllowed: SRD, official, homebrew; never 2024 or unknown', () => {
   expect(packAllowed({ source: 'MYBREW' })).toBe(false); // an old pack with no flag is judged by its source alone
   expect(packAllowed({ source: 'FRHOF' })).toBe(false);
   expect(packAllowed({ source: 'XPHB', homebrew: true })).toBe(false);
+});
+
+test('I7: entityAllowed and patchAllowed refuse non-string ids and sources instead of throwing', () => {
+  expect(entityAllowed({ id: 'spell:x@PHB', source: 'PHB' })).toBe(true);
+  for (const bad of [{ id: 5, source: 'PHB' }, { id: 'spell:x@PHB', source: null }, { id: undefined, source: undefined }, {}]) {
+    expect(entityAllowed(bad as never), JSON.stringify(bad)).toBe(false);
+  }
+  expect(patchAllowed({ alias: 'PHB', targetId: 'spell:x@SRD' })).toBe(true);
+  for (const bad of [{ alias: 1, targetId: 'spell:x@SRD' }, { alias: 'PHB', targetId: {} }, {}]) expect(patchAllowed(bad as never), JSON.stringify(bad)).toBe(false);
 });
