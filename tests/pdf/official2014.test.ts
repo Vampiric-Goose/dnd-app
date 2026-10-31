@@ -1,4 +1,5 @@
 import { expect, test } from 'vitest';
+import { validateCharacter } from '../../src/lib/character/build.ts';
 import { importPdf } from '../../src/lib/pdf/importPdf.ts';
 import { official2014 } from '../../src/lib/pdf/maps/official2014.ts';
 import { computeSheet } from '../../src/lib/rules/sheet.ts';
@@ -139,4 +140,14 @@ test('official 2014 sheet: detect needs a field only the 2014 sheet has', () => 
   expect(official2014.detect(new Set(['CharacterName', 'ClassLevel', 'STR']))).toBe(false);
   expect(official2014.detect(new Set(['CharacterName', 'ClassLevel', 'STR', 'ST Strength']))).toBe(true);
   expect(official2014.detect(new Set(['charactername', ' classlevel', 'STR', 'ProficienciesLang ']))).toBe(true);
+});
+
+test('official 2014 sheet: alignment tags become the full name; typed-in scores pass validation without rule overrides', async () => {
+  const all = { STR: '15', DEX: '14', CON: '13', INT: '12', WIS: '10', CHA: '8' };
+  for (const [tag, full] of [['LG', 'Lawful good'], ['n', 'Neutral'], ['TN', 'Neutral'], ['C/E', 'Chaotic evil'], ['neutral GOOD', 'Neutral good'], ['Lawful-ish', 'Lawful-ish']]) {
+    const { data } = await read(await sheet({ CharacterName: 'A', ClassLevel: 'Fighter 1', 'Race ': 'Human', Alignment: tag, ...all }));
+    expect(data.details.alignment).toBe(full);
+  }
+  const { data } = await read(await sheet({ CharacterName: 'A', ClassLevel: 'Fighter 1', 'Race ': 'Human', ...all }));
+  expect(validateCharacter(data, fixtureIndex(), DEFAULT_SETTINGS).filter((p) => p.step === 'abilities')).toEqual([]);
 });

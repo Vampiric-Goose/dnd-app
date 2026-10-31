@@ -20,10 +20,10 @@ test('character round-trip is lossless', async () => {
 test('edits made in a PDF reader come back as overrides', async () => {
   const { PDFDocument } = await import('pdf-lib');
   const doc = await PDFDocument.load(await exportCharacterPdf(c, sheet()));
-  doc.getForm().getTextField('app.ac').setText('21'); doc.getForm().getTextField('app.name').setText('Bruni');
+  doc.getForm().getTextField('app.ac').setText('21'); doc.getForm().getTextField('app.name').setText('Bruni'); doc.getForm().getTextField('app.alignment').setText('CG');
   const r = await importPdf(await doc.save()) as { data: Character; edits: string[] };
-  expect([r.data.overrides.ac, r.data.name]).toEqual([21, 'Bruni']);
-  expect(r.edits).toEqual(expect.arrayContaining(['AC', 'Name']));
+  expect([r.data.overrides.ac, r.data.name, r.data.details.alignment]).toEqual([21, 'Bruni', 'Chaotic good']);
+  expect(r.edits).toEqual(expect.arrayContaining(['AC', 'Name', 'Alignment']));
 });
 test('non-Latin names survive', async () => {
   const z = { ...c, name: 'Zoë 🐉 李' };

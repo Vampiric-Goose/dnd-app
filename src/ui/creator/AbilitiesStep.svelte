@@ -9,8 +9,7 @@
 
   type Method = Character['build']['abilityMethod'];
   const methods = $derived<[Method, string][]>([
-    ['pointBuy', 'Point buy'], ['standard', 'Standard array'], ['rolled', 'Rolled (4d6, drop the lowest)'],
-    ...(settings.allowOverrides || c.build.abilityMethod === 'manual' ? [['manual', 'Type them in'] as [Method, string]] : []),
+    ['pointBuy', 'Point buy'], ['standard', 'Standard array'], ['rolled', 'Rolled (4d6, drop the lowest)'], ['manual', 'Type them in'],
   ]);
   const s = $derived(c.build.baseScores);
   const all = (n: number): Scores => ({ str: n, dex: n, con: n, int: n, wis: n, cha: n });

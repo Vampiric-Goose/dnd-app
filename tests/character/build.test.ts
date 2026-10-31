@@ -88,6 +88,13 @@ test('validation', () => {
   const tooMany = answerChoice(c, sk.key, { type: 'ids', ids: ['athletics', 'perception', 'survival'] });
   expect(validateCharacter(tooMany, idx, S).some(p => p.key === sk.key && p.blocking)).toBe(true);
 });
+test('typed-in scores are valid without rule overrides, but must be 1 to 30', () => {
+  const c = mkChar({ race: 'human', base: { str: 18, dex: 3, con: 20, int: 9, wis: 8, cha: 8 }, levels: ['fighter'] });
+  c.build.abilityMethod = 'manual';
+  expect(validateCharacter(c, idx, S).filter(p => p.step === 'abilities')).toEqual([]);
+  c.build.baseScores.dex = 0;
+  expect(validateCharacter(c, idx, S)).toContainEqual(expect.objectContaining({ step: 'abilities', message: 'Scores must be 1 to 30', blocking: true }));
+});
 test('custom origin skips racial ability choices; new characters start empty', () => {
   const he = mkChar({ race: 'half-elf', base: {}, levels: ['fighter'] });
   const key = listChoices(he, idx, S).find(p => p.choice.type === 'ability')!.key;

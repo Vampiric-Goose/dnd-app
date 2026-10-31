@@ -1,5 +1,5 @@
 import { addLevel, embedContent, newCharacter } from '../../character/build.ts';
-import { ABILITIES } from '../../rules/constants.ts';
+import { ABILITIES, parseAlignment } from '../../rules/constants.ts';
 import { computeSheet } from '../../rules/sheet.ts';
 import { DEFAULT_SETTINGS } from '../../settings.ts';
 import type { Ability, CampaignSettings, OverrideKey, Scores, Sheet, Skill } from '../../types.ts';
@@ -181,7 +181,7 @@ export const official2014: FieldMap = {
     c.state.tempHp = int('HPTemp', 0) ?? 0;
     for (const k of ['cp', 'sp', 'ep', 'gp', 'pp'] as const) c.currency[k] = int(k.toUpperCase(), 0) ?? 0;
     const d = c.details;
-    d.alignment = text('Alignment', 200);
+    d.alignment = parseAlignment(text('Alignment', 200));
     d.personality = text('PersonalityTraits'); d.ideals = text('Ideals'); d.bonds = text('Bonds'); d.flaws = text('Flaws'); d.backstory = text('Backstory');
     d.appearance = APPEARANCE.flatMap((k) => { const t = text(k, 200); return t ? [`${k}: ${t}`] : []; }).join(', ');
 

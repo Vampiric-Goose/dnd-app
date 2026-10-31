@@ -53,6 +53,14 @@ export const CONDITIONS = [
 
 export const ATTUNEMENT_LIMIT = 3;
 
+export const ALIGNMENTS = ['Lawful good', 'Neutral good', 'Chaotic good', 'Lawful neutral', 'Neutral', 'Chaotic neutral', 'Lawful evil', 'Neutral evil', 'Chaotic evil'];
+const ALIGNMENT_TAGS: Record<string, string> = { lg: 'Lawful good', ng: 'Neutral good', cg: 'Chaotic good', ln: 'Lawful neutral', n: 'Neutral', tn: 'Neutral', nn: 'Neutral', truen: 'Neutral', trueneutral: 'Neutral', cn: 'Chaotic neutral', le: 'Lawful evil', ne: 'Neutral evil', ce: 'Chaotic evil' };
+/** 'LG', 'l/g', 'lawful GOOD', 'True Neutral' → one of ALIGNMENTS; anything else is kept as written. */
+export function parseAlignment(s: string): string {
+  const k = s.toLowerCase().replace(/[^a-z]/g, '');
+  return ALIGNMENT_TAGS[k] ?? ALIGNMENTS.find((a) => a.toLowerCase().replace(/ /g, '') === k) ?? s;
+}
+
 export const profBonus = (totalLevel: number): number => 2 + Math.floor((totalLevel - 1) / 4);
 export const abilityMod = (score: number): number => Math.floor((score - 10) / 2);
 export const averageHp = (die: number): number => die / 2 + 1;

@@ -8,7 +8,7 @@
   type Module = keyof CampaignSettings['initiativeModules'];
 
   const rules: [Bool, string, string][] = [
-    ['allowOverrides', 'Allow rule overrides', 'The creator and level-up let you ignore prerequisites and type in ability scores. Problems become warnings.'],
+    ['allowOverrides', 'Allow rule overrides', 'The creator and level-up let you ignore prerequisites. Problems become warnings.'],
     ['customOrigin', 'Custom origin', 'Let characters set their own ability bonuses instead of the race\'s.'],
     ['optionalClassFeatures', 'Optional class features', 'Offer the optional features some classes can swap in.'],
     ['multiclassing', 'Multiclassing', 'Allow characters to take levels in a second class.'],

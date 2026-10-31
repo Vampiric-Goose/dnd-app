@@ -191,7 +191,8 @@ export function validateCharacter(c: Character, index: ContentIndex, settings: C
     else if (cost !== POINT_BUY_BUDGET) add('abilities', `Point buy total is ${cost} of ${POINT_BUY_BUDGET}`, undefined, cost > POINT_BUY_BUDGET);
   } else if (b.abilityMethod === 'standard' && !isStandardArray(s)) add('abilities', `Use each standard array score once (${STANDARD_ARRAY.join(', ')})`);
   else if (b.abilityMethod === 'rolled' && ABILITIES.some(a => s[a] < 3 || s[a] > 18)) add('abilities', 'Rolled scores must be 3 to 18');
-  else if (b.abilityMethod === 'manual' && !settings.allowOverrides) add('abilities', 'Typing in scores needs the allow overrides setting');
+  // Typed-in scores (dice rolled at the table, an imported sheet) are a normal method, not an override.
+  else if (b.abilityMethod === 'manual' && ABILITIES.some(a => !(s[a] >= 1 && s[a] <= 30))) add('abilities', 'Scores must be 1 to 30');
 
   if (!b.backgroundId) add('background', 'Choose a background');
   else if (!getKind(lookup, b.backgroundId, 'background')) add('background', `Missing background ${b.backgroundId}`);

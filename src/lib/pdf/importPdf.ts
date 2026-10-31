@@ -1,6 +1,7 @@
 import { strip2024 } from '../character/strip2024.ts';
 import type { ContentIndex } from '../content/index.ts';
 import { characterProblem, isRec, problem, SHAPES } from '../recordShape.ts';
+import { parseAlignment } from '../rules/constants.ts';
 import { computeSheet } from '../rules/sheet.ts';
 import { DEFAULT_SETTINGS } from '../settings.ts';
 import type { Ability, CampaignSettings, Character, ItemDef, OverrideKey, Sheet, Skill } from '../types.ts';
@@ -26,6 +27,7 @@ const override = (name: string, label: string, key: OverrideKey): Field => ({ na
 // The editable fields, in the order edits are listed. Everything else on the PDF is derived and ignored on re-import.
 const FIELDS: Field[] = [
   { name: 'app.name', label: 'Name', int: false, apply: (c, v) => { c.name = v as string; } },
+  { name: 'app.alignment', label: 'Alignment', int: false, apply: (c, v) => { c.details.alignment = parseAlignment(v as string); } },
   { name: 'app.hp', label: 'HP', int: true, apply: (c, v) => { c.state.hp = Math.max(0, v as number); } },
   override('app.ac', 'AC', 'ac'),
   override('app.init', 'Initiative', 'initiative'),

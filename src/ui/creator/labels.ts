@@ -28,6 +28,6 @@ export function versions<T extends { name: string; source: string }>(list: T[]):
 // PHB p.123 standard and exotic languages: offered when a choice doesn't list its own.
 export const LANGUAGES = ['Common', 'Dwarvish', 'Elvish', 'Giant', 'Gnomish', 'Goblin', 'Halfling', 'Orc', 'Abyssal', 'Celestial', 'Draconic', 'Deep Speech', 'Infernal', 'Primordial', 'Sylvan', 'Undercommon'];
 
-export const ALIGNMENTS = ['Lawful good', 'Neutral good', 'Chaotic good', 'Lawful neutral', 'Neutral', 'Chaotic neutral', 'Lawful evil', 'Neutral evil', 'Chaotic evil'];
+export { ALIGNMENTS } from '../../lib/rules/constants.ts';
 
 export const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
