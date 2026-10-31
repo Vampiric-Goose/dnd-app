@@ -247,6 +247,54 @@ test('labels read as in the books', async () => {
   expect(chars.getForm().getTextField('app.spells').getText()).toBe('No spellcasting');
 });
 
+test('I6: app.data rewritten by another tool as UTF-16, far past 100 KB, is decoded without pdf-lib\'s decoder; its size is checked first', async () => {
+  const c = mk([], { details: { ...mk().details, backstory: 'A long tale. '.repeat(12_000) } }); // about 160 KB of text
+  const { PDFDocument, PDFHexString } = await import('pdf-lib');
+  const doc = await PDFDocument.load(await dm(c));
+  const f = doc.getForm().getTextField('app.data');
+  const payload = readPayload(f);
+  expect(payload.length).toBeGreaterThan(100_000);
+  f.acroField.setValue(PDFHexString.fromText(payload)); // UTF-16BE with a byte order mark, as other tools write it
+  const bytes = await doc.save();
+  const r = await importPdf(bytes) as { data: Character; edits: string[] };
+  expect(r.data.details.backstory).toBe(c.details.backstory);
+  expect(r.edits).toEqual([]);
+  limits.maxData = 1000;
+  try { await expect(importPdf(bytes)).rejects.toThrow(/^This PDF's embedded data is too large/); } finally { limits.maxData = 32 * 1024 * 1024; }
+});
+
+// T20-6: the cut paths beyond one-line-per-entry notes.
+// Paragraphs of 50 words, each wrapped over several lines (pdf-lib's own layout of one huge paragraph is slow, which is not under test).
+const wrappedNotes = Array.from({ length: 22 }, (_, p) => Array.from({ length: 50 }, (_, i) => `word${p * 50 + i + 1}`).join(' ')).join('\n');
+test('a wrapped paragraph is cut between words; the field and the extra pages together hold it all, and a round trip is no edit', async () => {
+  const bytes = await dm(mk([], { details: { ...mk().details, notes: wrappedNotes } }));
+  const cut = (await cutOf(bytes, 'app.notes'))!;
+  expect(cut).toBeGreaterThan(0);
+  expect(wrappedNotes[cut]).toBe(' '); // a line boundary of the wrap, between two words
+  const { PDFDocument } = await import('pdf-lib');
+  expect((await PDFDocument.load(bytes)).getForm().getTextField('app.notes').getText()).toBe(`${wrappedNotes.slice(0, cut)}\n${MARKER}`);
+  expect((await importPdf(bytes) as { edits: string[] }).edits).toEqual([]);
+});
+
+test('a single word longer than many lines is cut mid-word, and nothing is lost on re-import', async () => {
+  const word = Array.from({ length: 36 }, (_, i) => `line ${i + 1}`).join('\n') + '\n' + 'x'.repeat(2500); // the cut falls inside the long word
+  const bytes = await dm(mk([], { details: { ...mk().details, notes: word } }));
+  const cut = (await cutOf(bytes, 'app.notes'))!;
+  expect(cut).toBeGreaterThan(0);
+  expect(cut).toBeGreaterThan(word.lastIndexOf('\n') + 1);
+  expect(cut).toBeLessThan(word.length);
+  const r = await importPdf(bytes) as { data: Character; edits: string[] };
+  expect([r.data.details.notes, r.edits]).toEqual([word, []]);
+});
+
+test('an edit to the visible part of a wrapped paragraph is merged with the text after the cut', async () => {
+  const bytes = await dm(mk([], { details: { ...mk().details, notes: wrappedNotes } }));
+  const cut = (await cutOf(bytes, 'app.notes'))!;
+  const r = await edited(bytes, (f) => f('app.notes').setText(`${wrappedNotes.slice(0, cut).replace('word1 ', 'EDITED ')}\n${MARKER}`));
+  expect(r.edits).toEqual(['Notes']);
+  expect(r.data.details.notes).toBe(wrappedNotes.replace('word1 ', 'EDITED '));
+});
+
 test('a character whose data is far past 100 KB still exports and re-imports (pdf-lib\'s text decoder overflows the stack there)', async () => {
   const c = mk([], { details: { ...mk().details, backstory: 'A long tale. '.repeat(40_000) } }); // about 520 KB of text
   const r = await importPdf(await dm(c)) as { data: Character; edits: string[] };

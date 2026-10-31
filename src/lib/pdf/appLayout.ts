@@ -306,10 +306,17 @@ export function addDataField(lib: Lib, doc: import('pdf-lib').PDFDocument, page:
   f.acroField.setValue(lib.PDFString.of(payload)); // base64 is plain ASCII with nothing to escape
 }
 
-/** The text of a field, read without pdf-lib's decoder when the value is a plain string (as addDataField writes it). */
-export function readPayload(f: import('pdf-lib').PDFTextField): string {
-  const v = f.acroField.getValue() as { asBytes?: () => Uint8Array } | undefined;
+/** Thrown by readPayload, before decoding, for a value that cannot fit in `max` characters. */
+export class PayloadTooLarge extends Error {}
+
+/**
+ * The text of a field, never through pdf-lib's decoder: plain bytes as addDataField writes them, or UTF-16 (with its byte order mark)
+ * as another tool may rewrite them. A value whose stored size could not decode to `max` characters or fewer is refused before decoding.
+ */
+export function readPayload(f: import('pdf-lib').PDFTextField, max = Infinity): string {
+  const v = f.acroField.getValue() as { asBytes?: () => Uint8Array; sizeInBytes?: () => number } | undefined;
+  if ((v?.sizeInBytes?.() ?? 0) > max * 4 + 6) throw new PayloadTooLarge(); // 4: a hex UTF-16 string spends 4 digits per character; 6: delimiters and mark
   const bytes = v?.asBytes?.();
-  if (bytes && !(bytes[0] === 0xfe && bytes[1] === 0xff)) return new TextDecoder('latin1').decode(bytes); // no UTF-16 mark: bytes are the characters
-  return f.getText() ?? ''; // text written by another tool as UTF-16
+  if (!bytes) return f.getText() ?? '';
+  return bytes[0] === 0xfe && bytes[1] === 0xff ? new TextDecoder('utf-16be').decode(bytes.subarray(2)) : new TextDecoder('latin1').decode(bytes);
 }

@@ -4,7 +4,7 @@ import { characterProblem, isRec, problem, SHAPES } from '../recordShape.ts';
 import { computeSheet } from '../rules/sheet.ts';
 import { DEFAULT_SETTINGS } from '../settings.ts';
 import type { Ability, CampaignSettings, Character, ItemDef, OverrideKey, Sheet, Skill } from '../types.ts';
-import { ABILITY_LABEL, appFieldValues, cutShown, decodeEnvelope, readPayload, SKILLS, skillLabel, withoutMarker, type Viewer } from './appLayout.ts';
+import { ABILITY_LABEL, appFieldValues, cutShown, decodeEnvelope, PayloadTooLarge, readPayload, SKILLS, skillLabel, withoutMarker, type Viewer } from './appLayout.ts';
 import { FIELD_MAPS } from './fieldmap.ts';
 import { toWinAnsi } from './winansi.ts';
 
@@ -43,6 +43,7 @@ const FIELDS: Field[] = [
 ];
 
 const NOT_APPLIED = "Notes (not applied: contains characters the PDF can't hold)";
+const tooLarge = () => new Error(`This PDF's embedded data is too large to import (over ${limits.maxData / 1024 / 1024} MB)`);
 const damaged = (why: string) => new Error(`This PDF's data is damaged: ${why}`);
 const reason = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const lines = (s: string) => s.replace(/\r\n?/g, '\n'); // readers may rewrite line breaks
@@ -54,19 +55,20 @@ export async function importPdf(bytes: Uint8Array, index?: IndexSource): Promise
   try {
     const doc = await lib.PDFDocument.load(bytes, { updateMetadata: false });
     for (const f of doc.getForm().getFields()) {
-      if (f instanceof lib.PDFTextField) fields[f.getName()] = f.getName() === 'app.data' ? readPayload(f) : f.getText() ?? '';
+      if (f instanceof lib.PDFTextField) fields[f.getName()] = f.getName() === 'app.data' ? readPayload(f, limits.maxData) : f.getText() ?? '';
       else if (f instanceof lib.PDFCheckBox) fields[f.getName()] = f.isChecked();
       else if (f instanceof lib.PDFRadioGroup) fields[f.getName()] = f.getSelected() ?? '';
       else if (f instanceof lib.PDFDropdown) fields[f.getName()] = f.getSelected()[0] ?? '';
       else if (f instanceof lib.PDFOptionList) fields[f.getName()] = f.getSelected()[0] ?? '';
     }
   } catch (e) {
+    if (e instanceof PayloadTooLarge) throw tooLarge();
     throw new Error(`That file is not a readable PDF: ${reason(e)}`);
   }
 
   const payload = fields['app.data'];
   if (typeof payload === 'string' && payload) {
-    if (payload.length > limits.maxData) throw new Error(`This PDF's embedded data is too large to import (over ${limits.maxData / 1024 / 1024} MB)`);
+    if (payload.length > limits.maxData) throw tooLarge();
     return fromData(payload, fields);
   }
 
