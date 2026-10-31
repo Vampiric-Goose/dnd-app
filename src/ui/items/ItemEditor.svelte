@@ -7,7 +7,7 @@
   import { newHomebrewId } from '../../lib/items/homebrew.ts';
   import { choiceTexts } from '../../lib/items/playerView.ts';
   import { stripStored } from '../../lib/items/rows.ts';
-  import { editableToRich, expandWithCaret, richToEditable } from '../../lib/items/textEdit.ts';
+  import { editableToRich, expandWithCaret, highestRedactionId, richToEditable, seqTaken } from '../../lib/items/textEdit.ts';
   import { leaveGuard, navigate } from '../../lib/router.svelte.ts';
   import { getIndex } from '../../lib/store.svelte.ts';
   import type { ItemDef, ItemType, PlayerView, Rarity, Recharge, StoredItem } from '../../lib/types.ts';
@@ -29,8 +29,15 @@
   const whole = (s: string) => /^\d+$/.test(s.trim());
   const text = (n: number | undefined) => (n === undefined ? '' : String(n));
 
+  // I3: the redaction high-water mark, seeded from the ids already in use (an item saved before it existed has none).
+  const withSeq = (i: StoredItem): StoredItem => {
+    const n = highestRedactionId([i.text, i.curse ?? [], ...choiceTexts(i.choices), i.defaultView?.text ?? []], i.redactionSeq);
+    return n ? { ...i, redactionSeq: n } : i;
+  };
   // svelte-ignore state_referenced_locally
-  let draft: StoredItem = $state($state.snapshot(initial) as StoredItem);
+  let draft: StoredItem = $state(withSeq($state.snapshot(initial) as StoredItem));
+  /** Raises the high-water mark when an id is issued, here or in the default view's text. */
+  const bump = (n: number) => { if (n > (draft.redactionSeq ?? 0)) draft.redactionSeq = n; };
   // svelte-ignore state_referenced_locally
   let saved = $state(!isNew); // stored at least once, so `draft.id` is real
   let saving = $state(false);
@@ -157,8 +164,9 @@
   async function typed(el: HTMLTextAreaElement, field: 'text' | 'curse') {
     const other = field === 'text' ? curseDraft : textDraft;
     const v = draft.defaultView;
-    const taken = [...redactionIds([...editableToRich(other), ...choiceTexts(draft.choices).flat(), ...(v?.text ?? [])]), ...(v?.revealed ?? [])];
+    const taken = [...redactionIds([...editableToRich(other), ...choiceTexts(draft.choices).flat(), ...(v?.text ?? [])]), ...(v?.revealed ?? []), ...seqTaken(draft)];
     const { text: next, caret } = expandWithCaret(el.value, taken, el.selectionStart);
+    bump(highestRedactionId([editableToRich(next)]));
     if (field === 'text') textDraft = next;
     else curseDraft = next;
     if (next !== el.value) {
@@ -408,7 +416,7 @@
 <h2>Default player view</h2>
 <div class="card">
   <p class="muted">What players see of this item in the compendium and when you give it to them, until you reveal more.</p>
-  <PlayerViewEditor item={assembled} view={draft.defaultView} onchange={setView} />
+  <PlayerViewEditor item={assembled} view={draft.defaultView} onchange={setView} onseq={bump} />
 </div>
 
 {#if error}<p role="alert" class="error">{error}</p>{/if}

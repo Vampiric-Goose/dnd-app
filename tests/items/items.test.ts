@@ -3,6 +3,7 @@ import { entityId } from '../../src/lib/content/ids.ts';
 import { richToPlain } from '../../src/lib/content/richtext.ts';
 import { displayItem, identify, playerItem, revealField, revealRedaction } from '../../src/lib/items/playerView.ts';
 import { attunedCount, carriedWeight, makeEntry, rechargeEntry, refreshEntry, transfer, useCharge, useItem } from '../../src/lib/items/inventory.ts';
+import { expandShorthand, highestRedactionId, nextRedactionId, seqTaken } from '../../src/lib/items/textEdit.ts';
 import type { ItemDef, PlayerView } from '../../src/lib/types.ts';
 
 const item = (name: string): ItemDef => ({ id: entityId('item', name, 'test'), kind: 'item', name, source: 'test', text: [], type: 'other', magic: false });
@@ -171,4 +172,18 @@ test('refreshEntry drops revealed ids the new text no longer has (fix round 1)',
   const latest = { ...item('Idol'), text: [{ p: 'Now {{redact:r1}}different{{/redact}}.' }] } as ItemDef;
   expect(refreshEntry(old, latest).view?.revealed).toEqual(['r1']);
   expect(refreshEntry(makeEntry(item('Plain')), latest).view).toBeUndefined();
+});
+test('I3: a deleted redaction id is never issued again, so a refreshed entry that had it revealed does not reveal the new secret', () => {
+  const saved = { ...item('Idol'), text: [{ p: 'An idol. {{redact:r1}}It bites.{{/redact}}' }], redactionSeq: 1 } as ItemDef;
+  const entry = makeEntry(saved, { view: { hidden: [], revealed: ['r1'] } }); // the player learned r1
+  // The DM deletes r1, then adds a new secret: typed (||…||) and by selection.
+  const typed = expandShorthand('An idol. ||It sings.||', seqTaken(saved));
+  expect(typed).toBe('An idol. {{redact:r2}}It sings.{{/redact}}');
+  expect(nextRedactionId([{ p: 'An idol.' }], seqTaken(saved))).toBe('r2');
+  const latest = { ...saved, text: [{ p: typed }], redactionSeq: highestRedactionId([[{ p: typed }]], saved.redactionSeq) } as ItemDef;
+  expect(latest.redactionSeq).toBe(2);
+  const fresh = refreshEntry(entry, latest);
+  expect(fresh.view?.revealed).toEqual([]);
+  expect(richToPlain(playerItem(fresh.item, fresh.view).text)).not.toContain('sings');
+  expect('redactionSeq' in playerItem(latest)).toBe(false); // bookkeeping, not for players
 });

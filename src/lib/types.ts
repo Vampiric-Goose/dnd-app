@@ -58,7 +58,8 @@ export interface ItemDef extends Base { kind: 'item'; type: ItemType; magic: boo
   weapon?: { category: 'simple' | 'martial'; ranged: boolean; damage: string; damageType: string; versatile?: string; properties: string[]; range?: [number, number] };
   armor?: { category: 'light' | 'medium' | 'heavy' | 'shield'; ac: number; dexCap?: number /* undefined = no cap */; strReq?: number; stealthDisadvantage?: boolean };
   bonuses?: { attack?: number; damage?: number; ac?: number; save?: number; spellAttack?: number; spellDc?: number };
-  charges?: { max: number; recharge: Recharge; rechargeAmount?: string } }
+  charges?: { max: number; recharge: Recharge; rechargeAmount?: string };
+  redactionSeq?: number /* I3: highest redaction id ever issued for this item; never shown to players */ }
 export interface ConditionDef extends Base { kind: 'condition' }
 export type Entity = RaceDef | SubraceDef | ClassDef | SubclassDef | FeatureDef | OptionalFeatureDef | BackgroundDef | FeatDef | SpellDef | ItemDef | ConditionDef;
 export type EntityKind = Entity['kind'];

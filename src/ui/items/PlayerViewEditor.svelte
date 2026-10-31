@@ -2,11 +2,12 @@
   import { tick } from 'svelte';
   import { redactionIds, redactionTexts } from '../../lib/content/richtext.ts';
   import { choiceTexts, playerItem, pruneRevealed, revealedView, revealField, revealRedaction } from '../../lib/items/playerView.ts';
-  import { editableToRich, expandWithCaret, nextRedactionId, richToEditable, wrapRedaction } from '../../lib/items/textEdit.ts';
+  import { editableToRich, expandWithCaret, highestRedactionId, nextRedactionId, richToEditable, seqTaken, wrapRedaction } from '../../lib/items/textEdit.ts';
   import type { HideableField, ItemDef, PlayerView } from '../../lib/types.ts';
   import EntityDetail from '../EntityDetail.svelte';
 
-  let { item, view, onchange }: { item: ItemDef; view: PlayerView | undefined; onchange: (view: PlayerView | undefined) => void } = $props();
+  // onseq (I3): told the highest redaction id in the text after each edit, so the item's high-water mark can rise.
+  let { item, view, onchange, onseq }: { item: ItemDef; view: PlayerView | undefined; onchange: (view: PlayerView | undefined) => void; onseq?: (n: number) => void } = $props();
 
   const FIELDS: [HideableField, string][] = [
     ['rarity', 'Rarity (item reads as mundane)'], ['attunement', 'Attunement'], ['bonuses', 'Bonuses'], ['effects', 'Effects'], ['charges', 'Charges'], ['curse', 'Curse'],
@@ -27,7 +28,7 @@
   });
 
   // Every redaction id in use (item text, curse, choices, override text) plus the revealed ones, which a new redaction must not reuse.
-  const taken = $derived([...redactionIds([...item.text, ...(item.curse ?? []), ...choiceTexts(item.choices).flat(), ...(view?.text ?? [])]), ...base.revealed]);
+  const taken = $derived([...redactionIds([...item.text, ...(item.curse ?? []), ...choiceTexts(item.choices).flat(), ...(view?.text ?? [])]), ...base.revealed, ...seqTaken(item)]);
 
   // Revealed ids whose redaction is gone are dropped on the way out, so a later redaction can't pick one up already revealed.
   const emit = (v: PlayerView) => onchange(pruneRevealed(item, v));
@@ -37,6 +38,7 @@
     hint = '';
     const { text: expanded, caret: at } = expandWithCaret(s, taken, caret); // ||secret|| becomes a numbered redaction
     draft = expanded;
+    onseq?.(highestRedactionId([editableToRich(expanded)]));
     set({ text: richToEditable(editableToRich(expanded)) === richToEditable(item.text) ? undefined : editableToRich(expanded) });
     if (area && expanded !== s) {
       await tick();

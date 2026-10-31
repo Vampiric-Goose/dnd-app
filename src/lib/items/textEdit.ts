@@ -55,6 +55,12 @@ const idNumber = (id: string): number => Number(/^r(\d+)$/.exec(id)?.[1] ?? 0);
 export const nextRedactionId = (r: RichText, taken: readonly string[] = []): string =>
   `r${Math.max(0, ...redactionIds(r).map(idNumber), ...taken.map(idNumber)) + 1}`;
 
+/** I3: an item's redaction high-water mark as a `taken` id, so an id stays used after its span is deleted (a copy may have it revealed). */
+export const seqTaken = (item: { redactionSeq?: number }): string[] => (item.redactionSeq ? [`r${item.redactionSeq}`] : []);
+
+/** The new high-water mark: `seq` or the highest numbered redaction id in `texts`, whichever is higher. */
+export const highestRedactionId = (texts: RichText[], seq = 0): number => Math.max(seq, ...texts.flatMap(redactionIds).map(idNumber));
+
 // A 5etools `{@tag a||b}` is one opaque token: its `||` separate the tag's own parts. ponytail: a tag nested inside a tag
 // ends the outer one early; homebrew text typed by hand never nests them.
 const TOKEN = new RegExp(`${MARK.source}|\\{@[^{}]*\\}|\\|\\|`, 'g');
