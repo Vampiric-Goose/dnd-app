@@ -34,7 +34,7 @@ const oneOf = <T extends string>(list: readonly T[], v: unknown): v is T => list
 
 // Each effect is checked for its type's fields (the custom-effect form's model), so the sheet can rely on them.
 const effectsOk = (v: unknown): v is Effect[] => Array.isArray(v) && v.every(effectOk);
-const traitOk = (t: unknown, depth: number): boolean =>
+export const traitOk = (t: unknown, depth: number): boolean =>
   isRec(t) && str(t.name) && isRichText(t.text) && (t.effects === undefined || effectsOk(t.effects)) && (t.choices === undefined || choicesOk(t.choices, depth + 1));
 function choicesOk(v: unknown, depth = 0): v is Choice[] {
   return depth <= 8 && Array.isArray(v) && v.every((c) => isRec(c) && str(c.type) && (c.type !== 'option' || (Array.isArray(c.options) && c.options.every((t) => traitOk(t, depth)))));

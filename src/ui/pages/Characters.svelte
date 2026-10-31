@@ -58,7 +58,7 @@
         taken = !!(await db.characters.get(c.id));
       } else {
         const rec = await importRecord(file);
-        if (rec.kind !== 'character') throw new Error('That file is an item. Import it on the Items page (All items tab).');
+        if (rec.kind !== 'character') throw new Error(rec.kind === 'monster' ? 'That file is a monster. Import it on the Monsters page.' : 'That file is an item. Import it on the Items page (All items tab).');
         ({ data: c, taken, playerView } = rec);
       }
       if (c.campaignId && !app.campaigns.some((x) => x.id === c.campaignId)) { c = { ...c }; delete c.campaignId; } // its campaign isn't on this device

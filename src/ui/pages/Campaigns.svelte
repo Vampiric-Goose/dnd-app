@@ -87,7 +87,7 @@
     await run(async () => {
       const n = await applyBackup(p);
       await refreshCampaigns();
-      notice = `Imported ${n.campaigns} campaigns, ${n.characters} characters, ${n.items} items and ${n.packs} books.${n.skippedPacks ? ` Left out ${n.skippedPacks.length} ${n.skippedPacks.length === 1 ? 'pack' : 'packs'} that claim to be the built-in SRD or another reserved source (${n.skippedPacks.join(', ')}).` : ''}${n.skippedItems ? ` Left out ${n.skippedItems.length} ${n.skippedItems.length === 1 ? 'item' : 'items'} from the 2024 rules (${n.skippedItems.join(', ')}).` : ''}`;
+      notice = `Imported ${n.campaigns} campaigns, ${n.characters} characters, ${n.items} items, ${n.monsters} monsters and ${n.packs} books.${n.skippedPacks ? ` Left out ${n.skippedPacks.length} ${n.skippedPacks.length === 1 ? 'pack' : 'packs'} that claim to be the built-in SRD or another reserved source (${n.skippedPacks.join(', ')}).` : ''}${n.skippedItems ? ` Left out ${n.skippedItems.length} ${n.skippedItems.length === 1 ? 'item' : 'items'} from the 2024 rules (${n.skippedItems.join(', ')}).` : ''}${n.skippedMonsters ? ` Left out ${n.skippedMonsters.length} ${n.skippedMonsters.length === 1 ? 'monster' : 'monsters'} from the 2024 rules or damaged (${n.skippedMonsters.join(', ')}).` : ''}`;
     });
     importing = false;
   }
@@ -161,9 +161,10 @@
 {#if plan}
   {@const n = plan.counts}
   <div role="alertdialog" aria-label="Confirm backup import" class="card">
-    <p>This backup holds {n.campaigns} {n.campaigns === 1 ? 'campaign' : 'campaigns'}, {n.characters} {n.characters === 1 ? 'character' : 'characters'}, {n.items} {n.items === 1 ? 'item' : 'items'} and {n.packs} {n.packs === 1 ? 'book' : 'books'}. Matching records are overwritten.</p>
+    <p>This backup holds {n.campaigns} {n.campaigns === 1 ? 'campaign' : 'campaigns'}, {n.characters} {n.characters === 1 ? 'character' : 'characters'}, {n.items} {n.items === 1 ? 'item' : 'items'}, {n.monsters} {n.monsters === 1 ? 'monster' : 'monsters'} and {n.packs} {n.packs === 1 ? 'book' : 'books'}. Matching records are overwritten.</p>
     {#if plan.replaced}<p class="error">{plan.replaced} {plan.replaced === 1 ? 'record on this device' : 'records on this device'} will be replaced ({plan.newer} of them newer).</p>{/if}
     {#if n.skippedItems}<p class="muted">{n.skippedItems.length} {n.skippedItems.length === 1 ? 'item is' : 'items are'} from the 2024 rules and will be left out.</p>{/if}
+    {#if n.skippedMonsters}<p class="muted">{n.skippedMonsters.length} {n.skippedMonsters.length === 1 ? 'monster is' : 'monsters are'} from the 2024 rules or damaged and will be left out.</p>{/if}
     <div class="row">
       <button class="primary" disabled={busy} onclick={confirmImport}>Import backup</button>
       <button disabled={busy} onclick={() => (plan = undefined)}>Cancel</button>

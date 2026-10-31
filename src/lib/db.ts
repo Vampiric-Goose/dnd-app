@@ -1,7 +1,7 @@
 import { is2024, strip2024, stripLoot } from './character/strip2024.ts';
 import { restorablePack } from './content/sources.ts';
 import { deleteDB, openDB, type DBSchema, type IDBPDatabase, type IDBPTransaction, type StoreNames } from 'idb';
-import type { Campaign, Character, Pack, PackMeta, StoredItem } from './types.ts';
+import type { Campaign, Character, Pack, PackMeta, StoredItem, StoredMonster } from './types.ts';
 
 export class StorageError extends Error {
   override name = 'StorageError';
@@ -14,6 +14,7 @@ interface Schema extends DBSchema {
   campaigns: { key: string; value: Campaign };
   characters: { key: string; value: Character; indexes: { campaignId: string } };
   items: { key: string; value: StoredItem; indexes: { campaignId: string } };
+  monsters: { key: string; value: StoredMonster; indexes: { campaignId: string } };
   packMeta: { key: string; value: PackMeta };
   packs: { key: string; value: Pack };
   raw5e: { key: string; value: unknown };
@@ -26,16 +27,19 @@ const NAME = 'dnd-app';
 let conn: Promise<IDBPDatabase<Schema>> | undefined;
 
 function open() {
-  return (conn ??= openDB<Schema>(NAME, 1, {
-    upgrade(d) {
-      d.createObjectStore('campaigns', { keyPath: 'id' });
-      d.createObjectStore('characters', { keyPath: 'id' }).createIndex('campaignId', 'campaignId');
-      d.createObjectStore('items', { keyPath: 'id' }).createIndex('campaignId', 'campaignId');
-      d.createObjectStore('packMeta', { keyPath: 'id' });
-      d.createObjectStore('packs', { keyPath: 'id' });
-      d.createObjectStore('raw5e');
-      d.createObjectStore('blobs', { keyPath: 'hash' });
-      d.createObjectStore('meta');
+  return (conn ??= openDB<Schema>(NAME, 2, {
+    upgrade(d, oldVersion) {
+      if (oldVersion < 1) {
+        d.createObjectStore('campaigns', { keyPath: 'id' });
+        d.createObjectStore('characters', { keyPath: 'id' }).createIndex('campaignId', 'campaignId');
+        d.createObjectStore('items', { keyPath: 'id' }).createIndex('campaignId', 'campaignId');
+        d.createObjectStore('packMeta', { keyPath: 'id' });
+        d.createObjectStore('packs', { keyPath: 'id' });
+        d.createObjectStore('raw5e');
+        d.createObjectStore('blobs', { keyPath: 'hash' });
+        d.createObjectStore('meta');
+      }
+      if (oldVersion < 2) d.createObjectStore('monsters', { keyPath: 'id' }).createIndex('campaignId', 'campaignId'); // stage 2: the DM's own monsters
     },
     terminated() { conn = undefined; },
   }).catch((e) => { conn = undefined; throw e; })); // don't cache a failed open
@@ -86,7 +90,7 @@ function packMeta(p: Pack): PackMeta {
 
 const maybe = <T>(f: (x: T) => T, x: T | undefined) => (x === undefined ? x : f(x));
 
-export interface Snapshot { campaigns: Campaign[]; characters: Character[]; items: StoredItem[]; packs: Pack[]; blobs: BlobRecord[] }
+export interface Snapshot { campaigns: Campaign[]; characters: Character[]; items: StoredItem[]; monsters?: StoredMonster[] /* absent in old backups */; packs: Pack[]; blobs: BlobRecord[] }
 
 export const db = {
   // R54: characters and campaigns pass through strip2024 / stripLoot on every read and write (a read strips only the copy in memory).
@@ -94,11 +98,13 @@ export const db = {
     list: async () => (await (await open()).getAll('campaigns')).map(stripLoot),
     get: async (id: string) => maybe(stripLoot, await (await open()).get('campaigns', id)),
     put: (c: Campaign) => write(['campaigns'], (tx) => tx.objectStore('campaigns').put({ ...stripLoot(c), updatedAt: Date.now() })),
-    /** Removes the campaign and its items; its characters stay, unassigned. */
-    delete: (id: string) => write(['campaigns', 'characters', 'items'], async (tx) => {
+    /** Removes the campaign and its items and monsters; its characters stay, unassigned. */
+    delete: (id: string) => write(['campaigns', 'characters', 'items', 'monsters'], async (tx) => {
       await tx.objectStore('campaigns').delete(id);
       const items = tx.objectStore('items');
       for (const k of await items.index('campaignId').getAllKeys(id)) await items.delete(k);
+      const monsters = tx.objectStore('monsters');
+      for (const k of await monsters.index('campaignId').getAllKeys(id)) await monsters.delete(k);
       const chars = tx.objectStore('characters');
       for (const c of await chars.index('campaignId').getAll(id)) await chars.put({ ...c, campaignId: undefined, updatedAt: Date.now() });
     }),
@@ -121,6 +127,16 @@ export const db = {
     },
     put: (i: StoredItem) => write(['items'], (tx) => tx.objectStore('items').put({ ...i, updatedAt: Date.now() })),
     delete: (id: string) => write(['items'], (tx) => tx.objectStore('items').delete(id)),
+  },
+  monsters: {
+    // R60: a stored 2024 monster is hidden, never deleted, as for items.
+    list: async (campaignId: string) => (await (await open()).getAllFromIndex('monsters', 'campaignId', campaignId)).filter((m) => !is2024(m)),
+    get: async (id: string) => {
+      const m = await (await open()).get('monsters', id);
+      return is2024(m) ? undefined : m;
+    },
+    put: (m: StoredMonster) => write(['monsters'], (tx) => tx.objectStore('monsters').put({ ...m, updatedAt: Date.now() })),
+    delete: (id: string) => write(['monsters'], (tx) => tx.objectStore('monsters').delete(id)),
   },
   packs: {
     listMeta: async (): Promise<PackMeta[]> => (await open()).getAll('packMeta'),
@@ -188,10 +204,10 @@ export const db = {
    * blobs); `newer`: those of them with a later updatedAt than the file's copy. A record with no numeric updatedAt counts only as replaced.
    */
   countReplaced: async (s: Snapshot): Promise<{ replaced: number; newer: number }> => {
-    const tx = (await open()).transaction(['campaigns', 'characters', 'items', 'packs', 'blobs']);
+    const tx = (await open()).transaction(['campaigns', 'characters', 'items', 'monsters', 'packs', 'blobs']);
     let replaced = 0, newer = 0;
-    for (const name of ['campaigns', 'characters', 'items', 'packs'] as const) {
-      for (const r of s[name] as { id: string; updatedAt?: unknown }[]) {
+    for (const name of ['campaigns', 'characters', 'items', 'monsters', 'packs'] as const) {
+      for (const r of (s[name] ?? []) as { id: string; updatedAt?: unknown }[]) {
         const had = (await tx.objectStore(name).get(r.id)) as { updatedAt?: unknown } | undefined;
         if (!had) continue;
         replaced++;
@@ -202,10 +218,11 @@ export const db = {
     return { replaced, newer };
   },
   /** Backup import: one atomic upsert that keeps the records' own updatedAt. */
-  restore: (s: Snapshot) => write(['campaigns', 'characters', 'items', 'packs', 'packMeta', 'blobs'], async (tx) => {
+  restore: (s: Snapshot) => write(['campaigns', 'characters', 'items', 'monsters', 'packs', 'packMeta', 'blobs'], async (tx) => {
     for (const r of s.campaigns) await tx.objectStore('campaigns').put(stripLoot(r));
     for (const r of s.characters) await tx.objectStore('characters').put(strip2024(r));
     for (const r of s.items.filter((i) => !is2024(i))) await tx.objectStore('items').put(r); // R60
+    for (const r of (s.monsters ?? []).filter((m) => !is2024(m))) await tx.objectStore('monsters').put(r); // R60
     for (const p of s.packs.filter(restorablePack)) { // the built-in SRD always comes from the shipped asset (R52)
       await tx.objectStore('packs').put(p);
       await tx.objectStore('packMeta').put(packMeta(p));

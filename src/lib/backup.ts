@@ -2,8 +2,9 @@ import { is2024, strip2024 } from './character/strip2024.ts';
 import { restorablePack } from './content/sources.ts';
 import { db, sha256Hex, type BlobRecord, type Snapshot } from './db.ts';
 import { playerCharacter } from './items/playerView.ts';
+import { soundMonster } from './monsters/homebrew.ts';
 import { campaignProblem, characterProblem, isRec, problem, SHAPES, type Rec } from './recordShape.ts';
-import type { Campaign, Character, Pack, StoredItem } from './types.ts';
+import type { Campaign, Character, Pack, StoredItem, StoredMonster } from './types.ts';
 import { uid } from './uid.ts';
 
 const json = (o: unknown) => new Blob([JSON.stringify(o)], { type: 'application/json' });
@@ -51,15 +52,16 @@ async function blobRecords(o: Rec): Promise<BlobRecord[]> {
 }
 
 /**
- * Whole library, or one campaign (its characters and items, plus the packs it enables when
+ * Whole library, or one campaign (its characters, items and monsters, plus the packs it enables when
  * includePacks). Images always travel with it.
  */
 export async function exportBackup(opts: { campaignId?: string; includePacks: boolean }): Promise<Blob> {
-  let campaigns: Campaign[], characters: Character[], items: StoredItem[], packIds: string[];
+  let campaigns: Campaign[], characters: Character[], items: StoredItem[], monsters: StoredMonster[], packIds: string[];
   if (opts.campaignId === undefined) {
     campaigns = await db.campaigns.list();
     characters = await db.characters.list();
     items = (await Promise.all(campaigns.map((c) => db.items.list(c.id)))).flat();
+    monsters = (await Promise.all(campaigns.map((c) => db.monsters.list(c.id)))).flat();
     packIds = (await db.packs.listMeta()).map((p) => p.id);
   } else {
     const c = await db.campaigns.get(opts.campaignId);
@@ -67,20 +69,21 @@ export async function exportBackup(opts: { campaignId?: string; includePacks: bo
     campaigns = [c];
     characters = await db.characters.list(c.id);
     items = await db.items.list(c.id);
+    monsters = await db.monsters.list(c.id);
     packIds = c.enabledPacks;
   }
   const packs = opts.includePacks ? (await Promise.all(packIds.map((id) => db.packs.get(id)))).filter((p): p is Pack => !!p && restorablePack(p)) : []; // never the cached SRD
   // ponytail: every blob, even for one campaign; filter by referenced hashes once maps make this heavy
   const blobs = (await db.blobs.all()).map(({ hash, type, data }) => ({ hash, type, base64: toBase64(data) }));
   const exportedAt = Date.now();
-  const file = json({ format: 'dnd-app-backup', version: 1, exportedAt, campaigns, characters, items, packs, blobs });
+  const file = json({ format: 'dnd-app-backup', version: 1, exportedAt, campaigns, characters, items, monsters, packs, blobs });
   // The built file must not be lost over a bookkeeping write (a full disk is when you need a backup most).
   // Only a whole-library export counts as "backed up": one campaign's file leaves the rest unprotected.
   if (opts.campaignId === undefined) await db.meta.set('lastBackupAt', exportedAt).catch((err) => console.warn('Could not record backup time', err));
   return file;
 }
 
-export type BackupCounts = { campaigns: number; characters: number; items: number; packs: number; skippedPacks?: string[]; skippedItems?: string[] };
+export type BackupCounts = { campaigns: number; characters: number; items: number; monsters: number; packs: number; skippedPacks?: string[]; skippedItems?: string[]; skippedMonsters?: string[] };
 /** A validated backup waiting for the user's yes (R57). `replaced`: records stored here it would overwrite; `newer`: how many of those are newer than the file's copy. */
 export interface BackupPlan { snapshot: Snapshot; counts: BackupCounts; replaced: number; newer: number }
 
@@ -93,6 +96,7 @@ export async function readBackup(file: Blob): Promise<BackupPlan> {
     campaigns: records<Campaign>(o, 'campaigns', campaignProblem),
     characters: records<Character>(o, 'characters', characterProblem),
     items: records<StoredItem>(o, 'items', (r) => problem(r, SHAPES.item)),
+    monsters: records<StoredMonster>(o, 'monsters', (r) => problem(r, SHAPES.monster)), // missing in backups from before monsters
     packs: records<Pack>(o, 'packs', (r) => problem(r, SHAPES.pack)),
     blobs: await blobRecords(o),
   };
@@ -102,8 +106,11 @@ export async function readBackup(file: Blob): Promise<BackupPlan> {
   // R60: nor a 2024 item (by source, id or base item); also reported.
   const skippedItems = snapshot.items.filter(is2024).map((i) => i.id);
   snapshot.items = snapshot.items.filter((i) => !is2024(i));
-  const counts = { campaigns: snapshot.campaigns.length, characters: snapshot.characters.length, items: snapshot.items.length, packs: snapshot.packs.length,
-    ...(skippedPacks.length && { skippedPacks }), ...(skippedItems.length && { skippedItems }) };
+  // R60: and the same for monsters: a 2024 one, or one the stat block could not read.
+  const skippedMonsters = snapshot.monsters.filter((m) => is2024(m) || !soundMonster(m)).map((m) => m.id);
+  snapshot.monsters = snapshot.monsters.filter((m) => !is2024(m) && soundMonster(m));
+  const counts = { campaigns: snapshot.campaigns.length, characters: snapshot.characters.length, items: snapshot.items.length, monsters: snapshot.monsters.length, packs: snapshot.packs.length,
+    ...(skippedPacks.length && { skippedPacks }), ...(skippedItems.length && { skippedItems }), ...(skippedMonsters.length && { skippedMonsters }) };
   return { snapshot, counts, ...(await db.countReplaced(snapshot)) };
 }
 
@@ -114,7 +121,7 @@ export async function applyBackup(plan: BackupPlan): Promise<BackupCounts> {
 }
 
 /** R51: a character exported in Player view is the player-safe copy, and the file says so (`viewer`), so an import can warn. */
-export function exportRecord(kind: 'character' | 'item', data: Character | StoredItem, viewer: 'dm' | 'player' = 'dm'): Blob {
+export function exportRecord(kind: 'character' | 'item' | 'monster', data: Character | StoredItem | StoredMonster, viewer: 'dm' | 'player' = 'dm'): Blob {
   const safe = kind === 'character' && viewer === 'player';
   return json({ format: `dnd-app-${kind}`, version: 1, data: safe ? playerCharacter(data as Character) : data, ...(safe && { viewer }) });
 }
@@ -123,12 +130,17 @@ export function exportRecord(kind: 'character' | 'item', data: Character | Store
  * Reads a single-record file. Does not save it: the caller puts the result. `taken` says the id already exists locally;
  * the caller must then ask (R49) and either put it over the old one or put `keepBoth(data)`. Nothing is overwritten here.
  */
-export async function importRecord(file: Blob): Promise<{ kind: 'character'; data: Character; taken: boolean; playerView: boolean } | { kind: 'item'; data: StoredItem; taken: boolean; playerView: boolean }> {
+export async function importRecord(file: Blob): Promise<{ kind: 'character'; data: Character; taken: boolean; playerView: boolean } | { kind: 'item'; data: StoredItem; taken: boolean; playerView: boolean } | { kind: 'monster'; data: StoredMonster; taken: boolean; playerView: false }> {
   const o = await parse(file);
-  const kind = o?.format === 'dnd-app-character' ? 'character' : o?.format === 'dnd-app-item' ? 'item' : undefined;
-  if (!o || !kind || o.version !== 1) throw new Error('Not a dnd-app character or item file');
-  const why = kind === 'character' ? characterProblem(o.data) : problem(o.data, SHAPES.item);
+  const kind = o?.format === 'dnd-app-character' ? 'character' : o?.format === 'dnd-app-item' ? 'item' : o?.format === 'dnd-app-monster' ? 'monster' : undefined;
+  if (!o || !kind || o.version !== 1) throw new Error('Not a dnd-app character, item or monster file');
+  const why = kind === 'character' ? characterProblem(o.data) : problem(o.data, SHAPES[kind]) ?? (kind === 'monster' && !soundMonster(o.data) ? 'is damaged' : undefined);
   if (why) throw new Error(`Record file is damaged: ${kind} ${why}`);
+  if (kind === 'monster') {
+    if (is2024(o.data)) throw new Error('This monster is from the 2024 rules, which this app does not use.'); // R60
+    const data = o.data as StoredMonster;
+    return { kind, data, taken: !!(await db.monsters.get(data.id)), playerView: false };
+  }
   const data = kind === 'character' ? strip2024(o.data as Character) : o.data as StoredItem; // R54
   const taken = !!(await (kind === 'character' ? db.characters.get(data.id) : db.items.get(data.id)));
   return { kind, data, taken, playerView: kind === 'character' && o.viewer === 'player' } as { kind: 'character'; data: Character; taken: boolean; playerView: boolean } | { kind: 'item'; data: StoredItem; taken: boolean; playerView: boolean };

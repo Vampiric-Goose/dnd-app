@@ -12,6 +12,7 @@ export const SHAPES = {
   campaign: { objs: ['settings'], arrs: ['enabledPacks', 'loot'] },
   character: { objs: ['build', 'state'], arrs: ['inventory'] },
   item: { kind: 'item' },
+  monster: { kind: 'monster' },
   pack: { arrs: ['entities', 'patches'] },
 } satisfies Record<string, Shape>;
 
