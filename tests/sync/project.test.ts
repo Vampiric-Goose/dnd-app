@@ -6,7 +6,7 @@ import { characterProblem } from '../../src/lib/recordShape.ts';
 import { DEFAULT_SETTINGS } from '../../src/lib/settings.ts';
 import { hlcCompare, hlcNow } from '../../src/lib/sync/hlc.ts';
 import { latestClock, mergeCharacter, stamp } from '../../src/lib/sync/merge.ts';
-import { campaignForPlayers, characterForPlayer, packForPlayers, rosterEntry } from '../../src/lib/sync/project.ts';
+import { campaignForPlayers, characterForPlayer, packForPlayers, rosterEntry, unprojectCharacter } from '../../src/lib/sync/project.ts';
 import type { Campaign, Entity, ItemDef, Pack } from '../../src/lib/types.ts';
 import { fixtureIndex, mkChar } from '../fixtures/content.ts';
 import { camp, char } from '../fixtures/records.ts';
@@ -107,6 +107,33 @@ describe('player projections', () => {
     for (const secret of ['Venom', 'venom', 'deadly', 'uncommon']) expect(json).not.toContain(secret);
     expect(out.inventory[0].item.name).toBe('Cloudy red potion');
     expect(out.sync).toEqual(c.sync);
+  });
+
+  test('R8 unprojectCharacter: a player copy merged back keeps the real hidden item, its view, sourceId and hidden charges, and the play state', () => {
+    const potion: ItemDef = { kind: 'item', id: 'item:potion-of-venom@DMG', name: 'Potion of Venom', source: 'DMG', text: [{ p: 'Looks like healing. {{redact:r1}}It is deadly venom.{{/redact}}' }],
+      type: 'potion', magic: true, rarity: 'uncommon', consumable: true };
+    const wand: ItemDef = { kind: 'item', id: 'item:wand-of-secrets@DMG', name: 'Wand of Secrets', source: 'DMG', text: [], type: 'wand', magic: true, charges: { max: 3, recharge: 'dawn' } };
+    const view = { name: 'Zinc vial', hidden: ['rarity' as const], revealed: [] };
+    const dm = stamp(undefined, { ...char('a', 'c1'), ownerId: 'A1', inventory: [
+      makeEntry(potion, { sourceId: potion.id, view }),
+      { ...makeEntry(wand, { view: { hidden: ['charges'], revealed: [] } }), chargesUsed: 2 },
+    ] }, hlcNow('dmnode01', undefined, 1000));
+    const sent = characterForPlayer(dm);
+    expect(sent.inventory[1].chargesUsed).toBe(0);
+
+    // unchanged copy: equal clocks would fall to the canonical tie-break, which the cover name can win
+    expect(mergeCharacter(dm, unprojectCharacter(sent, dm)).inventory).toEqual(dm.inventory);
+    expect(mergeCharacter(dm, sent).inventory[0].item.name).not.toBe('Potion of Venom'); // what R8 prevents
+
+    // a player edit of both entries (quantity, notes) has the later clock
+    const edited = stamp(sent, { ...sent, inventory: sent.inventory.map((e) => ({ ...e, quantity: 3, notes: 'mine' })) }, hlcNow('a1node01', undefined, 2000));
+    const merged = mergeCharacter(dm, unprojectCharacter(edited, dm));
+    expect(merged.inventory.map((e) => [e.item.name, e.quantity, e.notes, e.chargesUsed])).toEqual([['Potion of Venom', 3, 'mine', 0], ['Wand of Secrets', 3, 'mine', 2]]);
+    expect(merged.inventory[0].view).toEqual(view);
+    expect(merged.inventory[0].sourceId).toBe(potion.id);
+    // an entry the DM never had stays as the player sent it
+    const extra = makeEntry({ ...wand, id: 'item:stick@HOMEBREW', name: 'Stick', source: 'Homebrew' });
+    expect(unprojectCharacter({ ...edited, inventory: [...edited.inventory, extra] }, dm).inventory[2]).toEqual(extra);
   });
 
   test('rosterEntry: name, race, "Fighter 3", level, HP and conditions, nothing else', () => {

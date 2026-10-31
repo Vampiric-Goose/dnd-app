@@ -26,7 +26,7 @@ const SPLIT = ['build', 'state', 'details', 'currency'] as const;
 export const SYNC_PATHS: readonly string[] = [...TOP, ...SPLIT.map((k) => `${k}.*`), 'inventory/*', 'order/*'];
 
 /** JSON with object keys sorted, so equal values compare equal whatever order their keys were written in. */
-const canon = (v: unknown): string => JSON.stringify(v, (_, x) =>
+export const canon = (v: unknown): string => JSON.stringify(v, (_, x) =>
   typeof x === 'object' && x !== null && !Array.isArray(x) ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) : x) ?? '';
 
 /** Does (c1, v1) beat (c2, v2)? The later clock; on a tie (two unstamped copies, say) the larger value, so the choice is symmetric. */

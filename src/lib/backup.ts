@@ -149,24 +149,7 @@ export async function importRecord(file: Blob): Promise<{ kind: 'character'; dat
   return { kind, data, taken, playerView: kind === 'character' && o.viewer === 'player' } as { kind: 'character'; data: Character; taken: boolean; playerView: boolean } | { kind: 'item'; data: StoredItem; taken: boolean; playerView: boolean };
 }
 
-/**
- * R56: "Replace" with a Player-view file (JSON or PDF). The file holds player-safe copies of items, so every entry the stored character
- * also has (same entry id) gets back its real `item`, `view` and `sourceId`; the file's play state (quantity, equipped, attuned,
- * chargesUsed, notes) is kept. Entries only in the file stay as they are.
- */
-export function restoreSecrets(imported: Character, stored: Character): Character {
-  const real = new Map(stored.inventory.map((e) => [e.id, e]));
-  return {
-    ...imported,
-    inventory: imported.inventory.map((e) => {
-      const s = real.get(e.id);
-      if (!s) return e;
-      const { view: _v, sourceId: _s, ...play } = e;
-      // R60/3: hidden charges reach the file with no count (I8), so the stored count stays; shown charges take the file's.
-      return { ...play, item: s.item, chargesUsed: e.item.charges ? e.chargesUsed : s.chargesUsed, ...(s.view && { view: s.view }), ...(s.sourceId !== undefined && { sourceId: s.sourceId }) };
-    }),
-  };
-}
+export { restoreSecrets } from './items/playerView.ts'; // R56; moved there so the sync engine can use it (stage 3)
 
 /** R49 "Keep both": the imported record under a fresh id, so the existing one stays. "Replace" is the record as it is. */
 export const keepBoth = <T extends { id: string }>(r: T): T => ({ ...r, id: uid() });

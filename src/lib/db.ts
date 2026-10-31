@@ -1,9 +1,10 @@
 import { is2024, strip2024, stripLoot } from './character/strip2024.ts';
 import { restorablePack } from './content/sources.ts';
 import { deleteDB, openDB, type DBSchema, type IDBPDatabase, type IDBPTransaction, type StoreNames } from 'idb';
+import { newNode } from './sync/code.ts';
 import { hlcNow, hlcReceive } from './sync/hlc.ts';
 import { latestClock, stamp as stampSync } from './sync/merge.ts';
-import type { Campaign, Character, Pack, PackMeta, StoredItem, StoredMonster } from './types.ts';
+import type { Campaign, CampaignSync, Character, Pack, PackMeta, StoredItem, StoredMonster } from './types.ts';
 
 export class StorageError extends Error {
   override name = 'StorageError';
@@ -117,6 +118,19 @@ async function putCharacter(tx: CharTx, c: Character, network = false): Promise<
   await tx.objectStore('characters').put({ ...rec, updatedAt: Date.now() });
 }
 
+type CampTx = IDBPTransaction<Schema, ('campaigns' | 'characters')[] | 'campaigns'[], 'readwrite'>;
+/**
+ * R4: an ordinary campaign write (settings, loot) never touches `sync`: the stored one is kept, so a stale copy in memory cannot roll
+ * back the clock, the players or the tombstones. A campaign written for the first time keeps the sync it carries.
+ */
+async function putCampaign(tx: CampTx, c: Campaign): Promise<void> {
+  const store = tx.objectStore('campaigns');
+  const had = await store.get(c.id);
+  const { sync: _s, ...rest } = stripLoot(c);
+  const sync = had ? had.sync : c.sync;
+  await store.put({ ...rest, ...(sync && { sync }), updatedAt: Date.now() });
+}
+
 export interface Snapshot { campaigns: Campaign[]; characters: Character[]; items: StoredItem[]; monsters?: StoredMonster[] /* absent in old backups */; packs: Pack[]; blobs: BlobRecord[] }
 
 type Stamped = { id: string; updatedAt?: unknown; importedAt?: unknown };
@@ -127,7 +141,16 @@ export const db = {
   campaigns: {
     list: async () => (await (await open()).getAll('campaigns')).map(stripLoot),
     get: async (id: string) => maybe(stripLoot, await (await open()).get('campaigns', id)),
-    put: (c: Campaign) => write(['campaigns'], (tx) => tx.objectStore('campaigns').put({ ...stripLoot(c), updatedAt: Date.now() })),
+    put: (c: Campaign) => write(['campaigns'], (tx) => putCampaign(tx, c)),
+    /** R4: the only way to change a stored campaign's sync: `fn` gets the stored sync and returns the new one, in one transaction. */
+    updateSync: (id: string, fn: (s: CampaignSync | undefined) => CampaignSync | undefined) => write(['campaigns'], async (tx) => {
+      const store = tx.objectStore('campaigns');
+      const c = await store.get(id);
+      if (!c) throw new Error('Campaign not found');
+      const { sync: old, ...rest } = c;
+      const sync = fn(old);
+      await store.put({ ...rest, ...(sync && { sync }) });
+    }),
     /** Removes the campaign and its items and monsters; its characters stay, unassigned. */
     delete: (id: string) => write(['campaigns', 'characters', 'items', 'monsters'], async (tx) => {
       await tx.objectStore('campaigns').delete(id);
@@ -149,7 +172,17 @@ export const db = {
     put: (c: Character) => write(['characters', 'campaigns'], (tx) => putCharacter(tx, c)),
     /** R2: a merged record from sync. Never stamped, so saving a merge creates no new clocks (and no echo back to the peers). */
     putSynced: (c: Character) => write(['characters', 'campaigns'], (tx) => putCharacter(tx, c, true)),
-    delete: (id: string) => write(['characters'], (tx) => tx.objectStore('characters').delete(id)),
+    /** In a synced campaign the deletion is also recorded as a tombstone in campaign.sync.deleted, so it sticks on every device. */
+    delete: (id: string) => write(['characters', 'campaigns'], async (tx) => {
+      const c = await tx.objectStore('characters').get(id);
+      const camp = c?.campaignId === undefined ? undefined : await tx.objectStore('campaigns').get(c.campaignId);
+      const sync = camp?.sync;
+      if (camp && sync) {
+        const at = hlcNow(sync.node, sync.last);
+        await tx.objectStore('campaigns').put({ ...camp, sync: { ...sync, last: at, deleted: { ...sync.deleted, [id]: at } } });
+      }
+      await tx.objectStore('characters').delete(id);
+    }),
   },
   items: {
     // R60: a stored 2024 item (an old import, a crafted file) is hidden, never deleted, like R54's stripping.
@@ -230,7 +263,7 @@ export const db = {
   /** R44: characters and a campaign in one transaction (an item transfer touches both sides), stamping updatedAt like put. */
   // The campaign goes first so the characters' stamping reads (and advances) the clock of the campaign as saved here.
   saveTogether: ({ characters = [], campaign }: { characters?: Character[]; campaign?: Campaign }) => write(['characters', 'campaigns'], async (tx) => {
-    if (campaign) await tx.objectStore('campaigns').put({ ...stripLoot(campaign), updatedAt: Date.now() });
+    if (campaign) await putCampaign(tx, campaign);
     for (const c of characters) await putCharacter(tx, c);
   }),
   /**
@@ -254,7 +287,8 @@ export const db = {
   },
   /** Backup import: one atomic upsert that keeps the records' own updatedAt. */
   restore: (s: Snapshot) => write(['campaigns', 'characters', 'items', 'monsters', 'packs', 'packMeta', 'blobs'], async (tx) => {
-    for (const r of s.campaigns) await tx.objectStore('campaigns').put(stripLoot(r));
+    // R5: a restored synced campaign gets a new clock node, so two devices restored from one file never stamp as the same node.
+    for (const r of s.campaigns) await tx.objectStore('campaigns').put(stripLoot(r.sync ? { ...r, sync: { ...r.sync, node: newNode() } } : r));
     for (const r of s.characters) await tx.objectStore('characters').put(strip2024(r));
     for (const r of s.items.filter((i) => !is2024(i))) await tx.objectStore('items').put(r); // R60
     for (const r of (s.monsters ?? []).filter((m) => !is2024(m))) await tx.objectStore('monsters').put(r); // R60

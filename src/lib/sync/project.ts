@@ -2,7 +2,7 @@
 // no loot (R50), no sync secrets or player list, no monsters, no item secrets (R51), only summaries of other players' characters.
 import { entityAllowed, packAllowed, patchAllowed } from '../content/sources.ts';
 import type { ContentIndex } from '../content/index.ts';
-import { playerCharacter } from '../items/playerView.ts';
+import { playerCharacter, restoreSecrets } from '../items/playerView.ts';
 import { computeSheet } from '../rules/sheet.ts';
 import type { Campaign, CampaignSettings, Character, Pack } from '../types.ts';
 import type { Synced } from './merge.ts';
@@ -41,3 +41,10 @@ export function packForPlayers(p: Pack): Pack | undefined {
 
 /** A player's own character as sent to them: `playerCharacter` (item player views only, R51), with its sync meta. */
 export const characterForPlayer = (c: Synced<Character>): Synced<Character> => playerCharacter(c);
+
+/**
+ * R8: the inverse of characterForPlayer for a character coming back from its player. Every entry the DM's stored copy also has gets back
+ * its real `item`, `view` and `sourceId`, and its stored `chargesUsed` when the player view hid the charges (R56's rule). The player's play
+ * state (quantity, equipped, attuned, notes) is kept, and entries new to the DM stay as they are. The host runs it before mergeCharacter.
+ */
+export const unprojectCharacter = (incoming: Synced<Character>, stored: Synced<Character>): Synced<Character> => restoreSecrets(incoming, stored);
