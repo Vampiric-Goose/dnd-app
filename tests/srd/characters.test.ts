@@ -1,8 +1,9 @@
 import fs from 'node:fs';
 import { expect, test } from 'vitest';
 import { effectTarget, SRD_EFFECTS } from '../../scripts/srd/effects.ts';
-import { addLevel, answerChoice, embedContent, listChoices, newCharacter } from '../../src/lib/character/build.ts';
+import { addLevel, answerChoice, embedContent, listChoices, newCharacter, validateCharacter } from '../../src/lib/character/build.ts';
 import { ContentIndex } from '../../src/lib/content/index.ts';
+import { import5etools } from '../../src/lib/import/fivetools/index.ts';
 import { makeEntry } from '../../src/lib/items/inventory.ts';
 import { computeSheet } from '../../src/lib/rules/sheet.ts';
 import { DEFAULT_SETTINGS } from '../../src/lib/settings.ts';
@@ -67,4 +68,29 @@ test('every authored SRD id exists', () => {
     expect(idx.get(id.split('/')[0]), id).toBeDefined();
     expect(effectTarget(x => idx.get(x), id), id).toBeDefined(); // R8: the trait/option sub-path resolves too
   }
+});
+
+test('R55 with PHB-shaped races imported: a standard Human, Half-Elf or Tiefling needs no subrace; the SRD Dwarf still does', async () => {
+  // Shaped like 5etools races.json: PHB races overlap the SRD (patches), each has a nameless "no subrace" entry, and Variants and
+  // other books' subraces point at them. Text is placeholder.
+  const sub = (name: string | undefined, raceName: string, source: string) => ({ ...(name && { name }), source, raceName, raceSource: 'PHB', entries: ['x'] });
+  const race = (name: string) => ({ name, source: 'PHB', srd: true, size: ['M'], speed: 30, entries: ['x'] });
+  const files = [{ name: 'races.json', json: {
+    race: [race('Human'), race('Half-Elf'), race('Tiefling'), race('Dwarf')],
+    subrace: [sub(undefined, 'Human', 'PHB'), sub('Variant', 'Human', 'PHB'), sub('Mark of Making', 'Human', 'ERLW'),
+      sub(undefined, 'Half-Elf', 'PHB'), sub('Variant; Drow Descent', 'Half-Elf', 'SCAG'),
+      sub(undefined, 'Tiefling', 'PHB'), sub('Asmodeus', 'Tiefling', 'MTF'),
+      { ...sub('Hill', 'Dwarf', 'PHB'), srd: true }, sub('Mountain', 'Dwarf', 'PHB'), sub('Duergar', 'Dwarf', 'MTF')],
+  } }];
+  const r = await import5etools(files, { index: idx, rawLookup: async () => undefined });
+  expect(r.errors).toEqual([]);
+  const all = new ContentIndex([srd, ...r.packs]);
+  expect(all.all('subrace').some(s => s.raceId === 'race:human@SRD' && s.source === 'PHB')).toBe(true); // the PHB Variant points at the SRD Human
+  const raceProblems = (raceId: string) => {
+    const blank = newCharacter('T');
+    const c = addLevel({ ...blank, build: { ...blank.build, raceId } }, 'class:fighter@SRD', all, settings).character;
+    return validateCharacter(c, all, settings).filter(p => p.step === 'race').map(p => p.message);
+  };
+  for (const id of ['race:human@SRD', 'race:half-elf@SRD', 'race:tiefling@SRD']) expect(raceProblems(id), id).toEqual([]);
+  expect(raceProblems('race:dwarf@SRD')).toEqual(['Choose a Dwarf subrace']);
 });

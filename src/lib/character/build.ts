@@ -165,7 +165,8 @@ export function validateCharacter(c: Character, index: ContentIndex, settings: C
 
   const race = getKind(lookup, b.raceId, 'race');
   if (!race) add('race', b.raceId ? `Missing race ${b.raceId}` : 'Choose a race');
-  else if (!b.subraceId && index.all('subrace').some(s => lookup(s.raceId)?.id === race.id)) add('race', `Choose a ${race.name} subrace`);
+  // R55: only a subrace from the race's own source makes one required (a PHB Variant or another book's subrace is optional).
+  else if (!b.subraceId && index.all('subrace').some(s => s.source === race.source && lookup(s.raceId)?.id === race.id)) add('race', `Choose a ${race.name} subrace`);
   if (b.subraceId && !getKind(lookup, b.subraceId, 'subrace')) add('race', `Missing subrace ${b.subraceId}`);
   if (b.customOrigin && !settings.customOrigin) add('race', 'Customizing your origin is off in this campaign');
 

@@ -5,7 +5,7 @@ import { DEFAULT_SETTINGS } from '../../src/lib/settings.ts';
 import { enumerateChoices } from '../../src/lib/character/choices.ts';
 import type { ClassDef, Entity, OptionalFeatureDef } from '../../src/lib/types.ts';
 import { ContentIndex } from '../../src/lib/content/index.ts';
-import { cleric, fixtureEntities, fixtureIndex, magicMissile, mkChar } from '../fixtures/content.ts';
+import { cleric, fixtureEntities, fixtureIndex, hillDwarf, magicMissile, mkChar } from '../fixtures/content.ts';
 
 const idx = fixtureIndex(), S = DEFAULT_SETTINGS;
 test('choices appear per level and after subclass', () => {
@@ -150,4 +150,12 @@ test('embedding makes the sheet independent of the index', () => {
   const before = computeSheet(c, { settings: S, viewer: 'dm' });
   expect(computeSheet(JSON.parse(JSON.stringify(c)), { settings: S, viewer: 'dm' })).toEqual(before);
   expect(spellLimits(c, S)[0]).toMatchObject({ cantrips: 3, prepared: 6, maxLevel: 2 });
+});
+test('R55: a subrace is required only when one from the race\'s own source points at it', () => {
+  // A 5etools-style race: its nameless "no subrace" entry was dropped on import, leaving only a Variant from another book.
+  const variant = { ...hillDwarf, id: 'subrace:variant-human@OTH', name: 'Variant Human', source: 'OTH', raceId: 'race:human@FIX' };
+  const ix = new ContentIndex([{ id: 'p', name: 'p', source: 'FIX', importedAt: 0, hash: '', patches: [], entities: [...fixtureEntities, variant] }]);
+  const race = (c: ReturnType<typeof mkChar>) => validateCharacter(c, ix, S).filter(p => p.step === 'race').map(p => p.message);
+  expect(race(mkChar({ race: 'human', base: {}, levels: ['fighter'] }))).toEqual([]);
+  expect(race(mkChar({ race: 'dwarf', base: {}, levels: ['fighter'] }))).toEqual(['Choose a Dwarf subrace']); // Hill Dwarf shares the race's source
 });
