@@ -5,7 +5,8 @@ const RESERVED = /^(con|prn|aux|nul|com\d|lpt\d)$/i; // Windows device names
 /** `name.ext` safe on Windows: invalid characters and trailing dots or spaces removed, `fallback` when nothing is left. */
 export function fileName(name: string, ext: string, fallback = 'character'): string {
   const base = name.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '').trim().slice(0, 100).replace(/[. ]+$/, '');
-  return `${!base || RESERVED.test(base) ? fallback : base}.${ext}`;
+  const device = RESERVED.test(base.split('.')[0].trim()); // Windows treats "con.foo" as the device CON too
+  return `${!base || device ? fallback : base}.${ext}`;
 }
 
 export function download(blob: Blob, name: string): void {

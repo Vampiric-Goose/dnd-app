@@ -1,4 +1,5 @@
 import { APP_NAME } from '../app.ts';
+import { playerCharacter } from '../items/playerView.ts';
 import type { CampaignSettings, Character, ItemDef, Sheet } from '../types.ts';
 import { addDataField, appFieldValues, drawCharacter, drawItem, encodeEnvelope, itemFieldValues, type Viewer } from './appLayout.ts';
 
@@ -6,11 +7,12 @@ import { addDataField, appFieldValues, drawCharacter, drawItem, encodeEnvelope, 
 
 /**
  * The character in our own sheet layout. The visible fields show `sheet` as `opts.viewer` sees it; the hidden `app.data` field
- * holds the whole character (exactly what the JSON export holds), plus the settings and viewer the sheet was computed with,
- * so a re-import can tell a value someone edited in a PDF reader from one the engine derives.
+ * holds the character (the real one for the DM; for a player the player-safe copy, R51), plus the settings and viewer the sheet
+ * was computed with, so a re-import can tell a value someone edited in a PDF reader from one the engine derives.
  */
-export async function exportCharacterPdf(c: Character, sheet: Sheet, opts: { viewer?: Viewer; settings?: CampaignSettings } = {}): Promise<Uint8Array> {
+export async function exportCharacterPdf(real: Character, sheet: Sheet, opts: { viewer?: Viewer; settings?: CampaignSettings } = {}): Promise<Uint8Array> {
   const lib = await import('pdf-lib');
+  const c = opts.viewer === 'player' ? playerCharacter(real) : real;
   const doc = await lib.PDFDocument.create();
   doc.setTitle(`${c.name || 'Character'} (${APP_NAME})`);
   doc.setCreator(APP_NAME);

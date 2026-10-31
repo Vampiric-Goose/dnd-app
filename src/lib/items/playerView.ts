@@ -1,6 +1,6 @@
 import { slug } from '../content/ids.ts';
 import { redact, redactionIds } from '../content/richtext.ts';
-import type { Choice, HideableField, InventoryEntry, ItemDef, PlayerView, RichText } from '../types.ts';
+import type { Character, Choice, HideableField, InventoryEntry, ItemDef, PlayerView, RichText } from '../types.ts';
 
 // Pure (no Svelte/Vite/DOM): shared with Node scripts. Nothing here mutates its arguments.
 
@@ -90,3 +90,21 @@ export const pruneRevealed = (item: ItemDef, view: PlayerView): PlayerView => {
 
 /** The player now knows everything, all at once. */
 export const identify = (entry: InventoryEntry): InventoryEntry => ({ ...entry, view: revealedView(entry.item) });
+
+/**
+ * R51: the character as its player may carry it away (a Player-view export). Every item is `playerItem(item, view)`, and the entry's
+ * `view` (which holds the hidden list and revealed ids) and the `sourceId` of a covered item (a real id) are dropped. The sheet the
+ * player sees is unchanged: `computeSheet(playerCharacter(c), player)` equals `computeSheet(c, player)`.
+ */
+export function playerCharacter(c: Character): Character {
+  return {
+    ...c,
+    inventory: c.inventory.map(({ view, sourceId, ...e }) => {
+      const item = playerItem(e.item, view);
+      // `active` (equipped, and attuned if the item needs it) is read from the real item. If its attunement is hidden, a worn but
+      // unattuned item would turn active in the copy, so the bare requirement stays (the text of it, "by a wizard", does not).
+      if (e.equipped && !e.attuned && e.item.attunement && !item.attunement) item.attunement = true;
+      return { ...e, item, ...(sourceId !== undefined && view?.name === undefined && { sourceId }) };
+    }),
+  };
+}

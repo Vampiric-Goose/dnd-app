@@ -28,7 +28,9 @@
   const campaignName = (id?: string) => app.campaigns.find((x) => x.id === id)?.name;
 
   // R49: an imported character whose id is already stored waits here until the user picks Replace or Keep both.
-  let clash: { c: Character; edits: string[]; existing: string } | undefined = $state.raw();
+  let clash: { c: Character; edits: string[]; existing: string; playerView: boolean } | undefined = $state.raw();
+  let keepBtn: HTMLButtonElement | undefined = $state();
+  $effect(() => { if (clash) keepBtn?.focus(); }); // the dialog takes focus; Escape (below) cancels
 
   const isPdf = (f: File) => f.type === 'application/pdf' || /\.pdf$/i.test(f.name);
 
@@ -39,21 +41,22 @@
     error = notice = '';
     clash = undefined;
     try {
-      let c: Character, edits: string[] = [], taken: boolean;
+      let c: Character, edits: string[] = [], taken: boolean, playerView = false;
       if (isPdf(file)) {
         const { importPdf } = await import('../../lib/pdf/importPdf.ts'); // pdf-lib's own chunk, loaded only now
-        const rec = await importPdf(new Uint8Array(await file.arrayBuffer()), await getFullIndex().catch(() => undefined));
+        const rec = await importPdf(new Uint8Array(await file.arrayBuffer()), () => getFullIndex().catch(() => undefined)); // the index loads only if a field map needs it
         if (rec.kind !== 'character') throw new Error('That file is an item. Import it on the Items page.');
         c = rec.data;
         edits = rec.edits;
+        playerView = !!rec.playerView;
         taken = !!(await db.characters.get(c.id));
       } else {
         const rec = await importRecord(file);
         if (rec.kind !== 'character') throw new Error('That file is an item. Import it on the Items page.');
-        ({ data: c, taken } = rec);
+        ({ data: c, taken, playerView } = rec);
       }
       if (c.campaignId && !app.campaigns.some((x) => x.id === c.campaignId)) { c = { ...c }; delete c.campaignId; } // its campaign isn't on this device
-      if (taken) clash = { c, edits, existing: (await db.characters.get(c.id))?.name || 'Unnamed' };
+      if (taken) clash = { c, edits, existing: (await db.characters.get(c.id))?.name || 'Unnamed', playerView };
       else await save(c, edits);
     } catch (err) {
       error = message(err);
@@ -94,12 +97,14 @@
 {#if error}<p role="alert" class="error">{error}</p>{/if}
 {#if notice}<p role="status">{notice}</p>{/if}
 {#if clash}
-  <div role="alertdialog" aria-label="Character already exists" class="card">
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions (Escape bubbles up from the dialog's own buttons) -->
+  <div role="alertdialog" aria-label="Character already exists" class="card" tabindex="-1" onkeydown={(e) => e.key === 'Escape' && (clash = undefined)}>
     <p>You already have a character with this id: “{clash.existing}”. Replace “{clash.existing}” with the imported “{clash.c.name || 'Unnamed'}”, or keep both?</p>
+    {#if clash.playerView}<p class="error" role="note">This file was exported in Player view; secret item details are not in it.</p>{/if}
     {#if clash.edits.length}<p class="muted">Changes made in the PDF: {clash.edits.join(', ')}.</p>{/if}
     <div class="row">
       <button class="danger" onclick={() => resolveClash('replace')}>Replace “{clash.existing}”</button>
-      <button class="primary" onclick={() => resolveClash('keep')}>Keep both</button>
+      <button class="primary" bind:this={keepBtn} onclick={() => resolveClash('keep')}>Keep both</button>
       <button onclick={() => (clash = undefined)}>Cancel</button>
     </div>
   </div>

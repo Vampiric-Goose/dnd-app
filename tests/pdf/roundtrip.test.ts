@@ -68,20 +68,20 @@ test('a corrupt or foreign app.data is rejected with a clear message', async () 
   await expect(importPdf(new TextEncoder().encode('definitely not a pdf'))).rejects.toThrow('not a readable PDF');
 });
 
-test('a player export shows covered names on the page (R48) but embeds the character as the JSON export does', async () => {
+test('a player export shows covered names on the page (R48) and embeds only the player-safe copy (R51)', async () => {
   const { PDFDocument } = await import('pdf-lib');
   const p = embedContent(mkChar({ race: 'dwarf', subrace: 'hill-dwarf', base: {}, levels: ['fighter'], inventory: [['potion-of-poison', false, false, { name: 'Cloudy red potion', hidden: [], revealed: [] }]] }), fixtureIndex());
   const opts = { viewer: 'player' as const, settings: DEFAULT_SETTINGS };
   const bytes = await exportCharacterPdf(p, computeSheet(p, opts), opts);
   const shown = (await PDFDocument.load(bytes)).getForm().getTextField('app.inventory').getText();
   expect(shown).toBe('1 x Cloudy red potion');
-  expect(((await importPdf(bytes)).data as Character).inventory[0].item.name).toBe('Potion of Poison');
+  expect(((await importPdf(bytes)).data as Character).inventory[0].item.name).toBe('Cloudy red potion');
   expect((await importPdf(bytes) as { edits: string[] }).edits).toEqual([]);
 });
 
 test('download file names are safe on Windows', () => {
   expect(fileName('Bruni: "the <Bold>"', 'pdf')).toBe('Bruni the Bold.pdf');
-  expect(fileName('a/b\c|d?e*f', 'json')).toBe('abcdef.json');
+  expect(fileName('a/b\\c|d?e*f', 'json')).toBe('abcdef.json');
   for (const bad of ['', '   ', '...', 'CON', 'nul', '???']) expect(fileName(bad, 'pdf')).toBe('character.pdf');
   expect(fileName('Ends with dot.', 'pdf')).toBe('Ends with dot.pdf');
 });

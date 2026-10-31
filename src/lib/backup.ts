@@ -1,4 +1,5 @@
 import { db, sha256Hex, type BlobRecord } from './db.ts';
+import { playerCharacter } from './items/playerView.ts';
 import { isRec, problem, SHAPES, type Rec, type Shape } from './recordShape.ts';
 import type { Campaign, Character, Pack, StoredItem } from './types.ts';
 
@@ -92,15 +93,17 @@ export async function importBackup(file: Blob): Promise<{ campaigns: number; cha
   return { campaigns: snapshot.campaigns.length, characters: snapshot.characters.length, items: snapshot.items.length, packs: snapshot.packs.length };
 }
 
-export function exportRecord(kind: 'character' | 'item', data: Character | StoredItem): Blob {
-  return json({ format: `dnd-app-${kind}`, version: 1, data });
+/** R51: a character exported in Player view is the player-safe copy, and the file says so (`viewer`), so an import can warn. */
+export function exportRecord(kind: 'character' | 'item', data: Character | StoredItem, viewer: 'dm' | 'player' = 'dm'): Blob {
+  const safe = kind === 'character' && viewer === 'player';
+  return json({ format: `dnd-app-${kind}`, version: 1, data: safe ? playerCharacter(data as Character) : data, ...(safe && { viewer }) });
 }
 
 /**
  * Reads a single-record file. Does not save it: the caller puts the result. `taken` says the id already exists locally;
  * the caller must then ask (R49) and either put it over the old one or put `keepBoth(data)`. Nothing is overwritten here.
  */
-export async function importRecord(file: Blob): Promise<{ kind: 'character'; data: Character; taken: boolean } | { kind: 'item'; data: StoredItem; taken: boolean }> {
+export async function importRecord(file: Blob): Promise<{ kind: 'character'; data: Character; taken: boolean; playerView: boolean } | { kind: 'item'; data: StoredItem; taken: boolean; playerView: boolean }> {
   const o = await parse(file);
   const kind = o?.format === 'dnd-app-character' ? 'character' : o?.format === 'dnd-app-item' ? 'item' : undefined;
   if (!o || !kind || o.version !== 1) throw new Error('Not a dnd-app character or item file');
@@ -108,7 +111,7 @@ export async function importRecord(file: Blob): Promise<{ kind: 'character'; dat
   if (why) throw new Error(`Record file is damaged: ${kind} ${why}`);
   const data = o.data as Character | StoredItem;
   const taken = !!(await (kind === 'character' ? db.characters.get(data.id) : db.items.get(data.id)));
-  return { kind, data, taken } as { kind: 'character'; data: Character; taken: boolean } | { kind: 'item'; data: StoredItem; taken: boolean };
+  return { kind, data, taken, playerView: kind === 'character' && o.viewer === 'player' } as { kind: 'character'; data: Character; taken: boolean; playerView: boolean } | { kind: 'item'; data: StoredItem; taken: boolean; playerView: boolean };
 }
 
 /** R49 "Keep both": the imported record under a fresh id, so the existing one stays. "Replace" is the record as it is. */

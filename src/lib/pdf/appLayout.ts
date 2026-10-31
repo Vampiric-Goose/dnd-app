@@ -16,7 +16,12 @@ export interface Ctx { viewer?: Viewer; settings?: CampaignSettings }
 
 export const ABILITY_LABEL: Record<Ability, string> = { str: 'Strength', dex: 'Dexterity', con: 'Constitution', int: 'Intelligence', wis: 'Wisdom', cha: 'Charisma' };
 export const SKILLS = Object.keys(SKILL_ABILITY) as Skill[];
-export const skillLabel = (s: Skill) => s.replace(/-/g, ' ').replace(/(^|\s)\p{Ll}/gu, (m) => m.toUpperCase());
+/** 'sleight-of-hand' becomes 'Sleight of Hand'. */
+export const skillLabel = (s: Skill) => s.split('-').map((w) => (w === 'of' ? w : w[0].toUpperCase() + w.slice(1))).join(' ');
+const cap = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
+// Fields that hold several lines. Every other field is one line, so a newline in its value becomes a space.
+const MULTILINE = new Set(['app.attacks', 'app.profs', 'app.features', 'app.spells', 'app.slots', 'app.inventory', 'app.notes', 'app.item.details', 'app.item.text']);
+const clean = (v: Record<string, string>) => Object.fromEntries(Object.entries(v).map(([k, x]) => [k, MULTILINE.has(k) ? toWinAnsi(x) : toWinAnsi(x).replace(/\n/g, ' ')]));
 const signed = (n: number) => (n >= 0 ? `+${n}` : String(n));
 // ponytail: not Object.groupBy (iOS 16 lacks it)
 const groupBy = <T, K>(xs: T[], key: (x: T) => K): Map<K, T[]> => { const m = new Map<K, T[]>(); for (const x of xs) m.set(key(x), [...(m.get(key(x)) ?? []), x]); return m; };
@@ -50,7 +55,7 @@ export function appFieldValues(c: Character, sheet: Sheet, ctx: Ctx = {}): Recor
     'app.spells': sheet.spellcasting.map((sc) => {
       const lines = [...groupBy(spellList(c, sc.classId), (s) => s.spell.level)].map(([lv, ss]) => `${lv === 0 ? 'Cantrips' : `Level ${lv}`}: ${ss.map((s) => s.spell.name + (s.prepared ? ' *' : '')).join(', ')}`);
       return [`${name(sc.classId) ?? 'Spells'} (save DC ${sc.dc}, attack ${signed(sc.attack)})`, ...lines].join('\n');
-    }).join('\n\n'),
+    }).join('\n\n') || 'No spellcasting',
     'app.slots': [...sheet.slots.flatMap((n, i) => (n ? [`${ordinal(i + 1)}: ${Math.max(0, n - (c.state.slotsUsed[i] ?? 0))}/${n}`] : [])),
       ...(sheet.pact ? [`Pact (level ${sheet.pact.level}): ${Math.max(0, sheet.pact.slots - c.state.pactSlotsUsed)}/${sheet.pact.slots}`] : [])].join('\n'),
     'app.inventory': c.inventory.map((e) => {
@@ -66,7 +71,7 @@ export function appFieldValues(c: Character, sheet: Sheet, ctx: Ctx = {}): Recor
   }
   for (const s of SKILLS) v[`app.skill.${s}`] = signed(sheet.skills[s].bonus);
   for (const k of ['cp', 'sp', 'ep', 'gp', 'pp'] as const) v[`app.currency.${k}`] = String(c.currency[k]);
-  return Object.fromEntries(Object.entries(v).map(([k, s]) => [k, toWinAnsi(s)]));
+  return clean(v);
 }
 
 /** Visible values of the item card. What it prints is exactly what the item holds: pass `playerItem(...)` for a player. */
@@ -82,9 +87,7 @@ export function itemFieldValues(item: ItemDef): Record<string, string> {
     item.charges && `Charges: ${item.charges.max}, recharge ${item.charges.recharge}`,
   ].filter(Boolean).join('\n');
   const text = richToPlain(item.text) + (item.curse ? `\n\nCurse: ${richToPlain(item.curse)}` : '');
-  return Object.fromEntries(Object.entries({
-    'app.item.name': item.name, 'app.item.type': item.type, 'app.item.rarity': item.rarity ?? '', 'app.item.details': details, 'app.item.text': text,
-  }).map(([k, s]) => [k, toWinAnsi(s)]));
+  return clean({ 'app.item.name': item.name, 'app.item.type': cap(item.type), 'app.item.rarity': cap(item.rarity ?? ''), 'app.item.details': details, 'app.item.text': text });
 }
 
 // The hidden field's payload: base64 of the UTF-8 JSON envelope.
@@ -105,7 +108,43 @@ const W = 612, H = 792, M = 36;
 const GREY = [0.35, 0.35, 0.35] as const;
 
 /** One page's drawing helpers. `top` is the distance from the top edge, which is easier to lay out than PDF's bottom-left origin. */
-function painter(lib: Lib, doc: import('pdf-lib').PDFDocument, page: import('pdf-lib').PDFPage, font: import('pdf-lib').PDFFont, bold: import('pdf-lib').PDFFont, values: Record<string, string>) {
+type Overflow = { title: string; text: string }[];
+const MIN_SIZE = 6;
+
+/** `text` broken into lines no wider than `width` at `size` (words, hard newlines; a word too long for a line is split). */
+function wrap(font: import('pdf-lib').PDFFont, text: string, width: number, size: number): string[] {
+  const out: string[] = [];
+  const fits = (t: string) => font.widthOfTextAtSize(t, size) <= width;
+  for (const para of text.split('\n')) {
+    let line = '';
+    for (const word of para.split(' ')) {
+      if (fits(line ? `${line} ${word}` : word)) { line = line ? `${line} ${word}` : word; continue; }
+      if (line) out.push(line);
+      line = word;
+      while (line.length > 1 && !fits(line)) {
+        let n = line.length - 1;
+        while (n > 1 && !fits(line.slice(0, n))) n--;
+        out.push(line.slice(0, n));
+        line = line.slice(n);
+      }
+    }
+    out.push(line);
+  }
+  return out;
+}
+
+/** The largest size from `max` down to MIN_SIZE at which `text` fits the box, and (when even MIN_SIZE is too big) the lines that do not fit. */
+function fit(font: import('pdf-lib').PDFFont, text: string, w: number, h: number, max: number): { size: number; rest: string } {
+  // Conservative against a reader's own wrapping: 4 pt of padding each side, and 1.2 line height.
+  const availW = w - 8, availH = h - 8;
+  for (let size = max; size >= MIN_SIZE; size -= 0.25) {
+    if (wrap(font, text, availW, size).length * size * 1.2 <= availH) return { size, rest: '' };
+  }
+  const lines = wrap(font, text, availW, MIN_SIZE);
+  return { size: MIN_SIZE, rest: lines.slice(Math.floor(availH / (MIN_SIZE * 1.2))).join('\n') };
+}
+
+function painter(lib: Lib, doc: import('pdf-lib').PDFDocument, page: import('pdf-lib').PDFPage, font: import('pdf-lib').PDFFont, bold: import('pdf-lib').PDFFont, values: Record<string, string>, overflow: Overflow) {
   const { rgb, TextAlignment } = lib;
   const form = doc.getForm();
   const text = (s: string, x: number, top: number, size = 8, b = false, grey = true) =>
@@ -116,18 +155,24 @@ function painter(lib: Lib, doc: import('pdf-lib').PDFDocument, page: import('pdf
     label: (s: string, x: number, top: number) => text(s, x, top, 6.5),
     row: (s: string, x: number, top: number) => text(s, x, top, 8, false, false),
     /** A form field named `name`, filled with its value from `values`. */
-    field(name: string, x: number, top: number, width: number, height: number, o: { multi?: boolean; size?: number; center?: boolean } = {}) {
+    field(name: string, x: number, top: number, width: number, height: number, o: { multi?: boolean; size?: number; center?: boolean; title?: string } = {}) {
       const f = form.createTextField(name);
       f.setText(values[name] ?? '');
       if (o.multi) f.enableMultiline();
       if (o.center) f.setAlignment(TextAlignment.Center);
       f.addToPage(page, { x, y: H - top - height, width, height, font, borderWidth: 0.75, borderColor: rgb(0.5, 0.5, 0.5), backgroundColor: rgb(0.97, 0.97, 0.97) });
-      f.setFontSize(o.size ?? (o.multi ? 7.5 : 9)); // after addToPage: it needs the default appearance that call creates
+      let size = o.size ?? (o.multi ? 7.5 : 9);
+      if (o.multi) { // shrink to fit; what still does not fit at the floor continues on an extra page (the field itself keeps all of it)
+        const r = fit(font, values[name] ?? '', width, height, size);
+        size = r.size;
+        if (r.rest) overflow.push({ title: o.title ?? name, text: r.rest });
+      }
+      f.setFontSize(size); // after addToPage: it needs the default appearance that call creates
     },
     /** A small caption over a field. */
     boxed(label: string, name: string, x: number, top: number, w: number, h: number, o: { multi?: boolean; size?: number; center?: boolean } = {}) {
       text(label, x, top - 9, 6.5);
-      this.field(name, x, top, w, h, o);
+      this.field(name, x, top, w, h, { ...o, title: label });
     },
   };
 }
@@ -135,8 +180,9 @@ function painter(lib: Lib, doc: import('pdf-lib').PDFDocument, page: import('pdf
 export async function drawCharacter(lib: Lib, doc: import('pdf-lib').PDFDocument, values: Record<string, string>): Promise<import('pdf-lib').PDFPage> {
   const font = await doc.embedFont(lib.StandardFonts.Helvetica), bold = await doc.embedFont(lib.StandardFonts.HelveticaBold);
   const sub = `${APP_NAME} character sheet`;
+  const overflow: Overflow = [];
   const first = doc.addPage([W, H]);
-  const p = painter(lib, doc, first, font, bold, values);
+  const p = painter(lib, doc, first, font, bold, values, overflow);
   p.title('Character', sub);
   p.boxed('Name', 'app.name', M, 70, 250, 22, { size: 12 });
   p.boxed('Class and level', 'app.classLevels', 292, 70, 284, 22);
@@ -166,31 +212,47 @@ export async function drawCharacter(lib: Lib, doc: import('pdf-lib').PDFDocument
   p.boxed('Features and traits', 'app.features', 300, 510, 276, 242, { multi: true });
   // Spells and slots
   const second = doc.addPage([W, H]);
-  const q = painter(lib, doc, second, font, bold, values);
+  const q = painter(lib, doc, second, font, bold, values, overflow);
   q.title('Spells and slots', sub);
   q.boxed('Spells (* = prepared)', 'app.spells', M, 70, 540, 520, { multi: true, size: 8 });
   q.boxed('Spell slots (remaining/total)', 'app.slots', M, 614, 540, 110, { multi: true, size: 8 });
   // Inventory, currency, notes
   const third = doc.addPage([W, H]);
-  const r = painter(lib, doc, third, font, bold, values);
+  const r = painter(lib, doc, third, font, bold, values, overflow);
   r.title('Inventory and notes', sub);
-  r.boxed('Inventory', 'app.inventory', M, 70, 540, 380, { multi: true, size: 8 });
-  (['cp', 'sp', 'ep', 'gp', 'pp'] as const).forEach((k, i) => r.boxed(k.toUpperCase(), `app.currency.${k}`, M + i * 70, 480, 60, 22, { center: true }));
-  r.boxed('Notes', 'app.notes', M, 534, 540, 218, { multi: true, size: 8 });
+  r.boxed('Inventory', 'app.inventory', M, 70, 540, 290, { multi: true, size: 8 });
+  (['cp', 'sp', 'ep', 'gp', 'pp'] as const).forEach((k, i) => r.boxed(k.toUpperCase(), `app.currency.${k}`, M + i * 70, 392, 60, 22, { center: true }));
+  r.boxed('Notes', 'app.notes', M, 446, 540, 306, { multi: true, size: 8 });
+  drawOverflow(lib, doc, font, bold, overflow);
   return first;
 }
 
 export async function drawItem(lib: Lib, doc: import('pdf-lib').PDFDocument, values: Record<string, string>): Promise<import('pdf-lib').PDFPage> {
   const font = await doc.embedFont(lib.StandardFonts.Helvetica), bold = await doc.embedFont(lib.StandardFonts.HelveticaBold);
+  const overflow: Overflow = [];
   const page = doc.addPage([W, H]);
-  const p = painter(lib, doc, page, font, bold, values);
+  const p = painter(lib, doc, page, font, bold, values, overflow);
   p.title('Item', `${APP_NAME} item card`);
   p.boxed('Name', 'app.item.name', M, 70, 540, 24, { size: 12 });
   p.boxed('Type', 'app.item.type', M, 116, 260, 20);
   p.boxed('Rarity', 'app.item.rarity', 316, 116, 260, 20);
   p.boxed('Details', 'app.item.details', M, 160, 540, 130, { multi: true, size: 8 });
   p.boxed('Description', 'app.item.text', M, 314, 540, 430, { multi: true, size: 8 });
+  drawOverflow(lib, doc, font, bold, overflow);
   return page;
+}
+
+/** Extra pages for text that did not fit its box: plain drawn text under "<Field> (continued)". The form fields stay the source of what is read back. */
+function drawOverflow(lib: Lib, doc: import('pdf-lib').PDFDocument, font: import('pdf-lib').PDFFont, bold: import('pdf-lib').PDFFont, overflow: Overflow): void {
+  const size = 8, lead = 10.5, perPage = Math.floor((H - 2 * M - 40) / lead);
+  for (const { title, text } of overflow) {
+    const lines = wrap(font, text, W - 2 * M, size);
+    for (let i = 0; i < lines.length; i += perPage) {
+      const page = doc.addPage([W, H]);
+      page.drawText(toWinAnsi(`${title} (continued)`), { x: M, y: H - M - 14, size: 12, font: bold, color: lib.rgb(0, 0, 0) });
+      lines.slice(i, i + perPage).forEach((l, j) => page.drawText(l, { x: M, y: H - M - 40 - j * lead, size, font, color: lib.rgb(0, 0, 0) }));
+    }
+  }
 }
 
 /** The hidden field that carries the full data. Its text is never drawn and has no appearance worth rendering. */

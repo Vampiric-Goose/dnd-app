@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { exportBackup, exportRecord, importBackup, importRecord, keepBoth } from '../src/lib/backup.ts';
 import { db, resetDb } from '../src/lib/db.ts';
 import type { Pack } from '../src/lib/types.ts';
+import { mkChar } from './fixtures/content.ts';
 import { camp, char, item } from './fixtures/records.ts';
 
 beforeEach(resetDb);
@@ -122,4 +123,15 @@ test('importBackup upserts by id and keeps timestamps', async () => {
   const a = (await db.characters.get('a'))!;
   expect([a.name, a.updatedAt]).toEqual(['Old', stamp]);
   expect(await db.characters.get('extra')).toBeDefined();
+});
+
+test('a Player-view character file is the player-safe copy and says so (R51)', async () => {
+  const c = { ...mkChar({ race: 'dwarf', base: {}, levels: ['fighter'], inventory: [['potion-of-poison', false, false, { name: 'Cloudy red potion', hidden: [], revealed: [] }]] }), id: 'p1' };
+  const text = await exportRecord('character', c, 'player').text();
+  expect(text).not.toContain('Potion of Poison');
+  expect(text).not.toContain('"view"');
+  const r = await importRecord(exportRecord('character', c, 'player'));
+  expect([r.kind, r.playerView]).toEqual(['character', true]);
+  expect((await importRecord(exportRecord('character', c))).playerView).toBe(false);
+  expect(await exportRecord('character', c).text()).toContain('Potion of Poison');
 });

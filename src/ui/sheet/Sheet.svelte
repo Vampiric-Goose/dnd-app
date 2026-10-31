@@ -134,7 +134,7 @@
   // Exports: the character as it is on screen (autosave may not have caught up). The PDF shows the sheet as the current viewer sees it (R48).
   let exporting = $state(false);
   function exportJson() {
-    if (c) download(exportRecord('character', $state.snapshot(c) as Character), fileName(c.name, 'json'));
+    if (c) download(exportRecord('character', $state.snapshot(c) as Character, app.viewer), fileName(c.name, 'json'));
   }
   async function exportPdf() {
     if (!c || !sheet || exporting) return;
