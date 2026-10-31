@@ -31,6 +31,10 @@ const entriesProblem = (list: unknown[], what: string): string | undefined => {
   return i < 0 ? undefined : `has a damaged ${what} entry (${i + 1})`;
 };
 
+const strings = (v: unknown) => isRec(v) && Object.values(v).every((x) => typeof x === 'string');
+/** Stage 3: a character's optional sync meta, `{ clock: Record<string, string>, gone: Record<string, string> }`. */
+const syncOk = (s: unknown) => isRec(s) && strings(s.clock) && strings(s.gone);
+
 /** I2: a character deep enough that the sheet, the lists and the creator can read it without throwing. */
 export function characterProblem(r: unknown): string | undefined {
   const shallow = problem(r, SHAPES.character);
@@ -43,6 +47,7 @@ export function characterProblem(r: unknown): string | undefined {
   if (!Array.isArray(c.customEffects)) return 'has no customEffects list';
   const bad = c.customEffects.findIndex((e) => !effectOk(e));
   if (bad >= 0) return `has a damaged custom effect (${bad + 1})`;
+  if (c.sync !== undefined && !syncOk(c.sync)) return 'has damaged sync clocks';
   return entriesProblem(c.inventory as unknown[], 'inventory');
 }
 

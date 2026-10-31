@@ -1,6 +1,8 @@
 import { is2024, strip2024, stripLoot } from './character/strip2024.ts';
 import { restorablePack } from './content/sources.ts';
 import { deleteDB, openDB, type DBSchema, type IDBPDatabase, type IDBPTransaction, type StoreNames } from 'idb';
+import { hlcNow, hlcReceive } from './sync/hlc.ts';
+import { latestClock, stamp as stampSync } from './sync/merge.ts';
 import type { Campaign, Character, Pack, PackMeta, StoredItem, StoredMonster } from './types.ts';
 
 export class StorageError extends Error {
@@ -97,6 +99,24 @@ function packMeta(p: Pack): PackMeta {
 
 const maybe = <T>(f: (x: T) => T, x: T | undefined) => (x === undefined ? x : f(x));
 
+type CharTx = IDBPTransaction<Schema, ('characters' | 'campaigns')[], 'readwrite'>;
+/**
+ * Stage 3: writes a character in a transaction that also holds campaigns. In a synced campaign a user edit (`network` false) is
+ * stamped against the stored copy with the campaign's next HLC; a merged record from the network (`network` true, R2) is stored as
+ * it is, and the campaign's clock moves past its clocks. Either way the campaign's advanced clock is saved in the same transaction.
+ */
+async function putCharacter(tx: CharTx, c: Character, network = false): Promise<void> {
+  let rec = strip2024(c);
+  const camp = c.campaignId === undefined ? undefined : await tx.objectStore('campaigns').get(c.campaignId);
+  const sync = camp?.sync;
+  if (camp && sync) {
+    const last = network ? hlcReceive(sync.node, sync.last, latestClock(rec)) : hlcNow(sync.node, sync.last);
+    if (!network) rec = stampSync(await tx.objectStore('characters').get(c.id), rec, last);
+    await tx.objectStore('campaigns').put({ ...camp, sync: { ...sync, last } });
+  }
+  await tx.objectStore('characters').put({ ...rec, updatedAt: Date.now() });
+}
+
 export interface Snapshot { campaigns: Campaign[]; characters: Character[]; items: StoredItem[]; monsters?: StoredMonster[] /* absent in old backups */; packs: Pack[]; blobs: BlobRecord[] }
 
 type Stamped = { id: string; updatedAt?: unknown; importedAt?: unknown };
@@ -125,7 +145,10 @@ export const db = {
       return (await (campaignId === undefined ? d.getAll('characters') : d.getAllFromIndex('characters', 'campaignId', campaignId))).map(strip2024);
     },
     get: async (id: string) => maybe(strip2024, await (await open()).get('characters', id)),
-    put: (c: Character) => write(['characters'], (tx) => tx.objectStore('characters').put({ ...strip2024(c), updatedAt: Date.now() })),
+    /** A user edit: stamped when the character's campaign is synced (stage 3). */
+    put: (c: Character) => write(['characters', 'campaigns'], (tx) => putCharacter(tx, c)),
+    /** R2: a merged record from sync. Never stamped, so saving a merge creates no new clocks (and no echo back to the peers). */
+    putSynced: (c: Character) => write(['characters', 'campaigns'], (tx) => putCharacter(tx, c, true)),
     delete: (id: string) => write(['characters'], (tx) => tx.objectStore('characters').delete(id)),
   },
   items: {
@@ -205,9 +228,10 @@ export const db = {
     set: (key: string, value: unknown) => write(['meta'], (tx) => tx.objectStore('meta').put(value, key)),
   },
   /** R44: characters and a campaign in one transaction (an item transfer touches both sides), stamping updatedAt like put. */
+  // The campaign goes first so the characters' stamping reads (and advances) the clock of the campaign as saved here.
   saveTogether: ({ characters = [], campaign }: { characters?: Character[]; campaign?: Campaign }) => write(['characters', 'campaigns'], async (tx) => {
-    for (const c of characters) await tx.objectStore('characters').put({ ...strip2024(c), updatedAt: Date.now() });
     if (campaign) await tx.objectStore('campaigns').put({ ...stripLoot(campaign), updatedAt: Date.now() });
+    for (const c of characters) await putCharacter(tx, c);
   }),
   /**
    * R57: what a backup import would overwrite here. `replaced`: stored records with the same key (campaigns, characters, items, packs,

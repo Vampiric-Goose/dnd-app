@@ -1,3 +1,6 @@
+import type { Hlc } from './sync/hlc.ts';
+import type { SyncMeta } from './sync/merge.ts';
+
 export type Ability = 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha';
 export type Skill = 'acrobatics' | 'animal-handling' | 'arcana' | 'athletics' | 'deception' | 'history' | 'insight' | 'intimidation' | 'investigation' | 'medicine' | 'nature' | 'perception' | 'performance' | 'persuasion' | 'religion' | 'sleight-of-hand' | 'stealth' | 'survival';
 export type Size = 'T' | 'S' | 'M' | 'L' | 'H' | 'G';
@@ -103,10 +106,14 @@ export interface Character {
   inventory: InventoryEntry[]; currency: { cp: number; sp: number; ep: number; gp: number; pp: number };
   overrides: Partial<Record<OverrideKey, number>>; customEffects: Effect[];
   details: { alignment: string; personality: string; ideals: string; bonds: string; flaws: string; appearance: string; backstory: string; notes: string; portrait?: string };
+  sync?: SyncMeta; // stage 3: per-path clocks, set by saves in a synced campaign
 }
 export interface CampaignSettings { allowOverrides: boolean; customOrigin: boolean; optionalClassFeatures: boolean; multiclassing: boolean; feats: boolean; hpMethod: 'average' | 'roll'; encumbrance: 'off' | 'standard' | 'variant'; crSuggestion: boolean; fog: boolean; diagonal: '5-5-5' | '5-10-5'; freeMovement: boolean; monsterHp: 'average' | 'roll';
   initiativeModules: { hp: boolean; conditions: boolean; deathSaves: boolean; concentration: boolean; legendary: boolean; lair: boolean; reactions: boolean }; showMonsterHealth: boolean }
-export interface Campaign { id: string; name: string; createdAt: number; updatedAt: number; settings: CampaignSettings; enabledPacks: string[]; loot: InventoryEntry[] }
+export interface Campaign { id: string; name: string; createdAt: number; updatedAt: number; settings: CampaignSettings; enabledPacks: string[]; loot: InventoryEntry[]; sync?: CampaignSync }
+/** Stage 3: a hosted (dm) or joined (player) campaign. `node`: this device's random 8-character HLC node id; `last`: its latest HLC. */
+export interface CampaignSync { role: 'dm' | 'player'; code: string; node: string; last?: Hlc;
+  players?: Record<string, { name?: string; removed?: boolean }>; playerId?: string /* role player */; deleted?: Record<string, Hlc> /* character id tombstones */ }
 export interface Attack { entryId: string; name: string; toHit: number; damage: string; damageType: string; versatile?: string; properties: string[] }
 export interface Sheet {
   totalLevel: number; prof: number; scores: Scores; mods: Scores;
