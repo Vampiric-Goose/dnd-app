@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest';
 import { embedContent } from '../../src/lib/character/build.ts';
 import { playerCharacter } from '../../src/lib/items/playerView.ts';
-import { decodeEnvelope } from '../../src/lib/pdf/appLayout.ts';
+import { decodeEnvelope, readPayload } from '../../src/lib/pdf/appLayout.ts';
 import { exportCharacterPdf, exportItemPdf } from '../../src/lib/pdf/exportPdf.ts';
 import { importPdf, limits } from '../../src/lib/pdf/importPdf.ts';
 import { computeSheet } from '../../src/lib/rules/sheet.ts';
@@ -25,7 +25,7 @@ const edited = async (bytes: Uint8Array, edit: Edit) => {
 };
 const embeddedJson = async (bytes: Uint8Array) => {
   const { PDFDocument } = await import('pdf-lib');
-  return JSON.stringify(decodeEnvelope((await PDFDocument.load(bytes)).getForm().getTextField('app.data').getText()!));
+  return JSON.stringify(decodeEnvelope(readPayload((await PDFDocument.load(bytes)).getForm().getTextField('app.data'))));
 };
 
 // ---- 1. R51: a Player-view export is player-safe ----
@@ -165,17 +165,66 @@ test('the index is only loaded when a field map needs it', async () => {
 
 // ---- 2. long text ----
 
-test('text that does not fit even at the smallest size continues on extra pages', async () => {
-  const notes = Array.from({ length: 120 }, (_, i) => `Note line number ${i + 1}`).join('\n');
-  const c = mk([], { details: { ...mk().details, notes } });
+// A field that overflows even at 6 pt holds only its first k lines plus a marker; the extra pages carry the rest, with no overlap.
+const MARKER = '(continued on next page)';
+const longNotes = Array.from({ length: 120 }, (_, i) => `Note line number ${i + 1}`).join('\n');
+const cutOf = async (bytes: Uint8Array, field: string) => {
+  const { PDFDocument } = await import('pdf-lib');
+  const env = decodeEnvelope(readPayload((await PDFDocument.load(bytes)).getForm().getTextField('app.data'))) as { cuts?: Record<string, number> };
+  return env.cuts?.[field];
+};
+
+test('text that does not fit even at the smallest size is cut: the field holds the first lines and a marker, extra pages the rest', async () => {
+  const c = mk([], { details: { ...mk().details, notes: longNotes } });
   const bytes = await dm(c);
   const { PDFDocument } = await import('pdf-lib');
   const doc = await PDFDocument.load(bytes);
   expect(doc.getPageCount()).toBeGreaterThan(3);
-  expect(doc.getForm().getTextField('app.notes').getText()).toBe(notes); // the field keeps everything
-  expect((await importPdf(bytes) as { edits: string[] }).edits).toEqual([]);
+  const shown = doc.getForm().getTextField('app.notes').getText()!;
+  const lines = shown.split('\n');
+  expect(lines[0]).toBe('Note line number 1');
+  expect(lines.at(-1)).toBe(MARKER);
+  expect(lines.length).toBeLessThan(41); // fewer than the box holds at 6 pt by the layout model, with room to spare
+  const cut = (await cutOf(bytes, 'app.notes'))!;
+  expect(shown).toBe(longNotes.slice(0, cut) + '\n' + MARKER);
+  const rest = longNotes.slice(cut).replace(/^\n/, '');
+  expect(rest.split('\n')[0]).toBe(`Note line number ${lines.length}`); // line k+1: nothing printed twice, nothing skipped
+  expect((await importPdf(bytes) as { edits: string[] }).edits).toEqual([]); // a straight round trip is no edit
+});
+
+test('editing the visible part of a cut notes field keeps everything after the cut', async () => {
+  const c = mk([], { details: { ...mk().details, notes: longNotes } });
+  const bytes = await dm(c);
+  const { PDFDocument } = await import('pdf-lib');
+  const shown = (await PDFDocument.load(bytes)).getForm().getTextField('app.notes').getText()!;
+  const r = await edited(bytes, (f) => f('app.notes').setText(shown.replace('Note line number 1\n', 'EDITED first line\n')));
+  expect(r.edits).toEqual(['Notes']);
+  expect(r.data.details.notes).toBe(longNotes.replace('Note line number 1\n', 'EDITED first line\n'));
+  expect(r.data.details.notes.endsWith('Note line number 120')).toBe(true);
+  // deleting the marker line changes nothing else
+  const noMarker = await edited(bytes, (f) => f('app.notes').setText(shown.replace('\n' + MARKER, '')));
+  expect(noMarker.edits).toEqual([]);
+  expect(noMarker.data.details.notes).toBe(longNotes);
+});
+
+test('every long multiline field is cut the same way, and short text only shrinks', async () => {
+  const { PDFDocument } = await import('pdf-lib');
   const short = await PDFDocument.load(await dm(mk([], { details: { ...mk().details, notes: 'a\nb' } })));
   expect(short.getPageCount()).toBe(3);
+  const many = Array.from({ length: 120 }, (_, i) => ['chain-mail', false] as [string, boolean]).map(([s, e], i) => [i % 2 ? 'shield' : s, e] as [string, boolean]);
+  const bytes = await dm(mk(many));
+  const shown = (await PDFDocument.load(bytes)).getForm().getTextField('app.inventory').getText()!;
+  expect(shown.endsWith(MARKER)).toBe(true);
+  const cut = (await cutOf(bytes, 'app.inventory'))!;
+  expect(cut).toBeGreaterThan(0);
+  expect((await importPdf(bytes) as { edits: string[] }).edits).toEqual([]);
+  // (paragraphs of ten sentences: pdf-lib's own layout of one very long paragraph is slow, which is not what is under test)
+  const paras = (n: number) => Array.from({ length: n / 10 }, (_, p) => ({ p: Array.from({ length: 10 }, (_, i) => `sentence ${p * 10 + i + 1}.`).join(' ') }));
+  const item = { ...potionFixture, text: paras(400) };
+  const card = await PDFDocument.load(await exportItemPdf(item));
+  expect(card.getPageCount()).toBe(1); // 400 short sentences fit by shrinking only
+  const huge = await PDFDocument.load(await exportItemPdf({ ...potionFixture, text: paras(6000) }));
+  expect(huge.getPageCount()).toBeGreaterThan(1);
 });
 
 // ---- 9 and 11 ----
@@ -194,4 +243,11 @@ test('labels read as in the books', async () => {
   expect([form.getTextField('app.item.type').getText(), form.getTextField('app.item.rarity').getText()]).toEqual(['Potion', 'Uncommon']);
   const chars = await PDFDocument.load(await dm(mk()));
   expect(chars.getForm().getTextField('app.spells').getText()).toBe('No spellcasting');
+});
+
+test('a character whose data is far past 100 KB still exports and re-imports (pdf-lib\'s text decoder overflows the stack there)', async () => {
+  const c = mk([], { details: { ...mk().details, backstory: 'A long tale. '.repeat(40_000) } }); // about 520 KB of text
+  const r = await importPdf(await dm(c)) as { data: Character; edits: string[] };
+  expect(r.data.details.backstory.length).toBe(c.details.backstory.length);
+  expect(r.edits).toEqual([]);
 });

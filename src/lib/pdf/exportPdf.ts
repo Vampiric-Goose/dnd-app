@@ -16,8 +16,8 @@ export async function exportCharacterPdf(real: Character, sheet: Sheet, opts: { 
   const doc = await lib.PDFDocument.create();
   doc.setTitle(`${c.name || 'Character'} (${APP_NAME})`);
   doc.setCreator(APP_NAME);
-  const first = await drawCharacter(lib, doc, appFieldValues(c, sheet, opts));
-  addDataField(lib, doc, first, encodeEnvelope({ format: 'dnd-app-character', version: 1, data: c, ...opts }));
+  const { page, cuts } = await drawCharacter(lib, doc, appFieldValues(c, sheet, opts));
+  addDataField(lib, doc, page, encodeEnvelope({ format: 'dnd-app-character', version: 1, data: c, ...opts, ...(Object.keys(cuts).length && { cuts }) }));
   return doc.save();
 }
 

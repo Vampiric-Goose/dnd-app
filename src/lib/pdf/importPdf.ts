@@ -3,7 +3,7 @@ import { isRec, problem, SHAPES } from '../recordShape.ts';
 import { computeSheet } from '../rules/sheet.ts';
 import { DEFAULT_SETTINGS } from '../settings.ts';
 import type { Ability, CampaignSettings, Character, ItemDef, OverrideKey, Sheet, Skill } from '../types.ts';
-import { ABILITY_LABEL, appFieldValues, decodeEnvelope, SKILLS, skillLabel, type Viewer } from './appLayout.ts';
+import { ABILITY_LABEL, appFieldValues, cutShown, decodeEnvelope, readPayload, SKILLS, skillLabel, withoutMarker, type Viewer } from './appLayout.ts';
 import { FIELD_MAPS } from './fieldmap.ts';
 import { toWinAnsi } from './winansi.ts';
 
@@ -53,7 +53,7 @@ export async function importPdf(bytes: Uint8Array, index?: IndexSource): Promise
   try {
     const doc = await lib.PDFDocument.load(bytes, { updateMetadata: false });
     for (const f of doc.getForm().getFields()) {
-      if (f instanceof lib.PDFTextField) fields[f.getName()] = f.getText() ?? '';
+      if (f instanceof lib.PDFTextField) fields[f.getName()] = f.getName() === 'app.data' ? readPayload(f) : f.getText() ?? '';
       else if (f instanceof lib.PDFCheckBox) fields[f.getName()] = f.isChecked();
       else if (f instanceof lib.PDFRadioGroup) fields[f.getName()] = f.getSelected() ?? '';
       else if (f instanceof lib.PDFDropdown) fields[f.getName()] = f.getSelected()[0] ?? '';
@@ -94,11 +94,11 @@ function fromData(payload: string, fields: Record<string, string | boolean>): Im
   if (why) throw damaged(`character ${why}`);
   const settings = { ...DEFAULT_SETTINGS, ...(isRec(env.settings) ? env.settings : {}) } as CampaignSettings;
   const viewer: Viewer = env.viewer === 'player' ? 'player' : 'dm';
-  return { kind: 'character', ...applyEdits(env.data as Character, settings, viewer, fields), ...(viewer === 'player' && { playerView: true }) };
+  return { kind: 'character', ...applyEdits(env.data as Character, settings, viewer, fields, isRec(env.cuts) ? env.cuts : {}), ...(viewer === 'player' && { playerView: true }) };
 }
 
 /** Compares each editable field with what the data itself produces; a different value is an edit made in a PDF reader. */
-function applyEdits(data: Character, settings: CampaignSettings, viewer: Viewer, fields: Record<string, string | boolean>): { data: Character; edits: string[] } {
+function applyEdits(data: Character, settings: CampaignSettings, viewer: Viewer, fields: Record<string, string | boolean>, cuts: Record<string, unknown>): { data: Character; edits: string[] } {
   let sheet: Sheet, expected: Record<string, string>;
   try {
     sheet = computeSheet(data, { settings, viewer });
@@ -118,10 +118,15 @@ function applyEdits(data: Character, settings: CampaignSettings, viewer: Viewer,
       f.apply(out, n);
     } else {
       const v = lines(raw);
-      if (v === lines(expected[f.name])) continue;
+      // A field that overflowed holds only the start of its text and a marker line (the rest is on extra pages and in app.data).
+      const full = expected[f.name], at = cuts[f.name];
+      const cut = typeof at === 'number' && Number.isInteger(at) && at >= 0 && at <= full.length ? at : undefined;
+      if (v === lines(cut === undefined ? full : cutShown(full, cut))) continue;
       // The field holds only what the PDF could draw, so applying a partial edit of it would silently drop the rest.
       if (f.name === 'app.notes' && data.details.notes !== toWinAnsi(data.details.notes)) { edits.push(NOT_APPLIED); continue; }
-      f.apply(out, v);
+      const next = cut === undefined ? v : withoutMarker(v) + full.slice(cut); // an edit of the visible part keeps everything after the cut
+      if (next === lines(full)) continue; // only the marker line was removed
+      f.apply(out, next);
     }
     edits.push(f.label);
   }

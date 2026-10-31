@@ -91,7 +91,7 @@ export function itemFieldValues(item: ItemDef): Record<string, string> {
 }
 
 // The hidden field's payload: base64 of the UTF-8 JSON envelope.
-export interface Envelope { format: 'dnd-app-character' | 'dnd-app-item'; version: 1; data: unknown; settings?: CampaignSettings; viewer?: Viewer }
+export interface Envelope { format: 'dnd-app-character' | 'dnd-app-item'; version: 1; data: unknown; settings?: CampaignSettings; viewer?: Viewer; cuts?: Record<string, number> }
 export function encodeEnvelope(e: Envelope): string {
   const bytes = new TextEncoder().encode(JSON.stringify(e));
   let s = '';
@@ -108,24 +108,43 @@ const W = 612, H = 792, M = 36;
 const GREY = [0.35, 0.35, 0.35] as const;
 
 /** One page's drawing helpers. `top` is the distance from the top edge, which is easier to lay out than PDF's bottom-left origin. */
-type Overflow = { title: string; text: string }[];
+/** What did not fit: the text for the extra pages, and for each cut field where its text was cut (an offset into its value). */
+type Overflow = { pages: { title: string; text: string }[]; cuts: Record<string, number> };
 const MIN_SIZE = 6;
+/** The last line of a cut field. The text after it is on the extra pages. */
+export const MARKER = '(continued on next page)';
+/** A field's value as the PDF shows it when it was cut at `cut`: the text up to there, then the marker. */
+export const cutShown = (full: string, cut: number): string => `${full.slice(0, cut)}\n${MARKER}`;
+/** The user's edit of a cut field with the marker line removed (it is not part of the text). */
+export const withoutMarker = (shown: string): string => shown.replace(/\n?\(continued on next page\)\s*$/, '');
 
-/** `text` broken into lines no wider than `width` at `size` (words, hard newlines; a word too long for a line is split). */
+// pdf-lib's widthOfTextAtSize is slow, and width is linear in size, so each word is measured once at size 1 per font.
+const unitWidths = new WeakMap<import('pdf-lib').PDFFont, Map<string, number>>();
+const unitWidth = (font: import('pdf-lib').PDFFont, s: string): number => {
+  let m = unitWidths.get(font);
+  if (!m) unitWidths.set(font, (m = new Map()));
+  let w = m.get(s);
+  if (w === undefined) m.set(s, (w = font.widthOfTextAtSize(s, 1)));
+  return w;
+};
+
+/** `text` broken into lines no wider than `width` at `size` (words, hard newlines; a word too long for a line is split). Widths add up per word, ignoring kerning across spaces. */
 function wrap(font: import('pdf-lib').PDFFont, text: string, width: number, size: number): string[] {
   const out: string[] = [];
-  const fits = (t: string) => font.widthOfTextAtSize(t, size) <= width;
+  const max = width / size, space = unitWidth(font, ' ');
   for (const para of text.split('\n')) {
-    let line = '';
+    let line = '', w = 0, started = false;
     for (const word of para.split(' ')) {
-      if (fits(line ? `${line} ${word}` : word)) { line = line ? `${line} ${word}` : word; continue; }
-      if (line) out.push(line);
-      line = word;
-      while (line.length > 1 && !fits(line)) {
+      const ww = unitWidth(font, word);
+      if (!started) { line = word; w = ww; started = true; }
+      else if (w + space + ww <= max) { line += ' ' + word; w += space + ww; continue; }
+      else { out.push(line); line = word; w = ww; }
+      while (line.length > 1 && w > max) {
         let n = line.length - 1;
-        while (n > 1 && !fits(line.slice(0, n))) n--;
+        while (n > 1 && unitWidth(font, line.slice(0, n)) > max) n--;
         out.push(line.slice(0, n));
         line = line.slice(n);
+        w = unitWidth(font, line);
       }
     }
     out.push(line);
@@ -133,15 +152,31 @@ function wrap(font: import('pdf-lib').PDFFont, text: string, width: number, size
   return out;
 }
 
-/** The largest size from `max` down to MIN_SIZE at which `text` fits the box, and (when even MIN_SIZE is too big) the lines that do not fit. */
-function fit(font: import('pdf-lib').PDFFont, text: string, w: number, h: number, max: number): { size: number; rest: string } {
+/** Where each wrapped line of `text` ends in `text` (a line is a piece of the text; one space or newline sits between lines). */
+function lineEnds(text: string, lines: string[]): number[] {
+  let pos = 0;
+  return lines.map((l) => {
+    const i = text.startsWith(l, pos) ? pos : Math.max(pos, text.indexOf(l, pos));
+    const end = i + l.length;
+    pos = end + (text[end] === ' ' || text[end] === '\n' ? 1 : 0);
+    return end;
+  });
+}
+
+/**
+ * The largest size from `max` down to MIN_SIZE at which `text` fits the box. If even MIN_SIZE is too big, `cut` says where to cut the
+ * text: after the first k lines, where k leaves room for the marker line and one spare line under this layout model. The viewer's
+ * own wrapping is not exactly ours, which is why the field must hold only those lines, not the whole text.
+ */
+function fit(font: import('pdf-lib').PDFFont, text: string, w: number, h: number, max: number): { size: number; cut?: number } {
   // Conservative against a reader's own wrapping: 4 pt of padding each side, and 1.2 line height.
   const availW = w - 8, availH = h - 8;
   for (let size = max; size >= MIN_SIZE; size -= 0.25) {
-    if (wrap(font, text, availW, size).length * size * 1.2 <= availH) return { size, rest: '' };
+    if (wrap(font, text, availW, size).length * size * 1.2 <= availH) return { size };
   }
   const lines = wrap(font, text, availW, MIN_SIZE);
-  return { size: MIN_SIZE, rest: lines.slice(Math.floor(availH / (MIN_SIZE * 1.2))).join('\n') };
+  const k = Math.max(1, Math.floor(availH / (MIN_SIZE * 1.2)) - 2);
+  return { size: MIN_SIZE, cut: lineEnds(text, lines)[k - 1] };
 }
 
 function painter(lib: Lib, doc: import('pdf-lib').PDFDocument, page: import('pdf-lib').PDFPage, font: import('pdf-lib').PDFFont, bold: import('pdf-lib').PDFFont, values: Record<string, string>, overflow: Overflow) {
@@ -157,16 +192,21 @@ function painter(lib: Lib, doc: import('pdf-lib').PDFDocument, page: import('pdf
     /** A form field named `name`, filled with its value from `values`. */
     field(name: string, x: number, top: number, width: number, height: number, o: { multi?: boolean; size?: number; center?: boolean; title?: string } = {}) {
       const f = form.createTextField(name);
-      f.setText(values[name] ?? '');
+      let value = values[name] ?? '';
+      let size = o.size ?? (o.multi ? 7.5 : 9);
+      if (o.multi) { // shrink to fit; past the 6 pt floor, the field holds the first lines and the extra pages the rest
+        const r = fit(font, value, width, height, size);
+        size = r.size;
+        if (r.cut !== undefined) {
+          overflow.pages.push({ title: o.title ?? name, text: value.slice(r.cut).replace(/^[ \n]/, '') });
+          overflow.cuts[name] = r.cut;
+          value = cutShown(value, r.cut);
+        }
+      }
+      f.setText(value);
       if (o.multi) f.enableMultiline();
       if (o.center) f.setAlignment(TextAlignment.Center);
       f.addToPage(page, { x, y: H - top - height, width, height, font, borderWidth: 0.75, borderColor: rgb(0.5, 0.5, 0.5), backgroundColor: rgb(0.97, 0.97, 0.97) });
-      let size = o.size ?? (o.multi ? 7.5 : 9);
-      if (o.multi) { // shrink to fit; what still does not fit at the floor continues on an extra page (the field itself keeps all of it)
-        const r = fit(font, values[name] ?? '', width, height, size);
-        size = r.size;
-        if (r.rest) overflow.push({ title: o.title ?? name, text: r.rest });
-      }
       f.setFontSize(size); // after addToPage: it needs the default appearance that call creates
     },
     /** A small caption over a field. */
@@ -177,10 +217,10 @@ function painter(lib: Lib, doc: import('pdf-lib').PDFDocument, page: import('pdf
   };
 }
 
-export async function drawCharacter(lib: Lib, doc: import('pdf-lib').PDFDocument, values: Record<string, string>): Promise<import('pdf-lib').PDFPage> {
+export async function drawCharacter(lib: Lib, doc: import('pdf-lib').PDFDocument, values: Record<string, string>): Promise<{ page: import('pdf-lib').PDFPage; cuts: Record<string, number> }> {
   const font = await doc.embedFont(lib.StandardFonts.Helvetica), bold = await doc.embedFont(lib.StandardFonts.HelveticaBold);
   const sub = `${APP_NAME} character sheet`;
-  const overflow: Overflow = [];
+  const overflow: Overflow = { pages: [], cuts: {} };
   const first = doc.addPage([W, H]);
   const p = painter(lib, doc, first, font, bold, values, overflow);
   p.title('Character', sub);
@@ -224,12 +264,12 @@ export async function drawCharacter(lib: Lib, doc: import('pdf-lib').PDFDocument
   (['cp', 'sp', 'ep', 'gp', 'pp'] as const).forEach((k, i) => r.boxed(k.toUpperCase(), `app.currency.${k}`, M + i * 70, 392, 60, 22, { center: true }));
   r.boxed('Notes', 'app.notes', M, 446, 540, 306, { multi: true, size: 8 });
   drawOverflow(lib, doc, font, bold, overflow);
-  return first;
+  return { page: first, cuts: overflow.cuts };
 }
 
 export async function drawItem(lib: Lib, doc: import('pdf-lib').PDFDocument, values: Record<string, string>): Promise<import('pdf-lib').PDFPage> {
   const font = await doc.embedFont(lib.StandardFonts.Helvetica), bold = await doc.embedFont(lib.StandardFonts.HelveticaBold);
-  const overflow: Overflow = [];
+  const overflow: Overflow = { pages: [], cuts: {} };
   const page = doc.addPage([W, H]);
   const p = painter(lib, doc, page, font, bold, values, overflow);
   p.title('Item', `${APP_NAME} item card`);
@@ -245,7 +285,7 @@ export async function drawItem(lib: Lib, doc: import('pdf-lib').PDFDocument, val
 /** Extra pages for text that did not fit its box: plain drawn text under "<Field> (continued)". The form fields stay the source of what is read back. */
 function drawOverflow(lib: Lib, doc: import('pdf-lib').PDFDocument, font: import('pdf-lib').PDFFont, bold: import('pdf-lib').PDFFont, overflow: Overflow): void {
   const size = 8, lead = 10.5, perPage = Math.floor((H - 2 * M - 40) / lead);
-  for (const { title, text } of overflow) {
+  for (const { title, text } of overflow.pages) {
     const lines = wrap(font, text, W - 2 * M, size);
     for (let i = 0; i < lines.length; i += perPage) {
       const page = doc.addPage([W, H]);
@@ -255,9 +295,21 @@ function drawOverflow(lib: Lib, doc: import('pdf-lib').PDFDocument, font: import
   }
 }
 
-/** The hidden field that carries the full data. Its text is never drawn and has no appearance worth rendering. */
+/**
+ * The hidden field that carries the full data. The payload is set as a plain PDF string, never through pdf-lib's `setText` / `getText`:
+ * those decode with `String.fromCodePoint(...all)`, which overflows the stack for a payload of about 100 KB, and a character with
+ * its embedded content is bigger than that. The field has no visible text, so it has no appearance to build either.
+ */
 export function addDataField(lib: Lib, doc: import('pdf-lib').PDFDocument, page: import('pdf-lib').PDFPage, payload: string): void {
   const f = doc.getForm().createTextField('app.data');
-  f.setText(payload);
   f.addToPage(page, { x: 0, y: 0, width: 1, height: 1, hidden: true, borderWidth: 0 });
+  f.acroField.setValue(lib.PDFString.of(payload)); // base64 is plain ASCII with nothing to escape
+}
+
+/** The text of a field, read without pdf-lib's decoder when the value is a plain string (as addDataField writes it). */
+export function readPayload(f: import('pdf-lib').PDFTextField): string {
+  const v = f.acroField.getValue() as { asBytes?: () => Uint8Array } | undefined;
+  const bytes = v?.asBytes?.();
+  if (bytes && !(bytes[0] === 0xfe && bytes[1] === 0xff)) return new TextDecoder('latin1').decode(bytes); // no UTF-16 mark: bytes are the characters
+  return f.getText() ?? ''; // text written by another tool as UTF-16
 }
