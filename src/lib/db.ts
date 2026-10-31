@@ -3,7 +3,7 @@ import { restorablePack } from './content/sources.ts';
 import { deleteDB, openDB, type DBSchema, type IDBPDatabase, type IDBPTransaction, type StoreNames } from 'idb';
 import { newNode } from './sync/code.ts';
 import { hlcNow, hlcReceive } from './sync/hlc.ts';
-import { latestClock, stamp as stampSync } from './sync/merge.ts';
+import { latestClock, rebase, stamp as stampSync } from './sync/merge.ts';
 import type { Campaign, CampaignSync, Character, Pack, PackMeta, StoredItem, StoredMonster } from './types.ts';
 
 export class StorageError extends Error {
@@ -103,7 +103,7 @@ const maybe = <T>(f: (x: T) => T, x: T | undefined) => (x === undefined ? x : f(
 type CharTx = IDBPTransaction<Schema, ('characters' | 'campaigns')[], 'readwrite'>;
 /**
  * Stage 3: writes a character in a transaction that also holds campaigns. In a synced campaign a user edit (`network` false) is
- * stamped against the stored copy with the campaign's next HLC; a merged record from the network (`network` true, R2) is stored as
+ * rebased onto the stored copy (C1: its loaded `sync` is the base) and stamped with the campaign's next HLC; a merged record from the network (`network` true, R2) is stored as
  * it is, and the campaign's clock moves past its clocks. Either way the campaign's advanced clock is saved in the same transaction.
  */
 async function putCharacter(tx: CharTx, c: Character, network = false): Promise<void> {
@@ -112,7 +112,10 @@ async function putCharacter(tx: CharTx, c: Character, network = false): Promise<
   const sync = camp?.sync;
   if (camp && sync) {
     const last = network ? hlcReceive(sync.node, sync.last, latestClock(rec)) : hlcNow(sync.node, sync.last);
-    if (!network) rec = stampSync(await tx.objectStore('characters').get(c.id), rec, last);
+    if (!network) {
+      const prev = await tx.objectStore('characters').get(c.id);
+      rec = stampSync(prev, strip2024(rebase(prev, c)), last); // C1: an edit from a stale copy keeps what arrived since it was loaded
+    }
     await tx.objectStore('campaigns').put({ ...camp, sync: { ...sync, last } });
   }
   await tx.objectStore('characters').put({ ...rec, updatedAt: Date.now() });

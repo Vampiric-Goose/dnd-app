@@ -4,7 +4,12 @@
 
 export type Hlc = string;
 
-const make = (wall: number, counter: number, node: string): Hlc => `${String(wall).padStart(15, '0')}:${String(counter).padStart(6, '0')}:${node}`;
+/** A counter past 6 digits carries into the wall time, so the fixed-width string order still holds. */
+const make = (wall: number, counter: number, node: string): Hlc => counter > 999_999 ? make(wall + 1, 0, node)
+  : `${String(wall).padStart(15, '0')}:${String(counter).padStart(6, '0')}:${node}`;
+
+/** A remote wall time more than this far ahead of ours is not believed (a phone set to 2099, a crafted record). */
+export const MAX_AHEAD = 86_400_000;
 
 /** Wall and counter of a timestamp; [0, -1] for none, so the next counter is 0. Anything after the second `:` is the node. */
 function parse(h: Hlc | undefined): [number, number] {
@@ -19,9 +24,11 @@ export function hlcNow(node: string, last?: Hlc, wall = Date.now()): Hlc {
   return wall > lw ? make(wall, 0, node) : make(lw, lc + 1, node);
 }
 
-/** The local clock after receiving `remote`: later than both the local clock and `remote`. */
+/** The local clock after receiving `remote`: later than both the local clock and `remote` (unless `remote` is over a day ahead of `wall`). */
 export function hlcReceive(node: string, local: Hlc | undefined, remote: Hlc, wall = Date.now()): Hlc {
   const [lw, lc] = parse(local), [rw, rc] = parse(remote);
+  // I2: one skewed device must not drag every clock into the future. The local clock stays; the caller treats the record as suspect.
+  if (rw > wall + MAX_AHEAD) return local ?? hlcNow(node, undefined, wall);
   const w = Math.max(wall, lw, rw);
   const c = w === lw && w === rw ? Math.max(lc, rc) + 1 : w === lw ? lc + 1 : w === rw ? rc + 1 : 0;
   return make(w, c, node);

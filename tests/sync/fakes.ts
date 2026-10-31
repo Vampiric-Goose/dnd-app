@@ -5,7 +5,7 @@ import { Guest, type GuestDeps } from '../../src/lib/sync/guest.ts';
 import { Host, type HostDeps } from '../../src/lib/sync/host.ts';
 import { hlcNow, hlcReceive } from '../../src/lib/sync/hlc.ts';
 import { memoryPair, type Link } from '../../src/lib/sync/link.ts';
-import { latestClock, stamp } from '../../src/lib/sync/merge.ts';
+import { latestClock, rebase, stamp } from '../../src/lib/sync/merge.ts';
 import type { Campaign, CampaignSync, Character, Pack, PackMeta } from '../../src/lib/types.ts';
 import { fixtureIndex } from '../fixtures/content.ts';
 
@@ -42,7 +42,8 @@ export class Device {
   /** A user edit, stamped like db.characters.put. */
   edit(c: Character): void {
     const at = this.#advance(c.campaignId, (s) => hlcNow(s.node, s.last, this.wall()));
-    const rec = at ? stamp(this.characters.get(c.id), c, at) : c;
+    const prev = this.characters.get(c.id);
+    const rec = at ? stamp(prev, rebase(prev, c), at) : c;
     this.characters.set(c.id, clone({ ...rec, updatedAt: this.wall() }));
   }
   /** R2, like db.characters.putSynced. */

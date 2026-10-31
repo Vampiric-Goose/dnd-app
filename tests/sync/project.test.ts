@@ -59,6 +59,25 @@ describe('db stamping (stage 3)', () => {
     expect(mergeCharacter((await db.characters.get('a'))!, remote).name).toBe('Mine');
   });
 
+  test('C1: a save from a copy loaded before a merge keeps the remote notes and entry, and its own hp', async () => {
+    await db.campaigns.put(synced('c1'));
+    await db.characters.put(char('a', 'c1'));
+    const stale = (await db.characters.get('a'))!; // an open sheet holds this copy
+    const remoteAt = hlcNow('player01', latestClock(stale), Date.now() + 1000);
+    const added = makeEntry({ kind: 'item', id: 'item:rope@PHB', name: 'Rope', source: 'PHB', text: [], type: 'gear', magic: false });
+    const remote = stamp(stale, { ...stale, details: { ...stale.details, notes: 'from the phone' }, inventory: [added] }, remoteAt);
+    await db.characters.putSynced(mergeCharacter(stale, remote));
+    await db.characters.put({ ...stale, state: { ...stale.state, hp: 9 } }); // damage applied from the stale copy
+    const got = (await db.characters.get('a'))!;
+    expect(got.details.notes).toBe('from the phone');
+    expect(got.inventory.map((e) => e.id)).toEqual([added.id]);
+    expect(got.state.hp).toBe(9);
+    expect(got.sync!.gone).toEqual({});
+    // and a deletion made on a copy that had the entry is still a deletion
+    await db.characters.put({ ...got, inventory: [] });
+    expect((await db.characters.get('a'))!.inventory).toEqual([]);
+  });
+
   test('saveTogether (an item transfer) stamps the characters too', async () => {
     await db.campaigns.put(synced('c1'));
     await db.characters.put(char('a', 'c1'));
@@ -69,9 +88,16 @@ describe('db stamping (stage 3)', () => {
   });
 });
 
-test('recordShape accepts sync meta and rejects a damaged one', () => {
-  expect(characterProblem({ ...char('a'), sync: { clock: { name: 'x' }, gone: {} } })).toBeUndefined();
-  expect(characterProblem({ ...char('a'), sync: { clock: { name: 1 }, gone: {} } })).toBe('has damaged sync clocks');
+test('I2: recordShape accepts real clocks and rejects a future wall time, a value that sorts after every clock, and too many keys', () => {
+  const ok = hlcNow('dmnode01', undefined, Date.now());
+  const bad = (clock: Record<string, unknown>, gone: Record<string, unknown> = {}) => characterProblem({ ...char('a'), sync: { clock, gone } });
+  expect(bad({ name: ok, 'order/e1': `${ok}/000003`, 'order/e2': '/000001' }, { e3: ok })).toBeUndefined();
+  expect(bad({ name: hlcNow('n', undefined, Date.now() + 2 * 86_400_000) })).toBe('has damaged sync clocks');
+  expect(bad({}, { e1: '999999999999999:000000:x' })).toBe('has damaged sync clocks');
+  expect(bad({ 'state.hp': '~' })).toBe('has damaged sync clocks');
+  expect(bad({ name: '' })).toBe('has damaged sync clocks');
+  expect(bad({ name: 1 })).toBe('has damaged sync clocks');
+  expect(bad(Object.fromEntries(Array.from({ length: 5001 }, (_, i) => [`inventory/${i}`, ok])))).toBe('has damaged sync clocks');
   expect(characterProblem({ ...char('a'), sync: { clock: {} } })).toBe('has damaged sync clocks');
 });
 

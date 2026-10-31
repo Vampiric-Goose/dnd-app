@@ -10,20 +10,29 @@ export type Synced<T> = T & { sync?: SyncMeta };
 
 type Rec = Record<string, unknown>;
 type Clocks = Record<string, Hlc>;
+type Path = readonly string[];
 
-const TOP = ['name', 'campaignId', 'ownerId', 'imported', 'overrides', 'customEffects'] as const;
-const SPLIT = ['build', 'state', 'details', 'currency'] as const;
+const TOP = ['name', 'campaignId', 'ownerId', 'imported', 'customEffects'] as const;
+const SPLIT = ['build', 'state', 'details', 'currency', 'overrides'] as const;
+/** R7: keyed maps split one level deeper, so different keys edited on different devices all survive. */
+const DEEP = new Set(['build.choices', 'build.spells', 'build.subclasses', 'state.resourcesUsed', 'state.hitDiceUsed', 'state.slotsUsed']);
+/** An array indexed by spell level: each index is a path, and a missing index reads as 0 (as the sheet reads it). */
+const LIST = 'state.slotsUsed';
 
 /**
- * The tracked paths. `*` is any key of that object (so optional keys such as `state.stable` are paths too).
- * - `name` … `customEffects`: each top-level field is one path.
- * - `build.*`, `state.*`, `details.*`, `currency.*`: one path per key, one level deep.
+ * The tracked paths. `*` is any key of that object, so optional keys (`state.stable`, `details.portrait`, a choice) are paths too;
+ * a key removed on one device is that path set to "absent" at the removal's clock, and wins over older values like any change.
+ * - `name`, `campaignId`, `ownerId`, `imported`, `customEffects`: each top-level field is one path.
+ *   Limitation: `customEffects` is one last-writer-wins list (effects have no ids, and only the DM's Edit mode changes them).
+ * - `build.*`, `state.*`, `details.*`, `currency.*`, `overrides.*`: one path per key.
+ * - `build.choices.*`, `build.spells.*`, `build.subclasses.*`, `state.resourcesUsed.*`, `state.hitDiceUsed.*`: one path per map key.
+ * - `state.slotsUsed.<i>`: one path per spell level; missing counts as 0, and a merged list has no trailing zeros.
  * - `inventory/<entryId>`: the whole entry. A removal is a tombstone in `gone`; it wins over any change with an earlier clock.
- * - `order/<entryId>`: not a value but the entry's list position, set when the entry first appears (its add clock plus index); a merge keeps the
- *   earliest. Inventory order is position order: the app only appends, so this is insertion order on every device.
- * Untracked: `id`; `updatedAt` (the merge time); `embedded` (taken from the copy whose newest `build.*` clock is later).
+ * - `order/<entryId>`: not a value but the entry's list position, set when the entry first appears (its add clock plus index); a merge
+ *   keeps the earliest. Inventory order is position order: the app only appends, so this is insertion order on every device.
+ * Untracked: `id`; `updatedAt` (the merge time); `embedded` (a content cache: the union of both copies, per id the larger value).
  */
-export const SYNC_PATHS: readonly string[] = [...TOP, ...SPLIT.map((k) => `${k}.*`), 'inventory/*', 'order/*'];
+export const SYNC_PATHS: readonly string[] = [...TOP, ...SPLIT.map((k) => `${k}.*`), ...[...DEEP].map((k) => `${k}.*`), 'inventory/*', 'order/*'];
 
 /** JSON with object keys sorted, so equal values compare equal whatever order their keys were written in. */
 export const canon = (v: unknown): string => JSON.stringify(v, (_, x) =>
@@ -32,6 +41,15 @@ export const canon = (v: unknown): string => JSON.stringify(v, (_, x) =>
 /** Does (c1, v1) beat (c2, v2)? The later clock; on a tie (two unstamped copies, say) the larger value, so the choice is symmetric. */
 const beats = (c1: Hlc, v1: unknown, c2: Hlc, v2: unknown): boolean => c1 > c2 || (c1 === c2 && canon(v1) > canon(v2));
 
+const isObj = (v: unknown): v is Rec => typeof v === 'object' && v !== null;
+/** Own properties only: an inherited `constructor` or `__proto__` is never a value. */
+const own = (o: unknown, k: string): unknown => (isObj(o) && Object.hasOwn(o, k) ? o[k] : undefined);
+const keysOf = (o: unknown): string[] => (isObj(o) ? Object.keys(o) : []);
+const union = (x: unknown, y: unknown) => new Set([...keysOf(x), ...keysOf(y)]);
+/** Defines a plain own property, so a `__proto__` key from the network can never set a prototype. */
+const define = (o: Rec, k: string, v: unknown) => { Object.defineProperty(o, k, { value: v, enumerable: true, writable: true, configurable: true }); };
+const clockAt = (c: Clocks | undefined, k: string): Hlc => (own(c, k) as Hlc | undefined) ?? '';
+
 /** Per key, the later clock. Built through a Map so a `__proto__` key stays a plain key. */
 function join(x: Clocks = {}, y: Clocks = {}): Clocks {
   const m = new Map(Object.entries(x));
@@ -39,20 +57,51 @@ function join(x: Clocks = {}, y: Clocks = {}): Clocks {
   return Object.fromEntries(m);
 }
 
-const fields = (r: Rec | undefined, k: string) => (r?.[k] ?? {}) as Rec;
 const pad = (i: number) => String(i).padStart(6, '0');
+const keyOf = (p: Path) => p.join('.');
+const isList = (p: Path) => p.length === 3 && `${p[0]}.${p[1]}` === LIST;
 
 /** Every tracked value path (not inventory) present in either record. */
-function valuePaths(a: Rec | undefined, b: Rec): string[] {
-  const out: string[] = [...TOP];
-  for (const k of SPLIT) for (const f of new Set([...Object.keys(fields(a, k)), ...Object.keys(fields(b, k))])) out.push(`${k}.${f}`);
+function valuePaths(a: unknown, b: unknown): Path[] {
+  const out: Path[] = TOP.map((k) => [k]);
+  for (const k of SPLIT) for (const f of union(own(a, k), own(b, k))) {
+    if (!DEEP.has(`${k}.${f}`)) out.push([k, f]);
+    else for (const g of union(own(own(a, k), f), own(own(b, k), f))) out.push([k, f, g]);
+  }
   return out;
 }
 
-const valueAt = (r: Rec | undefined, path: string): unknown => {
-  const dot = path.indexOf('.');
-  return dot < 0 ? r?.[path] : fields(r, path.slice(0, dot))[path.slice(dot + 1)];
-};
+function valueAt(r: unknown, p: Path): unknown {
+  let v = r;
+  for (const k of p) v = own(v, k);
+  return v === undefined && isList(p) ? 0 : v;
+}
+
+/** slotsUsed from its index → count map: holes 0, no trailing zeros. */
+function toList(m: Rec): number[] {
+  const len = Math.max(0, ...Object.keys(m).filter((k) => own(m, k) !== 0).map((k) => Number(k) + 1).filter(Number.isInteger));
+  return Array.from({ length: len }, (_, i) => (own(m, String(i)) as number | undefined) ?? 0);
+}
+
+/** The record's tracked values rebuilt from `get(path)`: SPLIT objects and DEEP containers always exist, absent values are left out. */
+function build(a: unknown, b: unknown, get: (p: Path) => unknown): Rec {
+  const out: Rec = {};
+  for (const k of SPLIT) {
+    const o: Rec = {};
+    define(out, k, o);
+    for (const f of union(own(a, k), own(b, k))) if (DEEP.has(`${k}.${f}`)) define(o, f, {});
+  }
+  for (const p of valuePaths(a, b)) {
+    const v = get(p);
+    if (v === undefined) continue;
+    let o = out;
+    for (const s of p.slice(0, -1)) o = o[s] as Rec; // only SPLIT and DEEP names, never a key from the record
+    define(o, p[p.length - 1], v);
+  }
+  const st = out.state as Rec;
+  if (isObj(st.slotsUsed)) st.slotsUsed = toList(st.slotsUsed);
+  return out;
+}
 
 /** The latest HLC anywhere in the record's clocks and tombstones ('' when unstamped): what a receiver feeds to hlcReceive. */
 export function latestClock(c: Synced<Character>): Hlc {
@@ -67,8 +116,7 @@ export function latestClock(c: Synced<Character>): Hlc {
  */
 export function stamp(prev: Synced<Character> | undefined, next: Character, at: Hlc): Synced<Character> {
   const clock = new Map(Object.entries(prev?.sync?.clock ?? {})), gone = new Map(Object.entries(prev?.sync?.gone ?? {}));
-  const p = prev as Rec | undefined, n = next as unknown as Rec;
-  for (const path of valuePaths(p, n)) if (canon(valueAt(p, path)) !== canon(valueAt(n, path))) clock.set(path, at);
+  for (const p of valuePaths(prev, next)) if (canon(valueAt(prev, p)) !== canon(valueAt(next, p))) clock.set(keyOf(p), at);
   const before = new Map((prev?.inventory ?? []).map((e) => [e.id, e]));
   next.inventory.forEach((e, i) => {
     const had = before.get(e.id);
@@ -80,8 +128,36 @@ export function stamp(prev: Synced<Character> | undefined, next: Character, at: 
   return { ...next, sync: { clock: Object.fromEntries(clock), gone: Object.fromEntries(gone) } };
 }
 
-/** The newest `build.*` clock of a record. */
-const buildClock = (c: Clocks) => Object.entries(c).reduce((m, [k, v]) => (k.startsWith('build.') && v > m ? v : m), '');
+/**
+ * C1: an edit made on a copy loaded before a merge, rebased onto the stored record before it is stamped. `edited.sync` is the meta the
+ * editor loaded (its base): every path, entry or removal the store has seen since (a later stored clock) keeps the stored value
+ * instead of being stamped back to the stale one. An entry missing from `edited` is a deletion only if its base had it (a position);
+ * otherwise it arrived since and stays. Without `edited.sync` (a new or imported record) nothing changes.
+ * Limitation: on a path changed remotely since the load, the remote value wins over the stale editor's change of the same path.
+ */
+export function rebase(stored: Synced<Character> | undefined, edited: Synced<Character>): Character {
+  const base = edited.sync?.clock;
+  if (!stored || !base) return edited;
+  const sc = stored.sync?.clock;
+  const newer = (k: string) => clockAt(sc, k) > clockAt(base, k);
+  const fromStore = valuePaths(stored, edited).filter((p) => newer(keyOf(p))).map(keyOf);
+  const taken = new Set(fromStore);
+  const vals = build(stored, edited, (p) => valueAt(taken.has(keyOf(p)) ? stored : edited, p));
+  const had = new Map(stored.inventory.map((e) => [e.id, e])), mine = new Set(edited.inventory.map((e) => e.id));
+  const inventory = edited.inventory.flatMap((e) => {
+    const s = had.get(e.id);
+    if (s) return [newer(`inventory/${e.id}`) ? s : e];
+    return clockAt(stored.sync?.gone, e.id) > clockAt(edited.sync?.gone, e.id) ? [] : [e]; // removed elsewhere since the load
+  });
+  for (const s of stored.inventory) if (!mine.has(s.id) && !Object.hasOwn(base, `order/${s.id}`)) inventory.push(s); // added since
+  const pos = (e: InventoryEntry) => clockAt(sc, `order/${e.id}`);
+  inventory.sort((p, q) => (!pos(p) === !pos(q) ? (pos(p) < pos(q) ? -1 : pos(p) > pos(q) ? 1 : 0) : pos(p) ? -1 : 1));
+  // a build value taken from the store may need content the stale copy's snapshot lacks
+  const embedded = fromStore.some((k) => k.startsWith('build.')) ? { ...stored.embedded, ...edited.embedded } : edited.embedded;
+  const rest: Rec = { ...edited };
+  for (const k of TOP) delete rest[k];
+  return { ...rest, ...vals, embedded, inventory } as unknown as Character;
+}
 
 /**
  * The two copies merged: per path the value with the later clock; inventory the union of entries minus those whose tombstone is
@@ -89,19 +165,19 @@ const buildClock = (c: Clocks) => Object.entries(c).reduce((m, [k, v]) => (k.sta
  */
 export function mergeCharacter(a: Synced<Character>, b: Synced<Character>): Synced<Character> {
   const ca = a.sync?.clock ?? {}, cb = b.sync?.clock ?? {};
-  const ra = a as unknown as Rec, rb = b as unknown as Rec;
   const clock = join(ca, cb), gone = join(a.sync?.gone, b.sync?.gone);
-  const pick = (path: string) => {
-    const va = valueAt(ra, path), vb = valueAt(rb, path);
-    return beats(cb[path] ?? '', vb, ca[path] ?? '', va) ? vb : va;
-  };
-  const out: Rec = { id: a.id };
-  for (const k of TOP) { const v = pick(k); if (v !== undefined) out[k] = v; }
-  for (const k of SPLIT) {
-    const keys = new Set([...Object.keys(fields(ra, k)), ...Object.keys(fields(rb, k))]);
-    out[k] = Object.fromEntries([...keys].flatMap((f) => { const v = pick(`${k}.${f}`); return v === undefined ? [] : [[f, v]]; }));
+  const out = build(a, b, (p) => {
+    const va = valueAt(a, p), vb = valueAt(b, p), k = keyOf(p);
+    return beats(clockAt(cb, k), vb, clockAt(ca, k), va) ? vb : va;
+  });
+  define(out, 'id', a.id);
+
+  const embedded: Rec = {};
+  for (const k of union(a.embedded, b.embedded)) {
+    const x = own(a.embedded, k), y = own(b.embedded, k);
+    define(embedded, k, x === undefined ? y : y === undefined || !beats('', y, '', x) ? x : y);
   }
-  out.embedded = beats(buildClock(cb), b.embedded, buildClock(ca), a.embedded) ? b.embedded : a.embedded;
+  out.embedded = embedded;
 
   // Positions take the EARLIEST (an entry keeps the place it was first given). An entry with no stored position (an unstamped
   // copy) is at its index, which sorts before every stamped position.
@@ -115,8 +191,8 @@ export function mergeCharacter(a: Synced<Character>, b: Synced<Character>): Sync
   for (const id of new Set([...ha.keys(), ...hb.keys()])) {
     const x = ha.get(id), y = hb.get(id), ip = `inventory/${id}`;
     const g = Object.hasOwn(gone, id) ? gone[id] : undefined;
-    if (g !== undefined && g > (clock[ip] ?? '')) continue; // the removal is later than the entry's last change
-    kept.push({ e: !x ? y! : !y ? x : beats(cb[ip] ?? '', y, ca[ip] ?? '', x) ? y : x, pos: order.get(`order/${id}`)! });
+    if (g !== undefined && g > clockAt(clock, ip)) continue; // the removal is later than the entry's last change
+    kept.push({ e: !x ? y! : !y ? x : beats(clockAt(cb, ip), y, clockAt(ca, ip), x) ? y : x, pos: order.get(`order/${id}`)! });
   }
   out.inventory = kept.sort((p, q) => (p.pos < q.pos ? -1 : p.pos > q.pos ? 1 : p.e.id < q.e.id ? -1 : 1)).map((k) => k.e);
   out.updatedAt = Math.max(a.updatedAt || 0, b.updatedAt || 0);

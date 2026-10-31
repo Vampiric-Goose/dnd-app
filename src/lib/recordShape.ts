@@ -31,9 +31,15 @@ const entriesProblem = (list: unknown[], what: string): string | undefined => {
   return i < 0 ? undefined : `has a damaged ${what} entry (${i + 1})`;
 };
 
-const strings = (v: unknown) => isRec(v) && Object.values(v).every((x) => typeof x === 'string');
+// An HLC (`wall:counter:node`), an inventory position (`<hlc>/NNNNNN`), or the position of an unstamped entry (`/NNNNNN`).
+const CLOCK = /^(\d{15}:\d{6}:[A-Za-z0-9_-]{1,16})?(\/\d{6})?$/;
+const MAX_CLOCKS = 5000;
+const DAY = 86_400_000;
+/** I2: every value a well-formed clock whose wall time is at most a day ahead, and no more than MAX_CLOCKS of them. */
+const clocks = (v: unknown, latest: number) => isRec(v) && Object.keys(v).length <= MAX_CLOCKS
+  && Object.values(v).every((x) => typeof x === 'string' && x !== '' && CLOCK.test(x) && (x[0] === '/' || Number(x.slice(0, 15)) <= latest));
 /** Stage 3: a character's optional sync meta, `{ clock: Record<string, string>, gone: Record<string, string> }`. */
-const syncOk = (s: unknown) => isRec(s) && strings(s.clock) && strings(s.gone);
+const syncOk = (s: unknown) => { const latest = Date.now() + DAY; return isRec(s) && clocks(s.clock, latest) && clocks(s.gone, latest); };
 
 /** I2: a character deep enough that the sheet, the lists and the creator can read it without throwing. */
 export function characterProblem(r: unknown): string | undefined {

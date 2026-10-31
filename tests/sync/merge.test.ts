@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { hlcCompare, hlcNow, hlcReceive, type Hlc } from '../../src/lib/sync/hlc.ts';
-import { latestClock, mergeCharacter, stamp, SYNC_PATHS, type Synced } from '../../src/lib/sync/merge.ts';
+import { canon, latestClock, mergeCharacter, rebase, stamp, SYNC_PATHS, type Synced } from '../../src/lib/sync/merge.ts';
 import type { Character, InventoryEntry, ItemDef } from '../../src/lib/types.ts';
 import { char } from '../fixtures/records.ts';
 
@@ -50,6 +50,21 @@ describe('HLC', () => {
     expect(last).toBe('000000000000101:000002:n');
   });
 
+  test('M2: a counter past 999999 carries into the wall time and still sorts later', () => {
+    const last = '000000000000100:999999:n';
+    const next = hlcNow('n', last, 50);
+    expect(next).toBe('000000000000101:000000:n');
+    expect(hlcCompare(next, last)).toBe(1);
+    expect(hlcCompare(hlcReceive('n', last, '000000000000100:999999:m', 50), last)).toBe(1);
+  });
+
+  test('I2: a remote wall time over a day ahead is ignored (the local clock stays)', () => {
+    const local = hlcNow('b', undefined, T);
+    expect(hlcReceive('b', local, '999999999999999:000000:x', T)).toBe(local);
+    expect(hlcReceive('b', undefined, hlcNow('x', undefined, T + 2 * 86_400_000), T)).toBe(hlcNow('b', undefined, T));
+    expect(hlcCompare(hlcReceive('b', local, hlcNow('x', undefined, T + 3_600_000), T), local)).toBe(1); // an hour ahead is believed
+  });
+
   test('receive moves past the remote clock, even from a device whose wall clock is behind', () => {
     const remote = hlcNow('a', undefined, T);
     const r = hlcReceive('b', undefined, remote, T - 10 * MIN);
@@ -79,6 +94,19 @@ describe('stamp', () => {
     expect(s.sync!.clock['order/n1']).toBe(`${at2}/000001`);
     expect(s.sync!.clock.name).toBe(at1);
     expect(s.sync!.gone).toEqual({ b1: at2 });
+  });
+
+  test('C1: rebase keeps what arrived since the load (a value, an add, a removal); a missing entry the base had is a deletion', () => {
+    const at1 = hlcNow('a', undefined, T);
+    const stale = stamp(undefined, base(), at1); // the editor loaded this
+    // since then the store merged a remote edit: notes changed, b1 removed, n added
+    const stored = stamp(stale, { ...clone(stale), details: { ...stale.details, notes: 'remote' }, inventory: [entry('b2'), entry('n')] }, hlcNow('b', at1, T + 1));
+    const edited = { ...clone(stale), state: { ...stale.state, hp: 4 }, inventory: stale.inventory.filter((e) => e.id !== 'b2') }; // the editor removed b2
+    const r = rebase(stored, edited);
+    expect(r.details.notes).toBe('remote');
+    expect(r.state.hp).toBe(4);
+    expect(r.inventory.map((e) => e.id)).toEqual(['n']);
+    expect(rebase(stored, { ...edited, sync: undefined })).toEqual({ ...edited, sync: undefined }); // no base: unchanged
   });
 
   test('key order alone is not a change', () => {
@@ -162,11 +190,33 @@ describe('the spec guarantees (3.6)', () => {
     expect(mergeCharacter(x, y).inventory.map((e) => e.id)).toEqual(['b1', 'b2', 'q']);
   });
 
-  test('embedded comes from the copy with the newest build change', () => {
+  test('M3: embedded is the union of both snapshots (a class taken on one device, a race changed on the other)', () => {
     const [a, b] = pair();
     a.edit((c) => { c.build.levels = [{ classId: 'class:fighter@PHB' }]; c.embedded = { 'class:fighter@PHB': gear as never }; }, T);
-    b.edit((c) => { c.state.hp = 2; c.embedded = {}; }, T + 5);
-    expect(Object.keys(mergeCharacter(b.rec, a.rec).embedded)).toEqual(['class:fighter@PHB']);
+    b.edit((c) => { c.build.raceId = 'race:elf@PHB'; c.embedded = { 'race:elf@PHB': gear as never }; }, T + 5);
+    const m = mergeCharacter(b.rec, a.rec);
+    expect(Object.keys(m.embedded).sort()).toEqual(['class:fighter@PHB', 'race:elf@PHB']);
+    expect(m.build.raceId).toBe('race:elf@PHB');
+    expect(m.build.levels).toEqual([{ classId: 'class:fighter@PHB' }]);
+  });
+
+  test('R7: different keys of one map survive; a deleted key sticks against an older value', () => {
+    const [a, b] = pair();
+    a.edit((c) => { c.build.choices.feat4 = { type: 'ids', ids: ['feat:alert@PHB'] }; c.state.resourcesUsed.Rage = 1; c.overrides.ac = 18; c.state.slotsUsed = [1]; }, T);
+    b.edit((c) => { c.build.choices.skill1 = { type: 'ids', ids: ['athletics'] }; c.state.resourcesUsed['Second Wind'] = 1; c.overrides.speed = 40; c.state.slotsUsed = [0, 0, 2]; }, T + 1);
+    const m = mergeCharacter(a.rec, b.rec);
+    expect(Object.keys(m.build.choices).sort()).toEqual(['feat4', 'skill1']);
+    expect(m.state.resourcesUsed).toEqual({ Rage: 1, 'Second Wind': 1 });
+    expect(m.overrides).toEqual({ ac: 18, speed: 40 });
+    expect(m.state.slotsUsed).toEqual([1, 0, 2]);
+    // a later delete of feat4 on b wins over the older value, both ways, and the merged map has no such key at all
+    b.receive(a);
+    b.edit((c) => { delete c.build.choices.feat4; c.state.slotsUsed = []; }, T + 2);
+    for (const x of [mergeCharacter(a.rec, b.rec), mergeCharacter(b.rec, a.rec)]) {
+      expect(Object.hasOwn(x.build.choices, 'feat4')).toBe(false);
+      expect(x.state.slotsUsed).toEqual([]);
+    }
+    expect(SYNC_PATHS).toEqual(expect.arrayContaining(['build.choices.*', 'state.slotsUsed.*', 'overrides.*', 'customEffects']));
   });
 
   test('a __proto__ key from the network stays a plain key', () => {
@@ -175,6 +225,17 @@ describe('the spec guarantees (3.6)', () => {
     const m = mergeCharacter(a.rec, { ...a.rec, sync: evil });
     expect(Object.getPrototypeOf(m.sync!.clock)).toBe(Object.prototype);
     expect(({} as Record<string, unknown>).x).toBeUndefined();
+  });
+
+  test('M1: an inherited name (constructor) is never read as a value', () => {
+    const [a] = pair();
+    const crafted = JSON.parse(JSON.stringify(a.rec));
+    crafted.details.constructor = 'x';
+    crafted.sync.clock['details.constructor'] = hlcNow('a', undefined, T);
+    const later = { ...a.rec, sync: { ...a.rec.sync!, clock: { ...a.rec.sync!.clock, 'details.constructor': hlcNow('b', undefined, T + 1) } } };
+    const m = mergeCharacter(crafted, later);
+    expect(Object.hasOwn(m.details, 'constructor')).toBe(false);
+    expect(() => structuredClone(m)).not.toThrow();
   });
 });
 
@@ -191,60 +252,103 @@ describe('property: three replicas converge', () => {
   const SCRIPTS = 200, STEPS = 40;
   const ids = (c: Character) => c.inventory.map((e) => e.id);
 
+  // Compared as canonical JSON (toEqual would ignore keys holding undefined).
+  const same = (x: unknown, y: unknown, msg?: string) => expect(canon(x), msg).toBe(canon(y));
+  const read = (c: unknown, p: string[]) => {
+    let v = c;
+    for (const k of p) v = v && typeof v === 'object' && Object.hasOwn(v, k) ? (v as Record<string, unknown>)[k] : undefined;
+    return v === undefined && p[1] === 'slotsUsed' ? 0 : v;
+  };
+
   test(`${SCRIPTS} seeded edit scripts × ${STEPS} steps`, () => {
     for (let s = 1; s <= SCRIPTS; s++) {
       const r = mulberry32(s), int = (n: number) => Math.floor(r() * n);
       let now = T, seq = 100; // above every base value, so each edit changes something
+      // M4: in some scripts the replicas start from diverged unstamped copies (different name, hp, an entry and a choice each)
+      const diverged = r() < 0.3;
+      const start = (i: number): Character => !diverged ? base() : {
+        ...base(), name: `B${i}`, state: { ...base().state, hp: 10 + i }, inventory: [...base().inventory, entry(`b${3 + i}`)],
+        build: { ...base().build, choices: { [`base${i}`]: { type: 'ids', ids: [`q${i}`] } } },
+      };
       // skews up to ±10 min; a replica's clock sometimes jumps back a minute
-      const devs = ['pa', 'pb', 'dm'].map((n) => new Device(n, base(), 0)).map((d) => Object.assign(d, { skew: (r() - 0.5) * 20 * MIN }));
+      const devs = ['pa', 'pb', 'dm'].map((n, i) => new Device(n, start(i), 0)).map((d) => Object.assign(d, { skew: (r() - 0.5) * 20 * MIN }));
       const wall = (d: Device & { skew: number }) => Math.round(now + d.skew - (r() < 0.1 ? MIN : 0));
       // the oracle: per path the value of the edit with the latest HLC; per entry its latest edit and latest removal
-      const values = new Map<string, { at: Hlc; v: unknown }>(), edits = new Map<string, { at: Hlc; e: InventoryEntry }>();
+      const values = new Map<string, { at: Hlc; v: unknown; p: string[] }>(), edits = new Map<string, { at: Hlc; e: InventoryEntry }>();
       const removed = new Map<string, Hlc>(), added = new Map<string, Hlc>();
-      const note = (path: string, at: Hlc, v: unknown) => { if (!(values.get(path)?.at! >= at)) values.set(path, { at, v }); };
-      for (const e of base().inventory) edits.set(e.id, { at: '', e });
+      for (const d of devs) for (const e of d.rec.inventory) edits.set(e.id, { at: '', e });
 
       for (let step = 0; step < STEPS; step++) {
         now += int(3000);
         const d = devs[int(3)];
         if (r() < 0.6) {
           const n = ++seq;
-          const op = int(11);
-          let path = '', v: unknown, ent: InventoryEntry | undefined, gone: string | undefined;
+          const op = int(18);
+          const changes: [string[], unknown][] = [];
+          let ent: InventoryEntry | undefined, gone: string | undefined, pushed = false;
           const before = clone(d.rec);
+          const set = (p: string[], v: unknown) => { changes.push([p, v]); };
           const at = d.edit((c) => {
-            const inv = c.inventory;
+            const inv = c.inventory, st = c.state;
+            const hp = () => set(['state', 'hp'], (st.hp = n));
             switch (op) {
-              case 0: path = 'state.hp'; v = c.state.hp = n; break;
-              case 1: path = 'details.notes'; v = c.details.notes = `n${n}`; break;
-              case 2: path = 'name'; v = c.name = `N${n}`; break;
-              case 3: path = 'currency.gp'; v = c.currency.gp = n; break;
-              case 4: inv.push((ent = entry(`e${n}`, n))); break;
-              case 5: if (inv.length) { gone = inv[int(inv.length)].id; c.inventory = inv.filter((e) => e.id !== gone); } else { path = 'state.hp'; v = c.state.hp = n; } break;
-              case 6: if (inv.length) { ent = inv[int(inv.length)]; ent.quantity = n; } else { path = 'state.hp'; v = c.state.hp = n; } break;
-              case 7: path = 'state.stable'; v = c.state.stable = c.state.stable ? undefined : true; if (v === undefined) delete c.state.stable; break;
-              case 8: path = 'build.levels'; v = c.build.levels = [{ classId: `class:c${n}@PHB` }]; break;
-              case 9: path = 'state.conditions'; v = c.state.conditions = [`c${n}`]; break;
-              default: path = 'details.portrait'; v = c.details.portrait = c.details.portrait ? undefined : `p${n}`; if (v === undefined) delete c.details.portrait; break;
+              case 0: hp(); break;
+              case 1: set(['details', 'notes'], (c.details.notes = `n${n}`)); break;
+              case 2: set(['name'], (c.name = `N${n}`)); break;
+              case 3: set(['currency', 'gp'], (c.currency.gp = n)); break;
+              case 4: inv.push((ent = entry(`e${n}`, n))); pushed = true; break;
+              case 5: if (inv.length) { gone = inv[int(inv.length)].id; c.inventory = inv.filter((e) => e.id !== gone); } else hp(); break;
+              case 6: if (inv.length) { ent = inv[int(inv.length)]; ent.quantity = n; } else hp(); break;
+              case 7: if (st.stable) { delete st.stable; set(['state', 'stable'], undefined); } else set(['state', 'stable'], (st.stable = true)); break;
+              case 8: set(['build', 'levels'], (c.build.levels = [{ classId: `class:c${n}@PHB` }])); break;
+              case 9: set(['state', 'conditions'], (st.conditions = [`c${n}`])); break;
+              case 10: if (c.details.portrait) { delete c.details.portrait; set(['details', 'portrait'], undefined); } else set(['details', 'portrait'], (c.details.portrait = `p${n}`)); break;
+              // R7: different keys of one map on different replicas; deletions included
+              case 11: {
+                const k = `k${int(4)}`, ch = c.build.choices;
+                if (Object.hasOwn(ch, k) && r() < 0.5) { delete ch[k]; set(['build', 'choices', k], undefined); } else set(['build', 'choices', k], (ch[k] = { type: 'ids', ids: [`x${n}`] }));
+                break;
+              }
+              case 12: { const k = `r${int(3)}`; set(['state', 'resourcesUsed', k], (st.resourcesUsed[k] = n)); break; }
+              case 13: { const die = [6, 8, 10][int(3)]; set(['state', 'hitDiceUsed', String(die)], (st.hitDiceUsed[die] = n)); break; }
+              case 14: {
+                const k = (['ac', 'initiative', 'speed'] as const)[int(3)], o = c.overrides;
+                if (o[k] !== undefined && r() < 0.5) { delete o[k]; set(['overrides', k], undefined); } else set(['overrides', k], (o[k] = n));
+                break;
+              }
+              case 15: { const i = int(4); st.slotsUsed = Array.from({ length: Math.max(st.slotsUsed.length, i + 1) }, (_, k) => st.slotsUsed[k] ?? 0); set(['state', 'slotsUsed', String(i)], (st.slotsUsed[i] = n)); break; }
+              case 16: { // a long rest: every spent slot back to 0
+                const spent = st.slotsUsed.flatMap((x, i) => (x ? [i] : []));
+                if (!spent.length) { hp(); break; }
+                for (const i of spent) set(['state', 'slotsUsed', String(i)], 0);
+                st.slotsUsed = [];
+                break;
+              }
+              default: { // M4: re-add a removed id (an item handed back)
+                const back = [...removed.keys()].filter((id) => !inv.some((e) => e.id === id));
+                if (!back.length) { hp(); break; }
+                inv.push((ent = entry(back[int(back.length)], n)));
+                pushed = true;
+              }
             }
           }, wall(d));
-          if (path) note(path, at, v);
+          for (const [p, v] of changes) { const k = p.join('.'); if (!(values.get(k)?.at! >= at)) values.set(k, { at, v, p }); }
           if (ent && !(edits.get(ent.id)?.at! >= at)) edits.set(ent.id, { at, e: clone(ent) });
           if (ent && op === 4) added.set(ent.id, at);
           if (gone && !(removed.get(gone)! >= at)) removed.set(gone, at);
-          // stamp touched exactly that path (plus the new entry's position)
-          // (a first edit also gives the base entries their positions)
+          // stamp touched exactly those paths, plus a pushed entry's position if it had none (a first edit also positions base entries)
           const fresh = Object.entries(d.rec.sync!.clock).filter(([k, c]) => c.startsWith(at) && before.sync?.clock[k] !== c && !k.startsWith('order/b')).map(([k]) => k);
-          const want = path ? [path] : ent ? [`inventory/${ent.id}`, ...(op === 4 ? [`order/${ent.id}`] : [])] : [];
-          expect(fresh.sort()).toEqual(want.sort());
+          const want = [...changes.map(([p]) => p.join('.')), ...(ent ? [`inventory/${ent.id}`] : []),
+            ...(ent && pushed && !before.sync?.clock[`order/${ent.id}`] ? [`order/${ent.id}`] : [])].filter((k) => !k.startsWith('order/b'));
+          expect(fresh.sort(), `seed ${s} op ${op}`).toEqual(want.sort());
           if (gone) expect(d.rec.sync!.gone[gone]).toBe(at);
         } else {
           const e = devs[(devs.indexOf(d) + 1 + int(2)) % 3];
           const m = mergeCharacter(d.rec, e.rec);
-          expect(mergeCharacter(e.rec, d.rec)).toEqual(m); // commutative
-          expect(mergeCharacter(m, m)).toEqual(m); // idempotent
-          expect(mergeCharacter(m, d.rec)).toEqual(m); // absorbs its inputs
-          expect(mergeCharacter(m, e.rec)).toEqual(m);
+          same(mergeCharacter(e.rec, d.rec), m); // commutative
+          same(mergeCharacter(m, m), m); // idempotent
+          same(mergeCharacter(m, d.rec), m); // absorbs its inputs
+          same(mergeCharacter(m, e.rec), m);
           d.receive(e, wall(d));
           if (r() < 0.5) e.receive(d, wall(e)); // otherwise a partial (one-way) sync
         }
@@ -253,27 +357,23 @@ describe('property: three replicas converge', () => {
       // associative: every order of folding the three gives the same record
       const [x, y, z] = devs.map((d) => d.rec);
       const all = mergeCharacter(mergeCharacter(x, y), z);
-      for (const [p, q, t] of [[x, z, y], [y, x, z], [y, z, x], [z, x, y], [z, y, x]]) expect(mergeCharacter(mergeCharacter(p, q), t)).toEqual(all);
-      expect(mergeCharacter(x, mergeCharacter(y, z))).toEqual(all);
+      for (const [p, q, t] of [[x, z, y], [y, x, z], [y, z, x], [z, x, y], [z, y, x]]) same(mergeCharacter(mergeCharacter(p, q), t), all);
+      same(mergeCharacter(x, mergeCharacter(y, z)), all);
 
       // everyone syncs both ways with everyone, in a random order: all three end identical
       const pairs = [[0, 1], [1, 2], [0, 2]].sort(() => r() - 0.5);
       for (const [i, j] of pairs) { devs[i].receive(devs[j], wall(devs[i])); devs[j].receive(devs[i], wall(devs[j])); }
-      expect(devs[1].rec).toEqual(devs[0].rec);
-      expect(devs[2].rec).toEqual(devs[0].rec);
+      same(devs[1].rec, devs[0].rec);
+      same(devs[2].rec, devs[0].rec);
       const fin = devs[0].rec;
-      expect(fin).toEqual(all);
+      same(fin, all);
 
       // no edit is lost: each path holds its latest edit; each entry is present iff its latest edit is later than its removal
-      for (const [path, { v }] of values) {
-        const dot = path.indexOf('.');
-        const got = dot < 0 ? (fin as unknown as Record<string, unknown>)[path] : ((fin as unknown as Record<string, Record<string, unknown>>)[path.slice(0, dot)])[path.slice(dot + 1)];
-        expect(got, `seed ${s} ${path}`).toEqual(v);
-      }
+      for (const [k, { v, p }] of values) expect(read(fin, p), `seed ${s} ${k}`).toEqual(v);
       const expected = [...edits].filter(([id, { at }]) => !(removed.get(id)! > at)).map(([id]) => id).sort();
       expect([...ids(fin)].sort(), `seed ${s} inventory`).toEqual(expected);
-      for (const e of fin.inventory) expect(e).toEqual(edits.get(e.id)!.e);
-      // added entries keep their add order
+      for (const e of fin.inventory) same(e, edits.get(e.id)!.e);
+      // added entries keep their add order (a re-added one keeps its first place)
       const addOrder = ids(fin).filter((id) => added.has(id));
       expect(addOrder).toEqual([...addOrder].sort((p, q) => hlcCompare(added.get(p)!, added.get(q)!)));
     }
