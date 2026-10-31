@@ -6,6 +6,7 @@ import type { Entity, ItemDef, Pack } from '../src/lib/types.ts';
 import { classes } from './srd/classes.ts';
 import { effectTarget, SRD_EFFECTS } from './srd/effects.ts';
 import { items } from './srd/items.ts';
+import { convertMonsters } from './srd/monsters.ts';
 import { backgrounds, conditions, fail, feats, type Raw } from './srd/misc.ts';
 import { races } from './srd/races.ts';
 import { spells } from './srd/spells.ts';
@@ -17,7 +18,7 @@ const read = (file: string): Raw[] => {
   return cache.get(file)!;
 };
 
-const entities: Entity[] = [...classes(read), ...races(read), ...backgrounds(read), ...feats(read), ...spells(read), ...items(read), ...conditions(read)];
+const entities: Entity[] = [...classes(read), ...races(read), ...backgrounds(read), ...feats(read), ...spells(read), ...items(read), ...conditions(read), ...convertMonsters(read('Monsters'))];
 const byId = new Map<string, Entity>();
 for (const e of entities) {
   if (byId.has(e.id)) fail(`duplicate id ${e.id}`);
