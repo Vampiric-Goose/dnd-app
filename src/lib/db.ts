@@ -95,7 +95,7 @@ export const sha256Hex = async (data: ArrayBuffer) => {
 function packMeta(p: Pack): PackMeta {
   const counts: PackMeta['counts'] = {};
   for (const e of p.entities) counts[e.kind] = (counts[e.kind] ?? 0) + 1;
-  return { id: p.id, name: p.name, source: p.source, ...(p.homebrew && { homebrew: true }), importedAt: p.importedAt, hash: p.hash, counts };
+  return { id: p.id, name: p.name, source: p.source, ...(p.homebrew && { homebrew: true }), importedAt: p.importedAt, hash: p.hash, counts, ...(p.sharedBy !== undefined && { sharedBy: p.sharedBy }) };
 }
 
 const maybe = <T>(f: (x: T) => T, x: T | undefined) => (x === undefined ? x : f(x));

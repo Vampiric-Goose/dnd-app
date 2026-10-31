@@ -6,7 +6,7 @@ import { Host, type HostDeps } from '../../src/lib/sync/host.ts';
 import { hlcNow, hlcReceive } from '../../src/lib/sync/hlc.ts';
 import { memoryPair, type Link } from '../../src/lib/sync/link.ts';
 import { latestClock, stamp } from '../../src/lib/sync/merge.ts';
-import type { Campaign, CampaignSync, Character, Pack } from '../../src/lib/types.ts';
+import type { Campaign, CampaignSync, Character, Pack, PackMeta } from '../../src/lib/types.ts';
 import { fixtureIndex } from '../fixtures/content.ts';
 
 const clone = <T>(x: T): T => (x === undefined ? x : structuredClone(x));
@@ -58,6 +58,9 @@ export class Device {
     this.characters.delete(id);
   }
   char(id: string): Character | undefined { return clone(this.characters.get(id)); }
+  packMeta(): PackMeta[] {
+    return [...this.packs.values()].map((p) => ({ id: p.id, name: p.name, source: p.source, importedAt: p.importedAt, hash: p.hash, counts: {}, ...(p.sharedBy !== undefined && { sharedBy: p.sharedBy }) }));
+  }
   /** Everything stored, for "nothing changed" checks. */
   snapshot(): string { return JSON.stringify([[...this.campaigns], [...this.characters], [...this.packs]]); }
 
@@ -70,6 +73,8 @@ export class Device {
       saveCharacter: async (c) => this.putSynced(c),
       deleteCharacter: async (id) => this.deleteChar(id),
       index: fixtureIndex,
+      packMeta: async () => this.packMeta(),
+      loadPack: async (id) => clone(this.packs.get(id)),
       addRoll: (e, from) => { this.rolls.push({ e, from }); },
       onError: (e) => { this.errors.push(e); },
       now: this.wall,
@@ -85,6 +90,8 @@ export class Device {
       loadCharacter: async (id) => this.char(id),
       saveCharacter: async (c) => this.putSynced(c),
       deleteCharacter: async (id) => this.deleteChar(id),
+      packMeta: async () => this.packMeta(),
+      savePack: async (p) => { this.packs.set(p.id, clone(p)); },
       onRoll: (e, from) => { this.rolls.push({ e, from }); },
       onError: (e) => { this.errors.push(e); },
       now: this.wall,

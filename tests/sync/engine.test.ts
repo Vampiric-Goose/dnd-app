@@ -402,6 +402,8 @@ describe('with the real db (fake-indexeddb)', () => {
       saveCharacter: (c) => db.characters.putSynced(c),
       deleteCharacter: (id) => db.characters.delete(id),
       index: fixtureIndex,
+      packMeta: () => db.packs.listMeta(),
+      loadPack: (id) => db.packs.get(id),
     });
     const a = player({ playerId: 'A1' }), n = player({ name: 'Nia' });
     const [h] = connect(host, a.guest);

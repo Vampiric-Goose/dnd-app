@@ -3,15 +3,15 @@
 // 2024) before anything is stored. Storage, the content index and the clock are injected, so tests run it on fakes.
 import { strip2024 } from '../character/strip2024.ts';
 import type { ContentIndex } from '../content/index.ts';
-import { idSource, is2024Source } from '../content/sources.ts';
+import { idSource, is2024Source, restorablePack } from '../content/sources.ts';
 import type { RollEntry } from '../rolls.svelte.ts';
-import type { Campaign, CampaignSync, Character } from '../types.ts';
-import { newJoinCode, nextPlayerId } from './code.ts';
+import type { Campaign, CampaignSync, Character, Pack, PackMeta } from '../types.ts';
+import { newJoinCode, nextPlayerId, sha256Text } from './code.ts';
 import { hlcNow } from './hlc.ts';
 import type { Link } from './link.ts';
 import { canon, latestClock, mergeCharacter, type Synced } from './merge.ts';
-import { campaignForPlayers, characterForPlayer, rosterEntry, unprojectCharacter } from './project.ts';
-import { cleanRoll, MAX_MESSAGE, parseGuestMessage, size, type GuestMsg, type HostMsg } from './protocol.ts';
+import { campaignForPlayers, characterForPlayer, packForPlayers, rosterEntry, unprojectCharacter } from './project.ts';
+import { cleanRoll, MAX_CHUNK, MAX_MESSAGE, MAX_PACK, parseGuestMessage, size, type GuestMsg, type HostMsg, type PackOffer } from './protocol.ts';
 
 export interface HostDeps {
   /** The hosted campaign (its `sync.role` is 'dm'). */
@@ -26,6 +26,9 @@ export interface HostDeps {
   /** Deletes a character and records its tombstone in campaign.sync.deleted (db.characters.delete does both). */
   deleteCharacter(id: string): Promise<void>;
   index(): ContentIndex | Promise<ContentIndex>;
+  /** Stored pack metadata (db.packs.listMeta) and packs (db.packs.get). */
+  packMeta(): Promise<PackMeta[]>;
+  loadPack(id: string): Promise<Pack | undefined>;
   /** A player's public roll, for the DM's log. */
   addRoll?(e: RollEntry, from: string): void;
   /** The connected players changed. */
@@ -35,7 +38,22 @@ export interface HostDeps {
   now?(): number;
 }
 
-interface Conn { link: Link; playerId?: string; name?: string; bad: number; closed: boolean }
+interface Conn { link: Link; playerId?: string; name?: string; bad: number; closed: boolean; offered: Set<string>; packs: Promise<void> }
+
+/**
+ * Characters of pack JSON per chunk. Worst case a character takes 3 UTF-8 bytes (a quote or backslash escapes to 2, anything else in
+ * the BMP is at most 3), so a chunk message stays under MAX_CHUNK with room for its envelope.
+ */
+const CHUNK_CHARS = 20_000;
+const LOW_WATER = MAX_CHUNK * 4;
+
+/** A pack as players get it, serialized, with the hash and byte size of exactly that JSON (R6). Undefined when nothing may be sent. */
+async function playerPack(p: Pack | undefined): Promise<{ json: string; offer: PackOffer } | undefined> {
+  const fp = p && restorablePack(p) ? packForPlayers(p) : undefined; // never the built-in SRD; never monsters (packForPlayers)
+  if (!fp) return undefined;
+  const json = JSON.stringify(fp);
+  return { json, offer: { id: fp.id, hash: await sha256Text(json), size: new TextEncoder().encode(json).length } };
+}
 
 /** Same record, ignoring updatedAt (the db sets it on every write). */
 const same = (a: Character, b: Character) => canon({ ...a, updatedAt: 0 }) === canon({ ...b, updatedAt: 0 });
@@ -65,14 +83,16 @@ export class Host {
     return m;
   }
 
-  /** Resolves once every queued message and task has been handled (tests). */
+  #offers = new Map<string, { key: string; offer?: PackOffer }>(); // by pack id; key = stored hash + import time
+
+  /** Resolves once every queued message, task and pack stream has been handled (tests). */
   async idle(): Promise<void> {
     let q;
-    do { q = this.#queue; await q; } while (q !== this.#queue);
+    do { q = this.#queue; await q; await Promise.all([...this.#conns].map((c) => c.packs)); } while (q !== this.#queue);
   }
 
   accept(link: Link): void {
-    const conn: Conn = { link, bad: 0, closed: false };
+    const conn: Conn = { link, bad: 0, closed: false, offered: new Set(), packs: Promise.resolve() };
     this.#conns.add(conn);
     link.onMessage((raw) => {
       if (conn.closed) return;
@@ -177,7 +197,7 @@ export class Host {
       case 'roll':
         this.#deps.addRoll?.(msg.entry, c.playerId);
         return this.#broadcast({ t: 'roll', entry: msg.entry, from: c.playerId }, c);
-      case 'packWant': return; // Task 4
+      case 'packWant': return this.#packWant(c, msg.ids);
     }
   }
 
@@ -200,7 +220,9 @@ export class Host {
     c.playerId = id!;
     c.name = msg.name ?? players[id!]?.name;
     this.#deps.onChange?.();
-    this.#send(c, { t: 'welcome', playerId: c.playerId, campaign: campaignForPlayers(camp), roster: await this.#roster(camp), packs: [] });
+    const packs = await this.#packOffers(camp);
+    c.offered = new Set(packs.map((p) => p.id));
+    this.#send(c, { t: 'welcome', playerId: c.playerId, campaign: campaignForPlayers(camp), roster: await this.#roster(camp), packs });
     for (const ch of await this.#deps.loadCharacters()) if (ch.ownerId === c.playerId) this.#send(c, { t: 'chars', characters: [characterForPlayer(ch)] });
   }
 
@@ -258,6 +280,39 @@ export class Host {
     const at = (await this.#deps.loadCampaign())?.sync?.deleted?.[id] ?? '';
     this.#broadcast({ t: 'deleteChar', id, at }, c);
     await this.#sendRoster();
+  }
+
+  /** The campaign's enabled packs that players may have, with the hash and size of what would be sent. Cached per stored pack version. */
+  async #packOffers(camp: Campaign): Promise<PackOffer[]> {
+    const metas = new Map((await this.#deps.packMeta()).map((m) => [m.id, m]));
+    const out: PackOffer[] = [];
+    for (const id of camp.enabledPacks) {
+      const m = metas.get(id);
+      if (!m) continue;
+      const key = `${m.hash}|${m.importedAt}`;
+      let hit = this.#offers.get(id);
+      if (hit?.key !== key) this.#offers.set(id, hit = { key, offer: (await playerPack(await this.#deps.loadPack(id)))?.offer });
+      if (hit.offer && hit.offer.size <= MAX_PACK) out.push(hit.offer);
+    }
+    return out;
+  }
+
+  /** Only packs offered to this link in its welcome. Streams run one at a time per link, beside the message queue. */
+  #packWant(c: Conn, ids: string[]): void {
+    if (ids.some((id) => !c.offered.has(id))) return this.#violation(c, 'a pack that was not offered');
+    for (const id of new Set(ids)) c.packs = c.packs.then(() => this.#stream(c, id)).catch((e) => (this.#deps.onError ?? console.warn)(e));
+  }
+
+  async #stream(c: Conn, id: string): Promise<void> {
+    const pp = await playerPack(await this.#deps.loadPack(id));
+    if (!pp || pp.offer.size > MAX_PACK || c.closed) return;
+    const { json, offer: { hash } } = pp;
+    const total = Math.max(1, Math.ceil(json.length / CHUNK_CHARS));
+    for (let seq = 0; seq < total && !c.closed; seq++) {
+      // Flow control (R1): wait while the transport's send buffer is full; re-check every 100 ms in case a drain event is missed.
+      while (!c.closed && (c.link.bufferedAmount?.() ?? 0) > LOW_WATER) await new Promise<void>((r) => { c.link.onDrain?.(r); setTimeout(r, 100); });
+      this.#send(c, { t: 'packChunk', id, hash, seq, total, data: json.slice(seq * CHUNK_CHARS, (seq + 1) * CHUNK_CHARS) });
+    }
   }
 
   async #roster(camp: Campaign) {

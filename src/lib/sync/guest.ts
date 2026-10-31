@@ -1,16 +1,19 @@
 // Pure (no Svelte/Vite/DOM/PeerJS). A player's side of a campaign session: joins with the code, keeps the local copy of the campaign,
 // and merges the player's characters with the DM's. The DM's device is the authority on what is allowed, but anyone holding the code
 // can stand in for it while the DM is away, so what arrives is still checked (shape, campaign, owner) before it is stored.
-import { characterProblem, isRec } from '../recordShape.ts';
+import { entityAllowed, packAllowed, patchAllowed, restorablePack } from '../content/sources.ts';
+import { characterProblem, isRec, problem, SHAPES } from '../recordShape.ts';
 import type { RollEntry } from '../rolls.svelte.ts';
-import type { Campaign, CampaignSettings, CampaignSync, Character } from '../types.ts';
-import { newCampaignSync } from './code.ts';
+import type { Campaign, CampaignSettings, CampaignSync, Character, Pack, PackMeta } from '../types.ts';
+import { newCampaignSync, sha256Text } from './code.ts';
 import type { Link } from './link.ts';
 import { canon, mergeCharacter, type Synced } from './merge.ts';
 import type { CampaignForPlayers, RosterEntry } from './project.ts';
-import { cleanRoll, MAX_MESSAGE, PLAYER_ID, size, type GuestMsg } from './protocol.ts';
+import { cleanRoll, MAX_MESSAGE, MAX_PACK, PLAYER_ID, size, type GuestMsg, type PackOffer } from './protocol.ts';
 
 export type GuestStatus = 'connecting' | 'online' | 'offline' | 'rejected';
+/** Pack download progress: packs finished (stored or refused) of those wanted, and bytes received of their total. */
+export interface PackProgress { done: number; total: number; bytes: number; totalBytes: number; error?: string }
 
 export interface GuestDeps {
   code: string;
@@ -28,6 +31,10 @@ export interface GuestDeps {
   saveCharacter(c: Character): Promise<void>;
   /** Deletes a character and records its tombstone in campaign.sync.deleted (db.characters.delete does both). */
   deleteCharacter(id: string): Promise<void>;
+  /** Stored pack metadata (db.packs.listMeta) and the pack store (db.packs.put). */
+  packMeta(): Promise<PackMeta[]>;
+  savePack(p: Pack): Promise<void>;
+  onPacks?(p: PackProgress): void;
   onStatus?(s: GuestStatus, reason?: string): void;
   onRoster?(roster: RosterEntry[]): void;
   /** A public roll from the DM (`from` absent) or another player. */
@@ -42,6 +49,8 @@ const isSettings = (v: unknown): v is CampaignSettings => isRec(v) && isRec(v.in
 const playerCampaign = (v: unknown): v is CampaignForPlayers =>
   isRec(v) && typeof v.id === 'string' && typeof v.name === 'string' && isSettings(v.settings) && Array.isArray(v.enabledPacks) && v.enabledPacks.every((x) => typeof x === 'string');
 
+const isOffer = (o: unknown): o is PackOffer => isRec(o) && typeof o.id === 'string' && typeof o.hash === 'string' && /^[0-9a-f]{64}$/.test(o.hash) && Number.isSafeInteger(o.size);
+
 /** Reasons after which reconnecting with the same code and ID is pointless. */
 const FINAL = new Set(['code changed', 'removed']);
 
@@ -52,6 +61,9 @@ export class Guest {
   #queue: Promise<void> = Promise.resolve();
   #playerId?: string;
   #campaignId?: string;
+  #want = new Map<string, PackOffer>();
+  #progress: PackProgress = { done: 0, total: 0, bytes: 0, totalBytes: 0 };
+  #chunks?: { id: string; hash: string; total: number; parts: string[]; length: number };
 
   constructor(deps: GuestDeps) {
     this.#deps = deps;
@@ -151,6 +163,7 @@ export class Guest {
         return;
       }
       case 'settings': if (playerCampaign(m.campaign) && m.campaign.id === this.#campaignId) await this.#saveCampaign(m.campaign); return;
+      case 'packChunk': return this.#packChunk(m);
     }
   }
 
@@ -170,6 +183,56 @@ export class Guest {
     for (const c of await this.#deps.loadCharacters(campaign.id)) if (c.ownerId === playerId) this.#send({ t: 'chars', characters: [c] });
     const del = (await this.#deps.loadCampaign(campaign.id))?.sync?.deleted ?? {};
     for (const [id, at] of Object.entries(del)) this.#send({ t: 'deleteChar', id, at });
+    await this.#wantPacks(Array.isArray(m.packs) ? m.packs.filter(isOffer) : []);
+  }
+
+  /**
+   * Asks for the offered packs it lacks or holds an older shared copy of (Review Focus 5: content hash, so a reconnect asks for none).
+   * A pack of the same id the player imported themself is kept as it is (it is never overwritten, nor deleted with the campaign).
+   */
+  async #wantPacks(offers: PackOffer[]): Promise<void> {
+    const have = new Map((await this.#deps.packMeta()).map((p) => [p.id, p]));
+    const big = offers.filter((o) => o.size > MAX_PACK);
+    const want = offers.filter((o) => o.size <= MAX_PACK && (!have.has(o.id) || (have.get(o.id)!.sharedBy !== undefined && have.get(o.id)!.hash !== o.hash)));
+    this.#want = new Map(want.map((o) => [o.id, o]));
+    this.#chunks = undefined;
+    this.#progress = { done: 0, total: want.length, bytes: 0, totalBytes: want.reduce((n, o) => n + o.size, 0), ...(big.length && { error: `Too large to share: ${big.map((o) => o.id).join(', ')}` }) };
+    if (want.length || big.length) this.#deps.onPacks?.({ ...this.#progress });
+    if (want.length) this.#send({ t: 'packWant', ids: want.map((o) => o.id) });
+  }
+
+  /** One pack finished, stored or refused. */
+  #packDone(id: string, error?: string): void {
+    this.#want.delete(id);
+    this.#chunks = undefined;
+    this.#progress = { ...this.#progress, done: this.#progress.done + 1, ...(error && { error: `${id}: ${error}` }) };
+    this.#deps.onPacks?.({ ...this.#progress });
+  }
+
+  /** Chunks arrive in order, one pack at a time. Anything else (a gap, another pack midway, too many bytes, a bad hash) discards the pack. */
+  async #packChunk(m: Record<string, unknown>): Promise<void> {
+    const { id, hash, seq, total, data } = m;
+    if (typeof id !== 'string' || !this.#want.has(id) || typeof hash !== 'string' || typeof data !== 'string' || !Number.isSafeInteger(seq) || !Number.isSafeInteger(total) || (total as number) < 1) return;
+    const cur = this.#chunks;
+    if (cur && (cur.id !== id || cur.hash !== hash || cur.total !== total || seq !== cur.parts.length)) return this.#packDone(cur.id, 'chunks out of order');
+    if (!cur && seq !== 0) return this.#packDone(id, 'chunks out of order');
+    const c = this.#chunks = cur ?? { id, hash, total: total as number, parts: [], length: 0 };
+    c.parts.push(data);
+    c.length += data.length;
+    this.#progress = { ...this.#progress, bytes: this.#progress.bytes + data.length };
+    if (c.length > MAX_PACK) return this.#packDone(id, 'too large');
+    if (c.parts.length < c.total) return this.#deps.onPacks?.({ ...this.#progress });
+    const json = c.parts.join('');
+    this.#chunks = undefined;
+    if ((await sha256Text(json)) !== hash) return this.#packDone(id, 'damaged in transfer (hash mismatch)');
+    let p: Pack;
+    try { p = JSON.parse(json); } catch { return this.#packDone(id, 'not valid JSON'); }
+    // R52–R54/R60: what stored packs must pass, plus: it is the pack that was offered, and never the built-in SRD.
+    if (problem(p, SHAPES.pack) || p.id !== id || typeof p.source !== 'string' || !restorablePack(p) || !packAllowed(p) || !p.entities.every((e) => isRec(e) && entityAllowed(e)) || !p.patches.every((x) => isRec(x) && patchAllowed(x))) {
+      return this.#packDone(id, 'refused (not an allowed 2014 pack)');
+    }
+    await this.#deps.savePack({ ...p, hash, sharedBy: this.#campaignId! });
+    this.#packDone(id);
   }
 
   /** Creates or updates the local copy: the DM's id, name, settings and enabled packs. Loot stays empty (R50: never sent). */
