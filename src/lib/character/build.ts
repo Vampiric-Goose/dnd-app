@@ -50,6 +50,11 @@ function multiclassProblems(target: ClassDef, current: ClassDef[], s: Scores, se
 }
 
 /** Adds one level of `classId`. With a blocking problem the character comes back unchanged. Unknown classes and level 21 can't be overridden. */
+/** R11: a sidekick "class" (5etools isSidekick, imported with no hit die of its own) is for the DM's NPCs. */
+export const isSidekick = (k: ClassDef): boolean => !!k.sidekick || k.hitDie === 0;
+/** The classes the Creator and Level up offer: sidekicks only to the DM (DM view, in a campaign that is not joined as a player). */
+export const classesFor = <T extends ClassDef>(all: T[], dm: boolean): T[] => (dm ? all : all.filter((k) => !isSidekick(k)));
+
 export function addLevel(c: Character, classId: string, index: ContentIndex, settings: CampaignSettings, hpRoll?: number): { character: Character; problems: Problem[] } {
   const lookup = lookupOf(c, index);
   const cls = getKind(lookup, classId, 'class');

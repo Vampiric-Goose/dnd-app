@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { addLevel, type Problem } from '../../lib/character/build.ts';
+  import { addLevel, classesFor, type Problem } from '../../lib/character/build.ts';
+  import { app } from '../../lib/store.svelte.ts';
   import type { ContentIndex } from '../../lib/content/index.ts';
   import { roll } from '../../lib/rolls.svelte.ts';
   import type { CampaignSettings, Character } from '../../lib/types.ts';
@@ -9,7 +10,9 @@
 
   let { c = $bindable(), hpRolls = $bindable(), index, settings }: { c: Character; hpRolls: Record<string, number>; index: ContentIndex; settings: CampaignSettings } = $props();
 
-  const classes = $derived(index.all('class').sort(byName));
+  // R11: sidekick classes only for the DM (DM view, not a joined campaign)
+  const dm = $derived(app.viewer === 'dm' && app.campaigns.find((x) => x.id === c.campaignId)?.sync?.role !== 'player');
+  const classes = $derived(classesFor(index.all('class'), dm).sort(byName));
   const current = $derived(c.build.levels[0]?.classId ?? '');
   const cls = $derived(index.resolve(current));
   let problems: Problem[] = $state([]);

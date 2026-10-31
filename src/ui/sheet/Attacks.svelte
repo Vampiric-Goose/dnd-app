@@ -9,12 +9,12 @@
   let crit = $state(false);
 
   function attack(name: string, toHit: number) {
-    const r = rollD20(`${name} attack`, toHit);
+    const r = rollD20(`${name} attack`, toHit, { shareAs: 'Attack' }); // R12: shared from DM view without the (maybe hidden) item name
     if (r) crit = natD20(r.detail) === 'nat20'; // each attack roll sets the box: ticked on a natural 20, cleared otherwise (tick it by hand for a 19 crit range)
   }
 
-  function damage(label: string, expr: string) {
-    rollTo(label, expr, { crit });
+  function damage(label: string, expr: string, shareAs: string) {
+    rollTo(label, expr, { crit, shareAs });
     crit = false;
   }
 </script>
@@ -30,9 +30,9 @@
           <span class="muted small">{titleCase(a.damageType)}{a.properties.length ? `, ${a.properties.join(', ')}` : ''}</span>
           <span class="row">
             <button type="button" aria-label="Roll {a.name} attack, {signed(a.toHit)}" onclick={() => attack(a.name, a.toHit)}>Attack {signed(a.toHit)}</button>
-            <button type="button" aria-label="Roll {a.name} damage, {a.damage}" onclick={() => damage(`${a.name} damage`, a.damage)}>Damage {a.damage}</button>
+            <button type="button" aria-label="Roll {a.name} damage, {a.damage}" onclick={() => damage(`${a.name} damage`, a.damage, 'Damage')}>Damage {a.damage}</button>
             {#if a.versatile}
-              <button type="button" aria-label="Roll {a.name} damage two-handed, {a.versatile}" onclick={() => damage(`${a.name} damage (two-handed)`, a.versatile!)}>Two-handed {a.versatile}</button>
+              <button type="button" aria-label="Roll {a.name} damage two-handed, {a.versatile}" onclick={() => damage(`${a.name} damage (two-handed)`, a.versatile!, 'Damage (two-handed)')}>Two-handed {a.versatile}</button>
             {/if}
           </span>
         </li>

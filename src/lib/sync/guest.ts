@@ -4,8 +4,10 @@
 import { entityAllowed, packAllowed, patchAllowed, restorablePack } from '../content/sources.ts';
 import { characterProblem, isRec, problem, SHAPES } from '../recordShape.ts';
 import type { RollEntry } from '../rolls.svelte.ts';
+import { DEFAULT_SETTINGS } from '../settings.ts';
 import type { Campaign, CampaignSettings, CampaignSync, Character, Pack, PackMeta } from '../types.ts';
 import { newCampaignSync, sha256Text } from './code.ts';
+import { MAX_AHEAD } from './hlc.ts';
 import type { Link } from './link.ts';
 import { canon, latestClock, mergeCharacter, type Synced } from './merge.ts';
 import type { CampaignForPlayers, RosterEntry } from './project.ts';
@@ -54,9 +56,45 @@ export interface GuestDeps {
 
 const same = (a: Character, b: Character) => canon({ ...a, updatedAt: 0 }) === canon({ ...b, updatedAt: 0 });
 
-const isSettings = (v: unknown): v is CampaignSettings => isRec(v) && isRec(v.initiativeModules);
-const playerCampaign = (v: unknown): v is CampaignForPlayers =>
-  isRec(v) && typeof v.id === 'string' && typeof v.name === 'string' && isSettings(v.settings) && Array.isArray(v.enabledPacks) && v.enabledPacks.every((x) => typeof x === 'string');
+const CHOICES: Partial<Record<keyof CampaignSettings, readonly string[]>> = {
+  hpMethod: ['average', 'roll'], encumbrance: ['off', 'standard', 'variant'], diagonal: ['5-5-5', '5-10-5'], monsterHp: ['average', 'roll'],
+};
+/** M1: the DM's settings rebuilt key by key from DEFAULT_SETTINGS (same types, known choices); a missing key keeps the default. Undefined when any is wrong. */
+export function cleanSettings(v: unknown): CampaignSettings | undefined {
+  if (!isRec(v) || (v.initiativeModules !== undefined && !isRec(v.initiativeModules))) return undefined;
+  const out = structuredClone(DEFAULT_SETTINGS) as unknown as Record<string, unknown>;
+  for (const [k, d] of Object.entries(DEFAULT_SETTINGS)) {
+    const x = Object.hasOwn(v, k) ? v[k] : undefined;
+    if (x === undefined || k === 'initiativeModules') continue;
+    if (typeof x !== typeof d || (CHOICES[k as keyof CampaignSettings] && !CHOICES[k as keyof CampaignSettings]!.includes(x as string))) return undefined;
+    out[k] = x;
+  }
+  const im = out.initiativeModules as Record<string, boolean>, got = (v.initiativeModules ?? {}) as Record<string, unknown>;
+  for (const k of Object.keys(im)) {
+    if (!Object.hasOwn(got, k)) continue;
+    if (typeof got[k] !== 'boolean') return undefined;
+    im[k] = got[k] as boolean;
+  }
+  return out as unknown as CampaignSettings;
+}
+/** The campaign as the host sent it, with clean settings, or undefined. */
+function playerCampaign(v: unknown): CampaignForPlayers | undefined {
+  const settings = isRec(v) ? cleanSettings(v.settings) : undefined;
+  if (!isRec(v) || !settings || typeof v.id !== 'string' || typeof v.name !== 'string' || v.name.length > 200 || !Array.isArray(v.enabledPacks) || !v.enabledPacks.every((x) => typeof x === 'string')) return undefined;
+  return { id: v.id, name: v.name, settings, enabledPacks: v.enabledPacks as string[] };
+}
+const str = (x: unknown) => typeof x === 'string' && x.length <= 500;
+const fin = (x: unknown) => typeof x === 'number' && Number.isFinite(x);
+/** M1: only well-formed party entries reach the page, rebuilt from their known fields. */
+export const cleanRoster = (v: unknown): RosterEntry[] => (Array.isArray(v) ? v : []).flatMap((e): RosterEntry[] =>
+  isRec(e) && str(e.id) && str(e.ownerId) && str(e.name) && str(e.race) && str(e.classes) && fin(e.level) && fin(e.hp) && fin(e.maxHp)
+    && Array.isArray(e.conditions) && e.conditions.every(str) && (e.portrait === undefined || str(e.portrait))
+    ? [{ id: e.id as string, ownerId: e.ownerId as string, name: e.name as string, ...(e.portrait !== undefined && { portrait: e.portrait as string }), race: e.race as string, classes: e.classes as string,
+      level: e.level as number, hp: e.hp as number, maxHp: e.maxHp as number, conditions: [...e.conditions as string[]] }]
+    : []);
+/** B3: a tombstone clock from the DM, unless it claims a wall time past MAX_AHEAD (then the local clock is used). */
+const fairAt = (at: unknown, now: number): string | undefined =>
+  typeof at === 'string' && HLC.test(at) && Number(at.slice(0, 15)) <= now + MAX_AHEAD ? at : undefined;
 
 const isOffer = (o: unknown): o is PackOffer => isRec(o) && typeof o.id === 'string' && typeof o.hash === 'string' && /^[0-9a-f]{64}$/.test(o.hash) && Number.isSafeInteger(o.size);
 
@@ -164,7 +202,7 @@ export class Guest {
       case 'deleteChar': {
         const c = typeof m.id === 'string' ? await this.#deps.loadCharacter(m.id) : undefined;
         // the DM's tombstone clock, so a later restore (R9) outdates it here too
-        if (c && c.campaignId === this.#campaignId) await this.#deps.deleteCharacter(c.id, typeof m.at === 'string' && HLC.test(m.at) ? m.at : undefined);
+        if (c && c.campaignId === this.#campaignId) await this.#deps.deleteCharacter(c.id, fairAt(m.at, this.#deps.now?.() ?? Date.now()));
         return;
       }
       case 'notYours': {
@@ -175,20 +213,25 @@ export class Guest {
         await this.#deps.updateSync(this.#campaignId!, (s) => ({ ...s!, deleted: Object.fromEntries(Object.entries(s!.deleted ?? {}).filter(([k]) => k !== id)) }));
         return;
       }
-      case 'roster': if (Array.isArray(m.roster)) this.#deps.onRoster?.(m.roster as RosterEntry[]); return;
+      case 'roster': if (Array.isArray(m.roster)) this.#deps.onRoster?.(cleanRoster(m.roster)); return;
       case 'roll': {
         const entry = cleanRoll(m.entry);
         if (entry) this.#deps.onRoll?.(entry, typeof m.from === 'string' && PLAYER_ID.test(m.from) ? m.from : undefined);
         return;
       }
-      case 'settings': if (playerCampaign(m.campaign) && m.campaign.id === this.#campaignId) await this.#saveCampaign(m.campaign); return;
+      case 'settings': {
+        const c = playerCampaign(m.campaign);
+        if (c && c.id === this.#campaignId) await this.#saveCampaign(c);
+        return;
+      }
       case 'packChunk': return this.#packChunk(m);
     }
   }
 
   async #welcome(m: Record<string, unknown>): Promise<void> {
-    if (this.#status !== 'connecting' || typeof m.playerId !== 'string' || !PLAYER_ID.test(m.playerId) || !playerCampaign(m.campaign)) return;
-    const campaign = m.campaign as CampaignForPlayers, playerId = m.playerId;
+    const campaign = playerCampaign(m.campaign);
+    if (this.#status !== 'connecting' || typeof m.playerId !== 'string' || !PLAYER_ID.test(m.playerId) || !campaign) return;
+    const playerId = m.playerId;
     const had = await this.#deps.loadCampaign(campaign.id);
     // Never overwrite a campaign this device hosts or made itself (the same browser joining its own game, or a crafted welcome).
     if (had && had.sync?.role !== 'player') return this.#end('This device already has this campaign as its own.');
@@ -205,7 +248,7 @@ export class Guest {
     this.#playerId = playerId;
     this.#campaignId = campaign.id;
     this.#setStatus('online');
-    if (Array.isArray(m.roster)) this.#deps.onRoster?.(m.roster as RosterEntry[]);
+    if (Array.isArray(m.roster)) this.#deps.onRoster?.(cleanRoster(m.roster));
     for (const c of await this.#deps.loadCharacters(campaign.id)) if (c.ownerId === playerId) this.#send({ t: 'chars', characters: [c] });
     const del = (await this.#deps.loadCampaign(campaign.id))?.sync?.deleted ?? {};
     for (const [id, at] of Object.entries(del)) this.#send({ t: 'deleteChar', id, at });
@@ -258,7 +301,7 @@ export class Guest {
     if (problem(p, SHAPES.pack) || p.id !== id || typeof p.source !== 'string' || !restorablePack(p) || !packAllowed(p) || !p.entities.every((e) => isRec(e) && entityAllowed(e)) || !p.patches.every((x) => isRec(x) && patchAllowed(x))) {
       return this.#packDone(id, 'refused (not an allowed 2014 pack)');
     }
-    await this.#deps.savePack({ ...p, hash, sharedBy: this.#campaignId! });
+    await this.#deps.savePack({ ...p, hash: offer.hash, sharedBy: this.#campaignId! }); // B6: the offered hash, so the next welcome matches it
     this.#packDone(id);
   }
 

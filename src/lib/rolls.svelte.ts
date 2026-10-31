@@ -10,17 +10,27 @@ const CAP = 200;
 export const rollLog: RollEntry[] = $state([]);
 /** The next roll's advantage state; roll() resets it to 'normal'. */
 export const rollMode: { value: 'normal' | 'adv' | 'dis' } = $state({ value: 'normal' });
-/** Stored on each entry for stage 3 (shared logs); the tray's toggle writes it. */
-export const rollVisibility: { public: boolean } = $state({ public: true });
+/**
+ * Who is rolling: 'dm' in DM view of a campaign this device runs, 'player' in Player view or in any joined campaign (App keeps it
+ * current; a joined campaign holds nothing hidden).
+ */
+export const rollViewer: { value: 'dm' | 'player' } = $state({ value: 'dm' });
+/** The tray's Public toggle, per viewer. R12: a DM's rolls start private; the DM shares one by ticking it. */
+export const rollVisibility: { dm: boolean; player: boolean } = $state({ dm: false, player: true });
 
-/** Rolls with the tray's current mode, logs it, and resets the mode. `public` overrides the tray's toggle (R6: stat-block rolls are always private). Throws the parser's message on bad input. */
-export function roll(label: string, expr: string, opts: { crit?: boolean; public?: boolean } = {}): RollEntry {
+/**
+ * Rolls with the tray's current mode, logs it, and resets the mode. `public` overrides the tray's toggle (R6: stat-block rolls are always
+ * private). `shareAs`: what players see of a DM-view roll that is shared (R12: a sheet roll in DM view can carry a hidden item's real name
+ * or bonus, so only this label and the total leave the device). Throws the parser's message on bad input.
+ */
+export function roll(label: string, expr: string, opts: { crit?: boolean; public?: boolean; shareAs?: string } = {}): RollEntry {
   const advantage = rollMode.value === 'normal' ? undefined : rollMode.value;
   const { total, detail } = rollDice(expr, { advantage, crit: opts.crit });
-  const entry: RollEntry = { id: uid(), label, expr, total, detail, at: Date.now(), public: opts.public ?? rollVisibility.public };
+  const entry: RollEntry = { id: uid(), label, expr, total, detail, at: Date.now(), public: opts.public ?? rollVisibility[rollViewer.value] };
   log(entry);
   rollMode.value = 'normal';
-  if (entry.public) rollHooks.public?.(entry); // R6: a private roll never reaches the session
+  // R6: a private roll never reaches the session
+  if (entry.public) rollHooks.public?.(rollViewer.value === 'dm' && opts.shareAs !== undefined ? { ...entry, label: opts.shareAs, expr: '', detail: '' } : entry);
   return entry;
 }
 

@@ -266,6 +266,7 @@ export async function importClasses(live: Live[], ctx: Ctx, rawLookup: (key: str
           ...base('class', twin?.id ?? entityId('class', r.name, r.source), r.name, r),
           // ponytail: sidekick "classes" have no hit die of their own (the creature's is used); 0 until the sheet supports them
           hitDie: Number(r.hd?.faces ?? 0),
+          ...(r.isSidekick && { sidekick: true }), // R11: offered to the DM only
           saves: arr(r.proficiency).filter(isAbility),
           proficiencies: start.p,
           skillChoice: start.skillChoice ?? { count: 0, from: [] },

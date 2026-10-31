@@ -1,13 +1,17 @@
 // Task 5: the app-wide sync session over a fake transport (an in-memory "signaling server" of memory links) and the real db.
 import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { db, hostOffKey, resetDb } from '../../src/lib/db.ts';
-import { roll, rollLog } from '../../src/lib/rolls.svelte.ts';
+import { db, hostOffKey, resetDb, TRASH_CAP } from '../../src/lib/db.ts';
+import { makeEntry } from '../../src/lib/items/inventory.ts';
+import { roll, rollLog, rollViewer, rollVisibility } from '../../src/lib/rolls.svelte.ts';
+import { computeSheet } from '../../src/lib/rules/sheet.ts';
+import { DEFAULT_SETTINGS } from '../../src/lib/settings.ts';
 import { peerIdFor } from '../../src/lib/sync/code.ts';
 import { Guest } from '../../src/lib/sync/guest.ts';
 import { Host } from '../../src/lib/sync/host.ts';
 import { memoryPair, type Link, type Transport } from '../../src/lib/sync/link.ts';
-import type { Campaign } from '../../src/lib/types.ts';
+import type { Campaign, ItemDef } from '../../src/lib/types.ts';
+import { rollD20 } from '../../src/ui/sheet/roll.ts';
 import { camp, char } from '../fixtures/records.ts';
 import { Device } from './fakes.ts';
 
@@ -64,7 +68,21 @@ beforeEach(async () => {
   net = new Net();
   useTransport(net);
 });
-afterEach(() => { stopSession(); vi.useRealTimers(); });
+afterEach(() => { stopSession(); vi.useRealTimers(); rollViewer.value = 'dm'; rollVisibility.dm = false; });
+
+/** The DM hosting CID on the real db with a guest device connected over the fake network (as A1, the first player). */
+async function hostWithGuest(o: { onRoster?: (r: unknown[]) => void } = {}) {
+  await db.campaigns.put(hosted());
+  await refreshCampaigns();
+  await setCampaign(CID);
+  await follow(app.campaign);
+  await settle();
+  const p = new Device(), guest = new Guest(p.guestDeps(CODE, { name: 'Ann', ...(o.onRoster && { onRoster: o.onRoster }) }));
+  guest.connect(await net.dial(await peerIdFor(CODE)));
+  await settle(guest);
+  expect(guest.playerId).toBe('A1');
+  return { p, guest };
+}
 
 describe('DM', () => {
   test('hosting resumes on startup with the campaign open; after Stop hosting it does not', async () => {
@@ -112,6 +130,7 @@ describe('DM', () => {
     await settle(guest);
     expect(p.char('ch1')!.state.hp).toBe(7);
 
+    rollVisibility.dm = true; // R12: the DM shares on purpose
     roll('Table roll', '1d6');
     roll('Goblin attack', '1d20', { public: false });
     await settle(guest);
@@ -165,6 +184,75 @@ describe('DM', () => {
     await vi.advanceTimersByTimeAsync(5000);
     expect(net.registers).toBe(3);
     expect(session.status).toBe('hosting');
+  });
+});
+
+describe('final review fixes (DM side)', () => {
+  test('I1 (R12): a DM-view sheet attack with a hidden +1 weapon is not shared; shared on purpose, no real name or bonus leaves', async () => {
+    const { p, guest } = await hostWithGuest();
+    const flame = makeEntry({ kind: 'item', id: 'item:flame-tongue@HOMEBREW', name: 'Flame Tongue', source: 'HOMEBREW', text: [], type: 'weapon', magic: true,
+      weapon: { category: 'martial', ranged: false, damage: '1d8', damageType: 'slashing', properties: [] }, bonuses: { attack: 1 } } as ItemDef,
+    { view: { name: 'Longsword', hidden: ['bonuses'], revealed: [] } });
+    const c = { ...char('t', CID), inventory: [{ ...flame, equipped: true }] };
+    const dmA = computeSheet(c, { settings: DEFAULT_SETTINGS, viewer: 'dm' }).attacks[0], plA = computeSheet(c, { settings: DEFAULT_SETTINGS, viewer: 'player' }).attacks[0];
+    expect([dmA.name, plA.name, dmA.toHit - plA.toHit]).toEqual(['Flame Tongue', 'Longsword', 1]);
+    rollViewer.value = 'dm';
+    rollD20(`${dmA.name} attack`, dmA.toHit, { shareAs: 'Attack' }); // as Attacks.svelte rolls it
+    await settle(guest);
+    expect(p.rolls).toEqual([]); // DM rolls start private
+    expect(rollLog[0].label).toBe('Flame Tongue attack'); // the DM's own log keeps the real label
+    rollVisibility.dm = true;
+    const mine = rollD20(`${dmA.name} attack`, dmA.toHit, { shareAs: 'Attack' })!;
+    await settle(guest);
+    expect(p.rolls.map((r) => [r.e.label, r.e.total, r.e.expr, r.e.detail])).toEqual([['Attack', mine.total, '', '']]);
+    expect(JSON.stringify(p.rolls)).not.toMatch(/Flame|1d20\+/);
+  });
+
+  test(`I2: with Deleted characters full (${TRASH_CAP}), a player's delete is refused, the character comes back to them, and the trash is untouched`, async () => {
+    const { p, guest } = await hostWithGuest();
+    for (let i = 0; i < TRASH_CAP; i++) {
+      await db.characters.put(char(`junk${i}`, CID));
+      await db.characters.delete(`junk${i}`); // the DM's own deletes fill the trash
+    }
+    await db.characters.put({ ...char('mine', CID), ownerId: 'A1' });
+    await settle(guest);
+    expect(p.char('mine')).toBeTruthy();
+    p.deleteChar('mine');
+    guest.characterChanged('mine');
+    await settle(guest);
+    expect((await db.characters.get('mine'))?.name).toBe('mine');
+    expect((await db.campaigns.get(CID))!.sync!.deleted ?? {}).not.toHaveProperty('mine');
+    const t = await db.trash.list(CID);
+    expect([t.length, t[0].character.id]).toEqual([TRASH_CAP, 'junk0']);
+    expect(p.char('mine')?.name).toBe('mine'); // back on the player's device, its tombstone cleared
+    expect(p.campaigns.get(CID)!.sync!.deleted ?? {}).not.toHaveProperty('mine');
+  });
+
+  test('I3 (R13): a DM-only character is not in the party sent to players; assigning it to A1 delivers it, and edits from A1 come back', async () => {
+    const rosters: unknown[][] = [];
+    const { p, guest } = await hostWithGuest({ onRoster: (r) => rosters.push(r) });
+    await db.characters.put(char('npc', CID));
+    await db.characters.put({ ...char('pc', CID), ownerId: 'A1' });
+    await settle(guest);
+    expect(p.char('npc')).toBeUndefined();
+    expect((rosters.at(-1) as { id: string }[]).map((r) => r.id)).toEqual(['pc']);
+    const npc = (await db.characters.get('npc'))!;
+    await db.characters.put({ ...npc, ownerId: 'A1' }); // what the Player menu on the Characters page saves
+    await settle(guest);
+    expect(p.char('npc')?.ownerId).toBe('A1');
+    expect((rosters.at(-1) as { id: string }[]).map((r) => r.id).sort()).toEqual(['npc', 'pc']);
+    p.edit({ ...p.char('npc')!, name: 'Sidekick Sam' });
+    guest.characterChanged('npc');
+    await settle(guest);
+    expect((await db.characters.get('npc'))?.name).toBe('Sidekick Sam');
+  });
+
+  test('M2: when hosting cannot start, the session stops and says why (Host again shows)', async () => {
+    net.listen = () => { throw new Error('no WebRTC here'); };
+    await db.campaigns.put(hosted());
+    await refreshCampaigns();
+    await hostCampaign(CID);
+    expect([session.role, session.status, session.reason]).toEqual([undefined, 'off', 'Could not start hosting: no WebRTC here']);
   });
 });
 

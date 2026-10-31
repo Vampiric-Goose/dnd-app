@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { natD20, roll, rollLog, rollMode, rollVisibility, shownRolls } from '../lib/rolls.svelte.ts';
+  import { natD20, roll, rollLog, rollMode, rollViewer, rollVisibility, shownRolls } from '../lib/rolls.svelte.ts';
   import { app } from '../lib/store.svelte.ts';
 
   const DICE = [4, 6, 8, 10, 12, 20, 100];
@@ -63,7 +63,7 @@
       {/each}
     </div>
 
-    <label class="check"><input type="checkbox" bind:checked={rollVisibility.public} /> Public roll</label>
+    <label class="check"><input type="checkbox" bind:checked={rollVisibility[rollViewer.value]} /> Public roll{#if rollViewer.value === 'dm'} <span class="muted">(shared with players)</span>{/if}</label>
 
     <ol class="plain log" role="log" aria-label="Roll log">
       {#each shownRolls(rollLog, app.viewer) as r (r.id)}

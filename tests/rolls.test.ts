@@ -1,8 +1,9 @@
 import { expect, test } from 'vitest';
-import { natD20, roll, rollLog, rollVisibility, shownRolls } from '../src/lib/rolls.svelte.ts';
+import { natD20, roll, rollLog, rollViewer, rollVisibility, shownRolls } from '../src/lib/rolls.svelte.ts';
 
 test('R6: a stat-block roll is private whatever the toggle says, and Player view hides it', () => {
-  rollVisibility.public = true;
+  rollViewer.value = 'player';
+  rollVisibility.player = true;
   const table = roll('Table roll', '1d6');
   const monster = roll('Goblin: Scimitar attack', '1d20+4', { public: false }); // what StatBlock passes
   expect(table.public).toBe(true);

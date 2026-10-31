@@ -124,8 +124,23 @@
   // R9: db.trash.restore tells the sync session (onLocalChange), which re-sends the character to its owner's devices.
   async function restore(e: TrashEntry & { campaignId: string }) {
     try {
-      await db.trash.restore(e.campaignId, e.character.id);
-      notice = `Restored ${e.character.name || 'Unnamed'}.`;
+      const name = e.character.name || 'Unnamed';
+      notice = (await db.trash.restore(e.campaignId, e.character.id)) ? `Restored ${name}.` : `${name} is already back in the campaign, so it was only removed from Deleted characters.`;
+      await load();
+    } catch (err) {
+      error = message(err);
+    }
+  }
+
+  // I3 (R13): who plays a character of a hosted campaign. Saved like any edit, so sync delivers it to that player (M1 drops it from the old one).
+  const playersOf = (id?: string) => Object.entries(app.campaigns.find((x) => x.id === id)?.sync?.players ?? {}).sort(([a], [b]) => (a < b ? -1 : 1));
+  async function assign(c: Character, ownerId: string) {
+    try {
+      const fresh = await db.characters.get(c.id);
+      if (!fresh) return;
+      const { ownerId: _o, ...rest } = fresh;
+      await db.characters.put(ownerId ? { ...rest, ownerId } : rest);
+      notice = ownerId ? `${c.name || 'Unnamed'} now belongs to ${ownerId}.` : `${c.name || 'Unnamed'} is now yours only (not synced to a player).`;
       await load();
     } catch (err) {
       error = message(err);
@@ -221,6 +236,17 @@
         </div>
         <div class="row">
           {#if app.viewer === 'dm'}<a href="#/characters/{c.id}/level-up">Level up</a>{/if}
+          {#if hosted(c.campaignId)}
+            <label class="row">
+              <span class="muted">Player</span>
+              <select aria-label="Player for {c.name || 'Unnamed'}" value={c.ownerId ?? ''} onchange={(e) => assign(c, e.currentTarget.value)}>
+                <option value="">No player (DM only)</option>
+                {#each playersOf(c.campaignId) as [id, p] (id)}
+                  {#if !p.removed || id === c.ownerId}<option value={id}>{id}{p.name ? ` · ${p.name}` : ''}{p.removed ? ' (removed)' : ''}</option>{/if}
+                {/each}
+              </select>
+            </label>
+          {/if}
           <button class="danger" aria-label="Delete {c.name}" onclick={() => (deleting = c)}>Delete</button>
         </div>
         {#if deleting?.id === c.id}

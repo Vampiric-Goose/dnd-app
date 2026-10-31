@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { addLevel, embedContent, validateCharacter, type Problem } from '../../lib/character/build.ts';
+  import { addLevel, classesFor, embedContent, validateCharacter, type Problem } from '../../lib/character/build.ts';
   import type { ContentIndex } from '../../lib/content/index.ts';
   import { db } from '../../lib/db.ts';
   import { navigate } from '../../lib/router.svelte.ts';
@@ -40,7 +40,9 @@
     if (!index || !c) return [];
     const mine = new Set(c.build.levels.map((l) => index!.resolve(l.classId)?.id ?? l.classId));
     const all = index.all('class').sort(byName);
-    return [...all.filter((k) => mine.has(k.id)), ...all.filter((k) => !mine.has(k.id))].map((k) => ({ ...entityOption(k), label: mine.has(k.id) ? `${entityOption(k).label} (current)` : entityOption(k).label }));
+    const dm = app.viewer === 'dm' && app.campaigns.find((x) => x.id === c!.campaignId)?.sync?.role !== 'player'; // R11
+    const others = classesFor(all.filter((k) => !mine.has(k.id)), dm);
+    return [...all.filter((k) => mine.has(k.id)), ...others].map((k) => ({ ...entityOption(k), label: mine.has(k.id) ? `${entityOption(k).label} (current)` : entityOption(k).label }));
   });
   let classId = $state('');
   $effect(() => { if (!classId && c?.build.levels.length) classId = index?.resolve(c.build.levels.at(-1)!.classId)?.id ?? c.build.levels.at(-1)!.classId; });

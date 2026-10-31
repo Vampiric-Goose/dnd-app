@@ -52,6 +52,7 @@
 
 {#if !hosting}
   <p>Host this campaign so your players can join from their own devices with a code. Their characters sync with yours; what you hide stays on this device.</p>
+  {#if !session.role && session.reason}<p role="alert" class="error">{session.reason}</p>{/if}
   <button class="primary" disabled={busy} onclick={() => act(() => hostCampaign(campaign.id))}>{campaign.sync ? 'Host again' : 'Host this campaign'}</button>
 {:else}
   <p role="status">
@@ -116,6 +117,8 @@
   {/if}
 {/if}
 <p class="muted">Players on the same Wi-Fi connect reliably; some mobile and school networks block direct connections.</p>
+<p class="muted">Keep hosting in one tab; edits made in other tabs reach players when they reconnect.</p>
+<p class="muted">Give each character to its player with the Player menu on the Characters page; characters with no player stay with you.</p>
 
 <style>
   .code {

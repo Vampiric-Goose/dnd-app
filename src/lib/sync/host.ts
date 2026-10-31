@@ -25,6 +25,8 @@ export interface HostDeps {
   saveCharacter(c: Character): Promise<void>;
   /** Deletes a character, records its tombstone in campaign.sync.deleted and keeps it in the DM's trash (R9; db.characters.delete with `by`). */
   deleteCharacter(id: string, by: string): Promise<void>;
+  /** I2: the DM's trash is full (TRASH_CAP): a player's delete is then refused, so it can never push older deleted characters out. */
+  trashFull?(): Promise<boolean>;
   index(): ContentIndex | Promise<ContentIndex>;
   /** Stored pack metadata (db.packs.listMeta) and packs (db.packs.get). */
   packMeta(): Promise<PackMeta[]>;
@@ -163,9 +165,10 @@ export class Host {
         for (const k of this.#conns) if (k.playerId && k.playerId === c.ownerId) this.#send(k, { t: 'chars', characters: [p] });
       } else {
         const del = camp.sync?.deleted;
-        if (del && Object.hasOwn(del, id)) this.#broadcast({ t: 'deleteChar', id, at: del[id] });
+        if (!del || !Object.hasOwn(del, id)) return; // M3: not this campaign's: nothing to send, the roster is unchanged
+        this.#broadcast({ t: 'deleteChar', id, at: del[id] });
       }
-      await this.#sendRoster();
+      await this.#sendRoster(camp);
     });
   }
 
@@ -311,6 +314,14 @@ export class Host {
     if (s.ownerId !== pid || s.campaignId !== camp.id) return this.#send(c, { t: 'notYours', id }); // M1, as in #chars
     // A change the DM's copy holds from after the deletion (or a restore, R9) wins: the player's device gets the character back.
     if (at <= latestClock(s)) return this.#send(c, { t: 'chars', characters: [characterForPlayer(s)] });
+    if (await this.#deps.trashFull?.()) {
+      // I2: refused. The character gets a clock later than the player's tombstone, so their device takes it back.
+      (this.#deps.onError ?? console.warn)(new Error(`Refused ${pid}'s delete: Deleted characters is full.`));
+      const last = [camp.sync?.last ?? '', latestClock(s), at].sort().pop();
+      const back = { ...s, sync: { clock: { ...s.sync?.clock, name: hlcNow(camp.sync!.node, last, this.#deps.now?.()) }, gone: { ...s.sync?.gone } } };
+      await this.#deps.saveCharacter(back);
+      return this.#send(c, { t: 'chars', characters: [characterForPlayer(back)] });
+    }
     await this.#deps.updateSync((x) => ({ ...x, last: hlcReceive(x.node, x.last, at, this.#deps.now?.()) })); // a restore must stamp later than this
     await this.#deps.deleteCharacter(id, pid); // R9: kept in the DM's trash
     const tomb = (await this.#deps.loadCampaign())?.sync?.deleted?.[id] ?? at;
@@ -378,7 +389,8 @@ export class Host {
 
   async #roster(camp: Campaign) {
     const index = await this.#deps.index();
-    return (await this.#deps.loadCharacters()).filter((ch) => ch.campaignId === camp.id).map((ch) => rosterEntry(ch, index, camp.settings));
+    // I3: only characters a player owns; the DM's own (no owner) stay on the DM's device
+    return (await this.#deps.loadCharacters()).filter((ch) => ch.campaignId === camp.id && ch.ownerId).map((ch) => rosterEntry(ch, index, camp.settings));
   }
 
   async #sendRoster(camp?: Campaign): Promise<void> {

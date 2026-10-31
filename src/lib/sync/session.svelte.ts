@@ -1,7 +1,7 @@
 // Stage 3: the app-wide sync session (one at a time). It follows the open campaign: a campaign this device hosts resumes hosting unless
 // the DM stopped it, and a joined campaign reconnects. The engine and the PeerJS transport load only when a session starts (dynamic
 // imports), so the first load stays small. The engine writes through the db adapters below; local edits reach it through onLocalChange.
-import { db, hostOffKey, onLocalChange } from '../db.ts';
+import { db, hostOffKey, onLocalChange, TRASH_CAP } from '../db.ts';
 import { addRemoteRoll, rollHooks } from '../rolls.svelte.ts';
 import { app, getIndex, refreshCampaigns, setCampaign } from '../store.svelte.ts';
 import type { Campaign } from '../types.ts';
@@ -107,8 +107,10 @@ async function startHost(c: Campaign): Promise<void> {
     r.host = new Host(hostDeps(r, c.id));
     await listen(r);
   } catch (e) {
-    // ponytail: no retry when the code itself fails to load (offline before the chunk was ever fetched); a reload tries again
-    if (live(r)) Object.assign(session, { status: 'off', reason: msg(e) });
+    // ponytail: no retry when the code itself fails to load (offline before the chunk was ever fetched); Host again or a reload tries again
+    if (!live(r)) return;
+    stopSession(); // M2: not hosting, so the panel offers Host again
+    session.reason = `Could not start hosting: ${msg(e)}`;
   }
 }
 
@@ -144,6 +146,7 @@ function hostDeps(r: Run, cid: string): HostDeps {
     loadCharacter: (id) => db.characters.get(id),
     saveCharacter: async (c) => { await db.characters.putSynced(c); changed(r); },
     deleteCharacter: async (id, by) => { await db.characters.delete(id, { by, network: true }); changed(r); },
+    trashFull: async () => (await db.trash.list(cid)).length >= TRASH_CAP, // I2
     index: () => getIndex(cid),
     packMeta: () => db.packs.listMeta(),
     loadPack: (id) => db.packs.get(id),

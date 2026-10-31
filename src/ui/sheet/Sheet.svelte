@@ -2,7 +2,7 @@
   import { setContext, untrack } from 'svelte';
   import { exportRecord } from '../../lib/backup.ts';
   import { characterSummary } from '../../lib/character/play.ts';
-  import { db, StorageError } from '../../lib/db.ts';
+  import { db, DeletedError, StorageError } from '../../lib/db.ts';
   import { navigate } from '../../lib/router.svelte.ts';
   import { natD20, rollLog, shownRolls } from '../../lib/rolls.svelte.ts';
   import { computeSheet } from '../../lib/rules/sheet.ts';
@@ -55,9 +55,17 @@
       saved = stored;
       c = c === cur ? stored : replay(stored, cur, $state.snapshot(c) as Character);
     } catch (e) {
+      if (e instanceof DeletedError) return gone(); // B2: deleted meanwhile (here or on another device): nothing more is saved
       // The in-memory state is kept; the next edit tries again.
       toast(e instanceof StorageError ? e.message : `Could not save: ${message(e)}`, true);
     }
+  }
+
+  function gone() {
+    clearTimeout(timer);
+    c = saved = undefined;
+    status = 'missing';
+    toast('This character was deleted, so the last change was not saved.', true);
   }
 
   $effect(() => {
@@ -86,7 +94,11 @@
     untrack(() => {
       const id = c?.id;
       if (!id || c !== saved || moving) return;
-      db.characters.get(id).then((found) => { if (found && c === saved && c?.id === id) saved = c = found; }, () => {});
+      db.characters.get(id).then((found) => {
+        if (c !== saved || c?.id !== id) return;
+        if (found) saved = c = found;
+        else gone(); // B2: deleted by sync
+      }, () => {});
     });
   });
 
@@ -148,7 +160,8 @@
       if (camp) await refreshCampaigns().catch(() => {});
       toast(`Moved to ${camp ? 'Unassigned' : other!.name || 'Unnamed'}.`);
     } catch (e) {
-      toast(e instanceof StorageError ? e.message : `Could not move it: ${message(e)}`, true);
+      if (e instanceof DeletedError) gone();
+      else toast(e instanceof StorageError ? e.message : `Could not move it: ${message(e)}`, true);
     } finally {
       moving = false;
       if (c && c !== saved) timer = setTimeout(flush, 500);
