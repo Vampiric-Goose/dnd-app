@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from 'svelte';
   import type { OverrideKey } from '../../lib/types.ts';
 
   // A computed number: optionally a roll button, with an edit control that writes c.overrides[okey].
@@ -15,6 +16,7 @@
   let editing = $state(false);
   let draft: number | null = $state(null);
   let input: HTMLInputElement | undefined = $state();
+  let editBtn: HTMLButtonElement | undefined = $state();
   const valid = $derived(typeof draft === 'number' && Number.isInteger(draft));
 
   $effect(() => { if (editing) input?.focus(); });
@@ -24,11 +26,17 @@
     editing = true;
   }
 
+  // The control that had focus (Set, Cancel, Reset) disappears, so focus goes back to the edit button.
+  async function done(apply?: () => void) {
+    apply?.();
+    editing = false;
+    await tick();
+    editBtn?.focus();
+  }
+
   function save(e: SubmitEvent) {
     e.preventDefault();
-    if (!valid) return;
-    onset(okey, draft!);
-    editing = false;
+    if (valid) void done(() => onset(okey, draft!));
   }
 </script>
 
@@ -37,10 +45,10 @@
     <form class="row" onsubmit={save}>
       <label>
         <span class="sr-only">Override {label}</span>
-        <input bind:this={input} type="number" step="1" bind:value={draft} onkeydown={(e) => e.key === 'Escape' && (editing = false)} />
+        <input bind:this={input} type="number" step="1" bind:value={draft} onkeydown={(e) => e.key === 'Escape' && done()} />
       </label>
       <button type="submit" class="primary mini" disabled={!valid}>Set</button>
-      <button type="button" class="mini" onclick={() => (editing = false)}>Cancel</button>
+      <button type="button" class="mini" onclick={() => done()}>Cancel</button>
     </form>
   {:else}
     {#if onroll}
@@ -50,9 +58,9 @@
     {/if}
     {#if overridden}
       <span class="badge" title="This value is overridden"><span aria-hidden="true">✎</span><span class="sr-only">{label} is overridden</span></span>
-      <button type="button" class="mini" aria-label="Reset {label} to its computed value" onclick={() => onset(okey, undefined)}>Reset</button>
+      <button type="button" class="mini" aria-label="Reset {label} to its computed value" onclick={() => done(() => onset(okey, undefined))}>Reset</button>
     {/if}
-    <button type="button" class="mini edit" aria-label="Override {label}" onclick={start}>✎</button>
+    <button bind:this={editBtn} type="button" class="mini edit" aria-label="Override {label}" onclick={start}>✎</button>
   {/if}
 </span>
 

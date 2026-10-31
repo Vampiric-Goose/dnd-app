@@ -17,7 +17,8 @@
 
   const left = (die: number, total: number) => Math.max(0, total - (c.state.hitDiceUsed[die] ?? 0));
 
-  // Open and close the native dialog with `mode`; it traps focus and closes on Escape.
+  // Open and close the native dialog with `mode`; it traps focus and closes on Escape. Its `close` event can arrive late (after a quick
+  // reopen), so onclose only resets `mode` when the dialog really is closed.
   $effect(() => {
     if (!dlg) return;
     if (mode && !dlg.open) {
@@ -51,7 +52,7 @@
   }
 </script>
 
-<dialog bind:this={dlg} aria-labelledby="rest-h" onclose={() => (mode = undefined)}>
+<dialog bind:this={dlg} aria-labelledby="rest-h" onclose={() => { if (!dlg?.open) mode = undefined; }}>
   {#if mode === 'short'}
     <h2 id="rest-h">Short rest</h2>
     <p class="muted">Spend hit dice to heal: each rolls its die plus your Constitution modifier ({sheet.mods.con >= 0 ? '+' : ''}{sheet.mods.con}). Rolls are logged in the dice tray.</p>
@@ -64,8 +65,9 @@
       <p class="muted">This character has no hit dice.</p>
     {/each}
     <p class="muted">Pact slots and short-rest resources recharge.</p>
+    {#if c.state.dead}<p role="alert" class="error">A dead character gets no benefit from a rest. Revive them first.</p>{/if}
     <div class="row">
-      <button type="button" class="primary" onclick={doShort}>Rest</button>
+      <button type="button" class="primary" disabled={c.state.dead} onclick={doShort}>Rest</button>
       <button type="button" onclick={() => (mode = undefined)}>Cancel</button>
     </div>
   {:else if mode === 'long'}

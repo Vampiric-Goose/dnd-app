@@ -55,7 +55,12 @@
     if (r) update((x) => rollDeathSave(x, r.total));
   }
 
-  const revive = () => patch({ dead: false, stable: false, hp: 1, deathSaves: { success: 0, fail: 0 } });
+  // PHB: exhaustion 6 is death. Stepping back down does not revive; Revive does.
+  function raiseExhaustion() {
+    const n = c.state.exhaustion + 1;
+    patch(n >= 6 ? { exhaustion: 6, dead: true, stable: false } : { exhaustion: n });
+  }
+  const revive =() => patch({ dead: false, stable: false, hp: 1, deathSaves: { success: 0, fail: 0 } });
   const toggleCondition = (name: string) =>
     patch({ conditions: c.state.conditions.includes(name) ? c.state.conditions.filter((x) => x !== name) : [...c.state.conditions, name] });
   const speeds = $derived(Object.entries(sheet.speed).filter(([m, v]) => m !== 'walk' && v));
@@ -83,7 +88,7 @@
     </div>
   </div>
 
-  <div class="card hp" aria-labelledby="hp-h">
+  <div class="card hp" role="group" aria-labelledby="hp-h">
     <h3 id="hp-h">Hit points</h3>
     <p class="hpline">
       <span class="sr-only">Hit points</span>
@@ -97,7 +102,7 @@
       <label class="row"><span>Amount</span><input type="number" min="0" step="1" inputmode="numeric" bind:value={amount} /></label>
       <button type="button" class="danger" disabled={!whole(amount) || !amount || c.state.dead} onclick={damage}>Damage</button>
       <button type="button" disabled={!whole(amount) || !amount || c.state.dead} onclick={heal}>Heal</button>
-      <label class="check"><input type="checkbox" bind:checked={crit} /> Critical hit</label>
+      <label class="check"><input type="checkbox" bind:checked={crit} /> Damage is from a critical hit</label>
     </div>
     <div class="row">
       <label class="row"><span>Temp HP</span><input type="number" min="0" step="1" inputmode="numeric" bind:value={temp} /></label>
@@ -147,11 +152,11 @@
         <button type="button" class="chip" aria-pressed={c.state.conditions.includes(name)} onclick={() => toggleCondition(name)}>{name}</button>
       {/each}
     </div>
-    <p class="row exhaustion">
+    <p class="row exhaustion" role="group" aria-labelledby="exh-l">
       <span id="exh-l">Exhaustion</span>
       <button type="button" aria-label="Lower exhaustion" disabled={c.state.exhaustion <= 0} onclick={() => patch({ exhaustion: c.state.exhaustion - 1 })}>−</button>
-      <strong aria-labelledby="exh-l" data-testid="exhaustion">{c.state.exhaustion}</strong>
-      <button type="button" aria-label="Raise exhaustion" disabled={c.state.exhaustion >= 6} onclick={() => patch({ exhaustion: c.state.exhaustion + 1 })}>+</button>
+      <strong data-testid="exhaustion">{c.state.exhaustion}</strong>
+      <button type="button" aria-label="Raise exhaustion" disabled={c.state.exhaustion >= 6} onclick={raiseExhaustion}>+</button>
       {#if c.state.exhaustion}<span class="muted">{EXHAUSTION[c.state.exhaustion]}</span>{/if}
     </p>
     <label class="check"><input type="checkbox" checked={c.state.inspiration} onchange={(e) => patch({ inspiration: e.currentTarget.checked })} /> Inspiration</label>

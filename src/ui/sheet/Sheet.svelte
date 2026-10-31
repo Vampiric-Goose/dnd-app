@@ -192,6 +192,11 @@
     font-size: 1.5rem;
   }
 
+  /* The sticky strip must not cover a control that gets focus (keyboard, or tapping into a field on a phone). */
+  :global(html:has(.lastroll)) {
+    scroll-padding-top: 6rem;
+  }
+
   .cols {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 26rem), 1fr));

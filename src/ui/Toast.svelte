@@ -1,8 +1,19 @@
 <script lang="ts">
   import { dismissToast, toasts } from '../lib/toast.svelte.ts';
+
+  let box: HTMLDivElement | undefined = $state();
+
+  // Shown in the top layer, re-fronted on every change, so a message is visible above an open modal <dialog>.
+  // Without popover support the container is just a fixed element (z-index below).
+  $effect(() => {
+    const n = toasts.length;
+    if (!box?.showPopover) return;
+    if (box.matches(':popover-open')) box.hidePopover();
+    if (n) box.showPopover();
+  });
 </script>
 
-<div class="toasts" aria-live="polite">
+<div class="toasts" popover="manual" bind:this={box}>
   {#each toasts as t (t.id)}
     <div class="toast" class:error={t.error} role={t.error ? 'alert' : 'status'}>
       <span>{t.text}</span>
@@ -18,6 +29,15 @@
     left: 0.5rem;
     right: 0.5rem;
     z-index: 40;
+    /* reset the popover defaults */
+    inset: 0.5rem 0.5rem auto;
+    width: auto;
+    height: auto;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    overflow: visible;
     display: flex;
     flex-direction: column;
     align-items: center;

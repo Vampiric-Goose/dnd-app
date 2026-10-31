@@ -1,14 +1,22 @@
 <script lang="ts">
-  import { blankValues, buildEffect, describeEffect, EFFECT_FIELDS, EFFECT_LABEL, EFFECT_TYPES, type FieldValue } from '../../lib/character/customEffect.ts';
+  import { blankValues, buildEffect, describeEffect, EFFECT_FIELDS, EFFECT_LABEL, EFFECT_TYPES, PROFICIENCY_KEYS, type FieldValue } from '../../lib/character/customEffect.ts';
   import { ABILITIES } from '../../lib/rules/constants.ts';
   import type { Character, Effect } from '../../lib/types.ts';
-  import { ABILITY_NAMES } from '../creator/labels.ts';
+  import { ABILITY_NAMES, titleCase } from '../creator/labels.ts';
 
   let { c, update }: { c: Character; update: (fn: (c: Character) => Character) => void } = $props();
 
   let type: Effect['type'] = $state(EFFECT_TYPES[0]);
   let values: Record<string, FieldValue> = $state(blankValues(EFFECT_TYPES[0]));
   let error = $state('');
+
+  // A proficiency in a skill or a saving throw must name the exact key the sheet matches, so those values are picked, not typed.
+  const keysFor = (name: string) => (type === 'proficiency' && name === 'value' ? PROFICIENCY_KEYS[values.category as string] : undefined);
+  const keyLabel = (o: string) => (values.category === 'save' ? ABILITY_NAMES[o as keyof typeof ABILITY_NAMES] : titleCase(o));
+  function setField(name: string, v: string) {
+    values[name] = v;
+    if (type === 'proficiency' && name === 'category') values.value = PROFICIENCY_KEYS[v]?.[0] ?? '';
+  }
 
   function pick(t: Effect['type']) {
     type = t;
@@ -69,8 +77,12 @@
         {:else}
           <div class="field">
             <label for="ce-{f.name}">{f.label}{f.optional ? ' (optional)' : ''}</label>
-            {#if f.kind === 'select'}
-              <select id="ce-{f.name}" value={values[f.name]} onchange={(e) => (values[f.name] = e.currentTarget.value)}>
+            {#if keysFor(f.name)}
+              <select id="ce-{f.name}" value={values[f.name]} onchange={(e) => setField(f.name, e.currentTarget.value)}>
+                {#each keysFor(f.name) ?? [] as o (o)}<option value={o}>{keyLabel(o)}</option>{/each}
+              </select>
+            {:else if f.kind === 'select'}
+              <select id="ce-{f.name}" value={values[f.name]} onchange={(e) => setField(f.name, e.currentTarget.value)}>
                 {#if f.optional}<option value="">Always</option>{/if}
                 {#each f.options ?? [] as o (o)}<option value={o}>{o}</option>{/each}
               </select>

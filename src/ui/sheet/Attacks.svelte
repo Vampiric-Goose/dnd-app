@@ -10,7 +10,7 @@
 
   function attack(name: string, toHit: number) {
     const r = rollD20(`${name} attack`, toHit);
-    if (r && natD20(r.detail) === 'nat20') crit = true; // a natural 20 ticks Critical hit for the damage roll; untick to override
+    if (r) crit = natD20(r.detail) === 'nat20'; // each attack roll sets the box: ticked on a natural 20, cleared otherwise (tick it by hand for a 19 crit range)
   }
 
   function damage(label: string, expr: string) {
