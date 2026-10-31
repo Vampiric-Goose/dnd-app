@@ -251,6 +251,50 @@ Conversion rules (5etools → `MonsterDef`):
   rejected 2024 monsters counted. Record the numbers in the report. `npm run size` unchanged (importer is lazy).
 - [ ] **Step 6: Commit** `feat: import 5etools bestiaries with copies, templates and legendary groups`.
 
+### Task 4b: Import a 5etools zip as downloaded (user request, 2026-10-31)
+
+Players who aren't technical get stuck unzipping the download and finding `data/`. Phones can't pick folders at all.
+
+**Files:**
+- Modify: `package.json` (add `fflate`, MIT, lazy-loaded only), `src/lib/import/dataFolder.ts`, `src/ui/pages/Packs.svelte`
+- Create: `src/lib/import/zip.ts`
+- Test: `tests/import/zip.test.ts`
+
+**Interfaces — Produces:**
+```ts
+// zip.ts (pure, no DOM; takes chunks so the browser can stream a File and tests can pass a Uint8Array)
+export async function readDataZip(chunks: AsyncIterable<Uint8Array>, onProgress?: (done: number, total?: number) => void):
+  Promise<{ files: { path: string; text: string }[]; summary: ReturnType<typeof selectDataFiles> }>;
+```
+- Selection is `selectDataFiles` over the zip's entry paths, so the zip, folder and CLI paths agree. This includes a `data/`
+  root nested inside a top-level folder, such as `5etools-src-v2.x/data/...`.
+- Only the selected entries are decompressed. Every other entry (images, adventure text, fluff) is skipped without inflating.
+  Read the file as a stream (fflate's streaming `Unzip`, fed from `file.stream()`) so a several-hundred-MB zip doesn't have
+  to fit in memory at once.
+- Untrusted input:
+  - entries with `..` or absolute paths are ignored
+  - a selected entry larger than 20 MB uncompressed is skipped and reported
+  - a zip with no recognisable data falls back to homebrew `.json` files under 5 MB, as the folder path does
+- Packs page:
+  - The primary button becomes **"Import 5etools (zip or folder)"**: one picker accepting `.zip`, plus the folder button
+    where supported.
+  - The same summary → Import / Cancel → progress flow as the folder scanner, ending in the existing import path unchanged.
+  - The phone hint changes to "On a phone, import the 5etools zip file."
+- `fflate` must not enter the first-load bundle. Check with `npm run size`.
+
+- [ ] **Step 1: Failing tests.** Build zips in the test with fflate's `zipSync`, from invented content:
+  - A zip shaped like `5etools-src-x/data/races.json`, `.../data/bestiary/bestiary-xyz.json`, `.../data/img/a.png`,
+    `.../data/adventure/x.json` and `.../data/bestiary/fluff-bestiary-xyz.json` yields exactly the races and bestiary
+    files. The summary counts the skipped ones.
+  - A `../evil.json` entry is ignored.
+  - A homebrew zip with two `.json` files at its root yields both.
+  - Chunked input split at odd byte boundaries gives the same result as one chunk.
+- [ ] **Step 2–4:** FAIL → implement → PASS. Run `npm run check` and `npm run size` (first load unchanged).
+- [ ] **Step 5: Real data.** Zip `C:\Users\bestj\dnd-app-testdata\5etools\data` into the scratchpad (never the repo) and run
+  `readDataZip` on it from a small Node script there. The file count must match `selectDataFiles` on the folder. Report the
+  time taken.
+- [ ] **Step 6: Commit** `feat: import a 5etools zip without unzipping it`.
+
 ---
 
 ## Group C — Library, stat block and creator (Tasks 5–6)
