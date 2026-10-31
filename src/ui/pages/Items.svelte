@@ -25,17 +25,25 @@
   <h1>Items</h1>
   <p>{app.ready ? 'No campaign is open.' : 'Loading…'} <a href="#/">Open or create a campaign</a> first.</p>
 {:else if params.id}
-  {#key campaign.id + params.id}
-    {#await load(campaign.id, params.id)}
-      <p class="muted">Loading…</p>
-    {:then initial}
-      <ItemEditor {initial} isNew={params.id === 'new'} />
-    {:catch e}
-      <h1>Items</h1>
-      <p role="alert" class="error">{message(e)}</p>
-      <p><a href="#/items">Back to items</a></p>
-    {/await}
-  {/key}
+  <!-- The editor shows the real item, so Player view hides it. It stays mounted (hidden, not removed) so switching view can't
+       lose unsaved edits; its leave guard still asks before the "Back to items" link or any other navigation leaves it. -->
+  {#if app.viewer === 'player'}
+    <h1>Items</h1>
+    <p>Switch to DM view to edit items. <a href="#/items">Back to items</a></p>
+  {/if}
+  <div hidden={app.viewer === 'player'}>
+    {#key campaign.id + params.id}
+      {#await load(campaign.id, params.id)}
+        <p class="muted">Loading…</p>
+      {:then initial}
+        <ItemEditor {initial} isNew={params.id === 'new'} />
+      {:catch e}
+        <h1>Items</h1>
+        <p role="alert" class="error">{message(e)}</p>
+        <p><a href="#/items">Back to items</a></p>
+      {/await}
+    {/key}
+  </div>
 {:else}
   <ItemsHome {campaign} />
 {/if}

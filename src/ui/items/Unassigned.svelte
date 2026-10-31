@@ -35,7 +35,7 @@
           const latest = pool && e.sourceId ? latestItem(pool, e.sourceId) : undefined;
           if (latest) void edit((list) => list.map((x) => (x.id === e.id ? refreshEntry(x, latest) : x)));
         }}
-        onmove={(target, qty) => giveFromUnassigned(campaign.id, e.id, qty, target)}
+        onmove={async (target, qty) => { await giveFromUnassigned(campaign.id, e.id, qty, target); }}
       />
     {/each}
   </ul>

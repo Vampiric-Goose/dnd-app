@@ -10,9 +10,14 @@ import { message } from '../creator/labels.ts';
 // changes once the write has succeeded: on failure nothing moves.
 let queue: Promise<unknown> = Promise.resolve();
 
-const run = (f: () => Promise<void>) => {
-  queue = queue.then(f).catch((e) => toast(e instanceof StorageError ? e.message : `Could not save: ${message(e)}`, true));
-  return queue as Promise<void>;
+/** Resolves true when the change was saved, false when it failed (the failure has already been toasted). */
+const run = (f: () => Promise<void>): Promise<boolean> => {
+  const done = queue.then(async () => { await f(); return true; }).catch((e) => {
+    toast(e instanceof StorageError ? e.message : `Could not save: ${message(e)}`, true);
+    return false;
+  });
+  queue = done;
+  return done;
 };
 
 export const editUnassigned = (campaignId: string, fn: (list: InventoryEntry[]) => InventoryEntry[]) => run(async () => {

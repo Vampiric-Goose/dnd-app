@@ -20,10 +20,15 @@ export interface CatalogFilter { q?: string; magic?: '' | 'magic' | 'mundane'; t
 /** One row per item, by name. Build once per (content, viewer); `filterCatalog` is the cheap part to repeat on each keystroke. */
 export function catalogRows(items: ItemDef[], homebrew: StoredItem[], viewer: 'dm' | 'player'): CatalogRow[] {
   const mk = (item: ItemDef, stored?: StoredItem): CatalogRow => {
+    if (typeof item.name !== 'string' || !item.name || !Array.isArray(item.text)) throw new Error('damaged item');
     const shown = displayItem(item, viewer);
     return { item, stored, shown, source: stored ? HOMEBREW_SOURCE : item.source, folded: fold(shown.name) };
   };
-  return [...homebrew.map((h) => mk(h, h)), ...items.map((i) => mk(i))].sort((a, b) => a.folded.localeCompare(b.folded));
+  // A stored record that cannot be shown (an old bad import, a damaged file) is left out rather than breaking the whole page.
+  const safe = (item: ItemDef, stored?: StoredItem): CatalogRow[] => {
+    try { return [mk(item, stored)]; } catch { return []; }
+  };
+  return [...homebrew.flatMap((h) => safe(h, h)), ...items.flatMap((i) => safe(i))].sort((a, b) => a.folded.localeCompare(b.folded));
 }
 
 export function filterCatalog(rows: CatalogRow[], f: CatalogFilter): CatalogRow[] {

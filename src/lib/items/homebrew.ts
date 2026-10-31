@@ -1,17 +1,86 @@
-import type { ItemDef, PlayerView, StoredItem } from '../types.ts';
+import { isRec, type Rec } from '../recordShape.ts';
+import type { ItemDef, ItemType, PlayerView, Rarity, Recharge, StoredItem } from '../types.ts';
 
 // Pure (no Svelte/Vite/DOM): how a homebrew record is made from another item.
+
+export const ITEM_TYPES: readonly ItemType[] = ['weapon', 'armor', 'shield', 'ammunition', 'gear', 'pack', 'tool', 'wondrous', 'potion', 'ring', 'rod', 'scroll', 'staff', 'wand', 'other'];
+const RARITIES: readonly Rarity[] = ['common', 'uncommon', 'rare', 'very rare', 'legendary', 'artifact', 'varies'];
+const RECHARGES: readonly Recharge[] = ['short', 'long', 'dawn', 'dusk', 'none'];
+const BONUS_KEYS = ['attack', 'damage', 'ac', 'save', 'spellAttack', 'spellDc'] as const;
 
 /** A fresh homebrew id. Not the name: a rename must not leave a stale slug. */
 export const newHomebrewId = (): string => `item:homebrew-${crypto.randomUUID().slice(0, 8)}@HOMEBREW`;
 
-/** Customize: every field of an SRD or pack item, as a new homebrew record that remembers where it came from. It carries no default player view. */
+/**
+ * Customize: every field of an SRD or pack item, as a new homebrew record that remembers where it came from.
+ * It carries no default player view. An item that already has a base (a "+1 Longsword") keeps it, so proficiency still works.
+ */
 export function customize(item: ItemDef, campaignId: string): StoredItem {
   const { defaultView: _v, ...copy } = structuredClone(item) as ItemDef & { defaultView?: PlayerView };
-  return { ...copy, id: newHomebrewId(), source: 'Homebrew', campaignId, baseItemId: item.id, updatedAt: Date.now() };
+  return { ...copy, id: newHomebrewId(), source: 'Homebrew', campaignId, baseItemId: item.baseItemId ?? item.id, updatedAt: Date.now() };
 }
 
-/** An imported item file (JSON or PDF) as this campaign's homebrew: a fresh id, so it never replaces anything. */
-export function importedItem(data: ItemDef & { defaultView?: PlayerView }, campaignId: string): StoredItem {
-  return { ...structuredClone(data), id: newHomebrewId(), source: 'Homebrew', campaignId, updatedAt: Date.now() };
+const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+const str = (v: unknown): v is string => typeof v === 'string';
+const strs = (v: unknown): v is string[] => Array.isArray(v) && v.every(str);
+const blocks = (v: unknown): v is Rec[] => Array.isArray(v) && v.every(isRec);
+const oneOf = <T extends string>(list: readonly T[], v: unknown): v is T => list.includes(v as T);
+
+function weapon(w: unknown): ItemDef['weapon'] {
+  if (!isRec(w) || !oneOf(['simple', 'martial'], w.category) || typeof w.ranged !== 'boolean' || !str(w.damage) || !str(w.damageType) || !strs(w.properties)) return undefined;
+  const range = Array.isArray(w.range) && w.range.length === 2 && w.range.every(num) ? { range: [w.range[0], w.range[1]] as [number, number] } : {};
+  return { category: w.category, ranged: w.ranged, damage: w.damage, damageType: w.damageType, properties: w.properties, ...(str(w.versatile) && { versatile: w.versatile }), ...range };
+}
+
+function armor(a: unknown): ItemDef['armor'] {
+  if (!isRec(a) || !oneOf(['light', 'medium', 'heavy', 'shield'], a.category) || !num(a.ac)) return undefined;
+  return { category: a.category, ac: a.ac, ...(num(a.dexCap) && { dexCap: a.dexCap }), ...(num(a.strReq) && { strReq: a.strReq }), ...(a.stealthDisadvantage === true && { stealthDisadvantage: true }) };
+}
+
+function bonuses(b: unknown): ItemDef['bonuses'] {
+  if (!isRec(b)) return undefined;
+  const out = Object.fromEntries(BONUS_KEYS.filter((k) => num(b[k])).map((k) => [k, b[k]]));
+  return Object.keys(out).length ? out : undefined;
+}
+
+function charges(c: unknown): ItemDef['charges'] {
+  if (!isRec(c) || !num(c.max) || c.max < 1 || !oneOf(RECHARGES, c.recharge)) return undefined;
+  return { max: c.max, recharge: c.recharge, ...(str(c.rechargeAmount) && c.rechargeAmount && { rechargeAmount: c.rechargeAmount }) };
+}
+
+function view(v: unknown): PlayerView | undefined {
+  if (!isRec(v) || !strs(v.hidden) || !strs(v.revealed)) return undefined;
+  return { hidden: v.hidden as PlayerView['hidden'], revealed: v.revealed, ...(str(v.name) && { name: v.name }), ...(blocks(v.text) && { text: v.text as unknown as PlayerView['text'] }) };
+}
+
+/**
+ * An imported item file (JSON or PDF) as this campaign's homebrew: a fresh id, so it never replaces anything.
+ * The file is untrusted: what the rest of the app relies on (name, text, type and the numbers) must be valid or it throws a message
+ * the page can show; optional blocks that are malformed are dropped; fields this app does not know are not kept.
+ */
+export function importedItem(data: unknown, campaignId: string): StoredItem {
+  if (!isRec(data)) throw new Error('That file does not hold an item.');
+  const d = data;
+  if (!str(d.name) || !d.name.trim()) throw new Error('The item has no name.');
+  if (d.text !== undefined && !blocks(d.text)) throw new Error(`The item "${d.name}" has a damaged description (text).`);
+  if (!oneOf(ITEM_TYPES, d.type)) throw new Error(`The item "${d.name}" has an unknown type.`);
+  if (d.magic !== undefined && typeof d.magic !== 'boolean') throw new Error(`The item "${d.name}" has a damaged magic flag.`);
+  if (d.weight !== undefined && !num(d.weight)) throw new Error(`The item "${d.name}" has a damaged weight.`);
+  if (d.costCp !== undefined && !num(d.costCp)) throw new Error(`The item "${d.name}" has a damaged cost.`);
+  if (d.rarity !== undefined && !oneOf(RARITIES, d.rarity)) throw new Error(`The item "${d.name}" has an unknown rarity.`);
+
+  const w = weapon(d.weapon), a = armor(d.armor), b = bonuses(d.bonuses), c = charges(d.charges), v = view(d.defaultView);
+  const out: StoredItem = {
+    id: newHomebrewId(), kind: 'item', name: d.name.trim(), source: 'Homebrew', campaignId, updatedAt: Date.now(),
+    text: (d.text ?? []) as unknown as ItemDef['text'], type: d.type, magic: d.magic === true,
+    ...(num(d.weight) && { weight: d.weight }), ...(num(d.costCp) && { costCp: d.costCp }), ...(d.rarity !== undefined && { rarity: d.rarity as Rarity }),
+    ...(str(d.baseItemId) && { baseItemId: d.baseItemId }), ...(str(d.category) && { category: d.category }),
+    ...((str(d.attunement) || typeof d.attunement === 'boolean') && { attunement: d.attunement as string | boolean }),
+    ...(d.consumable === true && { consumable: true }), ...(strs(d.aliases) && d.aliases.length && { aliases: d.aliases }),
+    ...(blocks(d.curse) && d.curse.length && { curse: d.curse as unknown as ItemDef['text'] }),
+    ...(Array.isArray(d.effects) && blocks(d.effects) && { effects: d.effects as unknown as ItemDef['effects'] }),
+    ...(Array.isArray(d.choices) && blocks(d.choices) && { choices: d.choices as unknown as ItemDef['choices'] }),
+    ...(w && { weapon: w }), ...(a && { armor: a }), ...(b && { bonuses: b }), ...(c && { charges: c }), ...(v && { defaultView: v }),
+  };
+  return structuredClone(out);
 }
