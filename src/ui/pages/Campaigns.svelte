@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { importBackup } from '../../lib/backup.ts';
+  import { applyBackup, readBackup, type BackupPlan } from '../../lib/backup.ts';
   import { db } from '../../lib/db.ts';
   import { DEFAULT_SETTINGS } from '../../lib/settings.ts';
   import { app, refreshCampaigns, saveBackup, saveCampaign, setCampaign } from '../../lib/store.svelte.ts';
@@ -66,14 +66,25 @@
       deleting = undefined;
     });
 
+  // R57: a backup is read and checked first; nothing is written until the user confirms what it will do.
   let importing = $state(false);
+  let plan: BackupPlan | undefined = $state.raw();
   async function onImport(e: Event & { currentTarget: HTMLInputElement }) {
     const file = e.currentTarget.files?.[0];
     e.currentTarget.value = ''; // so choosing the same file again fires change
     if (!file) return;
+    plan = undefined;
+    importing = true;
+    await run(async () => { plan = await readBackup(file); });
+    importing = false;
+  }
+
+  async function confirmImport() {
+    const p = plan!;
+    plan = undefined;
     importing = true;
     await run(async () => {
-      const n = await importBackup(file);
+      const n = await applyBackup(p);
       await refreshCampaigns();
       notice = `Imported ${n.campaigns} campaigns, ${n.characters} characters, ${n.items} items and ${n.packs} books.${n.skippedPacks ? ` Left out ${n.skippedPacks.length} ${n.skippedPacks.length === 1 ? 'pack' : 'packs'} that claim to be the built-in SRD or another reserved source (${n.skippedPacks.join(', ')}).` : ''}`;
     });
@@ -146,3 +157,14 @@
   <label for="import-backup">Backup file (.json)</label>
   <input id="import-backup" type="file" accept=".json,application/json" disabled={importing} onchange={onImport} />
 </div>
+{#if plan}
+  {@const n = plan.counts}
+  <div role="alertdialog" aria-label="Confirm backup import" class="card">
+    <p>This backup holds {n.campaigns} {n.campaigns === 1 ? 'campaign' : 'campaigns'}, {n.characters} {n.characters === 1 ? 'character' : 'characters'}, {n.items} {n.items === 1 ? 'item' : 'items'} and {n.packs} {n.packs === 1 ? 'book' : 'books'}. Matching records are overwritten.</p>
+    {#if plan.newer}<p class="error">{plan.newer} {plan.newer === 1 ? 'record on this device is newer and will be replaced' : 'records on this device are newer and will be replaced'}.</p>{/if}
+    <div class="row">
+      <button class="primary" disabled={busy} onclick={confirmImport}>Import backup</button>
+      <button disabled={busy} onclick={() => (plan = undefined)}>Cancel</button>
+    </div>
+  </div>
+{/if}

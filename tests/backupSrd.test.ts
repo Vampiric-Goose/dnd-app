@@ -1,10 +1,10 @@
 // R52 fix round 2: a backup can never replace the built-in SRD or carry a pack that claims a reserved source.
 import 'fake-indexeddb/auto';
 import { beforeEach, expect, test } from 'vitest';
-import { exportBackup, importBackup } from '../src/lib/backup.ts';
+import { exportBackup } from '../src/lib/backup.ts';
 import { db, resetDb } from '../src/lib/db.ts';
 import type { Pack } from '../src/lib/types.ts';
-import { camp } from './fixtures/records.ts';
+import { camp, importBackup } from './fixtures/records.ts';
 import { srdPackFixture } from './fixtures/srdPack.ts';
 
 beforeEach(resetDb);

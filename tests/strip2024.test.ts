@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, expect, test } from 'vitest';
-import { importBackup, importRecord } from '../src/lib/backup.ts';
+import { importRecord } from '../src/lib/backup.ts';
 import { strip2024, stripLoot } from '../src/lib/character/strip2024.ts';
 import { db, resetDb } from '../src/lib/db.ts';
 import { makeEntry } from '../src/lib/items/inventory.ts';
@@ -9,7 +9,7 @@ import { importPdf } from '../src/lib/pdf/importPdf.ts';
 import { computeSheet } from '../src/lib/rules/sheet.ts';
 import { DEFAULT_SETTINGS } from '../src/lib/settings.ts';
 import type { Campaign, Character, Entity, ItemDef } from '../src/lib/types.ts';
-import { camp, char } from './fixtures/records.ts';
+import { camp, char, importBackup } from './fixtures/records.ts';
 
 beforeEach(resetDb);
 

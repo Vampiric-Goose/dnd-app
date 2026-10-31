@@ -1,10 +1,10 @@
 import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import { exportBackup, exportRecord, importBackup, importRecord, keepBoth, restoreSecrets } from '../src/lib/backup.ts';
+import { applyBackup, exportBackup, exportRecord, importRecord, keepBoth, readBackup, restoreSecrets } from '../src/lib/backup.ts';
 import { db, resetDb } from '../src/lib/db.ts';
 import type { Character, Pack } from '../src/lib/types.ts';
 import { mkChar } from './fixtures/content.ts';
-import { camp, char, item } from './fixtures/records.ts';
+import { camp, char, importBackup, item } from './fixtures/records.ts';
 
 beforeEach(resetDb);
 afterEach(() => vi.restoreAllMocks());
@@ -123,6 +123,20 @@ test('importBackup upserts by id and keeps timestamps', async () => {
   const a = (await db.characters.get('a'))!;
   expect([a.name, a.updatedAt]).toEqual(['Old', stamp]);
   expect(await db.characters.get('extra')).toBeDefined();
+});
+
+test('R57: reading a backup writes nothing and counts the newer records it would replace', async () => {
+  await db.campaigns.put(camp('c1')); await db.characters.put({ ...char('a', 'c1'), name: 'Old' });
+  const file = await exportBackup({ includePacks: false });
+  vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 1000);
+  await db.characters.put({ ...char('a', 'c1'), name: 'Newer' }); // edited after the backup
+  await db.characters.put(char('extra'));
+  const plan = await readBackup(file);
+  expect(plan.counts).toEqual({ campaigns: 1, characters: 1, items: 0, packs: 0 });
+  expect(plan.newer).toBe(1); // a (c1 was not touched since)
+  expect((await db.characters.get('a'))!.name).toBe('Newer'); // nothing written yet
+  expect(await applyBackup(plan)).toEqual(plan.counts);
+  expect((await db.characters.get('a'))!.name).toBe('Old');
 });
 
 test('a Player-view character file is the player-safe copy and says so (R51)', async () => {

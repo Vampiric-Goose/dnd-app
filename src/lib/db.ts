@@ -177,6 +177,15 @@ export const db = {
     for (const c of characters) await tx.objectStore('characters').put({ ...strip2024(c), updatedAt: Date.now() });
     if (campaign) await tx.objectStore('campaigns').put({ ...stripLoot(campaign), updatedAt: Date.now() });
   }),
+  /** R57: how many of these records are stored here with a later updatedAt (a backup import would replace them with older copies). */
+  countNewer: async (s: Pick<Snapshot, 'campaigns' | 'characters' | 'items'>): Promise<number> => {
+    const tx = (await open()).transaction(['campaigns', 'characters', 'items']);
+    let n = 0;
+    for (const name of ['campaigns', 'characters', 'items'] as const) {
+      for (const r of s[name] as { id: string; updatedAt: number }[]) if (((await tx.objectStore(name).get(r.id))?.updatedAt ?? -Infinity) > r.updatedAt) n++;
+    }
+    return n;
+  },
   /** Backup import: one atomic upsert that keeps the records' own updatedAt. */
   restore: (s: Snapshot) => write(['campaigns', 'characters', 'items', 'packs', 'packMeta', 'blobs'], async (tx) => {
     for (const r of s.campaigns) await tx.objectStore('campaigns').put(stripLoot(r));

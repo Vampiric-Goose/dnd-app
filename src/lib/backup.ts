@@ -1,6 +1,6 @@
 import { strip2024 } from './character/strip2024.ts';
 import { restorablePack } from './content/sources.ts';
-import { db, sha256Hex, type BlobRecord } from './db.ts';
+import { db, sha256Hex, type BlobRecord, type Snapshot } from './db.ts';
 import { playerCharacter } from './items/playerView.ts';
 import { campaignProblem, characterProblem, isRec, problem, SHAPES, type Rec } from './recordShape.ts';
 import type { Campaign, Character, Pack, StoredItem } from './types.ts';
@@ -79,8 +79,12 @@ export async function exportBackup(opts: { campaignId?: string; includePacks: bo
   return file;
 }
 
-/** Validates the whole file, then upserts by id in one transaction, keeping each record's own updatedAt. */
-export async function importBackup(file: Blob): Promise<{ campaigns: number; characters: number; items: number; packs: number; skippedPacks?: string[] }> {
+export type BackupCounts = { campaigns: number; characters: number; items: number; packs: number; skippedPacks?: string[] };
+/** A validated backup waiting for the user's yes (R57). `newer`: records stored here with a later updatedAt, which it would replace. */
+export interface BackupPlan { snapshot: Snapshot; counts: BackupCounts; newer: number }
+
+/** Backup import, step 1 of 2 (R57): parses and validates the whole file and counts what it would do. Writes nothing. */
+export async function readBackup(file: Blob): Promise<BackupPlan> {
   const o = await parse(file);
   if (o?.format !== 'dnd-app-backup') throw new Error('Not a dnd-app backup file');
   if (o.version !== 1) throw new Error('Unsupported backup version ' + o.version);
@@ -94,8 +98,14 @@ export async function importBackup(file: Blob): Promise<{ campaigns: number; cha
   // R52: never the built-in SRD (id `srd`) nor a pack claiming a reserved source; the caller is told which were left out.
   const skippedPacks = snapshot.packs.filter((p) => !restorablePack(p)).map((p) => p.id);
   snapshot.packs = snapshot.packs.filter(restorablePack);
-  await db.restore(snapshot);
-  return { campaigns: snapshot.campaigns.length, characters: snapshot.characters.length, items: snapshot.items.length, packs: snapshot.packs.length, ...(skippedPacks.length && { skippedPacks }) };
+  const counts = { campaigns: snapshot.campaigns.length, characters: snapshot.characters.length, items: snapshot.items.length, packs: snapshot.packs.length, ...(skippedPacks.length && { skippedPacks }) };
+  return { snapshot, counts, newer: await db.countNewer(snapshot) };
+}
+
+/** Step 2, only once the user has confirmed: upserts by id in one transaction, keeping each record's own updatedAt. */
+export async function applyBackup(plan: BackupPlan): Promise<BackupCounts> {
+  await db.restore(plan.snapshot);
+  return plan.counts;
 }
 
 /** R51: a character exported in Player view is the player-safe copy, and the file says so (`viewer`), so an import can warn. */

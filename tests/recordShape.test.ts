@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 import fs from 'node:fs';
 import { beforeEach, expect, test } from 'vitest';
-import { importBackup, importRecord } from '../src/lib/backup.ts';
+import { importRecord } from '../src/lib/backup.ts';
 import { effectOk } from '../src/lib/character/customEffect.ts';
 import { resetDb } from '../src/lib/db.ts';
 import { importedItem, soundItem } from '../src/lib/items/homebrew.ts';
@@ -11,7 +11,7 @@ import { computeSheet } from '../src/lib/rules/sheet.ts';
 import { DEFAULT_SETTINGS } from '../src/lib/settings.ts';
 import type { Character, Effect, ItemDef, Pack } from '../src/lib/types.ts';
 import { mkChar } from './fixtures/content.ts';
-import { camp, char, item } from './fixtures/records.ts';
+import { camp, char, importBackup, item } from './fixtures/records.ts';
 
 beforeEach(resetDb);
 

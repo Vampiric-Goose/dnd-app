@@ -1,6 +1,10 @@
 // Minimal valid records for storage tests.
+import { applyBackup, readBackup } from '../../src/lib/backup.ts';
 import type { Campaign, Character, StoredItem } from '../../src/lib/types.ts';
 import { DEFAULT_SETTINGS } from '../../src/lib/settings.ts';
+
+/** Both backup import steps at once, as if the user confirmed (R57). */
+export const importBackup = async (file: Blob) => applyBackup(await readBackup(file));
 
 export const camp = (id: string): Campaign => ({
   id, name: id, createdAt: 0, updatedAt: 0, settings: structuredClone(DEFAULT_SETTINGS), enabledPacks: [], loot: [],
@@ -25,3 +29,4 @@ export const char = (id: string, campaignId?: string): Character => ({
 export const item = (id: string, campaignId: string): StoredItem => ({
   id, name: id, source: 'test', text: [], kind: 'item', type: 'gear', magic: false, campaignId, updatedAt: 0,
 });
+
