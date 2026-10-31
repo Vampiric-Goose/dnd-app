@@ -1,14 +1,17 @@
 <script lang="ts">
-  import { exportRecord } from '../../lib/backup.ts';
+  import { exportRecord, importRecord } from '../../lib/backup.ts';
   import type { ContentIndex } from '../../lib/content/index.ts';
   import { db } from '../../lib/db.ts';
-  import { soundMonster } from '../../lib/monsters/homebrew.ts';
+  import { rehome } from '../../lib/monsters/editing.ts';
+  import { duplicateMonster, soundMonster } from '../../lib/monsters/homebrew.ts';
   import { filterMonsters, monsterType, SIZE_NAMES } from '../../lib/monsters/library.ts';
   import { navigate, router } from '../../lib/router.svelte.ts';
   import { CR_LADDER, crValue } from '../../lib/rules/monsters.ts';
   import { app, getIndex } from '../../lib/store.svelte.ts';
   import type { MonsterDef, Size, StoredMonster } from '../../lib/types.ts';
+  import { message } from '../creator/labels.ts';
   import { download, fileName } from '../download.ts';
+  import MonsterEditor from '../monsters/MonsterEditor.svelte';
   import StatBlock from '../monsters/StatBlock.svelte';
   import VirtualList from '../VirtualList.svelte';
 
@@ -37,7 +40,7 @@
     );
   }
   $effect(() => {
-    if (!app.ready || app.viewer !== 'dm') return;
+    if (!app.ready || app.viewer !== 'dm' || editing) return;
     void app.campaign?.id;
     index = undefined;
     load();
@@ -61,6 +64,63 @@
   const go = (id?: string) => { location.hash = '#/monsters' + (id ? `?id=${encodeURIComponent(id)}` : ''); };
   const sub = (m: MonsterDef) => [`CR ${m.cr}`, `${m.size.map((s) => SIZE_NAMES[s]).join('/')} ${monsterType(m)}`, index?.label(m.source) ?? m.source].join(' · ');
 
+  // `monsters/new` (optionally `?from=<id>`: Duplicate) and `monsters/:id/edit` show the editor instead of the library.
+  const editing = $derived(router.path[1] === 'new' || router.path[2] === 'edit');
+  const from = $derived(router.query.get('from') ?? '');
+  async function loadEditor(campaignId: string, id: string | undefined, from: string): Promise<{ initial?: StoredMonster; draft?: MonsterDef }> {
+    if (id) {
+      const x = await db.monsters.get(id);
+      if (!x || x.campaignId !== campaignId) throw new Error('That monster is not in this campaign.');
+      if (!soundMonster(x)) throw new Error('That monster is damaged and cannot be opened.');
+      return { initial: x };
+    }
+    if (!from) return {};
+    const mine = await db.monsters.get(from);
+    const x = mine?.campaignId === campaignId ? mine : (await getIndex(campaignId)).get(from);
+    if (x?.kind !== 'monster') throw new Error("The monster to copy is not in this campaign's content.");
+    return { draft: x };
+  }
+
+  // R49: an imported monster whose id is this campaign's already waits here for Replace or Keep both.
+  let clash: { file: StoredMonster; monster: StoredMonster; existing: string } | undefined = $state.raw();
+  let keepBtn: HTMLButtonElement | undefined = $state();
+  let notice = $state('');
+  $effect(() => { if (clash) keepBtn?.focus(); });
+
+  // importRecord doesn't save: this is where the monster is put, re-homed into this campaign (see rehome).
+  async function onImport(e: Event & { currentTarget: HTMLInputElement }) {
+    const file = e.currentTarget.files?.[0];
+    e.currentTarget.value = '';
+    if (!file || !app.campaign) return;
+    error = notice = '';
+    clash = undefined;
+    try {
+      const rec = await importRecord(file);
+      if (rec.kind !== 'monster') throw new Error(`That file is a${rec.kind === 'item' ? 'n item. Import it on the Items page' : ' character. Import it on the Characters page'}.`);
+      const existing = await db.monsters.get(rec.data.id);
+      const { monster, clash: asks } = rehome(rec.data, app.campaign.id, existing);
+      if (asks) clash = { file: rec.data, monster, existing: existing!.name };
+      else await put(monster);
+    } catch (err) {
+      error = message(err);
+    }
+  }
+  async function put(x: StoredMonster) {
+    await db.monsters.put(x);
+    notice = `Imported ${x.name}.`;
+    load();
+    go(x.id);
+  }
+  async function resolveClash(how: 'replace' | 'keep') {
+    const k = clash!;
+    clash = undefined;
+    try {
+      await put(how === 'keep' ? duplicateMonster(k.file, app.campaign!.id) : k.monster);
+    } catch (err) {
+      error = message(err);
+    }
+  }
+
   function exportJson(m: MonsterDef) {
     const data: StoredMonster = { campaignId: app.campaign?.id ?? '', updatedAt: Date.now(), ...m };
     download(exportRecord('monster', data), fileName(m.name, 'json', 'monster'));
@@ -70,16 +130,52 @@
   const focusOnPhone = (node: HTMLElement) => { if (matchMedia('(max-width: 767px)').matches) node.focus(); };
 </script>
 
-<h1>Monsters</h1>
-
-{#if app.viewer !== 'dm'}
+{#if editing && app.campaign}
+  <!-- The editor stays mounted (hidden) in Player view, so switching view can't lose unsaved edits; its leave guard still asks. -->
+  {#if app.viewer !== 'dm'}
+    <h1>Monsters</h1>
+    <p>Monsters are visible to the DM only.</p>
+  {/if}
+  <div hidden={app.viewer !== 'dm'}>
+    {#key app.campaign.id + (params.id ?? 'new') + from}
+      {#await loadEditor(app.campaign.id, params.id, from)}
+        <p class="muted">Loading…</p>
+      {:then r}
+        <MonsterEditor campaignId={app.campaign.id} initial={r.initial} draft={r.draft} />
+      {:catch e}
+        <h1>Monsters</h1>
+        <p role="alert" class="error">{message(e)}</p>
+        <p><a href="#/monsters">Back to monsters</a></p>
+      {/await}
+    {/key}
+  </div>
+{:else if app.viewer !== 'dm'}
+  <h1>Monsters</h1>
   <p>Monsters are visible to the DM only.</p>
 {:else}
+  <h1>Monsters</h1>
+  {#if editing}<p>{app.ready ? 'Open a campaign to make monsters.' : 'Loading…'}</p>{/if}
+  {#if error}<p role="alert" class="error">{error}</p>{/if}
+  {#if notice}<p role="status">{notice}</p>{/if}
+  {#if clash}
+    <!-- svelte-ignore a11y_no_noninteractive_element_interactions (Escape bubbles up from the dialog's own buttons) -->
+    <div role="alertdialog" aria-label="Monster already exists" class="card" tabindex="-1" onkeydown={(e) => e.key === 'Escape' && (clash = undefined)}>
+      <p>This campaign already has a monster with this id: “{clash.existing}”. Replace “{clash.existing}” with the imported “{clash.monster.name}”, or keep both?</p>
+      <div class="row">
+        <button type="button" class="danger" onclick={() => resolveClash('replace')}>Replace “{clash.existing}”</button>
+        <button type="button" class="primary" bind:this={keepBtn} onclick={() => resolveClash('keep')}>Keep both</button>
+        <button type="button" onclick={() => (clash = undefined)}>Cancel</button>
+      </div>
+    </div>
+  {/if}
   <div class="layout" class:has-detail={!!selected}>
     <section class="browse" aria-label="Browse">
       <div class="row actions">
         {#if app.campaign}
           <button type="button" class="primary" onclick={() => navigate('monsters/new')}>New monster</button>
+          <label class="file"><span>Import monster (.json)</span>
+            <input type="file" accept=".json,application/json" onchange={onImport} />
+          </label>
         {:else}
           <p class="muted">Open a campaign to make monsters.</p>
         {/if}
@@ -162,6 +258,8 @@
 
 <style>
   .layout { display: block; }
+  .file { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin: 0; }
+  .file span { white-space: nowrap; }
   .filters { align-items: flex-end; }
   .filters .field { margin: 0.25rem 0; min-width: 0; }
   .grow { flex: 1 1 12rem; }

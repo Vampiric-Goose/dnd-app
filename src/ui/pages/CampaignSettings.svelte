@@ -15,7 +15,6 @@
     ['feats', 'Feats', 'Allow feats in place of ability score increases.'],
   ];
   const later: [Bool, string][] = [
-    ['crSuggestion', 'Suggest encounter CR'],
     ['fog', 'Fog of war'],
     ['freeMovement', 'Free movement on the map'],
     ['showMonsterHealth', 'Show monster health to players'],
@@ -96,6 +95,12 @@
       <option value="variant">Variant (encumbered at 5x and 10x Strength)</option>
     </select>
   </div>
+
+  <h2>Monsters</h2>
+  <label class="check">
+    <input type="checkbox" checked={c.settings.crSuggestion} onchange={(e) => setBool('crSuggestion', e)} />
+    <span>CR suggestion<br /><span class="muted">The monster creator suggests a CR from HP, AC, damage and attack bonus (DMG chapter 9).</span></span>
+  </label>
 
   <h2>Books</h2>
   <p class="muted">Content from these books can be used by this campaign's characters and items.</p>

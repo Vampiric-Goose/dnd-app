@@ -30,7 +30,9 @@
     ['characters/:id/level-up', 'LevelUp', () => import('./ui/creator/LevelUp.svelte')],
     ['compendium', 'Compendium', () => import('./ui/pages/Compendium.svelte')],
     ['monsters', 'Monsters', () => import('./ui/pages/Monsters.svelte')],
+    ['monsters/new', 'MonsterEditor', () => import('./ui/pages/Monsters.svelte')], // `?from=<id>` starts from a copy (Duplicate)
     ['monsters/:id', 'Monsters', () => import('./ui/pages/Monsters.svelte')], // the library with that monster's stat block open
+    ['monsters/:id/edit', 'MonsterEditor', () => import('./ui/pages/Monsters.svelte')],
     ['items', 'Items', () => import('./ui/pages/Items.svelte')],
     ['items/:id', 'ItemEditor', () => import('./ui/pages/Items.svelte')], // the same page; `:id` is an item id or "new"
     ['packs', 'Packs', () => import('./ui/pages/Packs.svelte')],
