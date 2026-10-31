@@ -133,10 +133,11 @@
   const nat = $derived(last && natD20(last.detail));
 
   // R46: sheet edits (overrides, custom effects) are the DM's, through one Edit mode. Not saved; it never outlives the DM view or the page.
-  let edit = $state(false);
+  let editOn = $state(false);
+  const edit = $derived(editOn && app.viewer === 'dm');
   setContext('sheet-edit', () => edit);
-  $effect(() => { if (app.viewer !== 'dm') edit = false; });
-  $effect(() => { void params.id; edit = false; });
+  $effect(() => { if (app.viewer !== 'dm') editOn = false; });
+  $effect(() => { void params.id; editOn = false; });
 </script>
 
 <svelte:window onpagehide={flush} />
@@ -161,7 +162,7 @@
       <!-- ponytail: Export is wired up in Task 20 -->
       <button type="button" disabled title="Available soon">Export</button>
       {#if app.viewer === 'dm'}
-        <button type="button" class="editbtn" aria-pressed={edit} onclick={() => (edit = !edit)}>Edit mode</button>
+        <button type="button" class="editbtn" aria-pressed={edit} onclick={() => (editOn = !editOn)}>Edit mode</button>
       {/if}
       <label class="row">
         <span class="muted">Campaign</span>

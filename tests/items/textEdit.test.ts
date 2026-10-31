@@ -65,6 +65,7 @@ test('expandWithCaret keeps the caret out of the markers', () => {
   expect(expandWithCaret('||x ||y', [], 2)).toEqual({ text: '{{redact:r1}}x {{/redact}}y', caret: 13 });
   expect(expandWithCaret('a ||b||', [], 7)).toEqual({ text: 'a {{redact:r1}}b{{/redact}}', caret: 27 }); // typed the closer: caret at the end
   expect(expandWithCaret('||b|| tail', [], 10)).toEqual({ text: '{{redact:r1}}b{{/redact}} tail', caret: 30 });
+  expect(expandWithCaret('||abc|| z', [], 4)).toEqual({ text: '{{redact:r1}}abc{{/redact}} z', caret: 15 }); // inside the secret: same place in its text ("ab|c")
   expect(expandWithCaret('p ||b|| q', [], 1).caret).toBe(1); // before the pair: unchanged
   expect(expandWithCaret('no pair', [], 3)).toEqual({ text: 'no pair', caret: 3 });
 });

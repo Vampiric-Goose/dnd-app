@@ -62,7 +62,9 @@
   function visible(list: Opt[], sel: string[]): Opt[] {
     if (list.length <= LONG) return list;
     const n = fold(q.trim());
-    return list.filter((o) => sel.includes(o.value) || fold(o.label).includes(n)).slice(0, 100);
+    // Selected options always stay; only the other matches are capped.
+    const rest = list.filter((o) => !sel.includes(o.value) && fold(o.label).includes(n)).slice(0, Math.max(0, 100 - sel.length));
+    return list.filter((o) => sel.includes(o.value) || rest.includes(o));
   }
   // The full text opens on demand, so a long list doesn't render a hundred of them up front.
   let opened: Record<string, boolean> = $state({});

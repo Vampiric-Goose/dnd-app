@@ -190,6 +190,7 @@
     padding: 0 0 0.25rem;
     margin: 0;
     overflow-x: auto;
+    position: relative; /* contains the absolutely positioned sr-only badge text, so it can't widen the page */
   }
 
   .steps button {
@@ -214,15 +215,6 @@
 
   .badge.warn {
     background: var(--muted);
-  }
-
-  .sr-only {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
   }
 
   .problems {
