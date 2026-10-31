@@ -1,5 +1,6 @@
 <script lang="ts">
   import { setContext } from 'svelte';
+  import { exportRecord } from '../../lib/backup.ts';
   import { characterSummary } from '../../lib/character/play.ts';
   import { db, StorageError } from '../../lib/db.ts';
   import { navigate } from '../../lib/router.svelte.ts';
@@ -9,8 +10,9 @@
   import { transfer } from '../../lib/items/inventory.ts';
   import { app, refreshCampaigns } from '../../lib/store.svelte.ts';
   import { toast } from '../../lib/toast.svelte.ts';
-  import type { Campaign, Character, OverrideKey } from '../../lib/types.ts';
+  import type { Campaign, CampaignSettings, Character, OverrideKey } from '../../lib/types.ts';
   import { message } from '../creator/labels.ts';
+  import { download, downloadPdf, fileName } from '../download.ts';
   import Abilities from './Abilities.svelte';
   import Attacks from './Attacks.svelte';
   import Combat from './Combat.svelte';
@@ -129,6 +131,24 @@
     }
   }
 
+  // Exports: the character as it is on screen (autosave may not have caught up). The PDF shows the sheet as the current viewer sees it (R48).
+  let exporting = $state(false);
+  function exportJson() {
+    if (c) download(exportRecord('character', $state.snapshot(c) as Character), fileName(c.name, 'json'));
+  }
+  async function exportPdf() {
+    if (!c || !sheet || exporting) return;
+    exporting = true;
+    try {
+      const { exportCharacterPdf } = await import('../../lib/pdf/exportPdf.ts');
+      downloadPdf(await exportCharacterPdf($state.snapshot(c) as Character, sheet, { viewer: app.viewer, settings: $state.snapshot(settings) as CampaignSettings }), fileName(c.name, 'pdf'));
+    } catch (e) {
+      toast(`Could not export the PDF: ${message(e)}`, true);
+    } finally {
+      exporting = false;
+    }
+  }
+
   const last = $derived(rollLog[0]);
   const nat = $derived(last && natD20(last.detail));
 
@@ -159,8 +179,8 @@
     <p class="muted">{characterSummary(c)}{sheet.totalLevel ? ` · level ${sheet.totalLevel}` : ''}</p>
     <div class="row">
       <button type="button" class="primary" onclick={() => navigate(`characters/${c!.id}/level-up`)}>Level up</button>
-      <!-- ponytail: Export is wired up in Task 20 -->
-      <button type="button" disabled title="Available soon">Export</button>
+      <button type="button" onclick={exportJson}>Export JSON</button>
+      <button type="button" disabled={exporting} onclick={exportPdf}>Export PDF</button>
       {#if app.viewer === 'dm'}
         <button type="button" class="editbtn" aria-pressed={edit} onclick={() => (editOn = !editOn)}>Edit mode</button>
       {/if}

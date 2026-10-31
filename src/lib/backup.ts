@@ -1,8 +1,6 @@
 import { db, sha256Hex, type BlobRecord } from './db.ts';
+import { isRec, problem, SHAPES, type Rec, type Shape } from './recordShape.ts';
 import type { Campaign, Character, Pack, StoredItem } from './types.ts';
-
-type Rec = Record<string, unknown>;
-const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
 
 const json = (o: unknown) => new Blob([JSON.stringify(o)], { type: 'application/json' });
 const parse = async (file: Blob): Promise<Rec | undefined> => {
@@ -21,24 +19,6 @@ const toBase64 = (buf: ArrayBuffer) => {
   return btoa(s);
 };
 const fromBase64 = (b64: string) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)).buffer;
-
-// What storage and the app rely on, nothing deeper: a file passing this can still hold bad values.
-type Shape = { objs?: string[]; arrs?: string[]; kind?: string };
-const SHAPES = {
-  campaign: { objs: ['settings'], arrs: ['enabledPacks', 'loot'] },
-  character: { objs: ['build', 'state'], arrs: ['inventory'] },
-  item: { kind: 'item' },
-  pack: { arrs: ['entities', 'patches'] },
-} satisfies Record<string, Shape>;
-
-/** What is wrong with a record read from a file, or undefined when it has the expected shape. */
-function problem(r: unknown, { objs = [], arrs = [], kind }: Shape): string | undefined {
-  if (!isRec(r)) return 'is not an object';
-  if (typeof r.id !== 'string') return 'has no id';
-  for (const k of objs) if (!isRec(r[k])) return `has no ${k}`;
-  for (const k of arrs) if (!Array.isArray(r[k])) return `has no ${k} list`;
-  if (kind && r.kind !== kind) return `is not an ${kind}`;
-}
 
 const damaged = (why: string) => new Error('Backup file is damaged: ' + why);
 
@@ -117,17 +97,19 @@ export function exportRecord(kind: 'character' | 'item', data: Character | Store
 }
 
 /**
- * Reads a single-record file. Does not save it: the caller puts the result. An id that already
- * exists locally is replaced by a fresh one so nothing is overwritten.
+ * Reads a single-record file. Does not save it: the caller puts the result. `taken` says the id already exists locally;
+ * the caller must then ask (R49) and either put it over the old one or put `keepBoth(data)`. Nothing is overwritten here.
  */
-export async function importRecord(file: Blob): Promise<{ kind: 'character'; data: Character } | { kind: 'item'; data: StoredItem }> {
+export async function importRecord(file: Blob): Promise<{ kind: 'character'; data: Character; taken: boolean } | { kind: 'item'; data: StoredItem; taken: boolean }> {
   const o = await parse(file);
   const kind = o?.format === 'dnd-app-character' ? 'character' : o?.format === 'dnd-app-item' ? 'item' : undefined;
   if (!o || !kind || o.version !== 1) throw new Error('Not a dnd-app character or item file');
   const why = problem(o.data, SHAPES[kind]);
   if (why) throw new Error(`Record file is damaged: ${kind} ${why}`);
-  const rec = o.data as Character | StoredItem;
-  const taken = await (kind === 'character' ? db.characters.get(rec.id) : db.items.get(rec.id));
-  const data = taken ? { ...rec, id: crypto.randomUUID() } : rec;
-  return { kind, data } as { kind: 'character'; data: Character } | { kind: 'item'; data: StoredItem };
+  const data = o.data as Character | StoredItem;
+  const taken = !!(await (kind === 'character' ? db.characters.get(data.id) : db.items.get(data.id)));
+  return { kind, data, taken } as { kind: 'character'; data: Character; taken: boolean } | { kind: 'item'; data: StoredItem; taken: boolean };
 }
+
+/** R49 "Keep both": the imported record under a fresh id, so the existing one stays. "Replace" is the record as it is. */
+export const keepBoth = <T extends { id: string }>(r: T): T => ({ ...r, id: crypto.randomUUID() });

@@ -1,14 +1,17 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { parseDice } from '../../lib/dice.ts';
+  import { exportRecord } from '../../lib/backup.ts';
   import { db } from '../../lib/db.ts';
   import { redactionIds } from '../../lib/content/richtext.ts';
   import { choiceTexts } from '../../lib/items/playerView.ts';
+  import { stripStored } from '../../lib/items/rows.ts';
   import { editableToRich, expandWithCaret, richToEditable } from '../../lib/items/textEdit.ts';
   import { leaveGuard, navigate } from '../../lib/router.svelte.ts';
   import { getIndex } from '../../lib/store.svelte.ts';
   import type { ItemDef, ItemType, PlayerView, Rarity, Recharge, StoredItem } from '../../lib/types.ts';
   import { entityOption, message } from '../creator/labels.ts';
+  import { download, downloadPdf, fileName } from '../download.ts';
   import FilterSelect from '../FilterSelect.svelte';
   import EffectsEditor from './EffectsEditor.svelte';
   import PlayerViewEditor from './PlayerViewEditor.svelte';
@@ -228,6 +231,26 @@
     if (await write(copy)) navigate(`items/${copy.id}`);
   }
 
+  // Exports the form as it stands (the DM's full item, with its default player view), once it passes the same checks as Save.
+  function exportJson() {
+    error = notice = '';
+    const p = problem();
+    if (p) { error = p; return; }
+    download(exportRecord('item', { ...assembled, id: draft.id }), fileName(draft.name, 'json', 'item'));
+  }
+
+  async function exportPdf() {
+    error = notice = '';
+    const p = problem();
+    if (p) { error = p; return; }
+    try {
+      const { exportItemPdf } = await import('../../lib/pdf/exportPdf.ts');
+      downloadPdf(await exportItemPdf(stripStored({ ...assembled, id: draft.id })), fileName(draft.name, 'pdf', 'item'));
+    } catch (e) {
+      error = `Could not export the PDF: ${message(e)}`;
+    }
+  }
+
   async function askDelete() {
     confirmingDelete = true;
     await tick();
@@ -393,6 +416,8 @@
   <button type="button" class="primary" disabled={saving} onclick={save}>Save item</button>
   {#if saved}
     <button type="button" disabled={saving} onclick={duplicate}>Duplicate</button>
+    <button type="button" onclick={exportJson}>Export JSON</button>
+    <button type="button" onclick={exportPdf}>Export PDF</button>
     <button type="button" class="danger" onclick={askDelete}>Delete</button>
   {/if}
   {#if dirty}<span class="muted">Unsaved changes</span>{/if}

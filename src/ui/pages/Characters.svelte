@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { importRecord } from '../../lib/backup.ts';
+  import { importRecord, keepBoth } from '../../lib/backup.ts';
   import { characterSummary } from '../../lib/character/play.ts';
   import { db } from '../../lib/db.ts';
   import { navigate } from '../../lib/router.svelte.ts';
-  import { app } from '../../lib/store.svelte.ts';
+  import { app, getFullIndex } from '../../lib/store.svelte.ts';
   import type { Character } from '../../lib/types.ts';
   import { message } from '../creator/labels.ts';
 
@@ -27,20 +27,51 @@
   const shown = $derived(chars.filter((c) => filter === 'all' || (filter === 'none' ? !c.campaignId : c.campaignId === filter)));
   const campaignName = (id?: string) => app.campaigns.find((x) => x.id === id)?.name;
 
+  // R49: an imported character whose id is already stored waits here until the user picks Replace or Keep both.
+  let clash: { c: Character; edits: string[]; existing: string } | undefined = $state.raw();
+
+  const isPdf = (f: File) => f.type === 'application/pdf' || /\.pdf$/i.test(f.name);
+
   async function onImport(e: Event & { currentTarget: HTMLInputElement }) {
     const file = e.currentTarget.files?.[0];
     e.currentTarget.value = '';
     if (!file) return;
     error = notice = '';
+    clash = undefined;
     try {
-      // ponytail: .pdf import arrives with Task 20.
-      const rec = await importRecord(file);
-      if (rec.kind !== 'character') throw new Error('That file is an item. Import it on the Items page.');
-      const c = rec.data;
-      if (c.campaignId && !app.campaigns.some((x) => x.id === c.campaignId)) delete c.campaignId; // its campaign isn't on this device
-      await db.characters.put(c); // importRecord doesn't save (N2)
-      notice = `Imported ${c.name}.`;
-      await load();
+      let c: Character, edits: string[] = [], taken: boolean;
+      if (isPdf(file)) {
+        const { importPdf } = await import('../../lib/pdf/importPdf.ts'); // pdf-lib's own chunk, loaded only now
+        const rec = await importPdf(new Uint8Array(await file.arrayBuffer()), await getFullIndex().catch(() => undefined));
+        if (rec.kind !== 'character') throw new Error('That file is an item. Import it on the Items page.');
+        c = rec.data;
+        edits = rec.edits;
+        taken = !!(await db.characters.get(c.id));
+      } else {
+        const rec = await importRecord(file);
+        if (rec.kind !== 'character') throw new Error('That file is an item. Import it on the Items page.');
+        ({ data: c, taken } = rec);
+      }
+      if (c.campaignId && !app.campaigns.some((x) => x.id === c.campaignId)) { c = { ...c }; delete c.campaignId; } // its campaign isn't on this device
+      if (taken) clash = { c, edits, existing: (await db.characters.get(c.id))?.name || 'Unnamed' };
+      else await save(c, edits);
+    } catch (err) {
+      error = message(err);
+    }
+  }
+
+  // importRecord and importPdf don't save (N2): this is where the character is put.
+  async function save(c: Character, edits: string[]) {
+    await db.characters.put(c);
+    notice = `Imported ${c.name}.${edits.length ? ` Changes made in the PDF were applied: ${edits.join(', ')}.` : ''}`;
+    await load();
+  }
+
+  async function resolveClash(how: 'replace' | 'keep') {
+    const k = clash!;
+    clash = undefined;
+    try {
+      await save(how === 'keep' ? keepBoth(k.c) : k.c, k.edits);
     } catch (err) {
       error = message(err);
     }
@@ -62,6 +93,17 @@
 
 {#if error}<p role="alert" class="error">{error}</p>{/if}
 {#if notice}<p role="status">{notice}</p>{/if}
+{#if clash}
+  <div role="alertdialog" aria-label="Character already exists" class="card">
+    <p>You already have a character with this id: “{clash.existing}”. Replace “{clash.existing}” with the imported “{clash.c.name || 'Unnamed'}”, or keep both?</p>
+    {#if clash.edits.length}<p class="muted">Changes made in the PDF: {clash.edits.join(', ')}.</p>{/if}
+    <div class="row">
+      <button class="danger" onclick={() => resolveClash('replace')}>Replace “{clash.existing}”</button>
+      <button class="primary" onclick={() => resolveClash('keep')}>Keep both</button>
+      <button onclick={() => (clash = undefined)}>Cancel</button>
+    </div>
+  </div>
+{/if}
 
 <div class="row">
   <button class="primary" onclick={() => navigate('characters/new')}>New character</button>
@@ -78,7 +120,7 @@
 {#if !loaded}
   <p class="muted">Loading…</p>
 {:else if !shown.length}
-  <p class="muted">{chars.length ? 'No characters match.' : 'No characters yet. Create one, or import a character file below.'}</p>
+  <p class="muted">{chars.length ? 'No characters match.' : 'No characters yet. Create one, or import a character file (JSON or PDF) below.'}</p>
 {:else}
   <ul class="plain">
     {#each shown as c (c.id)}
@@ -106,6 +148,6 @@
 
 <h2>Import a character</h2>
 <div class="field">
-  <label for="import-character">Character file (.json)</label>
-  <input id="import-character" type="file" accept=".json,application/json" onchange={onImport} />
+  <label for="import-character">Character file (.json or .pdf)</label>
+  <input id="import-character" type="file" accept=".json,application/json,.pdf,application/pdf" onchange={onImport} />
 </div>

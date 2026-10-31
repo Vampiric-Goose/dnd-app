@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import { exportBackup, exportRecord, importBackup, importRecord } from '../src/lib/backup.ts';
+import { exportBackup, exportRecord, importBackup, importRecord, keepBoth } from '../src/lib/backup.ts';
 import { db, resetDb } from '../src/lib/db.ts';
 import type { Pack } from '../src/lib/types.ts';
 import { camp, char, item } from './fixtures/records.ts';
@@ -78,12 +78,15 @@ test('damaged record files are rejected', async () => {
   ] as const) await expect(importRecord(file)).rejects.toThrow(message);
 });
 
-test('importRecord never overwrites', async () => {
-  await db.characters.put(char('a'));
-  const r = await importRecord(exportRecord('character', char('a')));
-  expect(r.data.id).not.toBe('a');
+test('importRecord flags a taken id (R49) and writes nothing; keepBoth gives a fresh id', async () => {
+  await db.characters.put({ ...char('a'), name: 'Old' });
+  const r = await importRecord(exportRecord('character', { ...char('a'), name: 'New' }));
+  expect([r.data.id, r.taken]).toEqual(['a', true]);
+  expect((await db.characters.get('a'))?.name).toBe('Old');
+  const copy = keepBoth(r.data);
+  expect([copy.id === 'a', copy.name]).toEqual([false, 'New']);
   const fresh = await importRecord(exportRecord('item', item('i', 'c1')));
-  expect([fresh.kind, fresh.data.id]).toEqual(['item', 'i']);
+  expect([fresh.kind, fresh.data.id, fresh.taken]).toEqual(['item', 'i', false]);
 });
 
 test('campaign export is scoped; packs only when asked; only a full export stamps lastBackupAt', async () => {

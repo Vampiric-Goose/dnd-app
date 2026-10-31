@@ -1,7 +1,10 @@
 <script lang="ts">
   import { useCharge, useItem } from '../../lib/items/inventory.ts';
   import { normalizeView, rowView } from '../../lib/items/rows.ts';
+  import { toast } from '../../lib/toast.svelte.ts';
   import type { InventoryEntry, PlayerView } from '../../lib/types.ts';
+  import { message } from '../creator/labels.ts';
+  import { downloadPdf, fileName } from '../download.ts';
   import EntityDetail from '../EntityDetail.svelte';
   import Pips from '../sheet/Pips.svelte';
   import PlayerViewEditor from './PlayerViewEditor.svelte';
@@ -57,6 +60,17 @@
     else onremove();
   }
 
+  // The card holds what this viewer may see: v.shown is playerItem(entry.item, entry.view) for a player.
+  async function exportPdf() {
+    menu = false;
+    try {
+      const { exportItemPdf } = await import('../../lib/pdf/exportPdf.ts');
+      downloadPdf(await exportItemPdf(v.shown), fileName(v.name, 'pdf', 'item'));
+    } catch (e) {
+      toast(`Could not export the PDF: ${message(e)}`, true);
+    }
+  }
+
   async function move() {
     busy = true;
     try { await onmove(target, amount); } finally { busy = false; panel = undefined; }
@@ -79,6 +93,7 @@
       <div class="pop">
         <button type="button" onclick={() => open('details')}>Details</button>
         {#if viewer === 'dm'}<button type="button" onclick={() => open('view')}>Edit player view</button>{/if}
+        <button type="button" onclick={exportPdf}>Export PDF</button>
         <button type="button" disabled={!canRefresh} title={canRefresh ? '' : 'The source item is no longer available'} onclick={() => { menu = false; onrefresh(); }}>Update from source</button>
         <button type="button" disabled={!targets.length} title={targets.length ? '' : 'There is nowhere to send it'} onclick={() => open('move')}>{moveLabel}</button>
         <button type="button" class="danger" onclick={() => open('remove')}>Remove</button>
