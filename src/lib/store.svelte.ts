@@ -1,9 +1,9 @@
 import { exportBackup } from './backup.ts';
 import { ContentIndex } from './content/index.ts';
 import { loadSrd } from './content/srd.ts';
-import { packAllowed } from './content/sources.ts';
+import { is2024Source, isReservedSource, packAllowed } from './content/sources.ts';
 import { db } from './db.ts';
-import type { Campaign } from './types.ts';
+import type { Campaign, Pack } from './types.ts';
 
 export const app: {
   campaign: Campaign | undefined;
@@ -66,6 +66,16 @@ export async function saveBackup(opts: { campaignId?: string; includePacks: bool
 // One cached index at a time: the key is the sorted pack ids plus their hashes, so a re-import invalidates it.
 let cache: { key: string; index: Promise<ContentIndex> } | undefined;
 
+/**
+ * Defence in depth against a crafted or restored pack (R52): whatever its own source says, no entity of a 2024 source and none
+ * claiming a reserved id (SRD, HOMEBREW, HIDDEN) gets in, so it cannot add 2024 content or replace a built-in SRD entity.
+ */
+const clean = (p: Pack): Pack => ({
+  ...p,
+  entities: p.entities.filter((e) => !is2024Source(e.source) && !isReservedSource(e.source)),
+  patches: p.patches.filter((x) => !is2024Source(x.alias)),
+});
+
 async function build(ids: string[] | undefined): Promise<ContentIndex> {
   const srd = await loadSrd();
   // R52: a stored pack from a 2024 or unknown source never reaches the index, even before the user removes it.
@@ -74,7 +84,7 @@ async function build(ids: string[] | undefined): Promise<ContentIndex> {
   const key = [srd.hash, ...chosen.map((m) => `${m.id}:${m.hash}`)].join('|');
   if (cache?.key === key) return cache.index;
   const index = (async () => {
-    const packs = (await Promise.all(chosen.map((m) => db.packs.get(m.id)))).filter((p) => !!p);
+    const packs = (await Promise.all(chosen.map((m) => db.packs.get(m.id)))).filter((p): p is Pack => !!p && packAllowed(p)).map(clean);
     return new ContentIndex([srd, ...packs]);
   })();
   cache = { key, index };

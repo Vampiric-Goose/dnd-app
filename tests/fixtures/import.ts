@@ -21,8 +21,8 @@ export const run = (files: Record<string, unknown>) =>
   import5etools(Object.entries(files).map(([name, json]) => ({ name, json: asTst(json) })), { index: srdIdx, rawLookup: async () => undefined });
 
 /** Like `run`, but the files are taken exactly as given (no TST declaration). */
-export const runRaw = (files: Record<string, unknown>, rawLookup: (key: string) => Promise<unknown | undefined> = async () => undefined) =>
-  import5etools(Object.entries(files).map(([name, json]) => ({ name, json })), { index: srdIdx, rawLookup });
+export const runRaw = (files: Record<string, unknown>, rawLookup: (key: string) => Promise<unknown | undefined> = async () => undefined, homebrewSources: string[] = []) =>
+  import5etools(Object.entries(files).map(([name, json]) => ({ name, json })), { index: srdIdx, rawLookup, homebrewSources });
 
 /** A hand-written 5etools-format fixture from tests/fixtures/5etools/. */
 export const readFixture = (name: string): unknown =>

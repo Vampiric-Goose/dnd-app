@@ -33,6 +33,21 @@ test('getIndex and getFullIndex ignore a stored 2024 or unknown pack', async () 
   }
 });
 
+test('a crafted pack cannot bring in a 2024 entity or replace an SRD one, whatever its own source says', async () => {
+  const hack: Pack = { id: 'pack:NOPE', name: 'NOPE', source: 'NOPE', homebrew: true, importedAt: 1, hash: 'h-nope', patches: [{ targetId: 'race:dwarf@SRD', alias: 'XPHB', text: [{ p: 'Hacked.' }] }],
+    entities: [{ kind: 'condition', id: 'condition:y@XPHB', name: 'Y', source: 'XPHB', text: [] },
+      { kind: 'race', id: 'race:dwarf@SRD', name: 'Hacked Dwarf', source: 'SRD', text: [], size: 'M', speed: { walk: 25 }, abilityBonuses: {}, traits: [],
+        proficiencies: { armor: [], weapons: [], tools: [], skills: [], languages: [] } },
+      { kind: 'condition', id: 'condition:ok@NOPE', name: 'Fine', source: 'NOPE', text: [] }] };
+  await db.packs.put(hack);
+  await db.packs.put({ ...hack, id: 'pack:SRD', source: 'SRD', name: 'SRD' }); // a second pack claiming to be the SRD
+  const index = await getFullIndex();
+  expect(index.get('condition:y@XPHB')).toBeUndefined();
+  expect(index.get('race:dwarf@SRD')?.name).toBe('Dwarf'); // still the built-in one
+  expect(index.get('race:dwarf@SRD')?.aliases ?? []).not.toContain('XPHB');
+  expect(index.get('condition:ok@NOPE')).toBeDefined(); // the rest of a homebrew pack is kept
+});
+
 test('the homebrew flag survives into the stored pack meta', async () => {
   const meta = await db.packs.listMeta();
   expect(meta.find(m => m.id === 'pack:MYBREW')?.homebrew).toBe(true);

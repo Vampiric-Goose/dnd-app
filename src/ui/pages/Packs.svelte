@@ -60,6 +60,7 @@
       const res = await import5etools(parsed, {
         index,
         rawLookup: async (key) => (await db.raw5e.getMany([key]))[0],
+        homebrewSources: (await db.packs.listMeta()).filter((m) => m.homebrew).map((m) => m.source),
       });
 
       progress = 'Saving…';

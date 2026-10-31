@@ -139,6 +139,19 @@ export const OFFICIAL_2014: Record<string, SourceEntry> = {
   'VEOR': { id: 'VEoR', name: "Vecna: Eve of Ruin", kind: 'adventure', published: '2024-05-21' },
   'QFTIS': { id: 'QftIS', name: "Quests from the Infinite Staircase", kind: 'adventure', published: '2024-07-16' },
   'PAF': { id: 'PaF', name: "Puncheons and Flagons", kind: 'other', published: '2024-08-27' },
+  // R53: WotC 2014-era sources that books.json does not list under these ids (dates are the best known release dates).
+  'ROTOS': { id: 'RoTOS', name: "Rise of Tiamat Online Supplement", kind: 'supplement', published: '2014-11-04' },
+  'EEPC': { name: "Elemental Evil Player's Companion", kind: 'supplement', published: '2015-03-10' },
+  'EET': { name: "Elemental Evil Trinkets", kind: 'supplement', published: '2015-03-10' },
+  'TFTYP': { id: 'TftYP', name: "Tales from the Yawning Portal", kind: 'adventure', published: '2017-04-04' },
+  'MFF': { name: "Mordenkainen's Fiendish Folio Volume 1", kind: 'supplement', published: '2018-09-20' },
+  'ESK': { name: "Essentials Kit", kind: 'adventure', published: '2019-06-24' },
+  'MCV2DC': { name: "Monstrous Compendium Volume 2: Dragonlance Creatures", kind: 'supplement', published: '2022-12-06' },
+  'SADS': { name: "Sapphire Anniversary Dice Set", kind: 'supplement', published: '2023-01-24' },
+  'HAT-LMI': { name: "Honor Among Thieves: Legendary Magic Items", kind: 'supplement', published: '2023-03-31' },
+  'MCV3MC': { name: "Monstrous Compendium Volume 3: Minecraft Creatures", kind: 'supplement', published: '2023-07-18' },
+  'MISMV1': { id: 'MisMV1', name: "Misplaced Monsters: Volume One", kind: 'supplement', published: '2023-10-31' },
+  'VD': { name: "Vecna Dossier", kind: 'supplement', published: '2024-04-16' },
 };
 
 /** Sources of the 2024 era (published on or after 2024-09-17), listed only so skipped content can be named "2024 rules". The whitelist is what enforces. */
@@ -207,6 +220,7 @@ export type SourceVerdict = 'official' | 'homebrew' | '2024' | 'unknown';
 export function classifySource(id: string, declared: ReadonlySet<string> = new Set()): SourceVerdict {
   if (is2024Source(id)) return '2024'; // checked first: no file may declare, or claim, a 2024 id
   if (entry(id)) return 'official'; // and an official id is always official, never homebrew
+  if (Object.hasOwn(SPECIAL, up(id))) return 'unknown'; // SRD, HOMEBREW and HIDDEN are the app's own: a file cannot declare them
   return declared.has(up(id)) ? 'homebrew' : 'unknown';
 }
 
@@ -220,6 +234,13 @@ export function sourceLabel(id: string, homebrew = false): string {
   return homebrew ? `Homebrew (${id})` : `Unknown source (${id})`;
 }
 
-/** May a stored pack reach the content index? The SRD, official 2014 books and homebrew packs, never 2024 or unknown sources. */
-export const packAllowed = (p: { source: string; homebrew?: boolean }): boolean =>
-  up(p.source) === 'SRD' || (!is2024Source(p.source) && (p.homebrew === true || !!entry(p.source)));
+/** Is this source one of the app's reserved ids (SRD, HOMEBREW, HIDDEN)? */
+export const isReservedSource = (id: string): boolean => Object.hasOwn(SPECIAL, up(id));
+
+/**
+ * May a stored pack reach the content index? The built-in SRD pack (id `srd`, the only one that may carry source SRD), official
+ * 2014 books and homebrew packs; never 2024 or unknown sources, and never another pack claiming a reserved id.
+ */
+export const packAllowed = (p: { id?: string; source: string; homebrew?: boolean }): boolean =>
+  isReservedSource(p.source) ? p.id === 'srd' && up(p.source) === 'SRD'
+    : !is2024Source(p.source) && (p.homebrew === true || !!entry(p.source));

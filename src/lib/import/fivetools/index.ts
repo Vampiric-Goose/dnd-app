@@ -90,7 +90,7 @@ export function mergePack(existing: Pack | undefined, incoming: Pack): Pack {
 
 export async function import5etools(
   files: { name: string; json: unknown }[],
-  ctx: { index: ContentIndex; rawLookup: (key: string) => Promise<unknown | undefined> },
+  ctx: { index: ContentIndex; rawLookup: (key: string) => Promise<unknown | undefined>; /** Sources of the homebrew packs already stored: their raw records may be `_copy` targets. */ homebrewSources?: Iterable<string> },
 ): Promise<ImportResult> {
   const { index } = ctx;
   const errors: ImportResult['errors'] = [], warnings: string[] = [], raw: [string, unknown][] = [];
@@ -137,48 +137,69 @@ export async function import5etools(
   // 2. Whitelist (R52): an entity is imported only from an official 2014 source, or from one its own file declares as homebrew.
   // Never from the 2024 rules or `edition: "one"`, and never through a `_copy` or a class that is itself refused.
   // Then resolve _copy (batch first, then stored raw entities).
-  /** The reason to refuse this record, or undefined (a record with no source is left to fail in conversion). */
-  const refusal = (key: string, r: Raw, declared: ReadonlySet<string>): { why: Reject; source: string } | undefined => {
-    const s = sourceOf(key, r);
-    if (r?.edition === 'one') return { why: '2024', source: s ?? '?' };
-    if (s === undefined) return undefined;
+  type Refusal = { why: Reject; source: string };
+  const storedHomebrew: ReadonlySet<string> = new Set([...(ctx.homebrewSources ?? [])].map(up)); // sources of the homebrew packs already stored
+  const sourceRefusal = (s: string, declared: ReadonlySet<string>): Refusal | undefined => {
     const v: SourceVerdict = classifySource(s, declared);
     return v === '2024' || v === 'unknown' ? { why: v, source: s } : undefined;
+  };
+  /**
+   * The reason to refuse this record's own source, or undefined (a record with no source is left to fail in conversion).
+   * A record that `inherits` (magic variants) is refused when either its own source or inherits.source is refused, or either is edition "one".
+   */
+  const refusal = (key: string, r: Raw, declared: ReadonlySet<string>): Refusal | undefined => {
+    if (r?.edition === 'one' || r?.inherits?.edition === 'one') return { why: '2024', source: sourceOf(key, r) ?? '?' };
+    for (const s of [r?.source, r?.inherits?.source]) if (typeof s === 'string') { const x = sourceRefusal(s, declared); if (x) return x; }
+    return undefined;
   };
   const rejectedClasses = new Map<string, Reject>(); // `class|SOURCE` of every class in the batch that is refused
   for (const e of found) {
     const x = e.key === 'class' ? refusal(e.key, e.r, e.declared) : undefined;
     if (x) rejectedClasses.set(`${String(e.r.name).toLowerCase()}|${up(e.r.source)}`, x.why);
   }
-  const parentRefusal = (key: string, r: Raw): { why: Reject; source: string } | undefined => {
+  /** A record's parents: classSource, subclassSource and raceSource are judged like its own source; a class in the batch that was refused refuses its subclasses and features. */
+  const parentRefusal = (key: string, r: Raw, declared: ReadonlySet<string>): Refusal | undefined => {
+    for (const f of ['classSource', 'subclassSource', 'raceSource']) {
+      const s = r?.[f];
+      if (typeof s === 'string' && s) { const x = sourceRefusal(s, declared); if (x) return x; }
+    }
     if (!CLASS_KEYS.has(key) || key === 'class') return undefined;
-    if (r.classSource && is2024Source(String(r.classSource))) return { why: '2024', source: String(r.classSource) };
     const why = rejectedClasses.get(`${String(r.className).toLowerCase()}|${up(r.classSource || 'PHB')}`);
     return why && { why, source: String(r.classSource || 'PHB') };
   };
-  const stored = async (key: string) => { // raw entities kept from earlier imports may predate this whitelist
+  /** The one check every record goes through, whether it is imported, a `_copy` target in the batch, or a stored raw record. */
+  const refuse = (key: string, r: Raw, declared: ReadonlySet<string>): Refusal | undefined => refusal(key, r, declared) ?? parentRefusal(key, r, declared);
+  // Raw records kept from earlier imports may predate the whitelist: they are judged like batch records, with the stored homebrew packs as their declarations.
+  const storedRefusal = (key: string, r: Raw): Refusal | undefined =>
+    refuse(key.split('|')[0], r, storedHomebrew) ?? sourceRefusal(keySourceOf(key), storedHomebrew);
+  const stored = async (key: string) => {
     const r = await ctx.rawLookup(key) as Raw;
-    return r && (is2024Source(keySourceOf(key)) || r.edition === 'one' || is2024Source(String(sourceOf(key.split('|')[0], r)))) ? undefined : r;
+    return r && !storedRefusal(key, r) ? r : undefined;
   };
   const lookup = async (key: string) => {
     const src = keySourceOf(key);
     if (is2024Source(src)) throw new CopyRejected('2024', src);
     const hit = batch.get(key);
-    if (!hit) return stored(key);
-    const x = refusal(key.split('|')[0], hit.r, hit.declared);
+    if (hit) {
+      const x = refuse(key.split('|')[0], hit.r, hit.declared);
+      if (x) throw new CopyRejected(x.why, x.source);
+      return hit.r;
+    }
+    const r = await ctx.rawLookup(key) as Raw;
+    const x = r && storedRefusal(key, r);
     if (x) throw new CopyRejected(x.why, x.source);
-    return hit.r;
+    return r;
   };
   const live: { file: string; key: string; r: Raw; label: string }[] = [];
   for (const e of found) {
     const label = `${e.key} "${e.r?.name ?? '?'}"`;
     try {
-      const early = refusal(e.key, e.r, e.declared) ?? parentRefusal(e.key, e.r); // before _copy: a refused class's copies need not resolve
+      const early = refuse(e.key, e.r, e.declared); // before _copy: a refused class's copies need not resolve
       if (early) { tally(early.why, early.source, e.file); continue; }
       const r = await resolveCopy(e.key, e.r, lookup, m => warnings.push(`${e.file}: ${label}: ${m}`), CLASS_KEYS.has(e.key) ? classRawKey : undefined);
       const bad = invalid(e.key, r); // a copy can inherit a bad name or source
       if (bad) fail(bad);
-      const late = refusal(e.key, r, e.declared) ?? parentRefusal(e.key, r);
+      const late = refuse(e.key, r, e.declared);
       if (late) { tally(late.why, late.source, e.file); continue; }
       const s = sourceOf(e.key, r);
       if (s !== undefined && classifySource(s, e.declared) === 'homebrew') homebrewSources.add(up(s));

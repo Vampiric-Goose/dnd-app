@@ -166,7 +166,7 @@ test('_copy from rawLookup with replaceArr, removeArr, replaceTxt, setProp', asy
   const r = await import5etools([{ name: 'n.json', json: asTst({ race: [{ name: 'Newfolk', source: 'TST', _copy: { name: 'Oldfolk', source: 'TST', _mod: {
     entries: [{ mode: 'replaceArr', replace: 'A', items: { type: 'entries', name: 'A2', entries: ['a2'] } }, { mode: 'removeArr', names: 'B' }, { mode: 'replaceTxt', replace: 'Old', with: 'New' }],
     _: { mode: 'setProp', prop: 'speed', value: 35 } } } }] }) }],
-  { index: srdIdx, rawLookup: async k => (k === 'race|oldfolk|TST' ? stored : undefined) });
+  { index: srdIdx, rawLookup: async k => (k === 'race|oldfolk|TST' ? stored : undefined), homebrewSources: ['TST'] });
   const nf = r.packs.flatMap(p => p.entities).find(e => e.name === 'Newfolk') as RaceDef;
   expect(nf).toMatchObject({ size: 'S', speed: { walk: 35 }, traits: [{ name: 'A2' }] });
   expect(richToPlain(nf.text)).toContain('New text.');
