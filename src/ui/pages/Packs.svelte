@@ -40,7 +40,49 @@
   const folderOk = 'webkitdirectory' in document.createElement('input');
   const coarse = matchMedia('(pointer: coarse)').matches;
   let folderInput: HTMLInputElement | undefined = $state();
+  let zipInput: HTMLInputElement | undefined = $state();
   let dragging = $state(false);
+
+  /** A File's bytes as chunks (a reader loop: Safari has no async iteration of ReadableStream). */
+  async function* chunksOf(file: File) {
+    const reader = file.stream().getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) return;
+      yield value;
+    }
+  }
+
+  /** Reads a 5etools zip as downloaded (or a homebrew zip) and shows the same summary as a folder. Only the selected files are inflated. */
+  async function proposeZip(file: File) {
+    summary = undefined;
+    plan = undefined;
+    error = '';
+    busy = true;
+    progress = 'Reading the zip…';
+    try {
+      const { readDataZip } = await import('../../lib/import/zip.ts'); // lazy: keeps fflate out of first load
+      const { files, summary: sel } = await readDataZip(chunksOf(file), (done) => (progress = `Reading the zip… ${Math.min(100, Math.floor((done / (file.size || 1)) * 100))}%`));
+      const { root } = sel;
+      plan = {
+        total: sel.use.length + sel.skipped.reduce((n, s) => n + s.count, 0),
+        items: files.map((f) => ({ name: root ? f.path.slice(root.length + 1) : f.path, text: async () => f.text })),
+        skipped: sel.skipped,
+        homebrew: root === null,
+      };
+    } catch (err) {
+      error = `Could not read ${file.name}: ${message(err)}`;
+    } finally {
+      busy = false;
+      progress = '';
+    }
+  }
+
+  function onZip(e: Event & { currentTarget: HTMLInputElement }) {
+    const file = e.currentTarget.files?.[0];
+    e.currentTarget.value = '';
+    if (file) proposeZip(file);
+  }
 
   const entryFile = (entry: FsEntry) => new Promise<File>((ok, fail) => (entry as FileSystemFileEntry).file(ok, fail));
 
@@ -78,6 +120,10 @@
     // The entries must be taken synchronously: the browser invalidates the drop data after the first await.
     const roots = [...(e.dataTransfer?.items ?? [])].map((i) => i.webkitGetAsEntry()).filter((x) => x !== null);
     if (!roots.length) return;
+    if (roots.length === 1 && roots[0].isFile && roots[0].name.toLowerCase().endsWith('.zip')) {
+      await entryFile(roots[0]).then(proposeZip, (err) => (error = message(err)));
+      return;
+    }
     summary = undefined;
     error = '';
     try {
@@ -184,29 +230,31 @@
 <h1>Packs</h1>
 <p>
   Import your own copies of 5etools-format books. Files are read on this device only and nothing is uploaded.
-  Choose your 5etools <code>data</code> folder and the app picks out the files it needs: books reference each other, so importing them together gives the best result.
+  Choose the 5etools zip as you downloaded it (no need to unzip it), or its <code>data</code> folder, and the app picks out the files it needs: books reference each other, so importing them together gives the best result.
 </p>
 
 <section
   class="card drop"
   class:dragging
-  aria-label="Import a 5etools data folder"
+  aria-label="Import 5etools"
   ondragover={(e) => { e.preventDefault(); dragging = true; }}
   ondragleave={() => (dragging = false)}
   ondrop={onDrop}
 >
+  <input bind:this={zipInput} type="file" accept=".zip,application/zip" hidden tabindex="-1" aria-hidden="true" onchange={onZip} />
+  <button class="primary" disabled={busy} onclick={() => zipInput?.click()}>Import 5etools (zip or folder)</button>
   {#if folderOk}
     <input bind:this={folderInput} type="file" webkitdirectory hidden tabindex="-1" aria-hidden="true" onchange={onFolder} />
-    <button class="primary" disabled={busy} onclick={() => folderInput?.click()}>Import a 5etools data folder</button>
-    <span class="muted"> or drop the folder here.</span>
+    <button disabled={busy} onclick={() => folderInput?.click()}>Choose a data folder instead</button>
+    <span class="muted"> or drop the zip or folder here.</span>
   {/if}
   {#if !folderOk || coarse}
-    <p class="muted">Picking a folder works in desktop browsers. On a phone, import individual files, or import on a computer and move the data over with a backup.</p>
+    <p class="muted">On a phone, import the 5etools zip file.</p>
   {/if}
 </section>
 
 {#if plan}
-  <section class="card" aria-label="Folder scan">
+  <section class="card" aria-label="Import scan">
     <p role="status">
       {#if plan.homebrew}No 5etools data folder was recognised, so every .json file under 5 MB is treated as homebrew. {/if}
       Found {plan.total} {plan.total === 1 ? 'file' : 'files'} · importing {plan.items.length}{plan.skipped.length ? ' · skipped: ' + plan.skipped.map((s) => `${s.reason} ${s.count}`).join(', ') : ''}
