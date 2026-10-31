@@ -1,7 +1,7 @@
 // 5etools `_copy` / `_mod` resolution, including the bestiary's `_templates` and its creature modes (skills, senses, spells, scaling).
 import { slug } from '../../content/ids.ts';
 import { abilityMod, SKILL_ABILITY } from '../../rules/constants.ts';
-import { crProf, crXp } from '../../rules/monsters.ts';
+import { crProf, crXp, okXp } from '../../rules/monsters.ts';
 import { arr, fail, mapStrings, type Raw } from './common.ts';
 
 export type Lookup = (key: string) => Promise<Raw | undefined>;
@@ -161,10 +161,11 @@ function applyMod(root: Raw, path: string, m: Raw, warn: (msg: string) => void):
       break;
     }
     case 'scalarMultXp': { // XP is the CR's unless the record carries its own (`cr: { cr, xp }`)
-      if (typeof m.scalar !== 'number') break;
+      if (!(Number.isFinite(m.scalar) && m.scalar >= 0)) { warn(`scalarMultXp: scalar ${m.scalar} is not a finite number >= 0; skipped`); break; }
       const c = isObj(own(root, 'cr')) ? root.cr : (root.cr = { cr: own(root, 'cr') });
-      const xp = (typeof c.xp === 'number' ? c.xp : crXp(String(c.cr)) ?? 0) * m.scalar;
-      c.xp = m.floor ? Math.floor(xp) : Math.round(xp);
+      const xp = (okXp(c.xp) ? c.xp : crXp(String(c.cr)) ?? 0) * m.scalar;
+      const v = m.floor ? Math.floor(xp) : Math.round(xp);
+      if (okXp(v)) c.xp = v; else warn(`scalarMultXp: XP ${v} out of range; skipped`);
       break;
     }
     case 'prefixSuffixStringProp': {

@@ -3,6 +3,7 @@ import { isRichText } from '../content/richtext.ts';
 import { traitOk } from '../items/homebrew.ts';
 import { isRec } from '../recordShape.ts';
 import { ABILITIES, SKILL_ABILITY } from '../rules/constants.ts';
+import { okXp } from '../rules/monsters.ts';
 import type { MonsterDef, StoredMonster } from '../types.ts';
 import { uid } from '../uid.ts';
 
@@ -54,6 +55,7 @@ export function soundMonster(m: unknown): boolean {
   if (![m.traits, m.actions, m.bonusActions, m.reactions, m.legendary].every(traits)) return false;
   if (m.legendaryCount !== undefined && !num(m.legendaryCount)) return false;
   if (m.mythic !== undefined && !traits(m.mythic)) return false;
-  for (const k of ['legendaryIntro', 'lair', 'regional']) if (m[k] !== undefined && !isRichText(m[k])) return false;
+  for (const k of ['legendaryIntro', 'mythicIntro', 'lair', 'regional']) if (m[k] !== undefined && !isRichText(m[k])) return false;
+  if (m.xp !== undefined && !okXp(m.xp)) return false;
   return m.environment === undefined || strs(m.environment);
 }

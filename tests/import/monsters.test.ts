@@ -281,6 +281,21 @@ test('an explicit cr.xp is kept as the monster\'s XP', async () => {
   expect([m.cr, m.xp, monsterXp(m)]).toEqual(['0', 0, 0]);
 });
 
+test('an xp or scalarMultXp scalar that is not a finite number >= 0 is dropped', async () => {
+  const half = (scalar: number) => ({ name: `Scaled ${scalar}`, source: 'TST', apply: { _mod: { _: { mode: 'scalarMultXp', scalar } } } });
+  const r = await run({
+    'bestiary/bestiary-tst.json': JSON.parse(JSON.stringify({ monster: [
+      mon({ name: 'Huge XP', cr: { cr: '1', xp: 0 } }), mon({ name: 'Negative XP', cr: { cr: '1', xp: -5 } }), mon({ name: 'Base', cr: '1' }),
+      { name: 'Infinite Copy', source: 'TST', _copy: { name: 'Base', source: 'TST', _templates: [{ name: 'Scaled 1e+999', source: 'TST' }] } },
+      { name: 'Negative Copy', source: 'TST', _copy: { name: 'Base', source: 'TST', _templates: [{ name: 'Scaled -5', source: 'TST' }] } },
+    ] }).replace('"xp":0', '"xp":1e999')), // JSON 1e999 parses to Infinity
+    'bestiary/template.json': JSON.parse(JSON.stringify({ monsterTemplate: [half(-5), { ...half(0), name: 'Scaled 1e+999' }] }).replace('"scalar":0', '"scalar":1e999')),
+  });
+  expect(r.errors).toEqual([]);
+  for (const n of ['Huge XP', 'Negative XP', 'Infinite Copy', 'Negative Copy']) expect([n, byName(r, n)!.xp, monsterXp(byName(r, n)!)]).toEqual([n, undefined, 200]);
+  expect(r.warnings.filter(w => w.includes('scalarMultXp'))).toHaveLength(2);
+});
+
 test('attack tags and list-item names render as the book prints them', () => {
   expect(['mw,rw', 'ms,rs', 'm,r', 'ms', 'rs'].map(a => renderTags(`{@atk ${a}}`))).toEqual([
     '*Melee or Ranged Weapon Attack:*', '*Melee or Ranged Spell Attack:*', '*Melee or Ranged Attack:*', '*Melee Spell Attack:*', '*Ranged Spell Attack:*']);

@@ -43,15 +43,22 @@
   let zipInput: HTMLInputElement | undefined = $state();
   let dragging = $state(false);
 
-  /** A File's bytes as chunks (a reader loop: Safari has no async iteration of ReadableStream). */
+  /** A File's bytes as chunks (a reader loop: Safari has no async iteration of ReadableStream). Stopping early cancels the read. */
   async function* chunksOf(file: File) {
     const reader = file.stream().getReader();
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) return;
-      yield value;
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) return;
+        yield value;
+      }
+    } finally {
+      void reader.cancel().catch(() => {});
     }
   }
+
+  let reading: AbortController | undefined = $state(); // a zip being read; Cancel or leaving the page aborts it
+  $effect(() => () => reading?.abort());
 
   /** Reads a 5etools zip as downloaded (or a homebrew zip) and shows the same summary as a folder. Only the selected files are inflated. */
   async function proposeZip(file: File) {
@@ -60,9 +67,12 @@
     error = '';
     busy = true;
     progress = 'Reading the zip…';
+    const ac = (reading = new AbortController());
     try {
       const { readDataZip } = await import('../../lib/import/zip.ts'); // lazy: keeps fflate out of first load
-      const { files, summary: sel } = await readDataZip(chunksOf(file), (done) => (progress = `Reading the zip… ${Math.min(100, Math.floor((done / (file.size || 1)) * 100))}%`));
+      const size = file.size || 1;
+      const { files, summary: sel } = await readDataZip(chunksOf(file),
+        (done) => (progress = done >= size ? 'Unpacking the data files…' : `Reading the zip… ${Math.floor((done / size) * 100)}%`), { signal: ac.signal });
       const { root } = sel;
       plan = {
         total: sel.use.length + sel.skipped.reduce((n, s) => n + s.count, 0),
@@ -71,8 +81,9 @@
         homebrew: root === null,
       };
     } catch (err) {
-      error = `Could not read ${file.name}: ${message(err)}`;
+      if (!ac.signal.aborted) error = `Could not read ${file.name}: ${message(err)}`; // a cancelled read just ends, its partial results dropped
     } finally {
+      if (reading === ac) reading = undefined;
       busy = false;
       progress = '';
     }
@@ -271,7 +282,10 @@
   <input id="pack-files" type="file" accept=".json" multiple disabled={busy} onchange={onFiles} />
 </div>
 
-{#if busy}<p role="status">{progress}</p>{/if}
+{#if busy}
+  <p role="status">{progress}</p>
+  {#if reading}<button onclick={() => reading?.abort()}>Cancel</button>{/if}
+{/if}
 {#if error}<p role="alert" class="error">{error}</p>{/if}
 
 {#if summary}

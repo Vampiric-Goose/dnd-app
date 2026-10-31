@@ -161,6 +161,13 @@ test('soundMonster: hp formula, speed values, save and skill keys', () => {
   bad({ skills: { stealth: '5' } });
 });
 
+test('soundMonster: mythicIntro is rich text and xp a finite number >= 0 when present', () => {
+  const b = blankMonster('c');
+  expect(soundMonster({ ...b, mythicIntro: [{ p: 'For one hour…' }], xp: 0 })).toBe(true);
+  for (const patch of [{ mythicIntro: 5 }, { mythicIntro: 'text' }, { xp: 'x' }, { xp: -5 }, { xp: Infinity }, { xp: NaN }])
+    expect(soundMonster({ ...b, ...patch })).toBe(false);
+});
+
 test('opening while an older tab holds version 1 reports it, then completes once that tab closes', async () => {
   const v1 = await openDB('dnd-app', 1, { upgrade(d) { d.createObjectStore('campaigns', { keyPath: 'id' }); } }); // no versionchange handler: it stays open
   const hook = vi.fn();

@@ -2,7 +2,7 @@
 import { slug } from '../../content/ids.ts';
 import { renderTags } from '../../content/richtext.ts';
 import { SKILL_ABILITY, abilityMod } from '../../rules/constants.ts';
-import { CR_LADDER, crProf } from '../../rules/monsters.ts';
+import { CR_LADDER, crProf, okXp } from '../../rules/monsters.ts';
 import type { Ability, MonsterDef, RichText, Size, Skill, Trait } from '../../types.ts';
 import { ABILITIES, arr, base, fail, mapStrings, rich, table, traits, type Ctx, type Raw } from './common.ts';
 
@@ -190,7 +190,7 @@ export function monster(raw: Raw, ctx: Ctx, id: string, name: string): MonsterDe
     ...sections,
     ...(sections.legendary.length && { legendaryCount: typeof r.legendaryActions === 'number' ? r.legendaryActions : 3 }),
     ...(r.legendaryHeader !== undefined && { legendaryIntro: rich(r.legendaryHeader) }),
-    ...(typeof r.cr?.xp === 'number' && { xp: r.cr.xp }),
+    ...(okXp(r.cr?.xp) && { xp: r.cr.xp }),
     ...(mythic.length && { mythic }), ...(r.mythicHeader !== undefined && { mythicIntro: rich(r.mythicHeader) }),
     ...(lair.length && { lair }), ...(regional.length && { regional }),
     ...(arr(r.environment).length && { environment: arr(r.environment).map(String) }),
