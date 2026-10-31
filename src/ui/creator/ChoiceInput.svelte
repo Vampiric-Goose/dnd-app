@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Problem } from '../../lib/character/build.ts';
+  import { skillOptions, type Problem } from '../../lib/character/build.ts';
   import type { PendingChoice } from '../../lib/character/choices.ts';
   import { choiceSummary } from '../../lib/character/choiceSummary.ts';
   import { fold } from '../../lib/content/ids.ts';
@@ -12,8 +12,9 @@
 
   // Renders one PendingChoice of any type as a bordered group: a heading, where it comes from, and the options as cards.
   // Nested choices are separate PendingChoices (ChoicesStep lists them).
-  let { pending: p, c, index, settings, sheet, problem, onanswer }: {
-    pending: PendingChoice; c: Character; index: ContentIndex; settings: CampaignSettings; sheet: Sheet; problem?: Problem; onanswer: (a: ChoiceAnswer) => void;
+  // `taken`: what the character already has from elsewhere (takenElsewhere), never offered again unless this choice picked it.
+  let { pending: p, c, index, settings, sheet, taken, problem, onanswer }: {
+    pending: PendingChoice; c: Character; index: ContentIndex; settings: CampaignSettings; sheet: Sheet; taken?: Set<string>; problem?: Problem; onanswer: (a: ChoiceAnswer) => void;
   } = $props();
 
   const uid = $props.id();
@@ -28,11 +29,12 @@
   const ofEntity = (e: Entity & { prerequisite?: unknown }): Opt => ({ ...entityOption(e), text: e.text, entity: e, ...(typeof e.prerequisite === 'string' && { prereq: `Prerequisite: ${e.prerequisite}` }) });
   const feats = $derived(index.all('feat').sort(byName).map(ofEntity));
   const options = $derived.by((): Opt[] => {
-    const plain = (xs: string[]) => xs.map((x) => ({ value: x, label: titleCase(x) }));
+    const free = (xs: string[]) => xs.filter((x) => picked.includes(x) || !taken?.has(x.toLowerCase()));
+    const plain = (xs: string[]) => free(xs).map((x) => ({ value: x, label: titleCase(x) }));
     switch (ch.type) {
-      case 'skill': return plain(ch.from === 'any' ? Object.keys(SKILL_ABILITY) : ch.from);
+      case 'skill': return plain(skillOptions(ch, taken, picked));
       case 'expertise': return plain(uniq([...Object.entries(sheet.skills).filter(([, s]) => s.proficient).map(([k]) => k), ...sheet.proficiencies.tools, ...picked]));
-      case 'language': return (ch.from ?? LANGUAGES).filter((l) => picked.includes(l) || !sheet.proficiencies.languages.includes(l)).map((l) => ({ value: l, label: l }));
+      case 'language': return free(ch.from ?? LANGUAGES).map((l) => ({ value: l, label: l }));
       case 'tool': return plain(ch.from ?? uniq(index.all('item').filter((i) => i.type === 'tool' && !i.magic).map((i) => i.name.toLowerCase())).sort());
       case 'ability': return ch.from.map((x) => ({ value: x, label: ABILITY_NAMES[x] }));
       case 'optionalFeature': return index.optionalFeatures(ch.featureTypes).sort(byName).map(ofEntity);

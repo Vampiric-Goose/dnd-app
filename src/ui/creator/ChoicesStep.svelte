@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { answerChoice, listChoices, type Problem } from '../../lib/character/build.ts';
+  import { answerChoice, embedContent, listChoices, takenElsewhere, type Problem } from '../../lib/character/build.ts';
   import type { ContentIndex } from '../../lib/content/index.ts';
   import type { CampaignSettings, Character, Sheet } from '../../lib/types.ts';
   import ChoiceInput from './ChoiceInput.svelte';
@@ -12,9 +12,11 @@
   } = $props();
 
   const racial = (sourceId: string) => [c.build.raceId, c.build.subraceId].includes(sourceId.split('/')[0]);
+  const all = $derived(listChoices(c, index, settings));
+  const taken = $derived(takenElsewhere(embedContent(c, index), all, settings)); // proficiencies already had, offered nowhere else
   const groups = $derived.by(() => {
     const out = new Map<number, ReturnType<typeof listChoices>>();
-    for (const p of listChoices(c, index, settings)) {
+    for (const p of all) {
       if (c.build.customOrigin && p.choice.type === 'ability' && racial(p.sourceId)) continue; // R24: the custom origin replaces these
       if (p.level < fromLevel && p.answer) continue;
       out.set(p.level, [...(out.get(p.level) ?? []), p]);
@@ -30,7 +32,7 @@
   <section class="level" aria-labelledby="lv-{level}">
     <h3 id="lv-{level}">{level === 0 ? 'Race and background' : `Level ${level}`}</h3>
     {#each list as p (p.key)}
-      <ChoiceInput pending={p} {c} {index} {settings} {sheet} problem={problems.find((x) => x.key === p.key)}
+      <ChoiceInput pending={p} {c} {index} {settings} {sheet} taken={taken.get(p.key)} problem={problems.find((x) => x.key === p.key)}
         onanswer={(a) => (c = answerChoice(c, p.key, a))} />
     {/each}
   </section>

@@ -107,7 +107,37 @@ export function spellPool(spells: SpellDef[], cls: ClassDef | undefined, maxLeve
 }
 
 /** What's wrong with one answered (or unanswered) choice, or undefined. */
-function choiceProblem(c: Character, p: PendingChoice, lookup: Lookup, sheet: Sheet, settings: CampaignSettings): string | undefined {
+const PICKS = new Set(['skill', 'tool', 'language', 'expertise']);
+/** For each skill, tool, language and expertise choice (by key): what the character already has from everything else,
+ *  fixed grants and the other choices' picks, lower-cased. The same proficiency can't be picked twice (PHB p.125: pick another). */
+export function takenElsewhere(embedded: Character, pending: PendingChoice[], settings: CampaignSettings): Map<string, Set<string>> {
+  const picks = pending.filter(p => PICKS.has(p.choice.type));
+  const out = new Map<string, Set<string>>();
+  if (!picks.length) return out;
+  const choices = { ...embedded.build.choices };
+  for (const p of picks) delete choices[p.key];
+  const base = computeSheet({ ...embedded, build: { ...embedded.build, choices } }, { settings, viewer: 'dm' });
+  const skills = Object.entries(base.skills);
+  const fixed: Record<string, string[]> = {
+    skill: skills.filter(([, s]) => s.proficient).map(([k]) => k), expertise: skills.filter(([, s]) => s.expertise).map(([k]) => k),
+    tool: base.proficiencies.tools, language: base.proficiencies.languages,
+  };
+  const ids = (p: PendingChoice) => (p.answer?.type === 'ids' ? p.answer.ids : []);
+  for (const p of picks) {
+    const t = p.choice.type;
+    out.set(p.key, new Set([...fixed[t], ...picks.filter(o => o.key !== p.key && o.choice.type === t).flatMap(ids)].map(x => x.toLowerCase())));
+  }
+  return out;
+}
+
+/** A skill choice's options: its list minus skills had elsewhere; if that leaves too few, any skill not had (PHB p.125). */
+export function skillOptions(ch: { from: string[] | 'any'; count: number }, taken: Set<string> | undefined, picked: string[]): string[] {
+  const free = (xs: string[]) => xs.filter(x => picked.includes(x) || !taken?.has(x));
+  const all = Object.keys(SKILL_ABILITY), listed = free(ch.from === 'any' ? all : ch.from);
+  return listed.length >= ch.count ? listed : free(all);
+}
+
+function choiceProblem(c: Character, p: PendingChoice, lookup: Lookup, sheet: Sheet, settings: CampaignSettings, taken?: Set<string>): string | undefined {
   const { choice: ch, answer: a } = p;
   if (!a) return 'not chosen yet';
   const wrong = 'answer is the wrong kind';
@@ -140,7 +170,7 @@ function choiceProblem(c: Character, p: PendingChoice, lookup: Lookup, sheet: Sh
   if (ids.length !== n) return `choose ${n} (${ids.length} chosen)`;
   const allowed = (id: string): boolean => {
     switch (ch.type) {
-      case 'skill': return ch.from === 'any' ? id in SKILL_ABILITY : (ch.from as string[]).includes(id);
+      case 'skill': return skillOptions(ch, taken, ids).includes(id);
       case 'language': case 'tool': return !ch.from || ch.from.includes(id);
       case 'expertise': return !!(sheet.skills as Record<string, { proficient: boolean }>)[id]?.proficient || sheet.proficiencies.tools.includes(id);
       case 'option': return ch.options.some(o => o.name === id);
@@ -154,6 +184,8 @@ function choiceProblem(c: Character, p: PendingChoice, lookup: Lookup, sheet: Sh
   };
   const bad = ids.find(id => !allowed(id));
   if (bad) return `${bad} isn't an allowed pick`;
+  const dup = ids.find(id => taken?.has(id.toLowerCase()));
+  if (dup) return ch.type === 'expertise' ? `already has expertise in ${dup}` : `already has ${dup}`;
   if (ch.type === 'feat') return featProblem(ids[0]);
 }
 
@@ -198,9 +230,11 @@ export function validateCharacter(c: Character, index: ContentIndex, settings: C
   else if (!getKind(lookup, b.backgroundId, 'background')) add('background', `Missing background ${b.backgroundId}`);
 
   const racial = (sourceId: string) => [b.raceId, b.subraceId].includes(sourceId.split('/')[0]);
-  for (const p of enumerateChoices(c, lookup, settings)) {
+  const pending = enumerateChoices(c, lookup, settings);
+  const taken = takenElsewhere(embedded, pending, settings);
+  for (const p of pending) {
     if (b.customOrigin && p.choice.type === 'ability' && racial(p.sourceId)) continue; // R24: the custom origin replaces these
-    const msg = choiceProblem(c, p, lookup, sheet, settings);
+    const msg = choiceProblem(c, p, lookup, sheet, settings, taken.get(p.key));
     if (msg) add('choices', `${p.sourceName}: ${msg}`, p.key);
   }
 

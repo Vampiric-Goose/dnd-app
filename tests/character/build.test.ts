@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { addLevel, answerChoice, embedContent, listChoices, newCharacter, spellLimits, validateCharacter } from '../../src/lib/character/build.ts';
+import { addLevel, answerChoice, embedContent, listChoices, newCharacter, skillOptions, spellLimits, takenElsewhere, validateCharacter } from '../../src/lib/character/build.ts';
 import { computeSheet } from '../../src/lib/rules/sheet.ts';
 import { DEFAULT_SETTINGS } from '../../src/lib/settings.ts';
 import { enumerateChoices } from '../../src/lib/character/choices.ts';
@@ -87,6 +87,26 @@ test('validation', () => {
   const sk = listChoices(c, idx, S).find(p => p.choice.type === 'skill')!;
   const tooMany = answerChoice(c, sk.key, { type: 'ids', ids: ['athletics', 'perception', 'survival'] });
   expect(validateCharacter(tooMany, idx, S).some(p => p.key === sk.key && p.blocking)).toBe(true);
+});
+test('a skill the character already has is not offered again, and picking it anyway is a problem', () => {
+  const c = mkChar({ race: 'human', base: { str: 15 }, levels: ['fighter'] });
+  c.customEffects.push({ type: 'proficiency', category: 'skill', value: 'athletics' });
+  const sk = listChoices(c, idx, S).find(p => p.choice.type === 'skill')!;
+  const taken = takenElsewhere(embedContent(c, idx), listChoices(c, idx, S), S).get(sk.key)!;
+  expect(taken.has('athletics')).toBe(true);
+  expect(skillOptions(sk.choice as { from: string[]; count: number }, taken, [])).not.toContain('athletics');
+  const dup = answerChoice(c, sk.key, { type: 'ids', ids: ['athletics', 'perception'] });
+  expect(validateCharacter(dup, idx, S)).toContainEqual(expect.objectContaining({ key: sk.key, message: expect.stringContaining('already has athletics') }));
+  const ok = answerChoice(c, sk.key, { type: 'ids', ids: ['history', 'perception'] });
+  expect(validateCharacter(ok, idx, S).some(p => p.key === sk.key)).toBe(false);
+  // Its own picks stay offered; a pick another choice made is not.
+  expect(takenElsewhere(embedContent(ok, idx), listChoices(ok, idx, S), S).get(sk.key)!.has('history')).toBe(false);
+});
+test('when too few listed skills are left, any skill not already had can be picked (PHB p.125)', () => {
+  const ch = { count: 2, from: ['athletics', 'history', 'insight'] };
+  expect(skillOptions(ch, new Set(['athletics', 'history']), [])).toEqual(expect.arrayContaining(['insight', 'arcana', 'stealth']));
+  expect(skillOptions(ch, new Set(['athletics', 'history']), [])).not.toContain('athletics');
+  expect(skillOptions(ch, new Set(['athletics']), [])).toEqual(['history', 'insight']);
 });
 test('typed-in scores are valid without rule overrides, but must be 1 to 30', () => {
   const c = mkChar({ race: 'human', base: { str: 18, dex: 3, con: 20, int: 9, wis: 8, cha: 8 }, levels: ['fighter'] });
