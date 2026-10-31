@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { importRecord, keepBoth } from '../../lib/backup.ts';
+  import { importRecord, keepBoth, restoreSecrets } from '../../lib/backup.ts';
   import { characterSummary } from '../../lib/character/play.ts';
   import { db } from '../../lib/db.ts';
   import { characterProblem } from '../../lib/recordShape.ts';
@@ -79,7 +79,9 @@
     const k = clash!;
     clash = undefined;
     try {
-      await save(how === 'keep' ? keepBoth(k.c) : k.c, k.edits);
+      // R56: Replace with a Player-view file puts the real items back on the entries the stored character still has.
+      const stored = how === 'replace' && k.playerView ? await db.characters.get(k.c.id) : undefined;
+      await save(how === 'keep' ? keepBoth(k.c) : stored ? restoreSecrets(k.c, stored) : k.c, k.edits);
     } catch (err) {
       error = message(err);
     }
@@ -116,7 +118,7 @@
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions (Escape bubbles up from the dialog's own buttons) -->
   <div role="alertdialog" aria-label="Character already exists" class="card" tabindex="-1" onkeydown={(e) => e.key === 'Escape' && (clash = undefined)}>
     <p>You already have a character with this id: “{clash.existing}”. Replace “{clash.existing}” with the imported “{clash.c.name || 'Unnamed'}”, or keep both?</p>
-    {#if clash.playerView}<p class="error" role="note">This file was exported in Player view; secret item details are not in it.</p>{/if}
+    {#if clash.playerView}<p class="error" role="note">This file was exported in Player view; secret item details are not in it. Replace keeps the real items of “{clash.existing}” and takes quantities, equipped, attuned, charges and notes from the file.</p>{/if}
     {#if clash.edits.length}<p class="muted">Changes made in the PDF: {clash.edits.join(', ')}.</p>{/if}
     <div class="row">
       <button class="danger" onclick={() => resolveClash('replace')}>Replace “{clash.existing}”</button>

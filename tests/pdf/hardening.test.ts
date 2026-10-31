@@ -1,4 +1,5 @@
 import { expect, test } from 'vitest';
+import { restoreSecrets } from '../../src/lib/backup.ts';
 import { embedContent } from '../../src/lib/character/build.ts';
 import { playerCharacter } from '../../src/lib/items/playerView.ts';
 import { decodeEnvelope, readPayload } from '../../src/lib/pdf/appLayout.ts';
@@ -62,9 +63,10 @@ test('a player PDF embeds the player-safe copy and re-imports with no edits', as
   const bytes = await player(c);
   const json = await embeddedJson(bytes);
   for (const secret of ['Ring of Protection', 'ring-of-protection', 'Potion of Poison', '"view"', '"revealed"']) expect(json, secret).not.toContain(secret);
-  const r = await importPdf(bytes) as { edits: string[]; playerView?: boolean };
+  const r = await importPdf(bytes) as { data: Character; edits: string[]; playerView?: boolean };
   expect(r.edits).toEqual([]);
   expect(r.playerView).toBe(true);
+  expect(restoreSecrets(r.data, c).inventory).toEqual(c.inventory); // R56: Replace puts the real items back
 });
 
 test('a DM PDF still embeds the real names and is not flagged as a player export', async () => {

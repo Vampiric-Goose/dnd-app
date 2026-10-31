@@ -1,8 +1,8 @@
 import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import { exportBackup, exportRecord, importBackup, importRecord, keepBoth } from '../src/lib/backup.ts';
+import { exportBackup, exportRecord, importBackup, importRecord, keepBoth, restoreSecrets } from '../src/lib/backup.ts';
 import { db, resetDb } from '../src/lib/db.ts';
-import type { Pack } from '../src/lib/types.ts';
+import type { Character, Pack } from '../src/lib/types.ts';
 import { mkChar } from './fixtures/content.ts';
 import { camp, char, item } from './fixtures/records.ts';
 
@@ -134,4 +134,20 @@ test('a Player-view character file is the player-safe copy and says so (R51)', a
   expect([r.kind, r.playerView]).toEqual(['character', true]);
   expect((await importRecord(exportRecord('character', c))).playerView).toBe(false);
   expect(await exportRecord('character', c).text()).toContain('Potion of Poison');
+});
+
+test('R56: Replace from a Player-view file restores the real item, view and sourceId of matching entries and keeps the play state', async () => {
+  const view = { name: 'Cloudy red potion', hidden: ['rarity' as const], revealed: [] };
+  const stored = { ...mkChar({ race: 'dwarf', base: {}, levels: ['fighter'], inventory: [['potion-of-poison', false, false, view], ['longsword', true]] }), id: 'p1' };
+  stored.inventory[0] = { ...stored.inventory[0], sourceId: 'item:potion-of-poison@FIX' };
+  const r = await importRecord(exportRecord('character', stored, 'player'));
+  const played = r.data as Character;
+  played.inventory[0] = { ...played.inventory[0], quantity: 3, notes: 'shaken', chargesUsed: 0 };
+  played.inventory[1] = { ...played.inventory[1], equipped: false, attuned: false };
+  played.inventory.push({ ...played.inventory[1], id: 'new-entry' }); // picked up while away: kept as the file has it
+  const merged = restoreSecrets(played, stored);
+  expect(merged.inventory[0]).toEqual({ ...stored.inventory[0], quantity: 3, notes: 'shaken', chargesUsed: 0 });
+  expect(merged.inventory[1]).toEqual({ ...stored.inventory[1], equipped: false, attuned: false });
+  expect(merged.inventory[2]).toEqual(played.inventory[2]);
+  expect(merged.name).toBe(played.name);
 });

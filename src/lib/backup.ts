@@ -119,5 +119,23 @@ export async function importRecord(file: Blob): Promise<{ kind: 'character'; dat
   return { kind, data, taken, playerView: kind === 'character' && o.viewer === 'player' } as { kind: 'character'; data: Character; taken: boolean; playerView: boolean } | { kind: 'item'; data: StoredItem; taken: boolean; playerView: boolean };
 }
 
+/**
+ * R56: "Replace" with a Player-view file (JSON or PDF). The file holds player-safe copies of items, so every entry the stored character
+ * also has (same entry id) gets back its real `item`, `view` and `sourceId`; the file's play state (quantity, equipped, attuned,
+ * chargesUsed, notes) is kept. Entries only in the file stay as they are.
+ */
+export function restoreSecrets(imported: Character, stored: Character): Character {
+  const real = new Map(stored.inventory.map((e) => [e.id, e]));
+  return {
+    ...imported,
+    inventory: imported.inventory.map((e) => {
+      const s = real.get(e.id);
+      if (!s) return e;
+      const { view: _v, sourceId: _s, ...play } = e;
+      return { ...play, item: s.item, ...(s.view && { view: s.view }), ...(s.sourceId !== undefined && { sourceId: s.sourceId }) };
+    }),
+  };
+}
+
 /** R49 "Keep both": the imported record under a fresh id, so the existing one stays. "Replace" is the record as it is. */
 export const keepBoth = <T extends { id: string }>(r: T): T => ({ ...r, id: crypto.randomUUID() });
