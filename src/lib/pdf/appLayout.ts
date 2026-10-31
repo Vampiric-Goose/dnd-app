@@ -59,8 +59,8 @@ export function appFieldValues(c: Character, sheet: Sheet, ctx: Ctx = {}): Recor
     'app.slots': [...sheet.slots.flatMap((n, i) => (n ? [`${ordinal(i + 1)}: ${Math.max(0, n - (c.state.slotsUsed[i] ?? 0))}/${n}`] : [])),
       ...(sheet.pact ? [`Pact (level ${sheet.pact.level}): ${Math.max(0, sheet.pact.slots - c.state.pactSlotsUsed)}/${sheet.pact.slots}`] : [])].join('\n'),
     'app.inventory': c.inventory.map((e) => {
-      const n = (viewer === 'player' ? playerItem(e.item, e.view) : e.item).name;
-      return `${e.quantity} x ${n}${e.equipped ? ' (equipped)' : ''}${e.attuned ? ' (attuned)' : ''}`;
+      const shown = viewer === 'player' ? playerItem(e.item, e.view) : e.item;
+      return `${e.quantity} x ${shown.name}${e.equipped ? ' (equipped)' : ''}${e.attuned && shown.attunement ? ' (attuned)' : ''}`; // I8: not for a hidden attunement
     }).join('\n'),
     'app.notes': c.details.notes,
   };

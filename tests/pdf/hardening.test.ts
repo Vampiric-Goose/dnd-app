@@ -58,6 +58,17 @@ test('playerCharacter holds nothing of what the player may not know', () => {
   expect(JSON.stringify(c)).toContain('Ring of Protection'); // the input is untouched
 });
 
+test('I8: hidden charges leave no charge count, and a hidden attunement prints no "(attuned)" in a player PDF', async () => {
+  const c = secrets();
+  c.inventory[2] = { ...c.inventory[2], item: { ...potionFixture, charges: { max: 3, recharge: 'dawn' } }, chargesUsed: 2, view: { hidden: ['charges'], revealed: [] } };
+  expect(playerCharacter(c).inventory[2].chargesUsed).toBe(0);
+  expect(playerCharacter({ ...c, inventory: [{ ...c.inventory[2], view: undefined }] }).inventory[0].chargesUsed).toBe(2); // shown charges keep their count
+  const { PDFDocument } = await import('pdf-lib');
+  const inv = async (bytes: Uint8Array) => (await PDFDocument.load(bytes)).getForm().getTextField('app.inventory').getText()!;
+  expect(await inv(await player(c))).not.toContain('(attuned)'); // the gauntlets are attuned, but their attunement is hidden
+  expect(await inv(await dm(c))).toContain('Gauntlets of Ogre Power (equipped) (attuned)');
+});
+
 test('a player PDF embeds the player-safe copy and re-imports with no edits', async () => {
   const c = secrets();
   const bytes = await player(c);

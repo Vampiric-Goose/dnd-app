@@ -104,7 +104,8 @@ export function playerCharacter(c: Character): Character {
       // `active` (equipped, and attuned if the item needs it) is read from the real item. If its attunement is hidden, a worn but
       // unattuned item would turn active in the copy, so the bare requirement stays (the text of it, "by a wizard", does not).
       if (e.equipped && !e.attuned && e.item.attunement && !item.attunement) item.attunement = true;
-      return { ...e, item, ...(sourceId !== undefined && view?.name === undefined && { sourceId }) };
+      // A charge count would tell the player the item has charges (I8).
+      return { ...e, item, ...(!item.charges && { chargesUsed: 0 }), ...(sourceId !== undefined && view?.name === undefined && { sourceId }) };
     }),
   };
 }
