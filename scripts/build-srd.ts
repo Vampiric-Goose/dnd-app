@@ -2,7 +2,7 @@
 //   node scripts/build-srd.ts <checkout>/src/2014/en     (from the repo root)
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Entity, Pack } from '../src/lib/types.ts';
+import type { Entity, ItemDef, Pack } from '../src/lib/types.ts';
 import { classes } from './srd/classes.ts';
 import { effectTarget, SRD_EFFECTS } from './srd/effects.ts';
 import { items } from './srd/items.ts';
@@ -50,3 +50,10 @@ writeFileSync('src/data/srd.json', json + '\n');
 const counts: Record<string, number> = {};
 for (const e of entities) counts[e.kind] = (counts[e.kind] ?? 0) + 1;
 console.log(Object.entries(counts).map(([k, n]) => `${k}: ${n}`).join('\n') + `\ntotal: ${entities.length}`);
+
+// Magic item coverage: how many got structured mechanics, and which mention charges or +1..+3 but got none.
+const magic = entities.filter((e): e is ItemDef => e.kind === 'item' && e.magic);
+const plain = (e: ItemDef) => JSON.stringify(e.text);
+const uncovered = magic.filter(e => !e.bonuses && !e.charges && !e.effects && /charges|\+[123]\b/.test(plain(e)));
+console.log(`magic items: ${magic.length}; bonuses: ${magic.filter(e => e.bonuses).length}, charges: ${magic.filter(e => e.charges).length}, effects: ${magic.filter(e => e.effects).length}`
+  + `\nmentioning charges or +1..+3 with no structured field (${uncovered.length}): ${uncovered.map(e => e.id).join(', ')}`);

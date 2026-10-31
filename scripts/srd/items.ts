@@ -1,4 +1,5 @@
 import type { Block, ItemDef, ItemType, Rarity } from '../../src/lib/types.ts';
+import { itemMechanics, ITEM_MECHANICS } from './itemMechanics.ts';
 import { base, fail, qty, rich, type Raw, type Read } from './misc.ts';
 
 const CP: Record<string, number> = { cp: 1, sp: 10, ep: 50, gp: 100, pp: 1000 };
@@ -48,27 +49,38 @@ function equipment(e: Raw): ItemDef {
 const MAGIC = /^(.+?), (common|uncommon|rare|very rare|legendary|artifact|rarity varies)(?: \((requires attunement(?: by [^)]+)?)\))?/i;
 const SIMPLE: ItemType[] = ['potion', 'ring', 'rod', 'scroll', 'staff', 'wand'];
 
-function magicItem(m: Raw): ItemDef {
+// "Weapon (dagger)", "Armor (plate)": a header naming exactly one base item copies its stats; "any sword" and the like stay statless.
+function magicItem(m: Raw, byName: Map<string, ItemDef>): ItemDef {
   const [, word, rarity, attune] = MAGIC.exec(m.desc[0]) ?? fail(`magic item header: ${m.desc[0]}`);
   const w = word.toLowerCase();
   const type: ItemType = w.startsWith('wond') ? 'wondrous' // also matches the data's "Wondous item"
     : w.startsWith('armor') ? (w.includes('(shield)') ? 'shield' : 'armor')
     : w.startsWith('weapon') ? (m.equipment_category.index === 'ammunition' ? 'ammunition' : 'weapon')
     : SIMPLE.find(t => t === w) ?? 'other';
-  const weapon = /^(Weapon|Ammunition), \+(\d)$/.exec(m.name), armor = /^(Armor|Shield), \+(\d)$/.exec(m.name);
+  const entity = base('item', m.name, rich(m.desc.slice(1)));
+  const named = /^(?:Weapon|Armor) \(([^)]+)\)/.exec(m.desc[0])?.[1].toLowerCase();
+  const from = named ? byName.get(named) ?? byName.get(`${named} armor`) : undefined; // "plate" is Plate Armor
+  const mech = itemMechanics(entity.id, m.desc.slice(1).join(' '), type);
   return {
-    ...base('item', m.name, rich(m.desc.slice(1))),
+    ...entity,
     type,
     magic: true,
     rarity: (rarity.toLowerCase() === 'rarity varies' ? 'varies' : rarity.toLowerCase()) as Rarity,
     ...(attune && { attunement: attune === 'requires attunement' ? true : attune.replace(/^requires attunement /, '') }),
     ...(type === 'shield' && { armor: { category: 'shield' as const, ac: 2 } }),
-    ...(weapon && { bonuses: { attack: +weapon[2], damage: +weapon[2] } }),
-    ...(armor && { bonuses: { ac: +armor[2] } }),
+    ...(from && (from.weapon || from.armor) && { baseItemId: from.id, ...(from.weight !== undefined && { weight: from.weight }), ...(from.weapon && { weapon: from.weapon }), ...(from.armor && { armor: from.armor }) }),
+    ...mech,
   };
 }
 
-export const items = (read: Read): ItemDef[] => [
-  ...read('Equipment').map(equipment),
-  ...read('Magic-Items').filter(m => !m.variants.length).map(magicItem), // parents with variants are umbrella entries
-];
+export const items = (read: Read): ItemDef[] => {
+  const gear = read('Equipment').map(equipment);
+  const byName = new Map(gear.map(i => [i.name.toLowerCase(), i]));
+  const all: ItemDef[] = [
+    ...gear,
+    ...read('Magic-Items').filter(m => !m.variants.length).map(m => magicItem(m, byName)), // parents with variants are umbrella entries
+  ];
+  const ids = new Set(all.map(i => i.id));
+  for (const k of Object.keys(ITEM_MECHANICS)) if (!ids.has(k)) fail('ITEM_MECHANICS: no item ' + k);
+  return all;
+};
