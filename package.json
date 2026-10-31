@@ -16,7 +16,8 @@
   "dependencies": {
     "fflate": "0.8.2",
     "idb": "^8.0.4",
-    "pdf-lib": "^1.17.1"
+    "pdf-lib": "^1.17.1",
+    "peerjs": "1.5.5"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^7.3.1",

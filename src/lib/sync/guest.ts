@@ -20,6 +20,13 @@ export interface GuestDeps {
   /** Join as this existing player ID; absent = as a new player. */
   playerId?: string;
   name?: string;
+  /** M9: a rejoin from an existing campaign: a welcome for any other campaign is refused. */
+  campaignId?: string;
+  /**
+   * M9: a join from a link whose welcome targets a player campaign already on this device under another player ID. Without a yes
+   * (or without this callback) the welcome is refused, so a crafted host cannot retarget another campaign.
+   */
+  confirmCampaign?(had: Campaign, offered: CampaignForPlayers, playerId: string): Promise<boolean>;
   loadCampaign(id: string): Promise<Campaign | undefined>;
   /** db.campaigns.put: an existing campaign keeps its stored sync (R4). */
   saveCampaign(c: Campaign): Promise<void>;
@@ -31,6 +38,8 @@ export interface GuestDeps {
   saveCharacter(c: Character): Promise<void>;
   /** Deletes a character and records its tombstone in campaign.sync.deleted (db.characters.delete does both), at `at` when the DM's. */
   deleteCharacter(id: string, at?: string): Promise<void>;
+  /** M1: the DM says this character is no longer the player's here: it leaves the campaign on this device (kept, no tombstone). */
+  dropCharacter(c: Character): Promise<void>;
   /** Stored pack metadata (db.packs.listMeta) and the pack store (db.packs.put). */
   packMeta(): Promise<PackMeta[]>;
   savePack(p: Pack): Promise<void>;
@@ -86,11 +95,12 @@ export class Guest {
     this.#link = link;
     this.#setStatus('connecting');
     link.onMessage((raw) => { if (this.#link === link) void this.#task(() => this.#receive(raw)); });
-    link.onClose(() => {
+    // In the queue, after the messages that came before the close: a bye or rejected just read decides the status, not the close.
+    link.onClose(() => void this.#task(async () => {
       if (this.#link !== link) return;
       this.#link = undefined;
       if (this.#status !== 'rejected') this.#setStatus('offline');
-    });
+    }));
     const { code, name } = this.#deps, playerId = this.#playerId;
     this.#send({ t: 'hello', code, ...(playerId && { playerId }), ...(name && { name }) });
   }
@@ -157,6 +167,14 @@ export class Guest {
         if (c && c.campaignId === this.#campaignId) await this.#deps.deleteCharacter(c.id, typeof m.at === 'string' && HLC.test(m.at) ? m.at : undefined);
         return;
       }
+      case 'notYours': {
+        if (typeof m.id !== 'string') return;
+        const c = await this.#deps.loadCharacter(m.id);
+        if (c && c.campaignId === this.#campaignId) await this.#deps.dropCharacter(c);
+        const id = m.id; // a deletion the DM did not take (the character is someone else's now) is forgotten too
+        await this.#deps.updateSync(this.#campaignId!, (s) => ({ ...s!, deleted: Object.fromEntries(Object.entries(s!.deleted ?? {}).filter(([k]) => k !== id)) }));
+        return;
+      }
       case 'roster': if (Array.isArray(m.roster)) this.#deps.onRoster?.(m.roster as RosterEntry[]); return;
       case 'roll': {
         const entry = cleanRoll(m.entry);
@@ -174,6 +192,11 @@ export class Guest {
     const had = await this.#deps.loadCampaign(campaign.id);
     // Never overwrite a campaign this device hosts or made itself (the same browser joining its own game, or a crafted welcome).
     if (had && had.sync?.role !== 'player') return this.#end('This device already has this campaign as its own.');
+    // M9: a rejoin expects its own campaign; a join from a link asks before taking over a campaign joined under another player ID.
+    if (this.#deps.campaignId !== undefined && campaign.id !== this.#deps.campaignId) return this.#end('This code now belongs to a different campaign.');
+    if (had && this.#deps.campaignId === undefined && had.sync?.playerId !== playerId && !(await this.#deps.confirmCampaign?.(had, campaign, playerId))) {
+      return this.#end(`Not joined: this device already plays “${had.name}” as ${had.sync?.playerId ?? 'another player'}.`);
+    }
     const code = this.#deps.code;
     if (had) {
       await this.#saveCampaign(campaign);

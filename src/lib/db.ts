@@ -33,6 +33,14 @@ let onBlocked: (() => void) | undefined;
 /** Called when opening is held up by another tab on an older version; the open itself finishes once that tab closes. */
 export const onUpgradeBlocked = (fn: (() => void) | undefined): void => { onBlocked = fn; };
 
+let onChange: ((kind: 'character' | 'campaign', id: string) => void) | undefined;
+/**
+ * Stage 3: told after every local write of a character (save, delete, restore from the trash) or campaign, so the sync session can
+ * send it. Writes from the sync engine itself (putSynced, deletes with `network`, updateSync) are not reported: no echo.
+ */
+export const onLocalChange = (fn: typeof onChange): void => { onChange = fn; };
+const changed = (kind: 'character' | 'campaign', id: string) => { try { onChange?.(kind, id); } catch (e) { console.warn(e); } };
+
 function open() {
   return (conn ??= openDB<Schema>(NAME, 2, {
     upgrade(d, oldVersion) {
@@ -109,9 +117,11 @@ type CharTx = IDBPTransaction<Schema, ('characters' | 'campaigns')[], 'readwrite
  * clocks. Either way the campaign's advanced clock is saved in the same transaction.
  */
 async function putCharacter(tx: CharTx, c: Character, network = false): Promise<Character> {
-  let rec = strip2024(c);
   const camp = c.campaignId === undefined ? undefined : await tx.objectStore('campaigns').get(c.campaignId);
   const sync = camp?.sync;
+  // A character made in (or moved into) a campaign joined as a player belongs to that player (spec 2: player IDs).
+  if (!network && sync?.role === 'player' && sync.playerId && c.ownerId === undefined) c = { ...c, ownerId: sync.playerId };
+  let rec = strip2024(c);
   if (camp && sync) {
     if (network) {
       const prev = await tx.objectStore('characters').get(c.id);
@@ -145,6 +155,10 @@ async function putCampaign(tx: CampTx, c: Campaign): Promise<void> {
 /** R9: a character deleted in a campaign this device hosts, kept so the DM can restore it. `by`: the player ID, or 'DM'. */
 export interface TrashEntry { character: Character; by: string; at: number }
 const trashKey = (campaignId: string) => `trash:${campaignId}`;
+/** B1: entries kept per campaign; past that the oldest go. */
+export const TRASH_CAP = 50;
+/** Device-local: the DM pressed Stop hosting for this campaign (hosting does not resume until they host again). */
+export const hostOffKey = (campaignId: string) => `hostOff:${campaignId}`;
 type MetaTx = IDBPTransaction<Schema, ('characters' | 'campaigns' | 'meta')[] | 'meta'[], 'readwrite'>;
 const readTrash = async (tx: MetaTx, campaignId: string) => ((await tx.objectStore('meta').get(trashKey(campaignId))) as TrashEntry[] | undefined) ?? [];
 const withoutKey = <T>(r: Record<string, T> | undefined, k: string): Record<string, T> => Object.fromEntries(Object.entries(r ?? {}).filter(([x]) => x !== k));
@@ -167,7 +181,43 @@ function restoredSync(file: CampaignSync, had: CampaignSync | undefined): Campai
   return { ...had, node: newNode(), players, deleted, ...(last && { last }) };
 }
 
-export interface Snapshot { campaigns: Campaign[]; characters: Character[]; items: StoredItem[]; monsters?: StoredMonster[] /* absent in old backups */; packs: Pack[]; blobs: BlobRecord[] }
+/** db.characters.delete's write (see there). */
+const deleteCharacter = (id: string, o: { by?: string; at?: Hlc; permanent?: boolean }) => write(['characters', 'campaigns', 'meta'], async (tx) => {
+  const c = await tx.objectStore('characters').get(id);
+  const camp = c?.campaignId === undefined ? undefined : await tx.objectStore('campaigns').get(c.campaignId);
+  const sync = camp?.sync;
+  if (camp && sync) {
+    const at = o.at ?? hlcNow(sync.node, sync.last);
+    await tx.objectStore('campaigns').put({ ...camp, sync: { ...sync, last: o.at ? hlcReceive(sync.node, sync.last, o.at) : at, deleted: { ...sync.deleted, [id]: at } } });
+    if (sync.role === 'dm' && !o.permanent) {
+      const trash = (await readTrash(tx, camp.id)).filter((e) => e.character.id !== id);
+      await tx.objectStore('meta').put([...trash, { character: c!, by: o.by ?? 'DM', at: Date.now() }].slice(-TRASH_CAP), trashKey(camp.id));
+    }
+  }
+  await tx.objectStore('characters').delete(id);
+});
+
+/** db.trash.restore's write (see there). */
+const restoreFromTrash = (campaignId: string, id: string) => write(['characters', 'campaigns', 'meta'], async (tx) => {
+  const trash = await readTrash(tx, campaignId);
+  const e = trash.find((x) => x.character.id === id);
+  if (!e) throw new Error('That character is not in Deleted characters.');
+  const camp = await tx.objectStore('campaigns').get(campaignId);
+  let c = strip2024(e.character);
+  if (camp?.sync) {
+    const at = hlcNow(camp.sync.node, [camp.sync.last ?? '', latestClock(c)].sort().pop());
+    await tx.objectStore('campaigns').put({ ...camp, sync: { ...camp.sync, last: at, deleted: withoutKey(camp.sync.deleted, id) } });
+    c = { ...c, sync: { clock: { ...c.sync?.clock, name: at }, gone: { ...c.sync?.gone } } };
+  }
+  await tx.objectStore('characters').put({ ...c, updatedAt: Date.now() });
+  await tx.objectStore('meta').put(trash.filter((x) => x !== e), trashKey(campaignId));
+});
+
+export interface Snapshot {
+  campaigns: Campaign[]; characters: Character[]; items: StoredItem[]; monsters?: StoredMonster[] /* absent in old backups */; packs: Pack[]; blobs: BlobRecord[];
+  /** Deleted characters per campaign id (R9; absent in old backups). */
+  trash?: Record<string, TrashEntry[]>;
+}
 
 type Stamped = { id: string; updatedAt?: unknown; importedAt?: unknown };
 const stamp = (r: Stamped) => r.updatedAt ?? r.importedAt; // M3: packs carry importedAt, not updatedAt
@@ -177,7 +227,10 @@ export const db = {
   campaigns: {
     list: async () => (await (await open()).getAll('campaigns')).map(stripLoot),
     get: async (id: string) => maybe(stripLoot, await (await open()).get('campaigns', id)),
-    put: (c: Campaign) => write(['campaigns'], (tx) => putCampaign(tx, c)),
+    put: async (c: Campaign) => {
+      await write(['campaigns'], (tx) => putCampaign(tx, c));
+      changed('campaign', c.id);
+    },
     /** R4: the only way to change a stored campaign's sync: `fn` gets the stored sync and returns the new one, in one transaction. */
     updateSync: (id: string, fn: (s: CampaignSync | undefined) => CampaignSync | undefined) => write(['campaigns'], async (tx) => {
       const store = tx.objectStore('campaigns');
@@ -187,9 +240,19 @@ export const db = {
       const sync = fn(old);
       await store.put({ ...rest, ...(sync && { sync }) });
     }),
-    /** Removes the campaign and its items and monsters; its characters stay, unassigned. */
-    delete: (id: string) => write(['campaigns', 'characters', 'items', 'monsters'], async (tx) => {
+    /**
+     * Removes the campaign and its items and monsters; its characters stay, unassigned. Stage 3: also the packs its DM shared with this
+     * device (`sharedBy`), its Deleted characters (trash) and its hosting switch.
+     */
+    delete: (id: string) => write(['campaigns', 'characters', 'items', 'monsters', 'packs', 'packMeta', 'meta'], async (tx) => {
       await tx.objectStore('campaigns').delete(id);
+      for (const m of await tx.objectStore('packMeta').getAll()) {
+        if (m.sharedBy !== id) continue;
+        await tx.objectStore('packs').delete(m.id);
+        await tx.objectStore('packMeta').delete(m.id);
+      }
+      await tx.objectStore('meta').delete(trashKey(id));
+      await tx.objectStore('meta').delete(hostOffKey(id));
       const items = tx.objectStore('items');
       for (const k of await items.index('campaignId').getAllKeys(id)) await items.delete(k);
       const monsters = tx.objectStore('monsters');
@@ -211,56 +274,38 @@ export const db = {
     put: async (c: Character): Promise<Character> => {
       let out!: Character;
       await write(['characters', 'campaigns'], async (tx) => { out = await putCharacter(tx, c); });
+      changed('character', out.id);
       return out;
     },
     /** R2: a merged record from sync. Never stamped, so saving a merge creates no new clocks (and no echo back to the peers). */
     putSynced: (c: Character) => write(['characters', 'campaigns'], (tx) => putCharacter(tx, c, true)),
-    /** In a synced campaign the deletion is also recorded as a tombstone in campaign.sync.deleted, so it sticks on every device. */
     /**
      * In a synced campaign the deletion is also a tombstone in campaign.sync.deleted, so it sticks on every device; `at` is the tombstone's
      * clock when the deletion came from elsewhere (the DM's). R9: in a campaign this device hosts, the character goes to the trash (`by` who),
-     * unless `permanent`.
+     * unless `permanent`. `network`: the sync engine's own delete (not reported to onLocalChange).
      */
-    delete: (id: string, o: { by?: string; at?: Hlc; permanent?: boolean } = {}) => write(['characters', 'campaigns', 'meta'], async (tx) => {
-      const c = await tx.objectStore('characters').get(id);
-      const camp = c?.campaignId === undefined ? undefined : await tx.objectStore('campaigns').get(c.campaignId);
-      const sync = camp?.sync;
-      if (camp && sync) {
-        const at = o.at ?? hlcNow(sync.node, sync.last);
-        await tx.objectStore('campaigns').put({ ...camp, sync: { ...sync, last: o.at ? hlcReceive(sync.node, sync.last, o.at) : at, deleted: { ...sync.deleted, [id]: at } } });
-        if (sync.role === 'dm' && !o.permanent) {
-          const trash = (await readTrash(tx, camp.id)).filter((e) => e.character.id !== id);
-          await tx.objectStore('meta').put([...trash, { character: c!, by: o.by ?? 'DM', at: Date.now() }], trashKey(camp.id));
-        }
-      }
-      await tx.objectStore('characters').delete(id);
-    }),
+    delete: async (id: string, o: { by?: string; at?: Hlc; permanent?: boolean; network?: boolean } = {}) => {
+      await deleteCharacter(id, o);
+      if (!o.network) changed('character', id);
+    },
   },
-  /** R9: deleted characters of a campaign this device hosts, until restored or deleted permanently. */
+  /** R9: deleted characters of a campaign this device hosts, until restored or deleted permanently (at most TRASH_CAP, B1). */
   trash: {
     list: async (campaignId: string): Promise<TrashEntry[]> => ((await (await open()).get('meta', trashKey(campaignId))) as TrashEntry[] | undefined) ?? [],
     /**
      * Brings the character back for everyone: its tombstone is cleared, and it gets a clock later than any tombstone (on its name), so the
-     * players' devices take it again. The caller then tells the host (characterChanged).
+     * players' devices take it again. onLocalChange tells the session, which re-sends it (host.characterChanged).
      */
-    restore: (campaignId: string, id: string) => write(['characters', 'campaigns', 'meta'], async (tx) => {
-      const trash = await readTrash(tx, campaignId);
-      const e = trash.find((x) => x.character.id === id);
-      if (!e) throw new Error('That character is not in Deleted characters.');
-      const camp = await tx.objectStore('campaigns').get(campaignId);
-      let c = strip2024(e.character);
-      if (camp?.sync) {
-        const at = hlcNow(camp.sync.node, [camp.sync.last ?? '', latestClock(c)].sort().pop());
-        await tx.objectStore('campaigns').put({ ...camp, sync: { ...camp.sync, last: at, deleted: withoutKey(camp.sync.deleted, id) } });
-        c = { ...c, sync: { clock: { ...c.sync?.clock, name: at }, gone: { ...c.sync?.gone } } };
-      }
-      await tx.objectStore('characters').put({ ...c, updatedAt: Date.now() });
-      await tx.objectStore('meta').put(trash.filter((x) => x !== e), trashKey(campaignId));
-    }),
+    restore: async (campaignId: string, id: string) => {
+      await restoreFromTrash(campaignId, id);
+      changed('character', id);
+    },
     /** Delete permanently. */
     purge: (campaignId: string, id: string) => write(['meta'], async (tx) => {
       await tx.objectStore('meta').put((await readTrash(tx, campaignId)).filter((x) => x.character.id !== id), trashKey(campaignId));
     }),
+    /** B1: Empty deleted characters (all of them, permanently). */
+    empty: (campaignId: string) => write(['meta'], (tx) => tx.objectStore('meta').delete(trashKey(campaignId))),
   },
   items: {
     // R60: a stored 2024 item (an old import, a crafted file) is hidden, never deleted, like R54's stripping.
@@ -347,6 +392,8 @@ export const db = {
       if (campaign) await putCampaign(tx, campaign);
       for (const c of characters) out.push(await putCharacter(tx, c));
     });
+    if (campaign) changed('campaign', campaign.id);
+    for (const c of out) changed('character', c.id);
     return out;
   },
   /**
@@ -369,7 +416,7 @@ export const db = {
     return { replaced, newer };
   },
   /** Backup import: one atomic upsert that keeps the records' own updatedAt. */
-  restore: (s: Snapshot) => write(['campaigns', 'characters', 'items', 'monsters', 'packs', 'packMeta', 'blobs'], async (tx) => {
+  restore: (s: Snapshot) => write(['campaigns', 'characters', 'items', 'monsters', 'packs', 'packMeta', 'blobs', 'meta'], async (tx) => {
     // R5: a restored synced campaign gets a new clock node, so two devices restored from one file never stamp as the same node; M8: merged into a stored sync.
     for (const r of s.campaigns) {
       const had = (await tx.objectStore('campaigns').get(r.id))?.sync;
@@ -383,6 +430,12 @@ export const db = {
       await tx.objectStore('packMeta').put(packMeta(p));
     }
     for (const r of s.blobs) await tx.objectStore('blobs').put(r);
+    // The trash travels with backups: the file's entries join the stored ones (the stored copy wins for an id in both), still capped.
+    for (const [cid, list] of Object.entries(s.trash ?? {})) {
+      const had = await readTrash(tx as unknown as MetaTx, cid), ids = new Set(had.map((e) => e.character.id));
+      const add = list.filter((e) => !ids.has(e.character.id)).map((e) => ({ ...e, character: strip2024(e.character) }));
+      if (add.length) await tx.objectStore('meta').put([...add, ...had].sort((a, b) => a.at - b.at).slice(-TRASH_CAP), trashKey(cid));
+    }
   }),
 };
 

@@ -48,6 +48,10 @@ const CHUNK_CHARS = 20_000;
 const LOW_WATER = MAX_CHUNK * 4;
 /** M6: a link that has not said hello by then is closed. */
 export const HELLO_TIMEOUT = 15_000;
+/** A pack stream whose send buffer has not drained for this long is dropped. */
+export const STALL_TIMEOUT = 60_000;
+/** B1: live characters per player in the campaign; a new one beyond that is a violation. */
+export const MAX_CHARACTERS = 30;
 
 /** M4: chunk boundaries every CHUNK_CHARS, moved back one unit so a surrogate pair is never split (a binary transport would mangle each half). */
 function cuts(json: string): number[] {
@@ -135,8 +139,8 @@ export class Host {
   }
 
   /** Marks the player ID removed (never reused) and disconnects its links. */
-  removePlayer(id: string): void {
-    void this.#task(async () => {
+  removePlayer(id: string): Promise<void> {
+    return this.#task(async () => {
       await this.#deps.updateSync((s) => ({ ...s, players: { ...s.players, [id]: { ...s.players?.[id], removed: true } } }));
       for (const c of [...this.#conns]) if (c.playerId === id) this.#close(c, 'removed');
     });
@@ -259,14 +263,21 @@ export class Host {
     if (!camp || !sync) return;
     const stored = await Promise.all(list.map((ch) => this.#deps.loadCharacter(ch.id)));
     // All checks first: one bad character refuses the whole message, so nothing of it is stored.
+    let fresh = 0;
     for (const [i, ch] of list.entries()) {
-      const s = stored[i];
-      if (ch.ownerId !== pid || ch.campaignId !== camp.id || (s && (s.ownerId !== pid || s.campaignId !== camp.id))) return this.#violation(c, 'not their character');
+      if (ch.ownerId !== pid || ch.campaignId !== camp.id) return this.#violation(c, 'not their character');
       if (has2024(ch)) return this.#violation(c, '2024 content');
+      if (!stored[i] && !Object.hasOwn(sync.deleted ?? {}, ch.id)) fresh++;
+    }
+    // B1: a cap on live characters per player, so a leaked code cannot fill the DM's storage (or trash, through deletes).
+    if (fresh && (await this.#deps.loadCharacters()).filter((x) => x.ownerId === pid && x.campaignId === camp.id).length + fresh > MAX_CHARACTERS) {
+      return this.#violation(c, `more than ${MAX_CHARACTERS} characters`);
     }
     let rosterChanged = false;
     for (const [i, ch] of list.entries()) {
       const s = stored[i];
+      // M1: the DM reassigned it or moved it out of the campaign. Not a violation: that device just has not heard yet.
+      if (s && (s.ownerId !== pid || s.campaignId !== camp.id)) { this.#send(c, { t: 'notYours', id: ch.id }); continue; }
       if (sync.deleted && Object.hasOwn(sync.deleted, ch.id)) { this.#send(c, { t: 'deleteChar', id: ch.id, at: sync.deleted[ch.id] }); continue; }
       // R8: the player's copy holds player views; the DM's real items, views and hidden charge counts go back in before the merge.
       const incoming = s ? unprojectCharacter(ch, s) : ch;
@@ -297,7 +308,7 @@ export class Host {
     const camp = await this.#deps.loadCampaign();
     const s = await this.#deps.loadCharacter(id);
     if (!camp || !s) return; // never reached the DM (or already gone): nothing to delete
-    if (s.ownerId !== pid || s.campaignId !== camp.id) return this.#violation(c, 'not their character');
+    if (s.ownerId !== pid || s.campaignId !== camp.id) return this.#send(c, { t: 'notYours', id }); // M1, as in #chars
     // A change the DM's copy holds from after the deletion (or a restore, R9) wins: the player's device gets the character back.
     if (at <= latestClock(s)) return this.#send(c, { t: 'chars', characters: [characterForPlayer(s)] });
     await this.#deps.updateSync((x) => ({ ...x, last: hlcReceive(x.node, x.last, at, this.#deps.now?.()) })); // a restore must stamp later than this
@@ -352,11 +363,13 @@ export class Host {
     if (!full()) return Promise.resolve();
     return new Promise((resolve) => {
       let timer: ReturnType<typeof setTimeout>, done = false;
+      // A stream with no drain for STALL_TIMEOUT is dropped, and the link closed: it is not moving, and it pins the pack in memory.
+      const stall = setTimeout(() => { if (!done) { done = true; clearTimeout(timer); this.#close(c); resolve(); } }, STALL_TIMEOUT);
       const check = () => {
         if (done) return; // a late drain event after the wait ended
         clearTimeout(timer);
         if (full()) timer = setTimeout(check, 100);
-        else { done = true; resolve(); }
+        else { done = true; clearTimeout(stall); resolve(); }
       };
       c.link.onDrain?.(check);
       check();

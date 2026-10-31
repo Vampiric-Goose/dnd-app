@@ -1,6 +1,6 @@
 import { is2024, strip2024 } from './character/strip2024.ts';
 import { restorablePack } from './content/sources.ts';
-import { db, sha256Hex, type BlobRecord, type Snapshot } from './db.ts';
+import { db, sha256Hex, type BlobRecord, type Snapshot, type TrashEntry } from './db.ts';
 import { playerCharacter } from './items/playerView.ts';
 import { soundMonster } from './monsters/homebrew.ts';
 import { campaignProblem, characterProblem, isRec, problem, SHAPES, type Rec } from './recordShape.ts';
@@ -52,6 +52,22 @@ async function blobRecords(o: Rec): Promise<BlobRecord[]> {
   }));
 }
 
+/** R9: the backup's Deleted characters, per campaign id; every entry is checked like a character. Missing means none. */
+function trashRecords(o: Rec): Record<string, TrashEntry[]> {
+  const t = o.trash ?? {};
+  if (!isRec(t)) throw damaged('trash is not a record');
+  const out: Record<string, TrashEntry[]> = Object.create(null); // a `__proto__` campaign id stays a plain key
+  for (const [cid, list] of Object.entries(t)) {
+    if (!Array.isArray(list)) throw damaged(`trash.${cid} is not a list`);
+    list.forEach((e: unknown, i) => {
+      const why = !isRec(e) || typeof e.by !== 'string' || typeof e.at !== 'number' ? 'is incomplete' : characterProblem(e.character);
+      if (why) throw damaged(`trash.${cid}[${i}] ${why}`);
+    });
+    out[cid] = list;
+  }
+  return out;
+}
+
 /**
  * Whole library, or one campaign (its characters, items and monsters, plus the packs it enables when
  * includePacks). Images and the "My spells" pack always travel with it.
@@ -78,8 +94,11 @@ export async function exportBackup(opts: { campaignId?: string; includePacks: bo
   const packs = (await Promise.all(wanted.map((id) => db.packs.get(id)))).filter((p): p is Pack => !!p && restorablePack(p)); // never the cached SRD
   // ponytail: every blob, even for one campaign; filter by referenced hashes once maps make this heavy
   const blobs = (await db.blobs.all()).map(({ hash, type, data }) => ({ hash, type, base64: toBase64(data) }));
+  // R9: the Deleted characters of each campaign travel too.
+  const trash: Record<string, TrashEntry[]> = {};
+  for (const c of campaigns) { const t = await db.trash.list(c.id); if (t.length) trash[c.id] = t; }
   const exportedAt = Date.now();
-  const file = json({ format: 'dnd-app-backup', version: 1, exportedAt, campaigns, characters, items, monsters, packs, blobs });
+  const file = json({ format: 'dnd-app-backup', version: 1, exportedAt, campaigns, characters, items, monsters, packs, blobs, trash });
   // The built file must not be lost over a bookkeeping write (a full disk is when you need a backup most).
   // Only a whole-library export counts as "backed up": one campaign's file leaves the rest unprotected.
   if (opts.campaignId === undefined) await db.meta.set('lastBackupAt', exportedAt).catch((err) => console.warn('Could not record backup time', err));
@@ -102,6 +121,7 @@ export async function readBackup(file: Blob): Promise<BackupPlan> {
     monsters: records<StoredMonster>(o, 'monsters', (r) => problem(r, SHAPES.monster)), // missing in backups from before monsters
     packs: records<Pack>(o, 'packs', (r) => problem(r, SHAPES.pack)),
     blobs: await blobRecords(o),
+    trash: trashRecords(o),
   };
   // R52: never the built-in SRD (id `srd`) nor a pack claiming a reserved source; the caller is told which were left out.
   const skippedPacks = snapshot.packs.filter((p) => !restorablePack(p)).map((p) => p.id);

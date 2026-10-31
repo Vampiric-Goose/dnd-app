@@ -93,6 +93,7 @@ export class Device {
       loadCharacter: async (id) => this.char(id),
       saveCharacter: async (c) => this.putSynced(c),
       deleteCharacter: async (id, at) => this.deleteChar(id, at),
+      dropCharacter: async (c) => { const { campaignId: _c, ...rest } = c; this.putSynced(rest); },
       packMeta: async () => this.packMeta(),
       savePack: async (p) => { this.packs.set(p.id, clone(p)); },
       onRoll: (e, from) => { this.rolls.push({ e, from }); },

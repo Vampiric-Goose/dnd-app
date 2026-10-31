@@ -234,7 +234,8 @@ describe('Review Focus 2: crafted guest messages', () => {
       s.evil.deliver(make(s));
       await settle(s.host);
       expect(s.d.snapshot()).toBe(before);
-      expect(s.evil.got.slice(1).map((m) => (m as { t: string }).t).filter((t) => t !== 'chars')).toEqual([]);
+      // M1: a stored character that is not theirs gets `notYours` (and no strike); everything else gets no reply at all
+      expect(s.evil.got.slice(1).map((m) => (m as { t: string }).t).filter((t) => t !== 'chars')).toEqual(name.includes('re-owned') ? ['notYours'] : []);
       expect(s.evil.closed()).toBe(false); // one strike
       await stillServing(s);
     });

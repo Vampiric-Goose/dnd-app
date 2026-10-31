@@ -22,6 +22,7 @@ export type HostMsg =
   | { t: 'rejected'; reason: string }
   | { t: 'chars'; characters: Synced<Character>[] }
   | { t: 'deleteChar'; id: string; at: string }
+  | { t: 'notYours'; id: string /* M1: the DM moved or reassigned it; the guest takes it out of the campaign */ }
   | { t: 'roster'; roster: RosterEntry[] }
   | { t: 'roll'; entry: RollEntry; from?: string /* player ID; absent for the DM */ }
   | { t: 'packChunk'; id: string; hash: string; seq: number; total: number; data: string }

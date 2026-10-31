@@ -36,3 +36,49 @@ export function memoryPair(): [Link, Link] {
   });
   return [make(0), make(1)];
 }
+
+/** How a session reaches the other devices (Task 5: PeerJS in peer.ts; tests: an in-memory fake). */
+export interface Transport {
+  /** Registers as `peerId` and hands over every incoming link once it is open. `status(false)` = not reachable; the caller retries. */
+  listen(peerId: string, on: { link(l: Link): void; status(up: boolean, why?: string): void }): Listener;
+  /** An open link to `peerId`, or a rejection saying why not. */
+  dial(peerId: string): Promise<Link>;
+}
+export interface Listener {
+  /** Tries to register again (after status(false)). */
+  retry(): void;
+  /** Stops accepting at once; links already open get a moment to flush (a bye), then close. */
+  close(): void;
+}
+
+/** Characters of message JSON per frame. PeerJS's JSON channel refuses anything over ~16 KB, and a character is at most 3 UTF-8 bytes. */
+export const FRAME = 5000;
+
+/**
+ * A message's JSON as frames: '+' = more follows, '=' = the last. ponytail: a cut may fall inside a surrogate pair; the channel
+ * JSON-encodes each frame, which writes a lone surrogate as a \uXXXX escape, so the pair rejoins intact.
+ */
+export function frames(json: string): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < json.length || !out.length; i += FRAME) out.push((i + FRAME >= json.length ? '=' : '+') + json.slice(i, i + FRAME));
+  return out;
+}
+
+/**
+ * Reassembles frames into messages. The JSON is parsed only once it is whole, and a message over `max` characters is refused before
+ * anything of it is parsed (MAX_MESSAGE on receive). Anything else than a frame, or JSON that does not parse, goes to `bad`.
+ */
+export function unframer(max: number, onMessage: (m: unknown) => void, bad: (why: string) => void): (frame: unknown) => void {
+  let buf = '';
+  return (f) => {
+    if (typeof f !== 'string' || (f[0] !== '+' && f[0] !== '=')) return bad('not a frame');
+    if (buf.length + f.length - 1 > max) { buf = ''; return bad('message too large'); }
+    buf += f.slice(1);
+    if (f[0] === '+') return;
+    const json = buf;
+    buf = '';
+    let m: unknown;
+    try { m = JSON.parse(json); } catch { return bad('not JSON'); }
+    onMessage(m);
+  };
+}

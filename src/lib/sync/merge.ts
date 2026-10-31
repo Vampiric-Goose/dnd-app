@@ -207,3 +207,16 @@ export function mergeCharacter(a: Synced<Character>, b: Synced<Character>): Sync
   out.sync = { clock: { ...clock, ...Object.fromEntries(order) }, gone };
   return out as unknown as Synced<Character>;
 }
+
+/** Later than any real clock (15 nines of wall time): used only inside replay, never stored. */
+const TOP_CLOCK: Hlc = '999999999999999:999999:~';
+
+/**
+ * B4: `stored` plus only what changed from `before` to `after` (the edits a holder made while `before` was being saved as `stored`).
+ * Every other path keeps the stored value, which may be a remote one the save preserved (C1). The result carries `stored.sync`, so the
+ * next save rebases on it and stamps exactly those edits.
+ */
+export function replay(stored: Synced<Character>, before: Synced<Character>, after: Character): Synced<Character> {
+  const { sync: _s, ...m } = mergeCharacter(stored, stamp(before, after, TOP_CLOCK));
+  return { ...m, updatedAt: stored.updatedAt, ...(stored.sync && { sync: stored.sync }) };
+}

@@ -1,7 +1,8 @@
 import { rollDice } from './dice.ts';
 import { uid } from './uid.ts';
 
-export interface RollEntry { id: string; label: string; expr: string; total: number; detail: string; at: number; public: boolean }
+/** `from`: set on a roll received through sync, naming who rolled it ("DM", "A1 · Thorin"). Never sent (cleanRoll drops it). */
+export interface RollEntry { id: string; label: string; expr: string; total: number; detail: string; at: number; public: boolean; from?: string }
 
 const CAP = 200;
 
@@ -17,10 +18,23 @@ export function roll(label: string, expr: string, opts: { crit?: boolean; public
   const advantage = rollMode.value === 'normal' ? undefined : rollMode.value;
   const { total, detail } = rollDice(expr, { advantage, crit: opts.crit });
   const entry: RollEntry = { id: uid(), label, expr, total, detail, at: Date.now(), public: opts.public ?? rollVisibility.public };
+  log(entry);
+  rollMode.value = 'normal';
+  if (entry.public) rollHooks.public?.(entry); // R6: a private roll never reaches the session
+  return entry;
+}
+
+function log(entry: RollEntry): void {
   rollLog.unshift(entry);
   if (rollLog.length > CAP) rollLog.length = CAP;
-  rollMode.value = 'normal';
-  return entry;
+}
+
+/** Stage 3: the sync session listens for this device's public rolls. */
+export const rollHooks: { public?: (e: RollEntry) => void } = {};
+
+/** A public roll from another device, labelled with who rolled it. Its id is kept, so the same roll is logged once. */
+export function addRemoteRoll(e: RollEntry, from: string): void {
+  if (e.public && !rollLog.some((r) => r.id === e.id)) log({ ...e, from });
 }
 
 /** R6: the entries this viewer may see. Player view hides private rolls (the DM's monster rolls), so switching views never shows them. */
