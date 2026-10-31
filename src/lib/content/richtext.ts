@@ -4,6 +4,7 @@ import type { Block, RichText } from '../types.ts';
 
 const BAR = '██████'; // fixed width, so the bar doesn't leak the hidden text's length
 // An opener (group 1 = id; the closing braces are optional so a malformed opener still counts) or a closer.
+// A /g regex keeps `lastIndex` between calls: use it only with `matchAll` or `replace`, never `test` or `exec`.
 export const MARK = /\{\{redact:([^}]*)(?:\}\})?|\{\{\/redact\}\}/g;
 const TAG = /\{@(\w+)(?:\s+([^{}]*))?\}/g;
 

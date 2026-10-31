@@ -12,8 +12,22 @@ const hasWindow = typeof window !== 'undefined'; // node tests import parseHash
 
 export const router: Route = $state(parseHash(hasWindow ? location.hash : ''));
 
+/** A page with unsaved work sets `fn`: it returns false to refuse leaving (usually after a confirm). Clear it on teardown. */
+export const leaveGuard: { fn?: () => boolean } = {};
+
+const pathOf = (hash: string) => hash.replace(/\?.*$/, '');
+
+/** The hash to show after a change from `prev` to `next`: `prev` when the guard refuses. A query-only change never asks. */
+export function guardedHash(prev: string, next: string): string {
+  return pathOf(prev) !== pathOf(next) && leaveGuard.fn && !leaveGuard.fn() ? prev : next;
+}
+
 if (hasWindow) {
+  let shown = location.hash;
   window.addEventListener('hashchange', () => {
+    const keep = guardedHash(shown, location.hash);
+    if (keep !== location.hash) return void history.replaceState(null, '', keep); // refused: back to the page we were on
+    shown = keep;
     const r = parseHash(location.hash);
     router.path = r.path;
     router.query = r.query;

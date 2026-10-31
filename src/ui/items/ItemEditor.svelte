@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { slug } from '../../lib/content/ids.ts';
+  import { tick } from 'svelte';
   import { parseDice } from '../../lib/dice.ts';
   import { db } from '../../lib/db.ts';
   import { editableToRich, richToEditable } from '../../lib/items/textEdit.ts';
-  import { navigate } from '../../lib/router.svelte.ts';
+  import { leaveGuard, navigate } from '../../lib/router.svelte.ts';
   import { getIndex } from '../../lib/store.svelte.ts';
   import type { ItemDef, ItemType, PlayerView, Rarity, Recharge, StoredItem } from '../../lib/types.ts';
   import { entityOption, message } from '../creator/labels.ts';
@@ -18,18 +18,39 @@
   const RECHARGES: Recharge[] = ['short', 'long', 'dawn', 'dusk', 'none'];
   const BONUSES = [['attack', 'Attack rolls'], ['damage', 'Damage'], ['ac', 'Armor class'], ['save', 'Saving throws'], ['spellAttack', 'Spell attack'], ['spellDc', 'Spell save DC']] as const;
 
+  const newId = () => `item:homebrew-${crypto.randomUUID().slice(0, 8)}@HOMEBREW`; // not the name: a rename must not leave a stale slug
+  const num = (s: string): number | undefined => (s.trim() === '' || !Number.isFinite(Number(s)) ? undefined : Number(s));
+  const whole = (s: string) => /^\d+$/.test(s.trim());
+  const text = (n: number | undefined) => (n === undefined ? '' : String(n));
+
   // svelte-ignore state_referenced_locally
   let draft: StoredItem = $state($state.snapshot(initial) as StoredItem);
   // svelte-ignore state_referenced_locally
-  let saved = $state(!isNew);
+  let saved = $state(!isNew); // stored at least once, so `draft.id` is real
+  let saving = $state(false);
   let error = $state('');
   let notice = $state('');
   let confirmingDelete = $state(false);
-  // The text areas keep their own strings so typing is never rewritten under the cursor; `text` and `curse` follow them.
+  let delBtn: HTMLButtonElement | undefined = $state();
+
+  // Fields that need typing room keep their own strings, so a half-typed or cleared value is never rewritten
+  // under the cursor or turned into 0. `assembled` folds them into the item; problem() checks them.
   // svelte-ignore state_referenced_locally
   let textDraft = $state(richToEditable(initial.text));
   // svelte-ignore state_referenced_locally
   let curseDraft = $state(richToEditable(initial.curse ?? []));
+  // svelte-ignore state_referenced_locally
+  let weightDraft = $state(text(initial.weight));
+  // svelte-ignore state_referenced_locally
+  let costDraft = $state(text(initial.costCp === undefined ? undefined : initial.costCp / 100));
+  // svelte-ignore state_referenced_locally
+  let acDraft = $state(text(initial.armor?.ac));
+  // svelte-ignore state_referenced_locally
+  let maxDraft = $state(text(initial.charges?.max));
+  // svelte-ignore state_referenced_locally
+  let rangeNear = $state(text(initial.weapon?.range?.[0]));
+  // svelte-ignore state_referenced_locally
+  let rangeFar = $state(text(initial.weapon?.range?.[1]));
 
   let bases: ItemDef[] = $state.raw([]);
   // svelte-ignore state_referenced_locally
@@ -38,41 +59,76 @@
     (e) => (error = message(e)),
   );
   const baseName = $derived(bases.find((b) => b.id === draft.baseItemId)?.name);
-
-  const num = (s: string): number | undefined => (s.trim() === '' || Number.isNaN(Number(s)) ? undefined : Number(s));
   const attune = $derived(draft.attunement === undefined || draft.attunement === false ? 'none' : draft.attunement === true ? 'required' : 'by');
+
+  // The item as it would be saved: the draft with the text areas and typed numbers folded in (invalid ones left out).
+  const assembled = $derived.by((): StoredItem => {
+    const out = $state.snapshot(draft) as StoredItem;
+    out.name = out.name.trim();
+    out.text = editableToRich(textDraft);
+    const curse = editableToRich(curseDraft);
+    if (curse.length) out.curse = curse;
+    else delete out.curse;
+    if (typeof out.attunement === 'string') {
+      const by = out.attunement.replace(/^by\s*/, '').trim();
+      out.attunement = by ? `by ${by}` : true;
+    }
+    const w = num(weightDraft), cost = num(costDraft);
+    if (w !== undefined && w >= 0) out.weight = w;
+    else delete out.weight;
+    if (cost !== undefined && cost >= 0) out.costCp = Math.round(cost * 100);
+    else delete out.costCp;
+    if (out.weapon) {
+      if (whole(rangeNear) && whole(rangeFar)) out.weapon.range = [Number(rangeNear), Number(rangeFar)];
+      else delete out.weapon.range;
+    }
+    if (out.armor && whole(acDraft)) out.armor.ac = Number(acDraft);
+    if (out.charges && whole(maxDraft)) out.charges.max = Number(maxDraft);
+    return out;
+  });
+
+  // Unsaved work: everything the editor holds, compared with what it held at the last load or save.
+  const snapshotKey = () => JSON.stringify([$state.snapshot(draft), textDraft, curseDraft, weightDraft, costDraft, acDraft, maxDraft, rangeNear, rangeFar]);
+  let baseline = $state(snapshotKey());
+  const dirty = $derived(snapshotKey() !== baseline);
+
+  $effect(() => {
+    const guard = () => !dirty || confirm('Discard unsaved changes to this item?');
+    leaveGuard.fn = guard;
+    return () => { if (leaveGuard.fn === guard) leaveGuard.fn = undefined; };
+  });
 
   function setAttune(mode: string, by = '') {
     if (mode === 'none') delete draft.attunement;
-    else draft.attunement = mode === 'required' ? true : `by ${by}`; // untrimmed while typing; save() trims it
+    else draft.attunement = mode === 'required' ? true : `by ${by}`; // untrimmed while typing; `assembled` trims it
   }
 
   function pickBase(id: string) {
     const b = bases.find((x) => x.id === id);
     if (!b) return void delete draft.baseItemId;
     draft.baseItemId = b.id;
-    for (const k of ['weapon', 'armor', 'weight', 'costCp'] as const) {
+    for (const k of ['weapon', 'armor'] as const) {
       if (b[k] === undefined) delete draft[k];
       else (draft as unknown as Record<string, unknown>)[k] = structuredClone($state.snapshot(b[k]));
     }
+    weightDraft = text(b.weight);
+    costDraft = text(b.costCp === undefined ? undefined : b.costCp / 100);
+    acDraft = text(b.armor?.ac);
+    rangeNear = text(b.weapon?.range?.[0]);
+    rangeFar = text(b.weapon?.range?.[1]);
     if (b.type === 'weapon' || b.type === 'armor' || b.type === 'shield') draft.type = b.type;
   }
 
   const setWeapon = (on: boolean) => {
     if (on) draft.weapon = { category: 'simple', ranged: false, damage: '1d6', damageType: 'slashing', properties: [] };
     else delete draft.weapon;
+    rangeNear = rangeFar = '';
   };
   const setArmor = (on: boolean) => {
     if (on) draft.armor = { category: 'light', ac: 11 };
     else delete draft.armor;
+    acDraft = on ? '11' : '';
   };
-  function setRange(i: 0 | 1, s: string) {
-    const w = draft.weapon!;
-    const r: [number | undefined, number | undefined] = [w.range?.[0], w.range?.[1]];
-    r[i] = num(s);
-    if (r[0] !== undefined && r[1] !== undefined) w.range = [r[0], r[1]];
-    else delete w.range;
-  }
   function setBonus(k: (typeof BONUSES)[number][0], s: string) {
     const v = num(s);
     const b = { ...draft.bonuses };
@@ -81,10 +137,14 @@
     if (Object.keys(b).length) draft.bonuses = b;
     else delete draft.bonuses;
   }
-  function setCharges(patch: Partial<NonNullable<ItemDef['charges']>> | undefined) {
-    if (!patch) return void delete draft.charges;
-    draft.charges = { max: 1, recharge: 'dawn', ...draft.charges, ...patch };
-    if (!draft.charges.rechargeAmount) delete draft.charges.rechargeAmount;
+  function setCharges(on: boolean) {
+    if (on) draft.charges = { max: 1, recharge: 'dawn' };
+    else delete draft.charges;
+    maxDraft = on ? '1' : '';
+  }
+  function setRechargeAmount(s: string) {
+    if (s) draft.charges!.rechargeAmount = s;
+    else delete draft.charges!.rechargeAmount;
   }
   const setView = (v: PlayerView | undefined) => {
     if (v) draft.defaultView = v;
@@ -93,58 +153,74 @@
 
   function problem(): string {
     if (!draft.name.trim()) return 'Give the item a name.';
-    const dice = [['Weapon damage', draft.weapon?.damage], ['Versatile damage', draft.weapon?.versatile], ['Recharge amount', draft.charges?.rechargeAmount]] as const;
-    for (const [label, expr] of dice) {
-      if (!expr) continue;
-      try { parseDice(expr); } catch { return `${label}: "${expr}" is not a dice expression such as 1d8+1.`; }
+    for (const [label, s] of [['Weight', weightDraft], ['Cost', costDraft]]) {
+      if (s.trim() !== '' && !(num(s) !== undefined && num(s)! >= 0)) return `${label} must be a number, 0 or more.`;
     }
-    if (draft.weapon && !draft.weapon.damage.trim()) return 'Weapon damage is required.';
+    if (draft.weapon) {
+      if (!draft.weapon.damage.trim()) return 'Weapon damage is required.';
+      const dice = [['Weapon damage', draft.weapon.damage], ['Versatile damage', draft.weapon.versatile], ['Recharge amount', draft.charges?.rechargeAmount]] as const;
+      for (const [label, expr] of dice) {
+        if (!expr) continue;
+        try { parseDice(expr); } catch { return `${label}: "${expr}" is not a dice expression such as 1d8+1.`; }
+      }
+      const a = rangeNear.trim(), b = rangeFar.trim();
+      if ((a || b) && !(whole(a) && whole(b) && Number(a) > 0 && Number(b) > 0)) return 'A range needs both the normal and the long range, as whole numbers above 0 (or leave both blank).';
+    }
+    if (draft.armor && !whole(acDraft)) return 'Armor class must be a whole number.';
+    if (draft.charges && !(whole(maxDraft) && Number(maxDraft) > 0)) return 'Maximum charges must be a whole number, 1 or more.';
+    if (draft.charges?.rechargeAmount) {
+      try { parseDice(draft.charges.rechargeAmount); } catch { return `Recharge amount: "${draft.charges.rechargeAmount}" is not a dice expression such as 1d6+1.`; }
+    }
     return '';
   }
 
-  async function save(item: StoredItem = draft): Promise<boolean> {
+  async function write(out: StoredItem): Promise<boolean> {
+    saving = true;
+    try {
+      await db.items.put($state.snapshot(out) as StoredItem);
+      return true;
+    } catch (e) {
+      error = message(e);
+      return false;
+    } finally {
+      saving = false;
+    }
+  }
+
+  async function save(): Promise<boolean> {
+    if (saving) return false;
     error = notice = '';
     const p = problem();
     if (p) {
       error = p;
       return false;
     }
-    const out = $state.snapshot(item) as StoredItem;
-    out.name = out.name.trim();
-    if (typeof out.attunement === 'string') {
-      const by = out.attunement.replace(/^by\s*/, '').trim();
-      out.attunement = by ? `by ${by}` : true;
-    }
-    out.text = editableToRich(textDraft);
-    const curse = editableToRich(curseDraft);
-    if (curse.length) out.curse = curse;
-    else delete out.curse;
-    if (!saved && item === draft) out.id = `item:${slug(out.name) || 'item'}-${crypto.randomUUID().slice(0, 8)}@HOMEBREW`;
-    try {
-      await db.items.put(out);
-    } catch (e) {
-      error = message(e);
-      return false;
-    }
-    if (item === draft) {
-      draft.id = out.id;
-      saved = true;
-      notice = 'Saved.';
-      if (isNew) navigate(`items/${out.id}`);
-    }
+    const out = { ...assembled, id: saved ? draft.id : newId() };
+    if (!(await write(out))) return false;
+    draft.id = out.id;
+    saved = true;
+    baseline = snapshotKey(); // before navigating: the leave guard must see a clean editor
+    notice = 'Saved.';
+    if (isNew) navigate(`items/${out.id}`);
     return true;
   }
 
   async function duplicate() {
-    const copy = $state.snapshot(draft) as StoredItem;
-    copy.id = `item:${slug(copy.name) || 'item'}-${crypto.randomUUID().slice(0, 8)}@HOMEBREW`;
-    copy.name = `${copy.name.trim()} (copy)`; // save() takes the text and curse from the text areas
-    if (await save(copy)) navigate(`items/${copy.id}`);
+    if (dirty && !(await save())) return; // the copy is of the saved item, so keep the edits first
+    const copy = { ...assembled, id: newId(), name: `${draft.name.trim()} (copy)` };
+    if (await write(copy)) navigate(`items/${copy.id}`);
+  }
+
+  async function askDelete() {
+    confirmingDelete = true;
+    await tick();
+    delBtn?.focus();
   }
 
   async function remove() {
     try {
       await db.items.delete(draft.id);
+      baseline = snapshotKey(); // deleted: nothing left to lose
       navigate('items');
     } catch (e) {
       error = message(e);
@@ -152,8 +228,10 @@
   }
 </script>
 
+<svelte:window onbeforeunload={(e) => { if (dirty) e.preventDefault(); }} />
+
 <p><a href="#/items">All items</a></p>
-<h1>{isNew ? 'New item' : draft.name || 'Item'}</h1>
+<h1>{isNew && !saved ? 'New item' : draft.name || 'Item'}</h1>
 
 <div class="card">
   <div class="field">
@@ -183,7 +261,7 @@
     {#if attune === 'by'}
       <div class="field">
         <label for="it-attune-by">Attunement requires</label>
-        <input id="it-attune-by" type="text" autocomplete="off" placeholder="a wizard" value={String(draft.attunement).replace(/^by\s*/, '')} oninput={(e) => setAttune('by', e.currentTarget.value)} />
+        <input id="it-attune-by" type="text" autocomplete="off" placeholder="a wizard" value={String(draft.attunement).replace(/^by\s?/, '')} oninput={(e) => setAttune('by', e.currentTarget.value)} />
       </div>
     {/if}
   </div>
@@ -194,11 +272,11 @@
   <div class="row">
     <div class="field">
       <label for="it-weight">Weight (lb)</label>
-      <input id="it-weight" type="text" inputmode="decimal" autocomplete="off" value={draft.weight ?? ''} oninput={(e) => { const v = num(e.currentTarget.value); if (v === undefined) delete draft.weight; else draft.weight = v; }} />
+      <input id="it-weight" type="text" inputmode="decimal" autocomplete="off" bind:value={weightDraft} />
     </div>
     <div class="field">
       <label for="it-cost">Cost (gp)</label>
-      <input id="it-cost" type="text" inputmode="decimal" autocomplete="off" value={draft.costCp === undefined ? '' : draft.costCp / 100} oninput={(e) => { const v = num(e.currentTarget.value); if (v === undefined) delete draft.costCp; else draft.costCp = Math.round(v * 100); }} />
+      <input id="it-cost" type="text" inputmode="decimal" autocomplete="off" bind:value={costDraft} />
     </div>
   </div>
 </div>
@@ -241,8 +319,8 @@
         <label for="w-props">Properties (comma separated)</label>
         <input id="w-props" type="text" autocomplete="off" value={draft.weapon.properties.join(', ')} oninput={(e) => (draft.weapon!.properties = e.currentTarget.value.split(',').map((s) => s.trim()).filter(Boolean))} />
       </div>
-      <div class="field"><label for="w-r1">Range (ft)</label><input id="w-r1" type="text" inputmode="numeric" autocomplete="off" value={draft.weapon.range?.[0] ?? ''} oninput={(e) => setRange(0, e.currentTarget.value)} /></div>
-      <div class="field"><label for="w-r2">Long range (ft)</label><input id="w-r2" type="text" inputmode="numeric" autocomplete="off" value={draft.weapon.range?.[1] ?? ''} oninput={(e) => setRange(1, e.currentTarget.value)} /></div>
+      <div class="field"><label for="w-r1">Range (ft)</label><input id="w-r1" type="text" inputmode="numeric" autocomplete="off" bind:value={rangeNear} /></div>
+      <div class="field"><label for="w-r2">Long range (ft)</label><input id="w-r2" type="text" inputmode="numeric" autocomplete="off" bind:value={rangeFar} /></div>
     </div>
   {/if}
 
@@ -253,7 +331,7 @@
         <label for="a-cat">Category</label>
         <select id="a-cat" bind:value={draft.armor.category}>{#each ['light', 'medium', 'heavy', 'shield'] as c (c)}<option value={c}>{c}</option>{/each}</select>
       </div>
-      <div class="field"><label for="a-ac">Armor class</label><input id="a-ac" type="text" inputmode="numeric" autocomplete="off" value={draft.armor.ac} oninput={(e) => (draft.armor!.ac = num(e.currentTarget.value) ?? 0)} /></div>
+      <div class="field"><label for="a-ac">Armor class</label><input id="a-ac" type="text" inputmode="numeric" autocomplete="off" bind:value={acDraft} /></div>
       <div class="field"><label for="a-dex">Dex bonus cap (blank: none)</label><input id="a-dex" type="text" inputmode="numeric" autocomplete="off" value={draft.armor.dexCap ?? ''} oninput={(e) => { const v = num(e.currentTarget.value); if (v === undefined) delete draft.armor!.dexCap; else draft.armor!.dexCap = v; }} /></div>
       <div class="field"><label for="a-str">Strength needed</label><input id="a-str" type="text" inputmode="numeric" autocomplete="off" value={draft.armor.strReq ?? ''} oninput={(e) => { const v = num(e.currentTarget.value); if (v === undefined) delete draft.armor!.strReq; else draft.armor!.strReq = v; }} /></div>
       <label class="check"><input type="checkbox" checked={!!draft.armor.stealthDisadvantage} onchange={(e) => (e.currentTarget.checked ? (draft.armor!.stealthDisadvantage = true) : delete draft.armor!.stealthDisadvantage)} /> Stealth disadvantage</label>
@@ -271,15 +349,15 @@
   </div>
 
   <h3>Charges</h3>
-  <label class="check"><input type="checkbox" checked={!!draft.charges} onchange={(e) => setCharges(e.currentTarget.checked ? {} : undefined)} /> Has charges</label>
+  <label class="check"><input type="checkbox" checked={!!draft.charges} onchange={(e) => setCharges(e.currentTarget.checked)} /> Has charges</label>
   {#if draft.charges}
     <div class="row">
-      <div class="field"><label for="c-max">Maximum charges</label><input id="c-max" type="text" inputmode="numeric" autocomplete="off" value={draft.charges.max} oninput={(e) => setCharges({ max: num(e.currentTarget.value) ?? 0 })} /></div>
+      <div class="field"><label for="c-max">Maximum charges</label><input id="c-max" type="text" inputmode="numeric" autocomplete="off" bind:value={maxDraft} /></div>
       <div class="field">
         <label for="c-rec">Recharges on</label>
-        <select id="c-rec" value={draft.charges.recharge} onchange={(e) => setCharges({ recharge: e.currentTarget.value as Recharge })}>{#each RECHARGES as r (r)}<option value={r}>{r}</option>{/each}</select>
+        <select id="c-rec" bind:value={draft.charges.recharge}>{#each RECHARGES as r (r)}<option value={r}>{r}</option>{/each}</select>
       </div>
-      <div class="field"><label for="c-amt">Recharge amount (e.g. 1d6+1; blank: all)</label><input id="c-amt" type="text" autocomplete="off" value={draft.charges.rechargeAmount ?? ''} oninput={(e) => setCharges({ rechargeAmount: e.currentTarget.value })} /></div>
+      <div class="field"><label for="c-amt">Recharge amount (e.g. 1d6+1; blank: all)</label><input id="c-amt" type="text" autocomplete="off" value={draft.charges.rechargeAmount ?? ''} oninput={(e) => setRechargeAmount(e.currentTarget.value)} /></div>
     </div>
   {/if}
 
@@ -289,20 +367,23 @@
 <h2>Default player view</h2>
 <div class="card">
   <p class="muted">What players see of this item in the compendium and when you give it to them, until you reveal more.</p>
-  <PlayerViewEditor item={{ ...draft, text: editableToRich(textDraft), curse: curseDraft.trim() ? editableToRich(curseDraft) : undefined }} view={draft.defaultView} onchange={setView} />
+  <PlayerViewEditor item={assembled} view={draft.defaultView} onchange={setView} />
 </div>
 
 {#if error}<p role="alert" class="error">{error}</p>{/if}
-{#if notice}<p role="status">{notice}</p>{/if}
+{#if notice && !dirty}<p role="status">{notice}</p>{/if}
 <div class="row">
-  <button type="button" class="primary" onclick={() => save()}>Save item</button>
-  {#if saved}<button type="button" onclick={duplicate}>Duplicate</button>
-    <button type="button" class="danger" onclick={() => (confirmingDelete = true)}>Delete</button>{/if}
+  <button type="button" class="primary" disabled={saving} onclick={save}>Save item</button>
+  {#if saved}
+    <button type="button" disabled={saving} onclick={duplicate}>Duplicate</button>
+    <button type="button" class="danger" onclick={askDelete}>Delete</button>
+  {/if}
+  {#if dirty}<span class="muted">Unsaved changes</span>{/if}
 </div>
 {#if confirmingDelete}
-  <div role="alertdialog" aria-label="Confirm delete" class="row">
-    <p>Delete “{draft.name}”? This cannot be undone.</p>
-    <button type="button" class="danger" onclick={remove}>Delete item</button>
+  <div role="alertdialog" aria-label="Confirm delete" aria-describedby="it-del-msg" class="row">
+    <p id="it-del-msg">Delete “{draft.name}”? This cannot be undone.</p>
+    <button type="button" class="danger" bind:this={delBtn} onclick={remove}>Delete item</button>
     <button type="button" onclick={() => (confirmingDelete = false)}>Keep it</button>
   </div>
 {/if}

@@ -46,6 +46,37 @@ export function wrapRedaction(s: string, start: number, end: number, id: string)
   return `${s.slice(0, start)}{{redact:${id}}}${s.slice(start, end)}{{/redact}}${s.slice(end)}`;
 }
 
-/** `r1`, `r2`, ...: one past the highest numbered redaction id in `r`. */
-export const nextRedactionId = (r: RichText): string =>
-  `r${Math.max(0, ...redactionIds(r).map(id => Number(/^r(\d+)$/.exec(id)?.[1] ?? 0))) + 1}`;
+const idNumber = (id: string): number => Number(/^r(\d+)$/.exec(id)?.[1] ?? 0);
+
+/**
+ * `r1`, `r2`, ...: one past the highest numbered redaction id in `r` or in `taken`. Pass the view's revealed ids as
+ * `taken`: a new redaction must never reuse an id the player already has revealed, or it would show at once.
+ */
+export const nextRedactionId = (r: RichText, taken: readonly string[] = []): string =>
+  `r${Math.max(0, ...redactionIds(r).map(idNumber), ...taken.map(idNumber)) + 1}`;
+
+const TOKEN = new RegExp(`${MARK.source}|\\|\\|`, 'g');
+
+/**
+ * The `||secret||` shorthand: each pair becomes `{{redact:rN}}secret{{/redact}}`, ids continuing after the highest in
+ * `s` and `taken`. A lone `||`, an empty `||||` and any `||` inside an existing redaction stay as typed.
+ */
+export function expandShorthand(s: string, taken: readonly string[]): string {
+  let depth = 0, open: number | undefined;
+  const pairs: [number, number][] = [];
+  for (const m of s.matchAll(TOKEN)) {
+    if (m[0] !== '||') depth = m[1] === undefined ? Math.max(0, depth - 1) : depth + 1;
+    else if (depth === 0) {
+      if (open === undefined) open = m.index;
+      else if (m.index > open + 2) { pairs.push([open, m.index]); open = undefined; }
+      else open = m.index; // `||||`: not a span; this one may open the next
+    }
+  }
+  if (!pairs.length) return s;
+  let n = idNumber(nextRedactionId([{ p: s }], taken)) - 1, out = '', at = 0;
+  for (const [a, b] of pairs) {
+    out += `${s.slice(at, a)}{{redact:r${++n}}}${s.slice(a + 2, b)}{{/redact}}`;
+    at = b + 2;
+  }
+  return out + s.slice(at);
+}

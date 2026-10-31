@@ -82,5 +82,11 @@ export const revealedView = (item: ItemDef): PlayerView => {
   return { hidden: [], revealed: [...new Set(ids)] };
 };
 
+/** `view` without revealed ids whose redaction is gone (the view's text, else the item's, plus curse and choices), so an id can't be reused already revealed. */
+export const pruneRevealed = (item: ItemDef, view: PlayerView): PlayerView => {
+  const ids = new Set([view.text ?? item.text, item.curse ?? [], ...choiceTexts(item.choices)].flatMap(redactionIds));
+  return { ...view, revealed: view.revealed.filter(id => ids.has(id)) };
+};
+
 /** The player now knows everything, all at once. */
 export const identify = (entry: InventoryEntry): InventoryEntry => ({ ...entry, view: revealedView(entry.item) });

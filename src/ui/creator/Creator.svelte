@@ -2,7 +2,7 @@
   import { embedContent, newCharacter, validateCharacter, type Problem } from '../../lib/character/build.ts';
   import type { ContentIndex } from '../../lib/content/index.ts';
   import { db } from '../../lib/db.ts';
-  import { navigate } from '../../lib/router.svelte.ts';
+  import { leaveGuard, navigate } from '../../lib/router.svelte.ts';
   import { computeSheet } from '../../lib/rules/sheet.ts';
   import { DEFAULT_SETTINGS } from '../../lib/settings.ts';
   import { app, getFullIndex, getIndex } from '../../lib/store.svelte.ts';
@@ -86,6 +86,17 @@
     queueMicrotask(() => heading?.focus());
   }
 
+  // Unsaved work (R43): any change to what the user has entered, compared with the empty start. The starting kit
+  // is derived from those choices, so it is left out.
+  const snapshotKey = () => JSON.stringify([c.name, c.build, c.details, rolls, hpRolls, equip]);
+  let baseline = $state(snapshotKey());
+  const dirty = $derived(snapshotKey() !== baseline);
+  $effect(() => {
+    const guard = () => !dirty || confirm('Discard this unsaved character?');
+    leaveGuard.fn = guard;
+    return () => { if (leaveGuard.fn === guard) leaveGuard.fn = undefined; };
+  });
+
   let saving = $state(false);
   let saveError = $state('');
   async function save() {
@@ -96,6 +107,7 @@
       const done = embedContent(withKit($state.snapshot(c) as Character, index), index);
       done.state = { ...done.state, hp: computeSheet(done, { settings, viewer: 'dm' }).maxHp };
       await db.characters.put(done);
+      baseline = snapshotKey(); // saved: the leave guard must not ask
       navigate(`characters/${done.id}`);
     } catch (e) {
       saveError = message(e);
@@ -104,6 +116,8 @@
     }
   }
 </script>
+
+<svelte:window onbeforeunload={(e) => { if (dirty) e.preventDefault(); }} />
 
 <h1>New character</h1>
 
