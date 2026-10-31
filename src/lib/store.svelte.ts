@@ -1,7 +1,7 @@
 import { exportBackup } from './backup.ts';
 import { ContentIndex } from './content/index.ts';
 import { loadSrd } from './content/srd.ts';
-import { is2024Source, isReservedSource, packAllowed } from './content/sources.ts';
+import { entityAllowed, mayPatch, packAllowed, patchAllowed } from './content/sources.ts';
 import { db } from './db.ts';
 import type { Campaign, Pack } from './types.ts';
 
@@ -67,13 +67,13 @@ export async function saveBackup(opts: { campaignId?: string; includePacks: bool
 let cache: { key: string; index: Promise<ContentIndex> } | undefined;
 
 /**
- * Defence in depth against a crafted or restored pack (R52): whatever its own source says, no entity of a 2024 source and none
- * claiming a reserved id (SRD, HOMEBREW, HIDDEN) gets in, so it cannot add 2024 content or replace a built-in SRD entity.
+ * Defence in depth against a crafted or restored pack (R52): whatever its own source says, an entity must carry its own source in its id, and none of a 2024 source or
+ * a reserved id (SRD, HOMEBREW, HIDDEN) gets in, so it cannot add 2024 content or replace another source's entity; only official packs may patch.
  */
 const clean = (p: Pack): Pack => ({
   ...p,
-  entities: p.entities.filter((e) => !is2024Source(e.source) && !isReservedSource(e.source)),
-  patches: p.patches.filter((x) => !is2024Source(x.alias)),
+  entities: p.entities.filter(entityAllowed),
+  patches: mayPatch(p) ? p.patches.filter(patchAllowed) : [],
 });
 
 async function build(ids: string[] | undefined): Promise<ContentIndex> {

@@ -3,7 +3,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { ContentIndex } from '../src/lib/content/index.ts';
-import { is2024Source, packAllowed, sourceLabel } from '../src/lib/content/sources.ts';
+import { entityAllowed, is2024Source, packAllowed, sourceLabel } from '../src/lib/content/sources.ts';
 import { import5etools } from '../src/lib/import/fivetools/index.ts';
 import type { Pack } from '../src/lib/types.ts';
 
@@ -36,7 +36,7 @@ for (const l of refused(r.skipped.rules2024)) console.log(l);
 console.log(`\nSkipped unknown per source (${r.skippedUnknown} total):`);
 for (const l of refused(r.skipped.unknown)) console.log(l);
 const tainted = r.packs.flatMap(p => [p.source, ...p.entities.map(e => e.source)]).filter(s => is2024Source(s));
-const bad = r.packs.filter(p => !packAllowed(p));
+const bad = [...r.packs.filter(p => !packAllowed(p)), ...r.packs.flatMap(p => p.entities.filter(e => !entityAllowed(e)).map(() => p))]; // a pack, or an entity whose id does not carry its own source
 console.log(`\nAccepted entities from a 2024 source: ${tainted.length}; packs that fail the whitelist: ${bad.length}\n`);
 if (tainted.length || bad.length) process.exitCode = 1;
 

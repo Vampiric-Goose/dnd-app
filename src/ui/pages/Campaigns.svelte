@@ -75,7 +75,7 @@
     await run(async () => {
       const n = await importBackup(file);
       await refreshCampaigns();
-      notice = `Imported ${n.campaigns} campaigns, ${n.characters} characters, ${n.items} items and ${n.packs} books.`;
+      notice = `Imported ${n.campaigns} campaigns, ${n.characters} characters, ${n.items} items and ${n.packs} books.${n.skippedPacks ? ` Left out ${n.skippedPacks.length} ${n.skippedPacks.length === 1 ? 'pack' : 'packs'} that claim to be the built-in SRD or another reserved source (${n.skippedPacks.join(', ')}).` : ''}`;
     });
     importing = false;
   }

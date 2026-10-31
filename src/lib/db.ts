@@ -1,3 +1,4 @@
+import { restorablePack } from './content/sources.ts';
 import { deleteDB, openDB, type DBSchema, type IDBPDatabase, type IDBPTransaction, type StoreNames } from 'idb';
 import type { Campaign, Character, Pack, PackMeta, StoredItem } from './types.ts';
 
@@ -177,7 +178,7 @@ export const db = {
     for (const r of s.campaigns) await tx.objectStore('campaigns').put(r);
     for (const r of s.characters) await tx.objectStore('characters').put(r);
     for (const r of s.items) await tx.objectStore('items').put(r);
-    for (const p of s.packs) {
+    for (const p of s.packs.filter(restorablePack)) { // the built-in SRD always comes from the shipped asset (R52)
       await tx.objectStore('packs').put(p);
       await tx.objectStore('packMeta').put(packMeta(p));
     }

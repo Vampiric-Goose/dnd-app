@@ -158,17 +158,18 @@ export async function import5etools(
     if (x) rejectedClasses.set(`${String(e.r.name).toLowerCase()}|${up(e.r.source)}`, x.why);
   }
   /** A record's parents: classSource, subclassSource and raceSource are judged like its own source; a class in the batch that was refused refuses its subclasses and features. */
-  const parentRefusal = (key: string, r: Raw, declared: ReadonlySet<string>): Refusal | undefined => {
+  const parentDeclared: ReadonlySet<string> = new Set([...allDeclared, ...storedHomebrew]); // a parent may be homebrew from another file of the batch or a stored pack
+  const parentRefusal = (key: string, r: Raw): Refusal | undefined => {
     for (const f of ['classSource', 'subclassSource', 'raceSource']) {
       const s = r?.[f];
-      if (typeof s === 'string' && s) { const x = sourceRefusal(s, declared); if (x) return x; }
+      if (typeof s === 'string' && s) { const x = sourceRefusal(s, parentDeclared); if (x) return x; } // 2024 first, then official, then declared (classifySource's order)
     }
     if (!CLASS_KEYS.has(key) || key === 'class') return undefined;
     const why = rejectedClasses.get(`${String(r.className).toLowerCase()}|${up(r.classSource || 'PHB')}`);
     return why && { why, source: String(r.classSource || 'PHB') };
   };
   /** The one check every record goes through, whether it is imported, a `_copy` target in the batch, or a stored raw record. */
-  const refuse = (key: string, r: Raw, declared: ReadonlySet<string>): Refusal | undefined => refusal(key, r, declared) ?? parentRefusal(key, r, declared);
+  const refuse = (key: string, r: Raw, declared: ReadonlySet<string>): Refusal | undefined => refusal(key, r, declared) ?? parentRefusal(key, r);
   // Raw records kept from earlier imports may predate the whitelist: they are judged like batch records, with the stored homebrew packs as their declarations.
   const storedRefusal = (key: string, r: Raw): Refusal | undefined =>
     refuse(key.split('|')[0], r, storedHomebrew) ?? sourceRefusal(keySourceOf(key), storedHomebrew);

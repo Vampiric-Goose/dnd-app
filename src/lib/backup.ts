@@ -1,3 +1,4 @@
+import { restorablePack } from './content/sources.ts';
 import { db, sha256Hex, type BlobRecord } from './db.ts';
 import { playerCharacter } from './items/playerView.ts';
 import { isRec, problem, SHAPES, type Rec, type Shape } from './recordShape.ts';
@@ -66,7 +67,7 @@ export async function exportBackup(opts: { campaignId?: string; includePacks: bo
     items = await db.items.list(c.id);
     packIds = c.enabledPacks;
   }
-  const packs = opts.includePacks ? (await Promise.all(packIds.map((id) => db.packs.get(id)))).filter((p): p is Pack => !!p) : [];
+  const packs = opts.includePacks ? (await Promise.all(packIds.map((id) => db.packs.get(id)))).filter((p): p is Pack => !!p && restorablePack(p)) : []; // never the cached SRD
   // ponytail: every blob, even for one campaign; filter by referenced hashes once maps make this heavy
   const blobs = (await db.blobs.all()).map(({ hash, type, data }) => ({ hash, type, base64: toBase64(data) }));
   const exportedAt = Date.now();
@@ -78,7 +79,7 @@ export async function exportBackup(opts: { campaignId?: string; includePacks: bo
 }
 
 /** Validates the whole file, then upserts by id in one transaction, keeping each record's own updatedAt. */
-export async function importBackup(file: Blob): Promise<{ campaigns: number; characters: number; items: number; packs: number }> {
+export async function importBackup(file: Blob): Promise<{ campaigns: number; characters: number; items: number; packs: number; skippedPacks?: string[] }> {
   const o = await parse(file);
   if (o?.format !== 'dnd-app-backup') throw new Error('Not a dnd-app backup file');
   if (o.version !== 1) throw new Error('Unsupported backup version ' + o.version);
@@ -89,8 +90,11 @@ export async function importBackup(file: Blob): Promise<{ campaigns: number; cha
     packs: records<Pack>(o, 'packs', SHAPES.pack),
     blobs: await blobRecords(o),
   };
+  // R52: never the built-in SRD (id `srd`) nor a pack claiming a reserved source; the caller is told which were left out.
+  const skippedPacks = snapshot.packs.filter((p) => !restorablePack(p)).map((p) => p.id);
+  snapshot.packs = snapshot.packs.filter(restorablePack);
   await db.restore(snapshot);
-  return { campaigns: snapshot.campaigns.length, characters: snapshot.characters.length, items: snapshot.items.length, packs: snapshot.packs.length };
+  return { campaigns: snapshot.campaigns.length, characters: snapshot.characters.length, items: snapshot.items.length, packs: snapshot.packs.length, ...(skippedPacks.length && { skippedPacks }) };
 }
 
 /** R51: a character exported in Player view is the player-safe copy, and the file says so (`viewer`), so an import can warn. */

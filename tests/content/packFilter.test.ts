@@ -48,6 +48,35 @@ test('a crafted pack cannot bring in a 2024 entity or replace an SRD one, whatev
   expect(index.get('condition:ok@NOPE')).toBeDefined(); // the rest of a homebrew pack is kept
 });
 
+test('an entity whose id suffix is not its own source, or is 2024 or reserved, never reaches the index', async () => {
+  const dwarf = { kind: 'race' as const, text: [], size: 'M' as const, speed: { walk: 25 }, abilityBonuses: {}, traits: [],
+    proficiencies: { armor: [], weapons: [], tools: [], skills: [], languages: [] } };
+  const cond = (id: string, source: string) => ({ kind: 'condition' as const, id, name: id, source, text: [] });
+  const crafted: Pack = { id: 'pack:NOPE', name: 'NOPE', source: 'NOPE', homebrew: true, importedAt: 1, hash: 'h-crafted', patches: [], entities: [
+    { ...dwarf, id: 'race:dwarf@SRD', name: 'Hacked Dwarf', source: 'NOPE' }, // replaces the built-in dwarf by id
+    cond('condition:x@XPHB', 'NOPE'), cond('condition:y@XPHB', 'PHB'), cond('condition:z@HOMEBREW', 'HOMEBREW'),
+    cond('condition:other@SOMEONE', 'NOPE'), cond('no-at-sign', 'NOPE'),
+    cond('condition:fine@nope', 'NOPE'), // same source, different case: fine
+  ] };
+  await db.packs.put(crafted);
+  const index = await getFullIndex();
+  expect(index.get('race:dwarf@SRD')?.name).toBe('Dwarf');
+  for (const id of ['condition:x@XPHB', 'condition:y@XPHB', 'condition:z@HOMEBREW', 'condition:other@SOMEONE', 'no-at-sign']) expect(index.get(id), id).toBeUndefined();
+  expect(index.get('condition:fine@nope')).toBeDefined();
+});
+
+test('only official packs can patch: a homebrew pack patch has no effect, a PHB pack patch applies', async () => {
+  const patch = (alias: string, text: string) => ({ targetId: 'race:dwarf@SRD', alias, text: [{ p: text }] });
+  await db.packs.put({ ...pack('MYBREW', true), patches: [patch('MYBREW', 'Brewed text.')] });
+  await db.packs.put({ ...pack('NOPE', true), hash: 'h-nope2', patches: [patch('NOPE', 'Nope text.')] });
+  let index = await getFullIndex();
+  expect(index.get('race:dwarf@SRD')).toMatchObject({ text: [{ p: 'Short SRD text.' }] });
+  expect(index.get('race:dwarf@SRD')?.aliases).toBeUndefined();
+  await db.packs.put({ ...pack('PHB'), hash: 'h-phb2', patches: [patch('PHB', 'Book text.'), patch('XPHB', 'Sneaky 2024 text.')] });
+  index = await getFullIndex();
+  expect(index.get('race:dwarf@SRD')).toMatchObject({ text: [{ p: 'Book text.' }], aliases: ['PHB'] });
+});
+
 test('the homebrew flag survives into the stored pack meta', async () => {
   const meta = await db.packs.listMeta();
   expect(meta.find(m => m.id === 'pack:MYBREW')?.homebrew).toBe(true);
