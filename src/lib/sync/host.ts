@@ -7,7 +7,7 @@ import { idSource, is2024Source, restorablePack } from '../content/sources.ts';
 import type { RollEntry } from '../rolls.svelte.ts';
 import type { Campaign, CampaignSync, Character, Pack, PackMeta } from '../types.ts';
 import { newJoinCode, nextPlayerId, sha256Text } from './code.ts';
-import { hlcNow } from './hlc.ts';
+import { hlcNow, hlcReceive } from './hlc.ts';
 import type { Link } from './link.ts';
 import { canon, latestClock, mergeCharacter, type Synced } from './merge.ts';
 import { campaignForPlayers, characterForPlayer, packForPlayers, rosterEntry, unprojectCharacter } from './project.ts';
@@ -23,8 +23,8 @@ export interface HostDeps {
   loadCharacter(id: string): Promise<Character | undefined>;
   /** R2: stores a merged record without stamping it (db.characters.putSynced). */
   saveCharacter(c: Character): Promise<void>;
-  /** Deletes a character and records its tombstone in campaign.sync.deleted (db.characters.delete does both). */
-  deleteCharacter(id: string): Promise<void>;
+  /** Deletes a character, records its tombstone in campaign.sync.deleted and keeps it in the DM's trash (R9; db.characters.delete with `by`). */
+  deleteCharacter(id: string, by: string): Promise<void>;
   index(): ContentIndex | Promise<ContentIndex>;
   /** Stored pack metadata (db.packs.listMeta) and packs (db.packs.get). */
   packMeta(): Promise<PackMeta[]>;
@@ -38,7 +38,7 @@ export interface HostDeps {
   now?(): number;
 }
 
-interface Conn { link: Link; playerId?: string; name?: string; bad: number; closed: boolean; offered: Set<string>; packs: Promise<void> }
+interface Conn { link: Link; playerId?: string; name?: string; bad: number; closed: boolean; offered: Set<string>; streamed: Set<string>; packs: Promise<void> }
 
 /**
  * Characters of pack JSON per chunk. Worst case a character takes 3 UTF-8 bytes (a quote or backslash escapes to 2, anything else in
@@ -46,6 +46,27 @@ interface Conn { link: Link; playerId?: string; name?: string; bad: number; clos
  */
 const CHUNK_CHARS = 20_000;
 const LOW_WATER = MAX_CHUNK * 4;
+/** M6: a link that has not said hello by then is closed. */
+export const HELLO_TIMEOUT = 15_000;
+
+/** M4: chunk boundaries every CHUNK_CHARS, moved back one unit so a surrogate pair is never split (a binary transport would mangle each half). */
+function cuts(json: string): number[] {
+  const out = [0];
+  while (out.at(-1)! < json.length) {
+    let end = Math.min(out.at(-1)! + CHUNK_CHARS, json.length);
+    const u = json.charCodeAt(end - 1);
+    if (end < json.length && u >= 0xd800 && u <= 0xdbff) end--;
+    out.push(end);
+  }
+  return out;
+}
+
+/** The campaign as players get it, its enabled packs cut to the ones they are offered (M2: no DM-only pack ids). */
+const forPlayers = (camp: Campaign, offers: PackOffer[]) => {
+  const ok = new Set(['srd', ...offers.map((o) => o.id)]);
+  const c = campaignForPlayers(camp);
+  return { ...c, enabledPacks: c.enabledPacks.filter((id) => ok.has(id)) };
+};
 
 /** A pack as players get it, serialized, with the hash and byte size of exactly that JSON (R6). Undefined when nothing may be sent. */
 async function playerPack(p: Pack | undefined): Promise<{ json: string; offer: PackOffer } | undefined> {
@@ -92,7 +113,8 @@ export class Host {
   }
 
   accept(link: Link): void {
-    const conn: Conn = { link, bad: 0, closed: false, offered: new Set(), packs: Promise.resolve() };
+    const conn: Conn = { link, bad: 0, closed: false, offered: new Set(), streamed: new Set(), packs: Promise.resolve() };
+    setTimeout(() => { if (!conn.playerId && !conn.closed) this.#close(conn); }, HELLO_TIMEOUT);
     this.#conns.add(conn);
     link.onMessage((raw) => {
       if (conn.closed) return;
@@ -147,7 +169,7 @@ export class Host {
   campaignChanged(): void {
     void this.#task(async () => {
       const camp = await this.#deps.loadCampaign();
-      if (camp) this.#broadcast({ t: 'settings', campaign: campaignForPlayers(camp) });
+      if (camp) this.#broadcast({ t: 'settings', campaign: forPlayers(camp, await this.#packOffers(camp)) });
     });
   }
 
@@ -193,7 +215,7 @@ export class Host {
     switch (msg.t) {
       case 'hello': return this.#violation(c, 'a second hello');
       case 'chars': return this.#chars(c, c.playerId, msg.characters);
-      case 'deleteChar': return this.#deleteChar(c, c.playerId, msg.id);
+      case 'deleteChar': return this.#deleteChar(c, c.playerId, msg.id, msg.at);
       case 'roll':
         this.#deps.addRoll?.(msg.entry, c.playerId);
         return this.#broadcast({ t: 'roll', entry: msg.entry, from: c.playerId }, c);
@@ -222,7 +244,7 @@ export class Host {
     this.#deps.onChange?.();
     const packs = await this.#packOffers(camp);
     c.offered = new Set(packs.map((p) => p.id));
-    this.#send(c, { t: 'welcome', playerId: c.playerId, campaign: campaignForPlayers(camp), roster: await this.#roster(camp), packs });
+    this.#send(c, { t: 'welcome', playerId: c.playerId, campaign: forPlayers(camp, packs), roster: await this.#roster(camp), packs });
     for (const ch of await this.#deps.loadCharacters()) if (ch.ownerId === c.playerId) this.#send(c, { t: 'chars', characters: [characterForPlayer(ch)] });
   }
 
@@ -271,14 +293,17 @@ export class Host {
     if (rosterChanged) await this.#sendRoster(camp);
   }
 
-  async #deleteChar(c: Conn, pid: string, id: string): Promise<void> {
+  async #deleteChar(c: Conn, pid: string, id: string, at: string): Promise<void> {
     const camp = await this.#deps.loadCampaign();
     const s = await this.#deps.loadCharacter(id);
     if (!camp || !s) return; // never reached the DM (or already gone): nothing to delete
     if (s.ownerId !== pid || s.campaignId !== camp.id) return this.#violation(c, 'not their character');
-    await this.#deps.deleteCharacter(id);
-    const at = (await this.#deps.loadCampaign())?.sync?.deleted?.[id] ?? '';
-    this.#broadcast({ t: 'deleteChar', id, at }, c);
+    // A change the DM's copy holds from after the deletion (or a restore, R9) wins: the player's device gets the character back.
+    if (at <= latestClock(s)) return this.#send(c, { t: 'chars', characters: [characterForPlayer(s)] });
+    await this.#deps.updateSync((x) => ({ ...x, last: hlcReceive(x.node, x.last, at, this.#deps.now?.()) })); // a restore must stamp later than this
+    await this.#deps.deleteCharacter(id, pid); // R9: kept in the DM's trash
+    const tomb = (await this.#deps.loadCampaign())?.sync?.deleted?.[id] ?? at;
+    this.#broadcast({ t: 'deleteChar', id, at: tomb }, c);
     await this.#sendRoster();
   }
 
@@ -300,19 +325,42 @@ export class Host {
   /** Only packs offered to this link in its welcome. Streams run one at a time per link, beside the message queue. */
   #packWant(c: Conn, ids: string[]): void {
     if (ids.some((id) => !c.offered.has(id))) return this.#violation(c, 'a pack that was not offered');
-    for (const id of new Set(ids)) c.packs = c.packs.then(() => this.#stream(c, id)).catch((e) => (this.#deps.onError ?? console.warn)(e));
+    if (ids.some((id) => c.streamed.has(id))) return this.#violation(c, 'a pack it already asked for'); // M5: each pack once per link
+    for (const id of new Set(ids)) {
+      c.streamed.add(id);
+      c.packs = c.packs.then(() => this.#stream(c, id)).catch((e) => (this.#deps.onError ?? console.warn)(e));
+    }
   }
 
   async #stream(c: Conn, id: string): Promise<void> {
     const pp = await playerPack(await this.#deps.loadPack(id));
     if (!pp || pp.offer.size > MAX_PACK || c.closed) return;
     const { json, offer: { hash } } = pp;
-    const total = Math.max(1, Math.ceil(json.length / CHUNK_CHARS));
+    const at = cuts(json), total = Math.max(1, at.length - 1);
     for (let seq = 0; seq < total && !c.closed; seq++) {
-      // Flow control (R1): wait while the transport's send buffer is full; re-check every 100 ms in case a drain event is missed.
-      while (!c.closed && (c.link.bufferedAmount?.() ?? 0) > LOW_WATER) await new Promise<void>((r) => { c.link.onDrain?.(r); setTimeout(r, 100); });
-      this.#send(c, { t: 'packChunk', id, hash, seq, total, data: json.slice(seq * CHUNK_CHARS, (seq + 1) * CHUNK_CHARS) });
+      await this.#drained(c);
+      this.#send(c, { t: 'packChunk', id, hash, seq, total, data: json.slice(at[seq], at[seq + 1] ?? json.length) });
     }
+  }
+
+  /**
+   * Flow control (R1): resolves once the transport's send buffer is low or the link closed. One onDrain listener per wait (M5), and a
+   * re-check every 100 ms in case a drain event is missed.
+   */
+  #drained(c: Conn): Promise<void> {
+    const full = () => !c.closed && (c.link.bufferedAmount?.() ?? 0) > LOW_WATER;
+    if (!full()) return Promise.resolve();
+    return new Promise((resolve) => {
+      let timer: ReturnType<typeof setTimeout>, done = false;
+      const check = () => {
+        if (done) return; // a late drain event after the wait ended
+        clearTimeout(timer);
+        if (full()) timer = setTimeout(check, 100);
+        else { done = true; resolve(); }
+      };
+      c.link.onDrain?.(check);
+      check();
+    });
   }
 
   async #roster(camp: Campaign) {

@@ -149,7 +149,26 @@ export async function importRecord(file: Blob): Promise<{ kind: 'character'; dat
   return { kind, data, taken, playerView: kind === 'character' && o.viewer === 'player' } as { kind: 'character'; data: Character; taken: boolean; playerView: boolean } | { kind: 'item'; data: StoredItem; taken: boolean; playerView: boolean };
 }
 
-export { restoreSecrets } from './items/playerView.ts'; // R56; moved there so the sync engine can use it (stage 3)
+import { restoreSecrets } from './items/playerView.ts';
+export { restoreSecrets }; // R56; moved there so the sync engine can use it (stage 3)
 
 /** R49 "Keep both": the imported record under a fresh id, so the existing one stays. "Replace" is the record as it is. */
 export const keepBoth = <T extends { id: string }>(r: T): T => ({ ...r, id: uid() });
+
+/**
+ * I1: was this character's id deleted in its campaign (a sync tombstone)? Saved under that id, sync would delete it again on the next
+ * connect, so an import takes it under a fresh id (keepBoth) and says so.
+ */
+export async function deletedInCampaign(c: Character): Promise<boolean> {
+  const del = c.campaignId === undefined ? undefined : (await db.campaigns.get(c.campaignId))?.sync?.deleted;
+  return !!del && Object.hasOwn(del, c.id);
+}
+
+/**
+ * R10: "Replace" means replace. The file's `sync` is dropped, so the save stamps every path that differs from the stored copy as a fresh
+ * local edit instead of rebasing the file onto newer stored values. A Player-view file first gets the real items back (R56).
+ */
+export function replacement(file: Character, stored: Character | undefined, playerView: boolean): Character {
+  const { sync: _s, ...c } = playerView && stored ? restoreSecrets(file, stored) : file;
+  return c;
+}

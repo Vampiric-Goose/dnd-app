@@ -7,9 +7,9 @@ import type { RollEntry } from '../rolls.svelte.ts';
 import type { Campaign, CampaignSettings, CampaignSync, Character, Pack, PackMeta } from '../types.ts';
 import { newCampaignSync, sha256Text } from './code.ts';
 import type { Link } from './link.ts';
-import { canon, mergeCharacter, type Synced } from './merge.ts';
+import { canon, latestClock, mergeCharacter, type Synced } from './merge.ts';
 import type { CampaignForPlayers, RosterEntry } from './project.ts';
-import { cleanRoll, MAX_MESSAGE, MAX_PACK, PLAYER_ID, size, type GuestMsg, type PackOffer } from './protocol.ts';
+import { cleanRoll, HLC, MAX_MESSAGE, MAX_PACK, PLAYER_ID, size, type GuestMsg, type PackOffer } from './protocol.ts';
 
 export type GuestStatus = 'connecting' | 'online' | 'offline' | 'rejected';
 /** Pack download progress: packs finished (stored or refused) of those wanted, and bytes received of their total. */
@@ -29,8 +29,8 @@ export interface GuestDeps {
   loadCharacter(id: string): Promise<Character | undefined>;
   /** R2: stores a merged record without stamping it (db.characters.putSynced). */
   saveCharacter(c: Character): Promise<void>;
-  /** Deletes a character and records its tombstone in campaign.sync.deleted (db.characters.delete does both). */
-  deleteCharacter(id: string): Promise<void>;
+  /** Deletes a character and records its tombstone in campaign.sync.deleted (db.characters.delete does both), at `at` when the DM's. */
+  deleteCharacter(id: string, at?: string): Promise<void>;
   /** Stored pack metadata (db.packs.listMeta) and the pack store (db.packs.put). */
   packMeta(): Promise<PackMeta[]>;
   savePack(p: Pack): Promise<void>;
@@ -153,7 +153,8 @@ export class Guest {
       case 'chars': if (Array.isArray(m.characters)) for (const c of m.characters) await this.#char(c); return;
       case 'deleteChar': {
         const c = typeof m.id === 'string' ? await this.#deps.loadCharacter(m.id) : undefined;
-        if (c && c.campaignId === this.#campaignId) await this.#deps.deleteCharacter(c.id);
+        // the DM's tombstone clock, so a later restore (R9) outdates it here too
+        if (c && c.campaignId === this.#campaignId) await this.#deps.deleteCharacter(c.id, typeof m.at === 'string' && HLC.test(m.at) ? m.at : undefined);
         return;
       }
       case 'roster': if (Array.isArray(m.roster)) this.#deps.onRoster?.(m.roster as RosterEntry[]); return;
@@ -173,9 +174,11 @@ export class Guest {
     const had = await this.#deps.loadCampaign(campaign.id);
     // Never overwrite a campaign this device hosts or made itself (the same browser joining its own game, or a crafted welcome).
     if (had && had.sync?.role !== 'player') return this.#end('This device already has this campaign as its own.');
-    await this.#saveCampaign(campaign);
     const code = this.#deps.code;
-    await this.#deps.updateSync(campaign.id, (s) => ({ ...(s ?? newCampaignSync('player', code)), role: 'player', code, playerId }));
+    if (had) {
+      await this.#saveCampaign(campaign);
+      await this.#deps.updateSync(campaign.id, (s) => ({ ...s!, role: 'player', code, playerId }));
+    } else await this.#saveCampaign(campaign, { ...newCampaignSync('player', code), playerId }); // M7: a first join is one write
     this.#playerId = playerId;
     this.#campaignId = campaign.id;
     this.#setStatus('online');
@@ -220,11 +223,12 @@ export class Guest {
     c.parts.push(data);
     c.length += data.length;
     this.#progress = { ...this.#progress, bytes: this.#progress.bytes + data.length };
-    if (c.length > MAX_PACK) return this.#packDone(id, 'too large');
+    const offer = this.#want.get(id)!;
+    if (c.length > offer.size) return this.#packDone(id, 'larger than offered'); // M3: characters never outnumber UTF-8 bytes
     if (c.parts.length < c.total) return this.#deps.onPacks?.({ ...this.#progress });
     const json = c.parts.join('');
     this.#chunks = undefined;
-    if ((await sha256Text(json)) !== hash) return this.#packDone(id, 'damaged in transfer (hash mismatch)');
+    if ((await sha256Text(json)) !== offer.hash) return this.#packDone(id, 'damaged in transfer (hash mismatch)'); // M3: the offered hash
     let p: Pack;
     try { p = JSON.parse(json); } catch { return this.#packDone(id, 'not valid JSON'); }
     // R52–R54/R60: what stored packs must pass, plus: it is the pack that was offered, and never the built-in SRD.
@@ -236,9 +240,9 @@ export class Guest {
   }
 
   /** Creates or updates the local copy: the DM's id, name, settings and enabled packs. Loot stays empty (R50: never sent). */
-  async #saveCampaign(c: CampaignForPlayers): Promise<void> {
+  async #saveCampaign(c: CampaignForPlayers, sync?: CampaignSync): Promise<void> {
     const had = await this.#deps.loadCampaign(c.id), now = this.#deps.now?.() ?? Date.now();
-    await this.#deps.saveCampaign({ createdAt: now, loot: [], ...had, id: c.id, name: c.name, settings: c.settings, enabledPacks: c.enabledPacks, updatedAt: now });
+    await this.#deps.saveCampaign({ createdAt: now, loot: [], ...had, id: c.id, name: c.name, settings: c.settings, enabledPacks: c.enabledPacks, updatedAt: now, ...(sync && { sync }) });
   }
 
   async #char(raw: unknown): Promise<void> {
@@ -246,7 +250,11 @@ export class Guest {
     const c = raw as Synced<Character>;
     if (c.campaignId !== this.#campaignId || c.ownerId !== this.#playerId) return;
     const del = (await this.#deps.loadCampaign(c.campaignId!))?.sync?.deleted;
-    if (del && Object.hasOwn(del, c.id)) return; // deleted here; the DM learns it from our deleteChar
+    if (del && Object.hasOwn(del, c.id)) {
+      if (latestClock(c) <= del[c.id]) return; // deleted here since its last change; the DM learns it from our deleteChar
+      // changed since the deletion (the DM restored it, R9): it comes back, and the tombstone goes
+      await this.#deps.updateSync(c.campaignId!, (s) => ({ ...s!, deleted: Object.fromEntries(Object.entries(s!.deleted ?? {}).filter(([k]) => k !== c.id)) }));
+    }
     const local = await this.#deps.loadCharacter(c.id);
     if (local && local.campaignId !== this.#campaignId) return; // never overwrite a character of another campaign
     const merged = mergeCharacter(local ?? c, c);

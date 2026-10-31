@@ -40,8 +40,10 @@
     const cur = c;
     if (!cur || cur === saved || moving) return;
     try {
-      await db.characters.put($state.snapshot(cur) as Character);
-      saved = cur;
+      const stored = await db.characters.put($state.snapshot(cur) as Character);
+      // N1: continue from what was stored, so the next save's base (sync) includes this one. Edits made meanwhile keep their values.
+      saved = stored;
+      c = c === cur ? stored : c && { ...c, sync: stored.sync };
     } catch (e) {
       // The in-memory state is kept; the next edit tries again.
       toast(e instanceof StorageError ? e.message : `Could not save: ${message(e)}`, true);
@@ -113,13 +115,13 @@
       const moved = transfer(cur.inventory, camp?.loot ?? other!.inventory, entryId, qty);
       if (moved.from === cur.inventory) throw new Error('Nothing was moved.');
       const next: Character = { ...cur, inventory: moved.from };
-      await db.saveTogether(camp
+      const [stored] = await db.saveTogether(camp
         ? { characters: [$state.snapshot(next) as Character], campaign: $state.snapshot({ ...camp, loot: moved.to }) as Campaign }
         : { characters: [$state.snapshot(next) as Character, $state.snapshot({ ...other!, inventory: moved.to }) as Character] });
       if (c?.id === cur.id) { // still on this sheet (the route may have changed while it committed)
-        saved = next;
+        saved = stored; // N1: as stored, with its sync
         // Edits made while it committed stay and autosave: the same move is applied to the latest inventory.
-        c = c === cur ? next : { ...c, inventory: transfer(c.inventory, [], entryId, qty).from };
+        c = c === cur ? stored : { ...c, sync: stored.sync, inventory: transfer(c.inventory, [], entryId, qty).from };
       }
       if (camp) await refreshCampaigns().catch(() => {});
       toast(`Moved to ${camp ? 'Unassigned' : other!.name || 'Unnamed'}.`);

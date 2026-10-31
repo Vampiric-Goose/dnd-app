@@ -75,6 +75,8 @@ describe('pack sharing', () => {
     connect(host, g.guest, down);
     await settle(host, g.guest);
     expect(JSON.parse(down[0]).packs.map((o: { id: string }) => o.id)).toEqual([XGE.id]);
+    expect(JSON.parse(down[0]).campaign.enabledPacks).toEqual([XGE.id]); // M2: no DM-only pack ids
+    expect(g.d.campaigns.get(CID)!.enabledPacks).toEqual([XGE.id]);
     expect(down.join()).not.toMatch(/Beholder|Gloomwyrm/);
     // a crafted packWant for the monster pack
     const before = down.length;
@@ -126,14 +128,14 @@ describe('pack sharing', () => {
 
   describe('from a host that is not honest (anyone with the code can pose as the DM)', () => {
     /** A guest talking to a hand-driven host end. */
-    async function crafted(p: Pack | string, o: { size?: number; chunk?: (data: string, hash: string) => unknown[] } = {}) {
+    async function crafted(p: Pack | string, o: { size?: number; offerHash?: string; chunk?: (data: string, hash: string) => unknown[] } = {}) {
       const g = joiner();
       const [h, l] = memoryPair();
       g.guest.connect(l);
       const json = typeof p === 'string' ? p : JSON.stringify(p);
       const id = typeof p === 'string' ? 'pack:X' : p.id;
       const hash = await sha256Text(json);
-      h.send({ t: 'welcome', playerId: 'A1', campaign: { id: CID, name: 'C', settings: camp(CID).settings, enabledPacks: [id] }, roster: [], packs: [{ id, hash, size: o.size ?? json.length }] });
+      h.send({ t: 'welcome', playerId: 'A1', campaign: { id: CID, name: 'C', settings: camp(CID).settings, enabledPacks: [id] }, roster: [], packs: [{ id, hash: o.offerHash ?? hash, size: o.size ?? json.length }] });
       await settle(g.guest);
       for (const m of o.chunk ? o.chunk(json, hash) : [{ t: 'packChunk', id, hash, seq: 0, total: 1, data: json }]) h.send(m);
       await settle(g.guest);
@@ -162,10 +164,54 @@ describe('pack sharing', () => {
       expect(g.progress.at(-1)!.error).toMatch(/out of order/);
     });
 
+    test('M3: the offered hash and size are what count, not the chunk\'s', async () => {
+      const real = pack('MYBREW', [spell('Fine', 'MYBREW')], { homebrew: true });
+      const offered = await sha256Text(JSON.stringify(real));
+      const swapped = await crafted(pack('MYBREW', [spell('Swapped', 'MYBREW')], { homebrew: true }), { offerHash: offered });
+      expect(swapped.d.packs.size).toBe(0);
+      expect(swapped.progress.at(-1)!.error).toMatch(/hash mismatch/);
+      const bigger = await crafted(real, { size: 10 });
+      expect(bigger.d.packs.size).toBe(0);
+      expect(bigger.progress.at(-1)!.error).toMatch(/larger than offered/);
+    });
+
     test('a well-formed homebrew pack from it is stored, marked as shared by the campaign', async () => {
       const g = await crafted(pack('MYBREW', [spell('Fine', 'MYBREW')], { homebrew: true }));
       expect(g.d.packs.get('pack:MYBREW')!.sharedBy).toBe(CID);
     });
+  });
+
+  test('M4: a chunk never ends inside a surrogate pair', async () => {
+    for (const lead of ['x', 'xx']) { // one of the two puts a pair across a 20,000-unit boundary
+      const DRAGONS = pack('TCE', [spell('Dragons', 'TCE', lead + '🐉'.repeat(30_000))]);
+      const { host } = setup([DRAGONS]);
+      const g = joiner();
+      const down: string[] = [];
+      connect(host, g.guest, down);
+      await settle(host, g.guest);
+      const cs = chunks(down);
+      expect(cs.length).toBeGreaterThan(1);
+      for (const c of cs) {
+        const last = c.data.charCodeAt(c.data.length - 1), first = c.data.charCodeAt(0);
+        expect(last >= 0xd800 && last <= 0xdbff).toBe(false);
+        expect(first >= 0xdc00 && first <= 0xdfff).toBe(false);
+      }
+      expect(g.d.packs.get(DRAGONS.id)!.entities).toEqual(DRAGONS.entities);
+    }
+  });
+
+  test('M5: asking for the same pack twice is refused, and it is streamed once', async () => {
+    const { d, host } = setup([XGE]);
+    const down: string[] = [];
+    const [h2, g2] = memoryPair();
+    host.accept(tap(h2, down));
+    g2.send({ t: 'hello', code: CODE, playerId: 'A1' });
+    await settle(host);
+    g2.send({ t: 'packWant', ids: [XGE.id] });
+    g2.send({ t: 'packWant', ids: [XGE.id] });
+    await settle(host);
+    expect(chunks(down).filter((m) => m.seq === 0)).toHaveLength(1);
+    expect(d.errors.some((e) => String(e).includes('already asked'))).toBe(true);
   });
 
   test('a pack the player imported themself is kept, not overwritten or marked shared', async () => {
@@ -185,12 +231,12 @@ describe('pack sharing', () => {
     const { host } = setup([BIG]);
     const g = joiner();
     const [h, l] = memoryPair();
-    let buffered = 0, drains: (() => void)[] = [];
+    let buffered = 0, drains: (() => void)[] = [], listeners = 0;
     const send = h.send.bind(h);
     const sent: string[] = [];
     Object.assign(h, {
       bufferedAmount: () => buffered,
-      onDrain: (f: () => void) => { drains.push(f); },
+      onDrain: (f: () => void) => { listeners++; drains.push(f); },
       send: (m: unknown) => { const s = JSON.stringify(m); sent.push(s); if (s.includes('"packChunk"')) buffered += 10 * MAX_CHUNK; send(m); },
     });
     host.accept(h);
@@ -201,5 +247,6 @@ describe('pack sharing', () => {
     const flush = () => { buffered = 0; const fs = drains; drains = []; for (const f of fs) f(); };
     for (let i = 0; i < 50 && !g.d.packs.has(BIG.id); i++) { flush(); await settle(g.guest); }
     expect(g.d.packs.get(BIG.id)!.entities).toEqual(BIG.entities);
+    expect(listeners).toBeLessThanOrEqual(chunks(sent).length); // M5: one drain listener per wait, not one per 100 ms
   });
 });

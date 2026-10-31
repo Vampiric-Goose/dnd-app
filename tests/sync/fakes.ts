@@ -5,7 +5,7 @@ import { Guest, type GuestDeps } from '../../src/lib/sync/guest.ts';
 import { Host, type HostDeps } from '../../src/lib/sync/host.ts';
 import { hlcNow, hlcReceive } from '../../src/lib/sync/hlc.ts';
 import { memoryPair, type Link } from '../../src/lib/sync/link.ts';
-import { latestClock, rebase, stamp } from '../../src/lib/sync/merge.ts';
+import { latestClock, mergeCharacter, rebase, stamp } from '../../src/lib/sync/merge.ts';
 import type { Campaign, CampaignSync, Character, Pack, PackMeta } from '../../src/lib/types.ts';
 import { fixtureIndex } from '../fixtures/content.ts';
 
@@ -46,16 +46,18 @@ export class Device {
     const rec = at ? stamp(prev, rebase(prev, c), at) : c;
     this.characters.set(c.id, clone({ ...rec, updatedAt: this.wall() }));
   }
-  /** R2, like db.characters.putSynced. */
+  /** R2, like db.characters.putSynced: never stamped, merged with the stored copy (I2). */
   putSynced(c: Character): void {
-    this.#advance(c.campaignId, (s) => hlcReceive(s.node, s.last, latestClock(c), this.wall()));
-    this.characters.set(c.id, clone({ ...c, updatedAt: this.wall() }));
+    const prev = this.characters.get(c.id);
+    const rec = prev && this.campaigns.get(c.campaignId ?? '')?.sync ? mergeCharacter(prev, c) : c;
+    this.#advance(c.campaignId, (s) => hlcReceive(s.node, s.last, latestClock(rec), this.wall()));
+    this.characters.set(c.id, clone({ ...rec, updatedAt: this.wall() }));
   }
-  /** Like db.characters.delete: a tombstone in a synced campaign. */
-  deleteChar(id: string): void {
+  /** Like db.characters.delete: a tombstone in a synced campaign, at the DM's clock `at` when given (the trash is the real db's). */
+  deleteChar(id: string, at?: string): void {
     const c = this.characters.get(id);
-    const at = this.#advance(c?.campaignId, (s) => hlcNow(s.node, s.last, this.wall()));
-    if (at) { const s = this.campaigns.get(c!.campaignId!)!.sync!; s.deleted = { ...s.deleted, [id]: at }; }
+    const t = this.#advance(c?.campaignId, (s) => (at ? hlcReceive(s.node, s.last, at, this.wall()) : hlcNow(s.node, s.last, this.wall())));
+    if (t) { const s = this.campaigns.get(c!.campaignId!)!.sync!; s.deleted = { ...s.deleted, [id]: at ?? t }; }
     this.characters.delete(id);
   }
   char(id: string): Character | undefined { return clone(this.characters.get(id)); }
@@ -90,7 +92,7 @@ export class Device {
       loadCharacters: async (cid) => [...this.characters.values()].filter((c) => c.campaignId === cid).map(clone),
       loadCharacter: async (id) => this.char(id),
       saveCharacter: async (c) => this.putSynced(c),
-      deleteCharacter: async (id) => this.deleteChar(id),
+      deleteCharacter: async (id, at) => this.deleteChar(id, at),
       packMeta: async () => this.packMeta(),
       savePack: async (p) => { this.packs.set(p.id, clone(p)); },
       onRoll: (e, from) => { this.rolls.push({ e, from }); },

@@ -41,6 +41,13 @@ const clocks = (v: unknown, latest: number) => isRec(v) && Object.keys(v).length
 /** Stage 3: a character's optional sync meta, `{ clock: Record<string, string>, gone: Record<string, string> }`. */
 const syncOk = (s: unknown) => { const latest = Date.now() + DAY; return isRec(s) && clocks(s.clock, latest) && clocks(s.gone, latest); };
 
+const finite = (v: unknown) => typeof v === 'number' && Number.isFinite(v);
+/** N3: the per-key state maps the merge splits: slotsUsed a list of at most 20 numbers, the other two records of at most 200 numbers. */
+const counts = (v: unknown) => isRec(v) && Object.keys(v).length <= 200 && Object.values(v).every(finite);
+const stateProblem = (s: Rec): string | undefined =>
+  !Array.isArray(s.slotsUsed) || s.slotsUsed.length > 20 || !s.slotsUsed.every(finite) ? 'has damaged state.slotsUsed'
+    : !counts(s.resourcesUsed) ? 'has damaged state.resourcesUsed' : !counts(s.hitDiceUsed) ? 'has damaged state.hitDiceUsed' : undefined;
+
 /** I2: a character deep enough that the sheet, the lists and the creator can read it without throwing. */
 export function characterProblem(r: unknown): string | undefined {
   const shallow = problem(r, SHAPES.character);
@@ -54,6 +61,8 @@ export function characterProblem(r: unknown): string | undefined {
   const bad = c.customEffects.findIndex((e) => !effectOk(e));
   if (bad >= 0) return `has a damaged custom effect (${bad + 1})`;
   if (c.sync !== undefined && !syncOk(c.sync)) return 'has damaged sync clocks';
+  const why = stateProblem(c.state as Rec);
+  if (why) return why;
   return entriesProblem(c.inventory as unknown[], 'inventory');
 }
 

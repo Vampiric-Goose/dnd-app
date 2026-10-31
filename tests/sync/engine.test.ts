@@ -1,11 +1,12 @@
 import 'fake-indexeddb/auto';
-import { beforeEach, describe, expect, test } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { deletedInCampaign, keepBoth, replacement } from '../../src/lib/backup.ts';
 import { db, resetDb } from '../../src/lib/db.ts';
 import { makeEntry } from '../../src/lib/items/inventory.ts';
 import type { RollEntry } from '../../src/lib/rolls.svelte.ts';
 import { newJoinCode, nextPlayerId, peerIdFor } from '../../src/lib/sync/code.ts';
 import { Guest } from '../../src/lib/sync/guest.ts';
-import { Host } from '../../src/lib/sync/host.ts';
+import { HELLO_TIMEOUT, Host } from '../../src/lib/sync/host.ts';
 import { hlcNow } from '../../src/lib/sync/hlc.ts';
 import { canon, latestClock, stamp } from '../../src/lib/sync/merge.ts';
 import { characterForPlayer } from '../../src/lib/sync/project.ts';
@@ -388,23 +389,29 @@ describe('Review Focus 4 (engine): rotating the code, removing a player', () => 
   });
 });
 
+/** A host on the real db. `beforeSave` runs once, between the host's load of a character and its save (I2). */
+function dbHost(o: { beforeSave?: () => Promise<void> } = {}) {
+  let hook = o.beforeSave;
+  return new Host({
+    loadCampaign: () => db.campaigns.get(CID),
+    updateSync: (fn) => db.campaigns.updateSync(CID, (s) => fn(s!)),
+    loadCharacters: () => db.characters.list(CID),
+    loadCharacter: async (id) => { const c = await db.characters.get(id); const h = hook; hook = undefined; await h?.(); return c; },
+    saveCharacter: async (c) => { await db.characters.putSynced(c); },
+    deleteCharacter: (id, by) => db.characters.delete(id, { by }),
+    index: fixtureIndex,
+    packMeta: () => db.packs.listMeta(),
+    loadPack: (id) => db.packs.get(id),
+  });
+}
+
 describe('with the real db (fake-indexeddb)', () => {
   beforeEach(resetDb);
 
   test('the DM side on the db: join, then a player edit and a DM edit merge, saved without new stamps', async () => {
     await db.campaigns.put(hosted({ A1: {} }));
     await db.characters.put({ ...char('ch1', CID), ownerId: 'A1' });
-    const host = new Host({
-      loadCampaign: () => db.campaigns.get(CID),
-      updateSync: (fn) => db.campaigns.updateSync(CID, (s) => fn(s!)),
-      loadCharacters: () => db.characters.list(CID),
-      loadCharacter: (id) => db.characters.get(id),
-      saveCharacter: (c) => db.characters.putSynced(c),
-      deleteCharacter: (id) => db.characters.delete(id),
-      index: fixtureIndex,
-      packMeta: () => db.packs.listMeta(),
-      loadPack: (id) => db.packs.get(id),
-    });
+    const host = dbHost();
     const a = player({ playerId: 'A1' }), n = player({ name: 'Nia' });
     const [h] = connect(host, a.guest);
     connect(host, n.guest);
@@ -441,11 +448,146 @@ describe('with the real db (fake-indexeddb)', () => {
     await expect(db.campaigns.updateSync('nope', (x) => x)).rejects.toThrow(/Could not save/);
   });
 
+  test('I2: a DM edit saved between the host loading a character and saving the merge survives', async () => {
+    await db.campaigns.put(hosted({ A1: {} }));
+    await db.characters.put({ ...char('ch1', CID), ownerId: 'A1' });
+    const host = dbHost();
+    const a = player({ playerId: 'A1' });
+    const [h] = connect(host, a.guest);
+    await settle(host, a.guest);
+    h.close();
+    await settle(host, a.guest);
+    const pc = a.d.char('ch1')!;
+    a.d.edit({ ...pc, details: { ...pc.details, notes: 'from the player' } });
+    const racy = dbHost({ beforeSave: async () => { const s = (await db.characters.get('ch1'))!; await db.characters.put({ ...s, state: { ...s.state, hp: 9 } }); } });
+    connect(racy, a.guest);
+    await settle(racy, a.guest);
+    const m = (await db.characters.get('ch1'))!;
+    expect([m.state.hp, m.details.notes]).toEqual([9, 'from the player']);
+  });
+
+  test('N1: two saves from one open sheet both land, in order, when the holder continues from what put returns', async () => {
+    await db.campaigns.put(hosted());
+    const loaded = await db.characters.put(char('x', CID));
+    const s1 = await db.characters.put({ ...loaded, state: { ...loaded.state, hp: 5 } });
+    const s2 = await db.characters.put({ ...s1, state: { ...s1.state, hp: 3 } });
+    expect([s2.state.hp, (await db.characters.get('x'))!.state.hp]).toEqual([3, 3]);
+    const [t] = await db.saveTogether({ characters: [{ ...s2, details: { ...s2.details, notes: 'n' } }] });
+    const t2 = await db.characters.put({ ...t, details: { ...t.details, notes: 'n2' } });
+    expect(t2.details.notes).toBe('n2');
+  });
+
+  test('R10: an import Replace overwrites every field with the file\'s, even fields stored later than the export', async () => {
+    await db.campaigns.put(hosted());
+    const exported = await db.characters.put({ ...char('x', CID), name: 'Old' });
+    const stored = await db.characters.put({ ...exported, state: { ...exported.state, hp: 5 }, details: { ...exported.details, notes: 'later' } });
+    const file = { ...exported, name: 'Restored', state: { ...exported.state, hp: 20 } }; // carries the export's sync
+    await db.characters.put(replacement(file, stored, false));
+    const after = (await db.characters.get('x'))!;
+    const strip = (c: Character) => canon({ ...c, sync: undefined, updatedAt: 0 });
+    expect(strip(after)).toBe(strip(file));
+  });
+
+  test('R9: a player delete goes to the DM\'s trash; restore brings it back to every device; delete permanently removes it', async () => {
+    await db.campaigns.put(hosted({ A1: {} }));
+    await db.characters.put({ ...char('x', CID), ownerId: 'A1', name: 'Vex' });
+    const host = dbHost();
+    const a = player({ playerId: 'A1' }), a2 = player({ playerId: 'A1' });
+    connect(host, a.guest);
+    const [h2] = connect(host, a2.guest);
+    await settle(host, a.guest, a2.guest);
+    a.d.deleteChar('x');
+    a.guest.characterChanged('x');
+    await settle(host, a.guest, a2.guest);
+    expect([await db.characters.get('x'), a2.d.char('x')]).toEqual([undefined, undefined]);
+    const trash = await db.trash.list(CID);
+    expect(trash.map((e) => [e.character.name, e.by])).toEqual([['Vex', 'A1']]);
+    h2.close(); // a2 goes offline still holding the tombstone
+    await settle(host, a2.guest);
+
+    await db.trash.restore(CID, 'x');
+    host.characterChanged('x');
+    await settle(host, a.guest);
+    expect((await db.characters.get('x'))!.name).toBe('Vex');
+    expect(a.d.char('x')!.name).toBe('Vex');
+    expect(a.d.campaigns.get(CID)!.sync!.deleted).toEqual({});
+    expect(await db.trash.list(CID)).toEqual([]);
+    connect(host, a2.guest); // re-sends its old tombstone: outdated by the restore
+    await settle(host, a.guest, a2.guest);
+    expect([!!(await db.characters.get('x')), a2.d.char('x')?.name]).toEqual([true, 'Vex']);
+
+    await db.characters.delete('x'); // the DM's own delete also goes to the trash
+    expect((await db.trash.list(CID)).map((e) => e.by)).toEqual(['DM']);
+    await db.trash.purge(CID, 'x');
+    expect([await db.trash.list(CID), await db.characters.get('x')]).toEqual([[], undefined]);
+  });
+
+  test('I1: re-importing a deleted character adds it under a new id, which sync keeps', async () => {
+    await db.campaigns.put(hosted({ A1: {} }));
+    const file = await db.characters.put({ ...char('x', CID), ownerId: 'A1', name: 'Vex' });
+    const host = dbHost();
+    const a = player({ playerId: 'A1' });
+    const [h] = connect(host, a.guest);
+    await settle(host, a.guest);
+    a.d.deleteChar('x');
+    a.guest.characterChanged('x');
+    await settle(host, a.guest);
+    h.close();
+    await settle(host, a.guest);
+    expect(await deletedInCampaign(file)).toBe(true);
+    const copy = await db.characters.put(keepBoth(file));
+    connect(host, a.guest); // still holds the tombstone for x
+    await settle(host, a.guest);
+    expect([(await db.characters.get(copy.id))?.name, a.d.char(copy.id)?.name, await db.characters.get('x')]).toEqual(['Vex', 'Vex', undefined]);
+  });
+
+  test('M8: a backup restored over a hosted campaign keeps its code, unions players and tombstones, and keeps the later clock', async () => {
+    const L1 = '001800000000000:000000:aaaaaaaa', L2 = '001800000001000:000000:bbbbbbbb';
+    await db.campaigns.put({ ...hosted({ A1: {}, A2: { name: 'Bo' } }), sync: { role: 'dm', code: 'NEWCODE23456', node: 'dmnode01', last: L2, players: { A1: {}, A2: { name: 'Bo' } }, deleted: { x: L2 } } });
+    const old: Campaign = { ...hosted(), sync: { role: 'dm', code: CODE, node: 'oldnode1', last: L1, players: { A1: { name: 'Ann', removed: true } }, deleted: { y: L1 } } };
+    await db.restore({ campaigns: [old], characters: [], items: [], packs: [], blobs: [] });
+    const s = (await db.campaigns.get(CID))!.sync!;
+    expect([s.code, s.last, s.players, s.deleted]).toEqual(['NEWCODE23456', L2, { A1: { name: 'Ann', removed: true }, A2: { name: 'Bo' } }, { x: L2, y: L1 }]);
+    expect(s.node).not.toMatch(/dmnode01|oldnode1/);
+  });
+
   test('R5: restoring a backup gives a synced campaign a new clock node and keeps its code and role', async () => {
     await db.restore({ campaigns: [hosted()], characters: [], items: [], packs: [], blobs: [] });
     const s = (await db.campaigns.get(CID))!.sync!;
     expect([s.role, s.code]).toEqual(['dm', CODE]);
     expect(s.node).toMatch(/^[0-9a-f]{8}$/);
     expect(s.node).not.toBe('dmnode01');
+  });
+});
+
+describe('handshake', () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  test('M6: a link that has not said hello within 15 s is closed; one that has stays', async () => {
+    vi.useFakeTimers();
+    const { host } = dm();
+    const quiet = rawLink(), talker = rawLink();
+    host.accept(quiet.link);
+    host.accept(talker.link);
+    talker.deliver({ t: 'hello', code: CODE });
+    await host.idle();
+    vi.advanceTimersByTime(HELLO_TIMEOUT);
+    expect([quiet.closed(), talker.closed()]).toEqual([true, false]);
+  });
+
+  test('M7: a first join stores the campaign and its player sync in one write', async () => {
+    const { host } = dm();
+    const d = new Device();
+    const calls: string[] = [];
+    const deps = d.guestDeps(CODE);
+    const guest = new Guest({
+      ...deps,
+      saveCampaign: async (c) => { calls.push(`save:${c.sync?.role}:${c.sync?.playerId}`); return deps.saveCampaign(c); },
+      updateSync: async (id, fn) => { calls.push('updateSync'); return deps.updateSync(id, fn); },
+    });
+    connect(host, guest);
+    await settle(host, guest);
+    expect(calls).toEqual(['save:player:A1']);
+    expect(d.campaigns.get(CID)!.sync).toMatchObject({ role: 'player', code: CODE, playerId: 'A1' });
   });
 });

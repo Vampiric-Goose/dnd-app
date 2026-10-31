@@ -14,7 +14,10 @@ type Path = readonly string[];
 
 const TOP = ['name', 'campaignId', 'ownerId', 'imported', 'customEffects'] as const;
 const SPLIT = ['build', 'state', 'details', 'currency', 'overrides'] as const;
-/** R7: keyed maps split one level deeper, so different keys edited on different devices all survive. */
+/**
+ * R7: keyed maps split one level deeper, so different keys edited on different devices all survive.
+ * N4: a whole-map reset is per-key deletes of the keys the resetting device had, so a key another device added unseen survives it.
+ */
 const DEEP = new Set(['build.choices', 'build.spells', 'build.subclasses', 'state.resourcesUsed', 'state.hitDiceUsed', 'state.slotsUsed']);
 /** An array indexed by spell level: each index is a path, and a missing index reads as 0 (as the sheet reads it). */
 const LIST = 'state.slotsUsed';
@@ -77,9 +80,14 @@ function valueAt(r: unknown, p: Path): unknown {
   return v === undefined && isList(p) ? 0 : v;
 }
 
-/** slotsUsed from its index → count map: holes 0, no trailing zeros. */
+const MAX_SLOT_LEVELS = 20;
+/** slotsUsed from its index → count map: holes 0, no trailing zeros. N3: only indexes 0–19 (a crafted key must not allocate), no spread. */
 function toList(m: Rec): number[] {
-  const len = Math.max(0, ...Object.keys(m).filter((k) => own(m, k) !== 0).map((k) => Number(k) + 1).filter(Number.isInteger));
+  let len = 0;
+  for (const k of Object.keys(m)) {
+    const i = Number(k);
+    if (Number.isInteger(i) && i >= 0 && i < MAX_SLOT_LEVELS && own(m, k) !== 0 && i + 1 > len) len = i + 1;
+  }
   return Array.from({ length: len }, (_, i) => (own(m, String(i)) as number | undefined) ?? 0);
 }
 

@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest';
 import { hlcCompare, hlcNow, hlcReceive, type Hlc } from '../../src/lib/sync/hlc.ts';
 import { canon, latestClock, mergeCharacter, rebase, stamp, SYNC_PATHS, type Synced } from '../../src/lib/sync/merge.ts';
 import type { Character, InventoryEntry, ItemDef } from '../../src/lib/types.ts';
+import { characterProblem } from '../../src/lib/recordShape.ts';
 import { char } from '../fixtures/records.ts';
 
 const MIN = 60_000;
@@ -377,5 +378,26 @@ describe('property: three replicas converge', () => {
       const addOrder = ids(fin).filter((id) => added.has(id));
       expect(addOrder).toEqual([...addOrder].sort((p, q) => hlcCompare(added.get(p)!, added.get(q)!)));
     }
+  });
+});
+
+describe('N3: crafted state maps', () => {
+  const crafted = (state: Record<string, unknown>) => ({ ...char('c', 'camp'), state: { ...char('c').state, ...state } }) as unknown as Character;
+  const huge = crafted({ slotsUsed: Array.from({ length: 300_000 }, () => 1) });
+  const far = crafted({ slotsUsed: { 3000000: 1 } });
+  const farther = crafted({ slotsUsed: { 4000000000: 1 } });
+
+  test('characterProblem refuses them', () => {
+    for (const c of [huge, far, farther]) expect(characterProblem(c)).toMatch(/slotsUsed/);
+    expect(characterProblem(crafted({ slotsUsed: [1, Infinity] }))).toMatch(/slotsUsed/);
+    expect(characterProblem(crafted({ resourcesUsed: { Rage: 'x' } }))).toMatch(/resourcesUsed/);
+    expect(characterProblem(crafted({ hitDiceUsed: Object.fromEntries(Array.from({ length: 201 }, (_, i) => [i, 1])) }))).toMatch(/hitDiceUsed/);
+    expect(characterProblem(crafted({ slotsUsed: [1, 0, 2], resourcesUsed: { Rage: 1 }, hitDiceUsed: { 8: 1 } }))).toBeUndefined();
+  });
+
+  test('and the merge copes without allocating by key or spreading', () => {
+    const ok = stamp(undefined, char('c', 'camp'), hlcNow('n', undefined, T));
+    for (const c of [far, farther]) expect((mergeCharacter(ok, stamp(ok, c, hlcNow('m', undefined, T + 1))).state.slotsUsed as number[]).length).toBeLessThanOrEqual(20);
+    expect(() => mergeCharacter(ok, stamp(ok, huge, hlcNow('m', undefined, T + 1)))).not.toThrow();
   });
 });

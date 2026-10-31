@@ -42,6 +42,8 @@ function poisoned(v: unknown, depth = 0): boolean {
 const str = (v: unknown, max: number): v is string => typeof v === 'string' && v.length <= max;
 const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 export const PLAYER_ID = /^[A-Z][1-9]$/;
+/** A hybrid logical clock value (hlc.ts). */
+export const HLC = /^\d{15}:\d{6}:[A-Za-z0-9_-]{1,16}$/;
 
 /** A public roll, rebuilt from its known fields only. Undefined when any is missing or the roll is private (R6: never sent). */
 export function cleanRoll(e: unknown): RollEntry | undefined {
@@ -65,7 +67,7 @@ export function parseGuestMessage(raw: unknown): GuestMsg | { error: string } {
       return why ? { error: `character ${why}` } : { t: 'chars', characters: raw.characters as Synced<Character>[] };
     }
     case 'deleteChar':
-      return str(raw.id, 100) && str(raw.at, 64) ? { t: 'deleteChar', id: raw.id, at: raw.at } : { error: 'bad deleteChar' };
+      return str(raw.id, 100) && typeof raw.at === 'string' && HLC.test(raw.at) ? { t: 'deleteChar', id: raw.id, at: raw.at } : { error: 'bad deleteChar' };
     case 'roll': {
       const entry = cleanRoll(raw.entry);
       return entry ? { t: 'roll', entry } : { error: 'bad roll' };

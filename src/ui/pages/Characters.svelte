@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { exportRecord, importRecord, keepBoth, restoreSecrets } from '../../lib/backup.ts';
+  import { deletedInCampaign, exportRecord, importRecord, keepBoth, replacement } from '../../lib/backup.ts';
   import { characterSummary } from '../../lib/character/play.ts';
-  import { db } from '../../lib/db.ts';
+  import { db, type TrashEntry } from '../../lib/db.ts';
   import { characterListProblem } from '../../lib/recordShape.ts';
   import { navigate } from '../../lib/router.svelte.ts';
   import { app, getFullIndex } from '../../lib/store.svelte.ts';
@@ -17,9 +17,14 @@
   let error = $state('');
   let notice = $state('');
   let deleting: Character | undefined = $state.raw();
+  let trash: (TrashEntry & { campaignId: string })[] = $state.raw([]); // R9: deleted characters of the campaigns this device hosts
+  let purging: string | undefined = $state();
+
+  const hosted = (id?: string) => app.campaigns.find((x) => x.id === id)?.sync?.role === 'dm';
 
   async function load() {
     try {
+      trash = (await Promise.all(app.campaigns.filter((x) => x.sync?.role === 'dm').map(async (x) => (await db.trash.list(x.id)).map((e) => ({ ...e, campaignId: x.id }))))).flat();
       const all = await db.characters.list();
       damaged = all.filter((c) => characterListProblem(c));
       chars = all.filter((c) => !characterListProblem(c)).sort((a, b) => a.name.localeCompare(b.name));
@@ -62,6 +67,10 @@
         ({ data: c, taken, playerView } = rec);
       }
       if (c.campaignId && !app.campaigns.some((x) => x.id === c.campaignId)) { c = { ...c }; delete c.campaignId; } // its campaign isn't on this device
+      if (await deletedInCampaign(c)) { // I1: under its old id, sync would delete it again
+        await save(keepBoth(c), edits, ' It had been deleted from its campaign, so it was added as a new copy.');
+        return;
+      }
       if (taken) clash = { c, edits, existing: (await db.characters.get(c.id))?.name || 'Unnamed', playerView };
       else await save(c, edits);
     } catch (err) {
@@ -70,9 +79,9 @@
   }
 
   // importRecord and importPdf don't save (N2): this is where the character is put.
-  async function save(c: Character, edits: string[]) {
+  async function save(c: Character, edits: string[], note = '') {
     await db.characters.put(c);
-    notice = `Imported ${c.name}.${edits.length ? ` Changes made in the PDF were applied: ${edits.join(', ')}.` : ''}`;
+    notice = `Imported ${c.name}.${note}${edits.length ? ` Changes made in the PDF were applied: ${edits.join(', ')}.` : ''}`;
     await load();
   }
 
@@ -80,9 +89,8 @@
     const k = clash!;
     clash = undefined;
     try {
-      // R56: Replace with a Player-view file puts the real items back on the entries the stored character still has.
-      const stored = how === 'replace' && k.playerView ? await db.characters.get(k.c.id) : undefined;
-      await save(how === 'keep' ? keepBoth(k.c) : stored ? restoreSecrets(k.c, stored) : k.c, k.edits);
+      // R10: Replace overwrites every field (JSON and PDF alike); R56: a Player-view file keeps the real items of the stored character.
+      await save(how === 'keep' ? keepBoth(k.c) : replacement(k.c, k.playerView ? await db.characters.get(k.c.id) : undefined, k.playerView), k.edits);
     } catch (err) {
       error = message(err);
     }
@@ -91,7 +99,7 @@
   // Mirrors the Items page: damaged records are hidden, and this is how they are cleared out.
   async function removeDamaged() {
     try {
-      for (const d of damaged) await db.characters.delete(d.id);
+      for (const d of damaged) await db.characters.delete(d.id, { permanent: true });
       confirmingRemove = false;
       await load();
     } catch (e) {
@@ -107,6 +115,27 @@
       await load();
     } catch (e) {
       error = message(e);
+    }
+  }
+
+  // R9: the session (Task 5) re-sends a restored character to its owner's devices.
+  async function restore(e: TrashEntry & { campaignId: string }) {
+    try {
+      await db.trash.restore(e.campaignId, e.character.id);
+      notice = `Restored ${e.character.name || 'Unnamed'}.`;
+      await load();
+    } catch (err) {
+      error = message(err);
+    }
+  }
+
+  async function purge(e: TrashEntry & { campaignId: string }) {
+    try {
+      await db.trash.purge(e.campaignId, e.character.id);
+      purging = undefined;
+      await load();
+    } catch (err) {
+      error = message(err);
     }
   }
 </script>
@@ -180,9 +209,35 @@
         </div>
         {#if deleting?.id === c.id}
           <div role="alertdialog" aria-label="Confirm delete" class="row">
-            <p>Delete “{c.name}”? This cannot be undone.</p>
+            <p>Delete “{c.name}”? {hosted(c.campaignId) ? 'It moves to Deleted characters below, where you can restore it.' : 'This cannot be undone.'}</p>
             <button class="danger" onclick={confirmDelete}>Delete character</button>
             <button onclick={() => (deleting = undefined)}>Keep it</button>
+          </div>
+        {/if}
+      </li>
+    {/each}
+  </ul>
+{/if}
+
+{#if trash.some((e) => filter === 'all' || filter === e.campaignId)}
+  <h2>Deleted characters</h2>
+  <ul class="plain">
+    {#each trash.filter((e) => filter === 'all' || filter === e.campaignId) as e (e.character.id)}
+      {@const name = typeof e.character.name === 'string' && e.character.name ? e.character.name : 'Unnamed'}
+      <li class="card">
+        <div class="row">
+          <strong>{name}</strong>
+          <span class="muted">deleted by {e.by === 'DM' ? 'you' : `player ${e.by}`} on {new Date(e.at).toLocaleDateString()}{#if campaignName(e.campaignId)} · {campaignName(e.campaignId)}{/if}</span>
+        </div>
+        <div class="row">
+          <button onclick={() => restore(e)}>Restore {name}</button>
+          <button class="danger" onclick={() => (purging = e.character.id)}>Delete {name} permanently</button>
+        </div>
+        {#if purging === e.character.id}
+          <div role="alertdialog" aria-label="Confirm permanent delete" class="row">
+            <p>Delete “{name}” permanently? This cannot be undone.</p>
+            <button class="danger" onclick={() => purge(e)}>Delete permanently</button>
+            <button onclick={() => (purging = undefined)}>Keep it</button>
           </div>
         {/if}
       </li>
