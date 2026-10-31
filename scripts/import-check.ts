@@ -28,7 +28,9 @@ for (const name of sel.use) {
 
 const srd: Pack = JSON.parse(readFileSync(new URL('../src/data/srd.json', import.meta.url), 'utf8'));
 // The importer resolves `_copy` from the batch itself; nothing is stored between runs here.
+const started = performance.now();
 const r = await import5etools(files, { index: new ContentIndex([srd]), rawLookup: async () => undefined });
+console.log(`Import took ${((performance.now() - started) / 1000).toFixed(1)} s\n`);
 
 // R52: the importer is a whitelist. What came in, per source, and what was refused and why.
 const label = (s: string, hb = false) => `${s.padEnd(12)} ${sourceLabel(s, hb)}`;
@@ -38,6 +40,7 @@ for (const { p, n } of accepted) console.log(`  ${label(p.source, p.homebrew)}: 
 const refused = (by: Record<string, number>, hb = false) => Object.entries(by).sort(([a], [b]) => a.localeCompare(b)).map(([s, n]) => `  ${label(s, hb)}: ${n}`);
 console.log(`\nSkipped 2024 per source (${r.skipped2024} total):`);
 for (const l of refused(r.skipped.rules2024)) console.log(l);
+console.log(`Skipped 2024 by kind: ${Object.entries(r.skipped.rules2024Kinds).sort(([a], [b]) => a.localeCompare(b)).map(([k, n]) => `${k} ${n}`).join(', ') || 'none'}`);
 console.log(`\nSkipped unknown per source (${r.skippedUnknown} total):`);
 for (const l of refused(r.skipped.unknown)) console.log(l);
 const tainted = r.packs.flatMap(p => [p.source, ...p.entities.map(e => e.source)]).filter(s => is2024Source(s));

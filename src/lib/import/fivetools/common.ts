@@ -15,6 +15,10 @@ export interface Ctx {
   ref(kind: EntityKind, name: string, source: string): string;
   /** Class-list entries for a spell from the spell-class lookup files in the batch. */
   spellClasses(name: string, source: string): ClassRef[];
+  /** A legendary group (lair actions, regional effects), `_copy` resolved; undefined when it is missing or from a refused source. */
+  legendaryGroup?(name: string, source: string): Raw | undefined;
+  /** A problem that drops part of an entity, not the entity. */
+  warn?(msg: string): void;
 }
 /** One spell class-list entry; `variantOf` (the books defining it) marks a classVariant (an expanded class list). */
 export interface ClassRef { name: string; source: string; variantOf?: string[] }

@@ -10,12 +10,13 @@ import { condition } from './conditions.ts';
 import { rawKey, resolveCopy } from './copy.ts';
 import { feat } from './feats.ts';
 import { expandVariant, item, variantApplies, viewOf } from './items.ts';
+import { monster } from './monsters.ts';
 import { optionalFeature } from './optionalFeatures.ts';
 import { race, subrace, subraceName } from './races.ts';
 import { spell, spellKey, spellLookup } from './spells.ts';
 
 /** Entities the importer refused, by upper-cased source: 2024 rules, or a source that is neither official 2014 nor declared homebrew. */
-export interface Skipped { rules2024: Record<string, number>; unknown: Record<string, number> }
+export interface Skipped { rules2024: Record<string, number>; unknown: Record<string, number>; /** The 2024 refusals by 5etools key ('monster', 'spell', ...). */ rules2024Kinds: Record<string, number> }
 export interface ImportResult {
   packs: Pack[]; raw: [string, unknown][]; errors: { file: string; message: string }[]; warnings: string[];
   skipped2024: number; skippedUnknown: number; skipped: Skipped;
@@ -25,9 +26,11 @@ type Converter = (r: Raw, ctx: Ctx, id: string, name: string) => Entity;
 const CONVERT: Record<string, [EntityKind, Converter]> = {
   race: ['race', race], subrace: ['subrace', subrace], background: ['background', background], feat: ['feat', feat],
   optionalfeature: ['optionalFeature', optionalFeature], condition: ['condition', condition], spell: ['spell', spell],
-  baseitem: ['item', item], item: ['item', item],
+  baseitem: ['item', item], item: ['item', item], monster: ['monster', monster],
 };
-const CONTENT_KEYS = [...Object.keys(CONVERT), 'magicvariant', ...CLASS_KEYS];
+// Legendary groups and monster templates are side data for monsters: whitelisted, copy-resolved and kept raw like entities, never converted.
+const SIDE_KEYS = ['legendaryGroup', 'monsterTemplate'] as const;
+const CONTENT_KEYS = [...Object.keys(CONVERT), 'magicvariant', ...SIDE_KEYS, ...CLASS_KEYS];
 const META_KEYS = ['book', 'adventure'];
 // A reference to a core book's item falls back to the SRD entity of the same name (the book's SRD subset).
 const isCore = (source: string) => sourceInfo(source)?.kind === 'core';
@@ -94,13 +97,13 @@ export async function import5etools(
 ): Promise<ImportResult> {
   const { index } = ctx;
   const errors: ImportResult['errors'] = [], warnings: string[] = [], raw: [string, unknown][] = [];
-  const skipped: Skipped = { rules2024: {}, unknown: {} };
+  const skipped: Skipped = { rules2024: {}, unknown: {}, rules2024Kinds: {} };
   const unknownIn = new Map<string, Map<string, number>>(); // file -> source -> entries skipped as unrecognised
   const homebrewSources = new Set<string>(), allDeclared = new Set<string>();
   const packNames = new Map<string, string>(), lookups: Map<string, ClassRef[]>[] = [];
-  const tally = (why: Reject, source: string, file: string) => {
+  const tally = (why: Reject, source: string, file: string, key: string) => {
     const s = up(source);
-    if (why === '2024') { skipped.rules2024[s] = (skipped.rules2024[s] ?? 0) + 1; return; }
+    if (why === '2024') { skipped.rules2024[s] = (skipped.rules2024[s] ?? 0) + 1; skipped.rules2024Kinds[key] = (skipped.rules2024Kinds[key] ?? 0) + 1; return; }
     skipped.unknown[s] = (skipped.unknown[s] ?? 0) + 1;
     const f = unknownIn.get(file) ?? new Map<string, number>();
     f.set(s, (f.get(s) ?? 0) + 1);
@@ -191,17 +194,36 @@ export async function import5etools(
     if (x) throw new CopyRejected(x.why, x.source);
     return r;
   };
+  /**
+   * A template or legendary group a monster names (batch first, then stored, its own `_copy` resolved).
+   * One from a refused source is left out with a warning (R52). A missing template fails the monster, like a missing `_copy` base;
+   * a missing legendary group only costs the lair text, so it is a warning.
+   */
+  const side = async (kind: (typeof SIDE_KEYS)[number], ref: Raw, warn: (msg: string) => void): Promise<Raw | undefined> => {
+    const what = `${kind === 'monsterTemplate' ? 'template' : 'legendary group'} "${ref?.name}" (${ref?.source})`;
+    try {
+      if (typeof ref?.name !== 'string' || typeof ref?.source !== 'string') fail(`${what} is malformed`);
+      const r = await lookup(rawKey(kind, ref.name, ref.source));
+      return r ? await resolveCopy(kind, r, lookup, warn) : fail(`${what} not found`);
+    } catch (err) {
+      if (err instanceof CopyRejected) warn(`${what} ignored: ${err.source} is not 2014 official content`);
+      else if (kind === 'monsterTemplate') throw err;
+      else warn(`${message(err)}; ignored`);
+    }
+    return undefined;
+  };
   const live: { file: string; key: string; r: Raw; label: string }[] = [];
   for (const e of found) {
     const label = `${e.key} "${e.r?.name ?? '?'}"`;
+    const warn = (m: string) => warnings.push(`${e.file}: ${label}: ${m}`);
     try {
       const early = refuse(e.key, e.r, e.declared); // before _copy: a refused class's copies need not resolve
-      if (early) { tally(early.why, early.source, e.file); continue; }
-      const r = await resolveCopy(e.key, e.r, lookup, m => warnings.push(`${e.file}: ${label}: ${m}`), CLASS_KEYS.has(e.key) ? classRawKey : undefined);
+      if (early) { tally(early.why, early.source, e.file, e.key); continue; }
+      const r = await resolveCopy(e.key, e.r, lookup, warn, { keyOf: CLASS_KEYS.has(e.key) ? classRawKey : undefined, template: ref => side('monsterTemplate', ref, warn) });
       const bad = invalid(e.key, r); // a copy can inherit a bad name or source
       if (bad) fail(bad);
       const late = refuse(e.key, r, e.declared);
-      if (late) { tally(late.why, late.source, e.file); continue; }
+      if (late) { tally(late.why, late.source, e.file, e.key); continue; }
       const s = sourceOf(e.key, r);
       if (s !== undefined && classifySource(s, e.declared) === 'homebrew') homebrewSources.add(up(s));
       live.push({ ...e, r, label });
@@ -209,7 +231,7 @@ export async function import5etools(
       if (rk) raw.push([rk, r]);
     } catch (err) {
       if (err instanceof CopyRejected) {
-        tally(err.why, err.source, e.file);
+        tally(err.why, err.source, e.file, e.key);
         if (err.why === '2024') warnings.push(`${e.file}: ${label}: skipped, it is a copy of ${err.source} (2024 rules)`);
       } else errors.push({ file: e.file, message: `${label}: ${message(err)}` });
     }
@@ -234,12 +256,19 @@ export async function import5etools(
     // A failure here resurfaces as this entity's conversion error in step 4.
     try { if (kind && name !== undefined && r.source) refs.set(refKey(kind, name, r.source), srdTwin(kind, name, r)?.id ?? entityId(kind, name, r.source)); } catch { /* reported in step 4 */ }
   }
+  const groups = new Map<string, Raw | undefined>(); // the legendary groups the batch's monsters name, by raw key
+  for (const { key, r, file, label } of live) {
+    const g = r.legendaryGroup, k = key === 'monster' && g ? rawKey('legendaryGroup', String(g.name), String(g.source)) : undefined;
+    if (k && !groups.has(k)) groups.set(k, await side('legendaryGroup', g, m => warnings.push(`${file}: ${label}: ${m}`)));
+  }
   const conv: Ctx = {
     index,
     listed: source => { const v = classifySource(source, allDeclared); return v === 'official' || v === 'homebrew'; },
     ref: (kind, name, source) => refs.get(refKey(kind, name, source)) ?? index.find(kind, name, source)?.id
       ?? (isCore(source) ? index.find(kind, name, 'SRD')?.id : undefined) ?? entityId(kind, name, source),
     spellClasses: (name, source) => lookups.flatMap(l => l.get(spellKey(name, source)) ?? []),
+    legendaryGroup: (name, source) => groups.get(rawKey('legendaryGroup', name, source)),
+    warn: msg => warnings.push(msg),
   };
 
   // 4. Convert. An entity overlapping the SRD becomes a text patch on it.

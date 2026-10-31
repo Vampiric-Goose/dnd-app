@@ -1,4 +1,4 @@
-// Picks the files of a 5etools `data/` folder that the stage-1 importer can use. Pure (no DOM, no Node): the Packs page and scripts/import-check.ts share it.
+// Picks the files of a 5etools `data/` folder that the importer can use. Pure (no DOM, no Node): the Packs page and scripts/import-check.ts share it.
 
 /** Files at the data root the importer reads (races, feats, ... and the book/adventure lists that carry pack names). */
 const TOP = ['races', 'backgrounds', 'feats', 'optionalfeatures', 'conditionsdiseases', 'books', 'adventures', 'items-base', 'items', 'magicvariants'].map(n => `${n}.json`);
@@ -7,11 +7,13 @@ const GENERATED = ['generated/gendata-spell-source-lookup.json'];
 /** Files that identify a data root. Three distinct hits are needed, so one homebrew `feats.json` is not mistaken for a 5etools folder. */
 const MARKERS = [...TOP, 'class/index.json', 'spells/index.json', ...GENERATED];
 const ALLOWED_DIR = /^(class|spells)\/[^/]+\.json$/;
+/** The bestiary files, their legendary groups (lair actions) and the monster templates; not its index.json, fluff or Foundry files. */
+const BESTIARY = /^bestiary\/(bestiary-[^/]+|legendarygroups|template)\.json$/;
 
 export const HOMEBREW_MAX_BYTES = 5 * 1024 * 1024;
 export const IGNORED_DIRS = new Set(['node_modules', '.git']);
 /** Skip reasons in display order; the strings are shown to the user as is. */
-const REASONS = ['fluff', 'Foundry', 'adventures/books', 'monsters (stage 2)', 'other', 'over 5 MB'] as const;
+const REASONS = ['fluff', 'Foundry', 'adventures/books', 'other', 'over 5 MB'] as const;
 type Reason = (typeof REASONS)[number];
 
 export interface DataSelection { use: string[]; skipped: { reason: string; count: number }[]; root: string | null }
@@ -34,15 +36,14 @@ function findRoot(paths: string[]): string | null {
 function why(rel: string): Reason | undefined {
   const base = rel.slice(rel.lastIndexOf('/') + 1);
   if (rel.startsWith('adventure/') || rel.startsWith('book/')) return 'adventures/books';
-  if (rel.startsWith('bestiary/')) return 'monsters (stage 2)';
   if (base.startsWith('foundry')) return 'Foundry';
   if (base.startsWith('fluff-')) return 'fluff';
-  return TOP.includes(rel) || GENERATED.includes(rel) || ALLOWED_DIR.test(rel) ? undefined : 'other';
+  return TOP.includes(rel) || GENERATED.includes(rel) || ALLOWED_DIR.test(rel) || BESTIARY.test(rel) ? undefined : 'other';
 }
 
 /**
  * Which of these relative paths (`webkitRelativePath` style, `/`-separated) to read.
- * With a recognised 5etools data root: the stage-1 allowlist. Without one the folder is homebrew: every .json under 5 MB
+ * With a recognised 5etools data root: the allowlist. Without one the folder is homebrew: every .json under 5 MB
  * (`sizeOf` gives bytes; unknown sizes pass), and the importer's own source rules decide what is accepted.
  * `root` is the data folder's path prefix ('' when the paths start inside it), or null for homebrew. Non-.json files and node_modules/.git are ignored.
  */

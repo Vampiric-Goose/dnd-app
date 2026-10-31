@@ -8,17 +8,18 @@ const dataFiles = [
   'class/index.json', 'class/class-fighter.json', 'class/class-wizard.json',
   'spells/index.json', 'spells/sources.json', 'spells/spells-phb.json', 'spells/spells-xge.json',
   'generated/gendata-spell-source-lookup.json',
+  'bestiary/bestiary-mm.json', 'bestiary/bestiary-tst.json', 'bestiary/legendarygroups.json', 'bestiary/template.json',
 ];
 const unused = [
   'fluff-races.json', 'fluff-items.json', 'class/fluff-class-fighter.json', 'class/fluff-index.json', 'spells/fluff-spells-phb.json',
   'foundry-feats.json', 'foundry-items.json', 'class/foundry.json', 'spells/foundry.json',
   'adventure/adventure-lmop.json', 'adventure/adventure-cos.json', 'book/book-phb.json',
-  'bestiary/bestiary-mm.json', 'bestiary/fluff-bestiary-mm.json', 'bestiary/index.json',
+  'bestiary/fluff-bestiary-mm.json', 'bestiary/foundry.json', 'bestiary/index.json',
   'actions.json', 'deities.json', 'generated/gendata-subclass-lookup.json', 'generated/bookref-quick.json',
 ];
 const under = (prefix: string, list: string[]) => list.map(p => prefix + p);
 const reasons = (s: ReturnType<typeof selectDataFiles>) => Object.fromEntries(s.skipped.map(x => [x.reason, x.count]));
-const expectedSkips = { fluff: 5, Foundry: 4, 'adventures/books': 3, 'monsters (stage 2)': 3, other: 4 };
+const expectedSkips = { fluff: 6, Foundry: 5, 'adventures/books': 3, other: 5 }; // the bestiary, its legendary groups and templates are read; its fluff, Foundry and index files are not
 
 test('a data/ folder gives exactly the allowlisted files, and everything else is skipped by reason', () => {
   const s = selectDataFiles(under('data/', [...unused, ...dataFiles]));

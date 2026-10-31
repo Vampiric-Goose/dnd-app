@@ -10,7 +10,7 @@ const sub = (classSource: string) => ({ _meta: { sources: [{ json: 'OtherBrew' }
 test("a subclass in file B of file A's homebrew class is accepted; the same with classSource XPHB is rejected", async () => {
   const ok = await runRaw({ 'a.json': brewClass, 'b.json': sub('MyBrew') });
   expect(names(ok)).toEqual(['Mystic', 'Order']);
-  expect(ok.skipped).toEqual({ rules2024: {}, unknown: {} });
+  expect(ok.skipped).toEqual({ rules2024: {}, unknown: {}, rules2024Kinds: {} });
   const bad = await runRaw({ 'a.json': brewClass, 'b.json': sub('XPHB') });
   expect(names(bad)).toEqual(['Mystic']);
   expect(bad.skipped.rules2024).toEqual({ XPHB: 1 });
