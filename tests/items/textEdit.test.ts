@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest';
 import { redactionTexts } from '../../src/lib/content/richtext.ts';
 import { pruneRevealed, revealedView } from '../../src/lib/items/playerView.ts';
-import { editableToRich, expandShorthand, nextRedactionId, richToEditable, wrapRedaction } from '../../src/lib/items/textEdit.ts';
+import { editableToRich, expandShorthand, expandWithCaret, nextRedactionId, richToEditable, wrapRedaction } from '../../src/lib/items/textEdit.ts';
 import type { ItemDef, RichText } from '../../src/lib/types.ts';
 
 test('editable text round-trips', () => {
@@ -50,6 +50,23 @@ test('R42: expandShorthand turns ||x|| into id-based redactions', () => {
   const inside = '{{redact:r1}}a || b || c{{/redact}}';
   expect(expandShorthand(inside, [])).toBe(inside); // inside an existing span: left alone
   expect(expandShorthand('plain', [])).toBe('plain');
+});
+
+test('expandShorthand leaves || inside a {@tag} alone', () => {
+  const tag = 'see {@spell fireball||Fireball} and {@filter x|y||z} here';
+  expect(expandShorthand(tag, [])).toBe(tag);
+  expect(expandShorthand(`||${tag}||`, [])).toBe(`{{redact:r1}}${tag}{{/redact}}`); // a pair around a tag still pairs
+  expect(expandShorthand('{@tag a||b} ||c|| {@tag d||e}', [])).toBe('{@tag a||b} {{redact:r1}}c{{/redact}} {@tag d||e}');
+  expect(expandShorthand('{@tag open||x', [])).toBe('{@tag open||x'); // unclosed tag: its lone || stays literal
+});
+
+test('expandWithCaret keeps the caret out of the markers', () => {
+  // Typing || in front of a lone || makes a pair that ends after the caret: the caret goes after the opener.
+  expect(expandWithCaret('||x ||y', [], 2)).toEqual({ text: '{{redact:r1}}x {{/redact}}y', caret: 13 });
+  expect(expandWithCaret('a ||b||', [], 7)).toEqual({ text: 'a {{redact:r1}}b{{/redact}}', caret: 27 }); // typed the closer: caret at the end
+  expect(expandWithCaret('||b|| tail', [], 10)).toEqual({ text: '{{redact:r1}}b{{/redact}} tail', caret: 30 });
+  expect(expandWithCaret('p ||b|| q', [], 1).caret).toBe(1); // before the pair: unchanged
+  expect(expandWithCaret('no pair', [], 3)).toEqual({ text: 'no pair', caret: 3 });
 });
 
 test('redactionTexts gives each span its hidden text', () => {

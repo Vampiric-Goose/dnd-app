@@ -55,16 +55,20 @@ const idNumber = (id: string): number => Number(/^r(\d+)$/.exec(id)?.[1] ?? 0);
 export const nextRedactionId = (r: RichText, taken: readonly string[] = []): string =>
   `r${Math.max(0, ...redactionIds(r).map(idNumber), ...taken.map(idNumber)) + 1}`;
 
-const TOKEN = new RegExp(`${MARK.source}|\\|\\|`, 'g');
+// A 5etools `{@tag a||b}` is one opaque token: its `||` separate the tag's own parts. ponytail: a tag nested inside a tag
+// ends the outer one early; homebrew text typed by hand never nests them.
+const TOKEN = new RegExp(`${MARK.source}|\\{@[^{}]*\\}|\\|\\|`, 'g');
 
 /**
  * The `||secret||` shorthand: each pair becomes `{{redact:rN}}secret{{/redact}}`, ids continuing after the highest in
- * `s` and `taken`. A lone `||`, an empty `||||` and any `||` inside an existing redaction stay as typed.
+ * `s` and `taken`. A lone `||`, an empty `||||`, any `||` inside an existing redaction and any inside a `{@tag}` stay as typed.
+ * `caret` (an offset in `s`) is mapped into the result; a caret inside a pair lands in its secret, never inside a marker.
  */
-export function expandShorthand(s: string, taken: readonly string[]): string {
+export function expandWithCaret(s: string, taken: readonly string[], caret = s.length): { text: string; caret: number } {
   let depth = 0, open: number | undefined;
   const pairs: [number, number][] = [];
   for (const m of s.matchAll(TOKEN)) {
+    if (m[0].startsWith('{@')) continue;
     if (m[0] !== '||') depth = m[1] === undefined ? Math.max(0, depth - 1) : depth + 1;
     else if (depth === 0) {
       if (open === undefined) open = m.index;
@@ -72,11 +76,17 @@ export function expandShorthand(s: string, taken: readonly string[]): string {
       else open = m.index; // `||||`: not a span; this one may open the next
     }
   }
-  if (!pairs.length) return s;
-  let n = idNumber(nextRedactionId([{ p: s }], taken)) - 1, out = '', at = 0;
+  if (!pairs.length) return { text: s, caret };
+  let n = idNumber(nextRedactionId([{ p: s }], taken)) - 1, out = '', at = 0, to = caret;
   for (const [a, b] of pairs) {
-    out += `${s.slice(at, a)}{{redact:r${++n}}}${s.slice(a + 2, b)}{{/redact}}`;
+    out += s.slice(at, a);
+    const opener = `{{redact:r${++n}}}`;
+    if (caret > a && caret < b + 2) to = out.length + opener.length + Math.min(Math.max(caret - a - 2, 0), b - a - 2);
+    out += `${opener}${s.slice(a + 2, b)}{{/redact}}`;
     at = b + 2;
+    if (caret >= at) to = caret + out.length - at;
   }
-  return out + s.slice(at);
+  return { text: out + s.slice(at), caret: to };
 }
+
+export const expandShorthand = (s: string, taken: readonly string[]): string => expandWithCaret(s, taken).text;

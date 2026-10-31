@@ -20,7 +20,7 @@ const redactChoices = (choices: Choice[], revealed: ReadonlySet<string>): Choice
 });
 
 /** Every RichText inside a choice list (option trait text, nested). */
-const choiceTexts = (choices: Choice[] = []): RichText[] =>
+export const choiceTexts = (choices: Choice[] = []): RichText[] =>
   choices.flatMap(c => c.type !== 'option' ? [] : c.options.flatMap(t => [t.text, ...choiceTexts(t.choices)]));
 
 /**

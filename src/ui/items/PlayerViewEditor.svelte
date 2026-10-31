@@ -1,8 +1,8 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { redactionIds, redactionTexts } from '../../lib/content/richtext.ts';
-  import { playerItem, pruneRevealed, revealedView, revealField, revealRedaction } from '../../lib/items/playerView.ts';
-  import { editableToRich, expandShorthand, nextRedactionId, richToEditable, wrapRedaction } from '../../lib/items/textEdit.ts';
+  import { choiceTexts, playerItem, pruneRevealed, revealedView, revealField, revealRedaction } from '../../lib/items/playerView.ts';
+  import { editableToRich, expandWithCaret, nextRedactionId, richToEditable, wrapRedaction } from '../../lib/items/textEdit.ts';
   import type { HideableField, ItemDef, PlayerView } from '../../lib/types.ts';
   import EntityDetail from '../EntityDetail.svelte';
 
@@ -26,8 +26,8 @@
     if (external !== richToEditable(editableToRich(draft))) draft = external;
   });
 
-  // Every redaction id in use (item text, curse, override text) plus the revealed ones, which a new redaction must not reuse.
-  const taken = $derived([...redactionIds([...item.text, ...(item.curse ?? []), ...(view?.text ?? [])]), ...base.revealed]);
+  // Every redaction id in use (item text, curse, choices, override text) plus the revealed ones, which a new redaction must not reuse.
+  const taken = $derived([...redactionIds([...item.text, ...(item.curse ?? []), ...choiceTexts(item.choices).flat(), ...(view?.text ?? [])]), ...base.revealed]);
 
   // Revealed ids whose redaction is gone are dropped on the way out, so a later redaction can't pick one up already revealed.
   const emit = (v: PlayerView) => onchange(pruneRevealed(item, v));
@@ -35,12 +35,10 @@
 
   async function setText(s: string, caret?: number) {
     hint = '';
-    const expanded = expandShorthand(s, taken); // ||secret|| becomes a numbered redaction
+    const { text: expanded, caret: at } = expandWithCaret(s, taken, caret); // ||secret|| becomes a numbered redaction
     draft = expanded;
     set({ text: richToEditable(editableToRich(expanded)) === richToEditable(item.text) ? undefined : editableToRich(expanded) });
     if (area && expanded !== s) {
-      // Keep the caret where it was, measured from the end, since the text before it grew.
-      const at = expanded.length - (s.length - (caret ?? s.length));
       await tick();
       area.setSelectionRange(at, at);
     }

@@ -27,11 +27,29 @@
   <p class="muted">{fromLevel ? 'No new choices.' : 'Nothing to choose yet. Pick a race, class and background first.'}</p>
 {/if}
 {#each groups as [level, list] (level)}
-  <section>
-    <h3>{level === 0 ? 'Race and background' : `Level ${level}`}</h3>
+  <section class="level" aria-labelledby="lv-{level}">
+    <h3 id="lv-{level}">{level === 0 ? 'Race and background' : `Level ${level}`}</h3>
     {#each list as p (p.key)}
       <ChoiceInput pending={p} {c} {index} {settings} {sheet} problem={problems.find((x) => x.key === p.key)}
         onanswer={(a) => (c = answerChoice(c, p.key, a))} />
     {/each}
   </section>
 {/each}
+
+<style>
+  /* Each level is its own band: a thick rule and a heading, so choices from different levels never run together. */
+  .level {
+    margin-top: 2rem;
+    padding-top: 0.5rem;
+    border-top: 4px solid var(--accent);
+  }
+
+  .level:first-of-type {
+    margin-top: 1rem;
+  }
+
+  h3 {
+    margin: 0 0 0.25rem;
+    color: var(--accent);
+  }
+</style>

@@ -1,8 +1,9 @@
 <script lang="ts">
+  import { setContext } from 'svelte';
   import { characterSummary } from '../../lib/character/play.ts';
   import { db, StorageError } from '../../lib/db.ts';
   import { navigate } from '../../lib/router.svelte.ts';
-  import { rollLog } from '../../lib/rolls.svelte.ts';
+  import { natD20, rollLog } from '../../lib/rolls.svelte.ts';
   import { computeSheet } from '../../lib/rules/sheet.ts';
   import { DEFAULT_SETTINGS } from '../../lib/settings.ts';
   import { transfer } from '../../lib/items/inventory.ts';
@@ -129,6 +130,13 @@
   }
 
   const last = $derived(rollLog[0]);
+  const nat = $derived(last && natD20(last.detail));
+
+  // R46: sheet edits (overrides, custom effects) are the DM's, through one Edit mode. Not saved; it never outlives the DM view or the page.
+  let edit = $state(false);
+  setContext('sheet-edit', () => edit);
+  $effect(() => { if (app.viewer !== 'dm') edit = false; });
+  $effect(() => { void params.id; edit = false; });
 </script>
 
 <svelte:window onpagehide={flush} />
@@ -152,6 +160,9 @@
       <button type="button" class="primary" onclick={() => navigate(`characters/${c!.id}/level-up`)}>Level up</button>
       <!-- ponytail: Export is wired up in Task 20 -->
       <button type="button" disabled title="Available soon">Export</button>
+      {#if app.viewer === 'dm'}
+        <button type="button" class="editbtn" aria-pressed={edit} onclick={() => (edit = !edit)}>Edit mode</button>
+      {/if}
       <label class="row">
         <span class="muted">Campaign</span>
         <select value={c.campaignId ?? ''} onchange={(e) => setCampaign(e.currentTarget.value)}>
@@ -173,9 +184,12 @@
   {/if}
 
   {#if last}
-    <p class="lastroll card" role="status">
+    <p class="lastroll" class:nat20={nat === 'nat20'} class:nat1={nat === 'nat1'} role="status">
       <strong class="total">{last.total}</strong>
-      <span>{last.label} <small class="muted">{last.expr === last.label ? '' : `${last.expr}: `}{last.detail}</small></span>
+      <span class="what">
+        {#if nat === 'nat20'}<b class="tag">★ Natural 20!</b>{:else if nat === 'nat1'}<b class="tag">Natural 1</b>{/if}
+        {last.label} <small>{last.expr === last.label ? '' : `${last.expr}: `}{last.detail}</small>
+      </span>
     </p>
   {/if}
 
@@ -188,7 +202,7 @@
     <div>
       <Abilities {sheet} {onset} />
       <Features {c} {sheet} {settings} />
-      <CustomEffects {c} {update} />
+      {#if edit}<CustomEffects {c} {update} />{/if}
     </div>
   </div>
 
@@ -219,18 +233,66 @@
     padding-left: 1.2rem;
   }
 
+  .editbtn[aria-pressed='true'] {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--bg);
+  }
+
+  /* The newest roll: a gold band with its own colours (--roll-*), so it never blends in with the cards. */
   .lastroll {
     position: sticky;
     top: 0;
     z-index: 5;
     display: flex;
-    align-items: baseline;
+    align-items: center;
     gap: 0.6rem;
+    margin: 0.5rem 0;
+    padding: 0.3rem 0.75rem;
     overflow-wrap: anywhere;
+    background: var(--roll-bg);
+    color: var(--roll-fg);
+    border: 1px solid var(--roll-edge);
+    border-left-width: 0.5rem;
+    border-radius: 0.5rem;
+    box-shadow: 0 2px 8px rgb(0 0 0 / 0.25);
+  }
+
+  .lastroll.nat20 {
+    border-width: 3px;
+    border-left-width: 0.5rem;
+  }
+
+  .lastroll.nat1 {
+    border-style: dashed;
+    border-width: 3px;
+    border-left-width: 0.5rem;
   }
 
   .total {
-    font-size: 1.5rem;
+    font-size: 2rem;
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+    min-width: 2ch;
+    text-align: center;
+  }
+
+  .what {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    column-gap: 0.4rem;
+    line-height: 1.3;
+  }
+
+  .tag {
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 0.85rem;
+  }
+
+  small {
+    font-size: 0.8rem;
   }
 
   /* The sticky strip must not cover a control that gets focus (keyboard, or tapping into a field on a phone). */

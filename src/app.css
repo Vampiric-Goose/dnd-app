@@ -6,6 +6,10 @@
   --muted: #5e5a52;
   --border: #d9d4c8;
   --accent: #8a5200;
+  /* The sheet's last-roll strip: gold band, dark text */
+  --roll-bg: #ffe9a8;
+  --roll-fg: #2b1b00;
+  --roll-edge: #8a5200;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -16,6 +20,9 @@
     --muted: #a9a59c;
     --border: #2f333d;
     --accent: #e3b04b;
+    --roll-bg: #4a3608;
+    --roll-fg: #fff3d1;
+    --roll-edge: #e3b04b;
   }
 }
 
@@ -77,7 +84,8 @@ button:disabled {
   cursor: default;
 }
 
-input[type='checkbox'] {
+input[type='checkbox'],
+input[type='radio'] {
   min-height: 0;
   width: 1.2rem;
   height: 1.2rem;

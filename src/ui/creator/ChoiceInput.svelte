@@ -1,16 +1,17 @@
 <script lang="ts">
   import type { Problem } from '../../lib/character/build.ts';
   import type { PendingChoice } from '../../lib/character/choices.ts';
+  import { choiceSummary } from '../../lib/character/choiceSummary.ts';
   import { fold } from '../../lib/content/ids.ts';
   import type { ContentIndex } from '../../lib/content/index.ts';
   import { ABILITIES, SKILL_ABILITY } from '../../lib/rules/constants.ts';
-  import type { Ability, CampaignSettings, Character, ChoiceAnswer, RichText as RT, Sheet } from '../../lib/types.ts';
+  import type { Ability, CampaignSettings, Character, ChoiceAnswer, Entity, RichText as RT, Sheet } from '../../lib/types.ts';
   import EntityDetail from '../EntityDetail.svelte';
-  import FilterSelect from '../FilterSelect.svelte';
   import RichText from '../RichText.svelte';
   import { ABILITY_NAMES, LANGUAGES, byName, entityOption, titleCase } from './labels.ts';
 
-  // Renders one PendingChoice of any type. Nested choices are separate PendingChoices (ChoicesStep lists them).
+  // Renders one PendingChoice of any type as a bordered group: a heading, where it comes from, and the options as cards.
+  // Nested choices are separate PendingChoices (ChoicesStep lists them).
   let { pending: p, c, index, settings, sheet, problem, onanswer }: {
     pending: PendingChoice; c: Character; index: ContentIndex; settings: CampaignSettings; sheet: Sheet; problem?: Problem; onanswer: (a: ChoiceAnswer) => void;
   } = $props();
@@ -20,10 +21,12 @@
   const a = $derived(p.answer);
   const picked = $derived<string[]>(a?.type === 'ids' ? a.ids : a?.type === 'abilities' ? Object.keys(a.abilities).filter((k) => a.abilities[k as Ability]) : []);
   const count = $derived('count' in ch ? ch.count : 1);
-  const feats = $derived(index.all('feat').sort(byName).map(entityOption));
   const uniq = (xs: string[]) => [...new Set(xs)];
 
-  type Opt = { value: string; label: string; hint?: string; text?: RT };
+  // `text` and `entity` feed the card's summary and its More details; `prereq` is shown when there is no text.
+  type Opt = { value: string; label: string; text?: RT; prereq?: string; entity?: Entity };
+  const ofEntity = (e: Entity & { prerequisite?: unknown }): Opt => ({ ...entityOption(e), text: e.text, entity: e, ...(typeof e.prerequisite === 'string' && { prereq: `Prerequisite: ${e.prerequisite}` }) });
+  const feats = $derived(index.all('feat').sort(byName).map(ofEntity));
   const options = $derived.by((): Opt[] => {
     const plain = (xs: string[]) => xs.map((x) => ({ value: x, label: titleCase(x) }));
     switch (ch.type) {
@@ -32,21 +35,37 @@
       case 'language': return (ch.from ?? LANGUAGES).filter((l) => picked.includes(l) || !sheet.proficiencies.languages.includes(l)).map((l) => ({ value: l, label: l }));
       case 'tool': return plain(ch.from ?? uniq(index.all('item').filter((i) => i.type === 'tool' && !i.magic).map((i) => i.name.toLowerCase())).sort());
       case 'ability': return ch.from.map((x) => ({ value: x, label: ABILITY_NAMES[x] }));
-      case 'optionalFeature':
-        return index.optionalFeatures(ch.featureTypes).sort(byName).map((o) => ({ ...entityOption(o), hint: o.prerequisite && `Prerequisite: ${o.prerequisite}`, text: o.text }));
+      case 'optionalFeature': return index.optionalFeatures(ch.featureTypes).sort(byName).map(ofEntity);
       case 'option': return ch.options.map((t) => ({ value: t.name, label: t.name, text: t.text }));
+      case 'subclass': {
+        const owner = c.build.levels[p.level - 1]?.classId;
+        return owner ? index.subclassesOf(owner).sort(byName).map(ofEntity) : [];
+      }
+      case 'feat': return feats;
       default: return [];
     }
   });
-  const what = $derived(({ skill: 'skills', expertise: 'proficiencies for expertise', language: 'languages', tool: 'tools', ability: `abilities to raise by ${'amount' in ch ? ch.amount : 1}`, optionalFeature: 'options', option: 'options' } as Record<string, string>)[ch.type]);
-
-  // Long lists (imported invocations, tools) get a search box and show at most 100 matches.
-  let q = $state('');
-  const shown = $derived.by(() => {
-    if (options.length <= 30) return options;
-    const n = fold(q.trim());
-    return options.filter((o) => picked.includes(o.value) || fold(o.label).includes(n)).slice(0, 100);
+  const KIND: Record<string, string> = { skill: 'Skills', expertise: 'Expertise', language: 'Languages', tool: 'Tools', subclass: 'Subclass', feat: 'Feat', asi: 'Ability score improvement' };
+  // Where it comes from: the class (or race, background) behind it, and its level. Anything the heading already says is left out.
+  const owner = $derived.by(() => {
+    const id = p.level === 0 ? p.sourceId.split('/')[0] : c.build.levels[p.level - 1]?.classId;
+    return id ? index.resolve(id)?.name : undefined;
   });
+  const meta = $derived(
+    [ch.type === 'ability' ? `Ability scores, +${ch.amount} each` : KIND[ch.type], owner, p.level ? `level ${p.level}` : undefined]
+      .filter((x, i, all) => x && fold(x) !== fold(p.sourceName) && all.indexOf(x) === i).join(' · '),
+  );
+
+  // Long lists (feats, imported invocations, tools) get a search box and show at most 100 matches.
+  const LONG = 12;
+  let q = $state('');
+  function visible(list: Opt[], sel: string[]): Opt[] {
+    if (list.length <= LONG) return list;
+    const n = fold(q.trim());
+    return list.filter((o) => sel.includes(o.value) || fold(o.label).includes(n)).slice(0, 100);
+  }
+  // The full text opens on demand, so a long list doesn't render a hundred of them up front.
+  let opened: Record<string, boolean> = $state({});
 
   function commit(next: string[]) {
     if (ch.type === 'ability') onanswer({ type: 'abilities', abilities: Object.fromEntries(next.map((x) => [x, ch.amount])) });
@@ -68,22 +87,50 @@
     asiPick = m;
     onanswer({ type: 'asi' });
   }
-
-  const subclasses = $derived.by(() => {
-    const owner = c.build.levels[p.level - 1]?.classId;
-    return owner ? index.subclassesOf(owner).sort(byName).map(entityOption) : [];
-  });
-  const selectedFeat = $derived(index.resolve((ch.type === 'feat' ? picked[0] : asi?.featId) ?? ''));
 </script>
 
-<fieldset class="card" aria-describedby={problem ? `${uid}-problem` : undefined}>
-  <legend>{p.sourceName}</legend>
+{#snippet cards(list: Opt[], sel: string[], max: number, pick: (value: string, on: boolean) => void)}
+  {#if list.length > LONG}
+    <input type="search" aria-label="Search {p.sourceName}" placeholder="Search {list.length}…" bind:value={q} />
+  {/if}
+  {@const shown = visible(list, sel)}
+  <ul class="plain cards">
+    {#each shown as o (o.value)}
+      {@const on = sel.includes(o.value)}
+      {@const sum = choiceSummary(o.text, o.prereq)}
+      <li class="opt">
+        <label>
+          <input type={max === 1 ? 'radio' : 'checkbox'} name="{uid}-pick" checked={on} disabled={!on && max > 1 && sel.length >= max}
+            onchange={(e) => pick(o.value, e.currentTarget.checked)} />
+          <span class="body">
+            <strong>{o.label}</strong>
+            {#if sum}<span class="sum">{sum}</span>{/if}
+            {#if o.prereq && sum !== o.prereq && sum}<small class="muted">{o.prereq}</small>{/if}
+          </span>
+        </label>
+        {#if o.text?.length || o.entity}
+          <details class="more" ontoggle={(e) => (opened[o.value] = e.currentTarget.open)}>
+            <summary>More<span class="sr-only"> about {o.label}</span></summary>
+            {#if opened[o.value]}
+              {#if o.entity}<EntityDetail entity={o.entity} {index} />{:else if o.text}<RichText text={o.text} />{/if}
+            {/if}
+          </details>
+        {/if}
+      </li>
+    {/each}
+  </ul>
+  {#if shown.length < list.length}<p class="muted small">Showing {shown.length} of {list.length}. Search to narrow it down.</p>{/if}
+  {#if !list.length}<p class="muted">Nothing to pick from (no matching content is loaded).</p>{/if}
+{/snippet}
 
-  {#if ch.type === 'subclass'}
-    <FilterSelect id="{uid}-sub" label="Subclass" options={subclasses} value={picked[0] ?? ''} onchange={(id) => onanswer({ type: 'ids', ids: id ? [id] : [] })} />
-  {:else if ch.type === 'feat'}
-    <FilterSelect id="{uid}-feat" label="Feat" options={feats} value={picked[0] ?? ''} onchange={(id) => onanswer({ type: 'ids', ids: id ? [id] : [] })} />
-  {:else if ch.type === 'asi'}
+<fieldset class="card choice" aria-describedby="{uid}-meta{problem ? ` ${uid}-problem` : ''}">
+  <legend>{p.sourceName}</legend>
+  <p id="{uid}-meta" class="meta">
+    {#if meta}<span class="muted">{meta}</span>{/if}
+    {#if ch.type !== 'asi'}<strong class="pick">Pick {count}</strong><span class="muted">{picked.length} chosen</span>{/if}
+  </p>
+
+  {#if ch.type === 'asi'}
     <div class="row">
       <label class="check"><input type="radio" name="{uid}-mode" checked={asiMode === 'scores'} onchange={() => setMode('scores')} /> +2 to one score, or +1 to two</label>
       {#if settings.feats || asiMode === 'feat'}
@@ -102,33 +149,10 @@
         {/each}
       </div>
     {:else}
-      <FilterSelect id="{uid}-asifeat" label="Feat" options={feats} value={asi?.featId ?? ''} onchange={(id) => onanswer(id ? { type: 'asi', featId: id } : { type: 'asi' })} />
+      {@render cards(feats, asi?.featId ? [asi.featId] : [], 1, (v) => onanswer({ type: 'asi', featId: v }))}
     {/if}
   {:else}
-    <p class="muted">Choose {count} {what} ({picked.length} chosen).</p>
-    {#if options.length > 30}
-      <input type="search" aria-label="Search {p.sourceName}" placeholder="Search {options.length}…" bind:value={q} />
-    {/if}
-    <ul class="plain">
-      {#each shown as o (o.value)}
-        {@const on = picked.includes(o.value)}
-        <li>
-          <label class="check">
-            <input type={count === 1 ? 'radio' : 'checkbox'} name="{uid}-pick" checked={on} disabled={!on && count > 1 && picked.length >= count}
-              onchange={(e) => toggle(o.value, e.currentTarget.checked)} />
-            <span>{o.label}{#if o.hint}<br /><small class="muted">{o.hint}</small>{/if}</span>
-          </label>
-          {#if o.text?.length}
-            <details class="more"><summary>About {o.label}</summary><RichText text={o.text} /></details>
-          {/if}
-        </li>
-      {/each}
-    </ul>
-    {#if !options.length}<p class="muted">Nothing to pick from (no matching content is loaded).</p>{/if}
-  {/if}
-
-  {#if selectedFeat}
-    <details class="more"><summary>About {selectedFeat.name}</summary><EntityDetail entity={selectedFeat} {index} /></details>
+    {@render cards(options, picked, count, toggle)}
   {/if}
 
   {#if problem}
@@ -137,7 +161,101 @@
 </fieldset>
 
 <style>
-  legend { font-weight: 600; padding: 0 0.25rem; }
-  .more { margin: 0 0 0.5rem 1.8rem; }
-  .check { margin: 0.25rem 0; }
+  .choice {
+    padding-bottom: 0.5rem;
+  }
+
+  legend {
+    font-size: 1.1rem;
+    font-weight: 700;
+    padding: 0 0.25rem;
+  }
+
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.2rem 0.6rem;
+    margin: 0 0 0.5rem;
+  }
+
+  .pick {
+    padding: 0 0.5rem;
+    border: 1px solid var(--accent);
+    border-radius: 1rem;
+    color: var(--accent);
+  }
+
+  .small {
+    font-size: 0.85rem;
+  }
+
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 15rem), 1fr));
+    gap: 0.5rem;
+    align-items: start;
+    margin: 0.5rem 0;
+  }
+
+  .opt {
+    min-width: 0;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+  }
+
+  .opt:has(input:checked) {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent);
+    background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  }
+
+  .opt:has(input:focus-visible) {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .opt:has(input:disabled) {
+    opacity: 0.6;
+  }
+
+  .opt label {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.6rem;
+    padding: 0.6rem 0.75rem;
+    min-height: 2.75rem;
+    box-sizing: border-box;
+    cursor: pointer;
+  }
+
+  .opt input {
+    flex: none;
+    margin: 0.2rem 0 0;
+  }
+
+  .body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .sum {
+    font-size: 0.9rem;
+    color: var(--muted);
+  }
+
+  .more {
+    padding: 0 0.75rem 0.6rem 2.35rem;
+  }
+
+  .more summary {
+    cursor: pointer;
+    font-size: 0.9rem;
+    color: var(--accent);
+    padding: 0.25rem 0;
+  }
 </style>

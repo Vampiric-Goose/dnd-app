@@ -27,6 +27,9 @@
   let crit = $state(false);
 
   const life = $derived(deathState(c.state));
+  // The engine only reads the crit flag at 0 HP (2 death-save failures), so the box exists only then.
+  const atZero = $derived(c.state.hp === 0 && !c.state.dead);
+  $effect(() => { if (!atZero) crit = false; });
   const whole = (n: number | null): n is number => typeof n === 'number' && Number.isInteger(n) && n >= 0;
 
   function damage() {
@@ -102,7 +105,9 @@
       <label class="row"><span>Amount</span><input type="number" min="0" step="1" inputmode="numeric" bind:value={amount} /></label>
       <button type="button" class="danger" disabled={!whole(amount) || !amount || c.state.dead} onclick={damage}>Damage</button>
       <button type="button" disabled={!whole(amount) || !amount || c.state.dead} onclick={heal}>Heal</button>
-      <label class="check"><input type="checkbox" bind:checked={crit} /> Damage is from a critical hit</label>
+      {#if atZero}
+        <label class="check"><input type="checkbox" bind:checked={crit} /> Critical hit (2 failed death saves)</label>
+      {/if}
     </div>
     <div class="row">
       <label class="row"><span>Temp HP</span><input type="number" min="0" step="1" inputmode="numeric" bind:value={temp} /></label>

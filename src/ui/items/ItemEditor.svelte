@@ -2,7 +2,9 @@
   import { tick } from 'svelte';
   import { parseDice } from '../../lib/dice.ts';
   import { db } from '../../lib/db.ts';
-  import { editableToRich, richToEditable } from '../../lib/items/textEdit.ts';
+  import { redactionIds } from '../../lib/content/richtext.ts';
+  import { choiceTexts } from '../../lib/items/playerView.ts';
+  import { editableToRich, expandWithCaret, richToEditable } from '../../lib/items/textEdit.ts';
   import { leaveGuard, navigate } from '../../lib/router.svelte.ts';
   import { getIndex } from '../../lib/store.svelte.ts';
   import type { ItemDef, ItemType, PlayerView, Rarity, Recharge, StoredItem } from '../../lib/types.ts';
@@ -146,6 +148,21 @@
     if (s) draft.charges!.rechargeAmount = s;
     else delete draft.charges!.rechargeAmount;
   }
+  // ||secret|| in Description or Curse becomes a numbered redaction as you type, like the players' text. A new id must
+  // not collide with one in the other area, the item's choices, or the default view (its own text, and revealed ids).
+  async function typed(el: HTMLTextAreaElement, field: 'text' | 'curse') {
+    const other = field === 'text' ? curseDraft : textDraft;
+    const v = draft.defaultView;
+    const taken = [...redactionIds([...editableToRich(other), ...choiceTexts(draft.choices).flat(), ...(v?.text ?? [])]), ...(v?.revealed ?? [])];
+    const { text: next, caret } = expandWithCaret(el.value, taken, el.selectionStart);
+    if (field === 'text') textDraft = next;
+    else curseDraft = next;
+    if (next !== el.value) {
+      await tick();
+      el.setSelectionRange(caret, caret);
+    }
+  }
+
   const setView = (v: PlayerView | undefined) => {
     if (v) draft.defaultView = v;
     else delete draft.defaultView;
@@ -285,12 +302,12 @@
 <div class="card">
   <div class="field">
     <label for="it-text">Description</label>
-    <textarea id="it-text" rows="6" bind:value={textDraft}></textarea>
-    <span class="muted">Blank line between paragraphs, "- " for list items, "| a | b |" for table rows, "## Heading" for a heading, **bold** and *italic*.</span>
+    <textarea id="it-text" rows="6" value={textDraft} oninput={(e) => typed(e.currentTarget, 'text')}></textarea>
+    <span class="muted">Blank line between paragraphs, "- " for list items, "| a | b |" for table rows, "## Heading" for a heading, **bold** and *italic*, ||secret|| to hide words from players until revealed.</span>
   </div>
   <div class="field">
     <label for="it-curse">Curse (optional)</label>
-    <textarea id="it-curse" rows="3" bind:value={curseDraft}></textarea>
+    <textarea id="it-curse" rows="3" value={curseDraft} oninput={(e) => typed(e.currentTarget, 'curse')}></textarea>
   </div>
 </div>
 
