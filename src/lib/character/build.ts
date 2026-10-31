@@ -3,6 +3,7 @@ import type { ContentIndex } from '../content/index.ts';
 import { isStandardArray, pointBuyCost } from '../rules/abilities.ts';
 import { ABILITIES, POINT_BUY_BUDGET, SKILL_ABILITY, STANDARD_ARRAY } from '../rules/constants.ts';
 import { computeSheet } from '../rules/sheet.ts';
+import { uid } from '../uid.ts';
 import type { Ability, CampaignSettings, Character, ChoiceAnswer, ClassDef, Entity, MulticlassPrereq, Scores, Sheet, SpellDef } from '../types.ts';
 import { enumerateChoices, getKind } from './choices.ts';
 import type { Lookup, PendingChoice } from './choices.ts';
@@ -245,7 +246,7 @@ export function validateCharacter(c: Character, index: ContentIndex, settings: C
 /** An empty character: no race/class/background, all scores 10, zeroed play state. */
 export function newCharacter(name: string, campaignId?: string): Character {
   return {
-    id: crypto.randomUUID(), name, ...(campaignId && { campaignId }), updatedAt: Date.now(),
+    id: uid(), name, ...(campaignId && { campaignId }), updatedAt: Date.now(),
     build: { raceId: '', backgroundId: '', abilityMethod: 'standard', baseScores: { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 }, levels: [], subclasses: {}, choices: {}, spells: {} },
     embedded: {},
     state: { hp: 0, tempHp: 0, hitDiceUsed: {}, slotsUsed: [], pactSlotsUsed: 0, resourcesUsed: {}, conditions: [], exhaustion: 0, deathSaves: { success: 0, fail: 0 }, inspiration: false },

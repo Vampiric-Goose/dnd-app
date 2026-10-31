@@ -1,6 +1,7 @@
 import { effectOk } from '../character/customEffect.ts';
 import { isRichText } from '../content/richtext.ts';
 import { isRec } from '../recordShape.ts';
+import { uid } from '../uid.ts';
 import type { Choice, Effect, ItemDef, ItemType, PlayerView, Rarity, Recharge, StoredItem } from '../types.ts';
 
 // Pure (no Svelte/Vite/DOM): how a homebrew record is made from another item.
@@ -11,7 +12,7 @@ const RECHARGES: readonly Recharge[] = ['short', 'long', 'dawn', 'dusk', 'none']
 const BONUS_KEYS = ['attack', 'damage', 'ac', 'save', 'spellAttack', 'spellDc'] as const;
 
 /** A fresh homebrew id. Not the name: a rename must not leave a stale slug. */
-export const newHomebrewId = (): string => `item:homebrew-${crypto.randomUUID().slice(0, 8)}@HOMEBREW`;
+export const newHomebrewId = (): string => `item:homebrew-${uid().slice(0, 8)}@HOMEBREW`;
 
 /**
  * Customize: every field of an SRD or pack item, as a new homebrew record that remembers where it came from.

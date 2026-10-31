@@ -50,6 +50,9 @@
   });
 
   const kinds = $derived(tabs.find((t) => t.id === tab)!.kinds);
+  // A homebrew item as this viewer sees it (cover name, hidden rarity): search and filters must not match what a player can't see.
+  const seen = $derived(new Map(homebrew.map((h) => [h.id, displayItem(h, app.viewer)])));
+  const look = (e: Entity): Entity => (e.kind === 'item' && seen.get(e.id)) || e;
   const select = $derived(router.query.get('id') ?? '');
 
   // Everything on this tab for the current search text, before the filters.
@@ -58,7 +61,7 @@
     const hits = index.search(q, kinds, Infinity);
     if (tab !== 'item') return hits;
     const n = fold(q.trim());
-    return [...homebrew.filter((h) => fold(h.name).includes(n)), ...hits];
+    return [...homebrew.filter((h) => fold(look(h).name).includes(n)), ...hits];
   });
   const pool = $derived.by<Entity[]>(() => {
     if (!index) return [];
@@ -69,7 +72,8 @@
   const itemTypes = $derived(tab === 'item' ? [...new Set(pool.flatMap((e) => (e.kind === 'item' ? [e.type] : [])))].sort() : []);
 
   const shown = $derived(
-    found.filter((e) => {
+    found.filter((raw) => {
+      const e = look(raw); // rows keep the real record: its id is what the detail opens
       if (source && e.source !== source) return false;
       if (e.kind === 'spell') return (level === '' || e.level === +level) && (!cls || e.classes.includes(cls));
       if (e.kind === 'item') return (!itemType || e.type === itemType) && (!rarity || e.rarity === rarity) && (!magic || e.magic === (magic === 'magic'));

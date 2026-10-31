@@ -18,6 +18,7 @@ function recharge(c: Character, sheet: Sheet, event: 'short' | 'long', rng?: () 
 
 /** Spends hit dice (never more than are left); each heals max(0, roll + Con mod). Pact slots and short-rest resources/items recharge. */
 export function shortRest(c: Character, spent: { die: number; rolls: number[] }[], sheet: Sheet, rng?: () => number): Character {
+  if (c.state.dead) return c; // the dead get no benefit from a rest
   const used = { ...c.state.hitDiceUsed };
   let heal = 0;
   for (const { die, rolls } of spent) {

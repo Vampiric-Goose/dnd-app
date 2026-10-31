@@ -4,6 +4,7 @@ import { db, sha256Hex, type BlobRecord, type Snapshot } from './db.ts';
 import { playerCharacter } from './items/playerView.ts';
 import { campaignProblem, characterProblem, isRec, problem, SHAPES, type Rec } from './recordShape.ts';
 import type { Campaign, Character, Pack, StoredItem } from './types.ts';
+import { uid } from './uid.ts';
 
 const json = (o: unknown) => new Blob([JSON.stringify(o)], { type: 'application/json' });
 const parse = async (file: Blob): Promise<Rec | undefined> => {
@@ -148,4 +149,4 @@ export function restoreSecrets(imported: Character, stored: Character): Characte
 }
 
 /** R49 "Keep both": the imported record under a fresh id, so the existing one stays. "Replace" is the record as it is. */
-export const keepBoth = <T extends { id: string }>(r: T): T => ({ ...r, id: crypto.randomUUID() });
+export const keepBoth = <T extends { id: string }>(r: T): T => ({ ...r, id: uid() });

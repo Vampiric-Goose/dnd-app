@@ -101,7 +101,7 @@
   });
 
   // Unsaved work: everything the editor holds, compared with what it held at the last load or save.
-  const snapshotKey = () => JSON.stringify([$state.snapshot(draft), textDraft, curseDraft, weightDraft, costDraft, acDraft, maxDraft, rangeNear, rangeFar]);
+  const snapshotKey = (id = draft.id) => JSON.stringify([{ ...$state.snapshot(draft), id }, textDraft, curseDraft, weightDraft, costDraft, acDraft, maxDraft, rangeNear, rangeFar]);
   let baseline = $state(snapshotKey());
   const dirty = $derived(snapshotKey() !== baseline);
 
@@ -225,10 +225,11 @@
       return false;
     }
     const out = { ...assembled, id: saved ? draft.id : newId() };
+    const key = snapshotKey(out.id); // taken before the write: an edit made while it runs must stay unsaved (dirty)
     if (!(await write(out))) return false;
     draft.id = out.id;
     saved = true;
-    baseline = snapshotKey(); // before navigating: the leave guard must see a clean editor
+    baseline = key; // before navigating: the leave guard must see a clean editor
     notice = 'Saved.';
     if (isNew) navigate(`items/${out.id}`);
     return true;

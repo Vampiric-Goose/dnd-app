@@ -221,7 +221,7 @@ export async function import5etools(
 
   // 3. Every batch entity's final id: its SRD counterpart's when it overlaps (it becomes a patch), else its own.
   const srdTwin = (kind: EntityKind, name: string, r: Raw): Entity | undefined => {
-    if (!r?.srd) return undefined;
+    if (!r?.srd || classifySource(String(r.source)) !== 'official') return undefined; // homebrew may not overlap (and patch) the SRD
     for (const n of [...(typeof r.srd === 'string' ? [r.srd] : []), ...srdNames(name)]) {
       const e = index.find(kind, n, 'SRD');
       if (e) return e;

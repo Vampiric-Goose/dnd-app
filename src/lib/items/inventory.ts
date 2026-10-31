@@ -1,6 +1,7 @@
 import { rollDice } from '../dice.ts';
 import { pruneRevealed } from './playerView.ts';
 import type { InventoryEntry, ItemDef, PlayerView, Recharge } from '../types.ts';
+import { uid } from '../uid.ts';
 
 // Pure (no Svelte/Vite/DOM): shared with Node scripts. Every operation returns new entries; none mutates.
 
@@ -8,7 +9,7 @@ const maxCharges = (item: ItemDef): number => item.charges?.max ?? 0;
 
 export function makeEntry(item: ItemDef, opts: { sourceId?: string; view?: PlayerView; quantity?: number } = {}): InventoryEntry {
   return {
-    id: crypto.randomUUID(), item, quantity: opts.quantity ?? 1, equipped: false, attuned: false, chargesUsed: 0, notes: '',
+    id: uid(), item, quantity: opts.quantity ?? 1, equipped: false, attuned: false, chargesUsed: 0, notes: '',
     ...(opts.sourceId !== undefined && { sourceId: opts.sourceId }),
     ...(opts.view && { view: opts.view }),
   };
@@ -29,7 +30,7 @@ export function rechargeEntry(e: InventoryEntry, event: Recharge, rng?: () => nu
   if (!c || c.recharge === 'none' || (c.recharge !== event && !(event === 'long' && c.recharge === 'short'))) return e;
   let restored = c.max; // a malformed rechargeAmount falls back to a full recharge rather than breaking the rest
   if (c.rechargeAmount) try { restored = rollDice(c.rechargeAmount, { rng }).total; } catch { /* keep the full recharge */ }
-  return { ...e, chargesUsed: Math.max(0, e.chargesUsed - restored) };
+  return { ...e, chargesUsed: Math.max(0, e.chargesUsed - Math.max(0, restored)) }; // a roll below zero restores nothing
 }
 
 export const attunedCount = (entries: InventoryEntry[]): number => entries.filter(e => e.attuned).length;
@@ -52,7 +53,7 @@ export function transfer(from: InventoryEntry[], to: InventoryEntry[], entryId: 
   if (!e) return { from, to };
   const n = Math.min(Math.floor(qty), e.quantity);
   if (!(n >= 1)) return { from, to }; // also catches NaN
-  const moved: InventoryEntry = { ...e, id: crypto.randomUUID(), quantity: n, equipped: false, attuned: false };
+  const moved: InventoryEntry = { ...e, id: uid(), quantity: n, equipped: false, attuned: false };
   return {
     from: n === e.quantity ? from.filter(x => x !== e) : from.map(x => x === e ? { ...e, quantity: e.quantity - n } : x),
     to: [...to, moved],

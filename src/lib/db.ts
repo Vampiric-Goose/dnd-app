@@ -73,8 +73,10 @@ async function write<N extends Stores>(names: N[], fn: (tx: IDBPTransaction<Sche
 }
 
 /** SHA-256 of the bytes, lowercase hex. This is the key blobs are stored under. */
-export const sha256Hex = async (data: ArrayBuffer) =>
-  [...new Uint8Array(await crypto.subtle.digest('SHA-256', data))].map((b) => b.toString(16).padStart(2, '0')).join('');
+export const sha256Hex = async (data: ArrayBuffer) => {
+  if (!crypto.subtle) throw new Error('Images need a secure connection (https): this browser offers no hashing over plain http.');
+  return [...new Uint8Array(await crypto.subtle.digest('SHA-256', data))].map((b) => b.toString(16).padStart(2, '0')).join('');
+};
 
 function packMeta(p: Pack): PackMeta {
   const counts: PackMeta['counts'] = {};

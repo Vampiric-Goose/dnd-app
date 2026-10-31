@@ -111,7 +111,7 @@
       {/if}
       {#if v.consumable}<button type="button" onclick={use}>Use</button>{/if}
     </div>
-    {#if warnAttune && v.needsAttune}<p id="{uid}-warn" class="error" role="note">Over the limit of 3; allowed only with an override, for example artificer.</p>{/if}
+    {#if warnAttune && v.needsAttune}<p id="{uid}-warn" class="error" role="note">Over the limit of 3 (artificers can attune to more)</p>{/if}
     {#if v.maxCharges > 0}
       <div class="row">
         <Pips total={v.maxCharges} used={Math.min(entry.chargesUsed, v.maxCharges)} label="{v.name} charges" onchange={(n) => patch({ chargesUsed: n })} />

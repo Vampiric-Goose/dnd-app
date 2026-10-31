@@ -2,6 +2,7 @@
   import { applyBackup, readBackup, type BackupPlan } from '../../lib/backup.ts';
   import { db } from '../../lib/db.ts';
   import { DEFAULT_SETTINGS } from '../../lib/settings.ts';
+  import { uid } from '../../lib/uid.ts';
   import { app, refreshCampaigns, saveBackup, saveCampaign, setCampaign } from '../../lib/store.svelte.ts';
 
   let newName = $state('');
@@ -33,7 +34,7 @@
     if (!name) return;
     return run(async () => {
       const now = Date.now();
-      const id = crypto.randomUUID();
+      const id = uid();
       await saveCampaign({ id, name, createdAt: now, updatedAt: now, settings: structuredClone(DEFAULT_SETTINGS), enabledPacks: [], loot: [] });
       await setCampaign(id);
       newName = '';

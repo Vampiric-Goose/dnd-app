@@ -116,7 +116,7 @@
       ['Damage', entity.weapon ? `${entity.weapon.damage} ${entity.weapon.damageType}${entity.weapon.versatile ? ` (versatile ${entity.weapon.versatile})` : ''}` : undefined],
       ['Properties', entity.weapon?.properties.length ? list(entity.weapon.properties) : undefined],
       ['Range', entity.weapon?.range ? `${entity.weapon.range[0]}/${entity.weapon.range[1]} ft.` : undefined],
-      ['Armor class', entity.armor ? `${entity.armor.ac}${entity.armor.category === 'shield' ? '' : entity.armor.category === 'heavy' ? '' : ` + Dex${entity.armor.dexCap !== undefined ? ` (max ${entity.armor.dexCap})` : ''}`}` : undefined],
+      ['Armor class', entity.armor ? `${entity.armor.category === 'shield' ? '+' : ''}${entity.armor.ac}${entity.armor.category === 'shield' ? '' : entity.armor.category === 'heavy' ? '' : ` + Dex${entity.armor.dexCap !== undefined ? ` (max ${entity.armor.dexCap})` : ''}`}` : undefined],
       ['Strength', entity.armor?.strReq ? String(entity.armor.strReq) : undefined],
       ['Stealth', entity.armor?.stealthDisadvantage ? 'Disadvantage' : undefined],
       ['Charges', entity.charges ? `${entity.charges.max} (${entity.charges.recharge})` : undefined],
