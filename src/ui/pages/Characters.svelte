@@ -45,14 +45,14 @@
       if (isPdf(file)) {
         const { importPdf } = await import('../../lib/pdf/importPdf.ts'); // pdf-lib's own chunk, loaded only now
         const rec = await importPdf(new Uint8Array(await file.arrayBuffer()), () => getFullIndex().catch(() => undefined)); // the index loads only if a field map needs it
-        if (rec.kind !== 'character') throw new Error('That file is an item. Import it on the Items page.');
+        if (rec.kind !== 'character') throw new Error('That file is an item. Import it on the Items page (All items tab).');
         c = rec.data;
         edits = rec.edits;
         playerView = !!rec.playerView;
         taken = !!(await db.characters.get(c.id));
       } else {
         const rec = await importRecord(file);
-        if (rec.kind !== 'character') throw new Error('That file is an item. Import it on the Items page.');
+        if (rec.kind !== 'character') throw new Error('That file is an item. Import it on the Items page (All items tab).');
         ({ data: c, taken, playerView } = rec);
       }
       if (c.campaignId && !app.campaigns.some((x) => x.id === c.campaignId)) { c = { ...c }; delete c.campaignId; } // its campaign isn't on this device

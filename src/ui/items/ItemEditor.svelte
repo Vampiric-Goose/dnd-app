@@ -4,6 +4,7 @@
   import { exportRecord } from '../../lib/backup.ts';
   import { db } from '../../lib/db.ts';
   import { redactionIds } from '../../lib/content/richtext.ts';
+  import { newHomebrewId } from '../../lib/items/homebrew.ts';
   import { choiceTexts } from '../../lib/items/playerView.ts';
   import { stripStored } from '../../lib/items/rows.ts';
   import { editableToRich, expandWithCaret, richToEditable } from '../../lib/items/textEdit.ts';
@@ -23,7 +24,7 @@
   const RECHARGES: Recharge[] = ['short', 'long', 'dawn', 'dusk', 'none'];
   const BONUSES = [['attack', 'Attack rolls'], ['damage', 'Damage'], ['ac', 'Armor class'], ['save', 'Saving throws'], ['spellAttack', 'Spell attack'], ['spellDc', 'Spell save DC']] as const;
 
-  const newId = () => `item:homebrew-${crypto.randomUUID().slice(0, 8)}@HOMEBREW`; // not the name: a rename must not leave a stale slug
+  const newId = newHomebrewId;
   const num = (s: string): number | undefined => (s.trim() === '' || !Number.isFinite(Number(s)) ? undefined : Number(s));
   const whole = (s: string) => /^\d+$/.test(s.trim());
   const text = (n: number | undefined) => (n === undefined ? '' : String(n));
@@ -270,7 +271,7 @@
 
 <svelte:window onbeforeunload={(e) => { if (dirty) e.preventDefault(); }} />
 
-<p><a href="#/items">All items</a></p>
+<p><a href="#/items">Back to items</a></p>
 <h1>{isNew && !saved ? 'New item' : draft.name || 'Item'}</h1>
 
 <div class="card">

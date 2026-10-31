@@ -1,7 +1,7 @@
 import type { InventoryEntry, ItemDef, PlayerView, StoredItem } from '../types.ts';
 import { playerItem } from './playerView.ts';
 
-// Pure (no Svelte/Vite/DOM): what an inventory or loot row shows and offers, for one viewer.
+// Pure (no Svelte/Vite/DOM): what an inventory or Unassigned row shows and offers, for one viewer.
 
 export interface RowView {
   shown: ItemDef; // the item as this viewer sees it (a player gets the cover name, bars and hidden fields removed)

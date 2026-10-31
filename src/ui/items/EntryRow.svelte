@@ -9,15 +9,15 @@
   import Pips from '../sheet/Pips.svelte';
   import PlayerViewEditor from './PlayerViewEditor.svelte';
 
-  // One inventory or loot entry, shown the way `viewer` may see it. `gear` adds what a character does with an item
-  // (equip, attune, use, charges); party loot is just quantity, notes and the menu.
+  // One inventory or Unassigned entry, shown the way `viewer` may see it. `gear` adds what a character does with an item
+  // (equip, attune, use, charges); an Unassigned entry is just quantity, notes and the menu.
   let { entry, viewer, gear = false, warnAttune = false, targets, moveLabel, canRefresh, onchange, onremove, onrefresh, onmove }: {
     entry: InventoryEntry;
     viewer: 'dm' | 'player';
     gear?: boolean;
     warnAttune?: boolean;
     targets: { id: string; label: string }[];
-    moveLabel: string; // 'Transfer' or 'Give to…'
+    moveLabel: string; // 'Transfer to…' or 'Give to…'
     canRefresh: boolean;
     onchange: (fn: (e: InventoryEntry) => InventoryEntry) => void; // applied to the latest copy of the entry
     onremove: () => void;
@@ -121,7 +121,7 @@
     {/if}
   {/if}
 
-  <!-- On party loot a player must not read the DM's notes; on their own inventory the notes are theirs. -->
+  <!-- On the Unassigned list a player must not read the DM's notes; on their own inventory the notes are theirs. -->
   {#if gear || viewer === 'dm'}
   <label class="field notes">Notes <input type="text" aria-label="Notes: {v.name}" autocomplete="off" value={entry.notes} onchange={(e) => patch({ notes: e.currentTarget.value })} /></label>
   {/if}

@@ -1,0 +1,67 @@
+<script lang="ts">
+  import { db } from '../../lib/db.ts';
+  import { router } from '../../lib/router.svelte.ts';
+  import { app } from '../../lib/store.svelte.ts';
+  import type { Campaign, Character } from '../../lib/types.ts';
+  import { message } from '../creator/labels.ts';
+  import AllItems from './AllItems.svelte';
+  import { loadPool, type Pool } from './pool.ts';
+  import Unassigned from './Unassigned.svelte';
+
+  let { campaign }: { campaign: Campaign } = $props();
+
+  let pool: Pool | undefined = $state.raw();
+  let chars: Character[] = $state.raw([]);
+  let error = $state('');
+
+  let seq = 0;
+  async function load(id: string) {
+    const mine = ++seq;
+    try {
+      const [p, list] = await Promise.all([loadPool(id), db.characters.list(id)]);
+      if (mine !== seq) return;
+      pool = p;
+      chars = list.sort((a, b) => a.name.localeCompare(b.name));
+    } catch (e) {
+      if (mine === seq) error = message(e);
+    }
+  }
+  $effect(() => {
+    const id = campaign.id;
+    pool = undefined;
+    chars = [];
+    error = '';
+    void load(id);
+    return () => { seq++; };
+  });
+
+  // Unassigned is the DM's: a player never sees the tab, and its address shows All items.
+  const tab = $derived(router.query.get('tab') === 'unassigned' && app.viewer === 'dm' ? 'unassigned' : 'all');
+  const tabs = $derived([{ id: 'all', label: 'All items' }, ...(app.viewer === 'dm' ? [{ id: 'unassigned', label: 'Unassigned' }] : [])]);
+  const go = (id: string) => { location.hash = id === 'all' ? '#/items' : `#/items?tab=${id}`; };
+</script>
+
+<h1>Items</h1>
+<p class="muted">SRD, pack and homebrew items for <strong>{campaign.name}</strong>. The Compendium has the read-only reference for everything else.</p>
+
+{#if tabs.length > 1}
+  <div class="row tabs" role="group" aria-label="Items view">
+    {#each tabs as t (t.id)}
+      <button type="button" aria-pressed={tab === t.id} class:primary={tab === t.id} onclick={() => go(t.id)}>{t.label}</button>
+    {/each}
+  </div>
+{/if}
+
+{#if tab === 'unassigned'}
+  <Unassigned {campaign} {pool} {chars} {error} />
+{:else if pool}
+  <AllItems {campaign} {pool} {chars} reload={() => load(campaign.id)} />
+{:else if error}
+  <p role="alert" class="error">{error}</p>
+{:else}
+  <p class="muted">Loading items…</p>
+{/if}
+
+<style>
+  .tabs { margin-bottom: 0.5rem; }
+</style>

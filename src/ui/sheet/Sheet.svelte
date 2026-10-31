@@ -96,7 +96,7 @@
     update(({ campaignId: _, ...rest }) => (id ? { ...rest, campaignId: id } : rest));
   }
 
-  // R44: moves `qty` of an entry to Party loot ('loot') or another character, and commits both sides in one transaction.
+  // R44: moves `qty` of an entry to Unassigned ('loot', the stored field) or another character, and commits both sides in one transaction.
   // The receiver is read fresh from storage. On failure nothing in memory changes. On success the sheet adopts what was
   // written as its saved baseline, so autosave doesn't write a stale copy over it.
   async function transferTo(entryId: string, qty: number, to: string) {
@@ -122,7 +122,7 @@
         c = c === cur ? next : { ...c, inventory: transfer(c.inventory, [], entryId, qty).from };
       }
       if (camp) await refreshCampaigns().catch(() => {});
-      toast(`Moved to ${camp ? 'Party loot' : other!.name || 'Unnamed'}.`);
+      toast(`Moved to ${camp ? 'Unassigned' : other!.name || 'Unnamed'}.`);
     } catch (e) {
       toast(e instanceof StorageError ? e.message : `Could not move it: ${message(e)}`, true);
     } finally {

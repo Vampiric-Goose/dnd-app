@@ -10,6 +10,17 @@ export function parseHash(hash: string): Route {
 
 const hasWindow = typeof window !== 'undefined'; // node tests import parseHash
 
+/** Pages that moved: the old first segment and where it lives now. */
+const MOVED: Record<string, string> = { loot: '#/items?tab=unassigned' };
+
+/** The hash to show instead of `hash` when its page moved (the old Loot page is now Items > Unassigned), else undefined. */
+export const redirected = (hash: string): string | undefined => {
+  const [first] = parseHash(hash).path;
+  return first !== undefined && Object.hasOwn(MOVED, first) ? MOVED[first] : undefined;
+};
+
+if (hasWindow && redirected(location.hash)) history.replaceState(null, '', redirected(location.hash)); // replace, so Back doesn't return to the old address
+
 export const router: Route = $state(parseHash(hasWindow ? location.hash : ''));
 
 /** A page with unsaved work sets `fn`: it returns false to refuse leaving (usually after a confirm). Clear it on teardown. */
@@ -25,6 +36,8 @@ export function guardedHash(prev: string, next: string): string {
 if (hasWindow) {
   let shown = location.hash;
   window.addEventListener('hashchange', () => {
+    const moved = redirected(location.hash);
+    if (moved) return void location.replace(moved); // fires hashchange again for the new address
     const keep = guardedHash(shown, location.hash);
     if (keep !== location.hash) return void history.replaceState(null, '', keep); // refused: back to the page we were on
     shown = keep;

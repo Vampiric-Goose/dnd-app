@@ -127,7 +127,7 @@
         {#if deleting?.id === c.id}
           <div role="alertdialog" aria-label="Confirm delete" class="row">
             <p>
-              Delete “{deleting.name}”? This removes the campaign, its settings and loot, and its {deleting.items} custom
+              Delete “{deleting.name}”? This removes the campaign, its settings, its Unassigned items, and its {deleting.items} custom
               {deleting.items === 1 ? 'item' : 'items'}. Its {deleting.characters}
               {deleting.characters === 1 ? 'character stays' : 'characters stay'} but {deleting.characters === 1 ? 'is' : 'are'} no longer in a campaign. This cannot be undone.
             </p>

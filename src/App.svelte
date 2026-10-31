@@ -31,7 +31,6 @@
     ['compendium', 'Compendium', () => import('./ui/pages/Compendium.svelte')],
     ['items', 'Items', () => import('./ui/pages/Items.svelte')],
     ['items/:id', 'ItemEditor', () => import('./ui/pages/Items.svelte')], // the same page; `:id` is an item id or "new"
-    ['loot', 'Loot', () => import('./ui/pages/Loot.svelte')],
     ['packs', 'Packs', () => import('./ui/pages/Packs.svelte')],
     ['settings', 'CampaignSettings', () => import('./ui/pages/CampaignSettings.svelte')],
     ['about', 'About', () => import('./ui/pages/About.svelte')],
@@ -42,7 +41,6 @@
     ['Characters', 'characters'],
     ['Compendium', 'compendium'],
     ['Items', 'items'],
-    ['Loot', 'loot'],
     ['Packs', 'packs'],
     ['Settings', 'settings'],
     ['About', 'about'],

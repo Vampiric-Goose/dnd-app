@@ -15,7 +15,7 @@
     sheet: Sheet;
     settings: CampaignSettings;
     update: (fn: (c: Character) => Character) => void;
-    ontransfer: (entryId: string, qty: number, targetId: string) => Promise<void>; // 'loot' or a character id
+    ontransfer: (entryId: string, qty: number, targetId: string) => Promise<void>; // 'loot' (Unassigned) or a character id
   } = $props();
 
   const campaignId = $derived(c.campaignId);
@@ -40,7 +40,8 @@
   }
   $effect(() => { campaignId; void loadOthers(); });
 
-  const targets = $derived([...(campaignId ? [{ id: 'loot', label: 'Party loot' }] : []), ...others.map((o) => ({ id: o.id, label: o.name || 'Unnamed' }))]);
+  // Unassigned is the DM's holding list: only DM view can hand an item back to it. A player can give to other characters.
+  const targets = $derived([...(campaignId && app.viewer === 'dm' ? [{ id: 'loot', label: 'Unassigned (DM)' }] : []), ...others.map((o) => ({ id: o.id, label: o.name || 'Unnamed' }))]);
 
   const COINS = ['cp', 'sp', 'ep', 'gp', 'pp'] as const;
   function setCoin(k: (typeof COINS)[number], input: HTMLInputElement) {
@@ -105,7 +106,7 @@
     <ul class="plain">
       {#each c.inventory as e (e.id)}
         <EntryRow
-          entry={e} viewer={app.viewer} gear {targets} moveLabel="Transfer"
+          entry={e} viewer={app.viewer} gear {targets} moveLabel="Transfer to…"
           warnAttune={e.attuned ? sheet.attunedCount > ATTUNEMENT_LIMIT : sheet.attunedCount >= ATTUNEMENT_LIMIT}
           canRefresh={!!pool && !!e.sourceId && !!latestItem(pool, e.sourceId)}
           onchange={(fn) => replace(e.id, fn)}

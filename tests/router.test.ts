@@ -1,5 +1,15 @@
 import { expect, test } from 'vitest';
-import { guardedHash, leaveGuard, parseHash } from '../src/lib/router.svelte.ts';
+import { guardedHash, leaveGuard, parseHash, redirected } from '../src/lib/router.svelte.ts';
+
+test('the old Loot address moves to Items > Unassigned; nothing else is redirected', () => {
+  expect(redirected('#/loot')).toBe('#/items?tab=unassigned');
+  expect(redirected('#/loot/')).toBe('#/items?tab=unassigned');
+  expect(redirected('#/loot?x=1')).toBe('#/items?tab=unassigned');
+  expect(redirected('#/items')).toBeUndefined();
+  expect(redirected('#/items?tab=unassigned')).toBeUndefined(); // the target is stable, so no loop
+  expect(redirected('')).toBeUndefined();
+  expect(redirected('#/constructor')).toBeUndefined();
+});
 
 test('leave guard keeps the old hash when it says no, and ignores query-only changes', () => {
   let asked = 0;
