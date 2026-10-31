@@ -131,6 +131,12 @@ test('I1/R8: a 2024-style stat block or spell is refused, not read; a 2014 one i
   expect(parseSpellText('Ember Lattice\nLevel 2 Evocation (Sorcerer, Wizard)\nCasting Time: Action').refused).toBe('This looks like a 2024 spell, which this app does not use.');
   expect(parseSpellText('Ember Lattice\n2nd-level evocation\nUsing a Higher-Level Spell Slot. More embers.').refused).toBeDefined();
   expect(parseSpellText('Ember Lattice\n2nd-level evocation\nCasting Time: 1 action').refused).toBeUndefined();
+  // PDF copies: non-breaking spaces, and labels split from their values across lines.
+  expect(parseMonsterText('Reed Stalker\nAC 14 Initiative +3').refused).toBeDefined();
+  expect(parseMonsterText('Reed Stalker\nAC\n14\nInitiative\n+3').refused).toBeDefined();
+  expect(parseMonsterText('Reed Stalker\nCR 1/2 (XP 100; PB +2)').refused).toBeDefined();
+  // A 2014 spell whose wrapped description has a line starting "Level 3 …" is still read.
+  expect(parseSpellText('Ember Lattice\n2nd-level evocation\nCasting Time: 1 action\nRange: 60 feet\nThe lattice burns hotter at higher\nLevel 3 slots and above.').refused).toBeUndefined();
 });
 
 test('I3: a paste longer than one entry is refused before it is read', () => {

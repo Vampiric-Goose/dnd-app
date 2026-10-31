@@ -16,11 +16,14 @@ export const MAX_PASTE = 50_000;
  */
 export function refusal(s: string, kind: 'monster' | 'spell' | 'item'): string | undefined {
   if (s.length > MAX_PASTE) return 'That is more than one entry. Paste one stat block, spell or item at a time.';
+  // \s+ (which also matches non-breaking spaces and line breaks): a label and its value may sit on separate lines in a PDF copy.
   const sign = '[+\\-−–]';
-  if (kind === 'monster' && ((/^\s*AC \d+/m.test(s) && new RegExp(`Initiative ${sign}\\s?\\d`).test(s)) || /\bCR \S+ \(XP [\d,]+; PB/.test(s) || /\bMOD\s+SAVE\b/.test(s))) {
+  if (kind === 'monster' && ((/^\s*AC\s+\d+/m.test(s) && new RegExp(`Initiative\\s+${sign}\\s*\\d`).test(s)) || /\bCR\s+\S+\s+\(XP\s+[\d,]+;\s*PB/.test(s) || /\bMOD\s+SAVE\b/.test(s))) {
     return 'This looks like a 2024 stat block, which this app does not use.';
   }
-  if (kind === 'spell' && (/^\s*Level \d \w+/m.test(s) || /Using a Higher-Level Spell Slot/i.test(s))) return 'This looks like a 2024 spell, which this app does not use.';
+  // The 2024 "Level 2 Evocation" line is the header, so look for it only in the first three lines, not in a wrapped description.
+  const head = s.trim().split('\n').slice(0, 3).join('\n');
+  if (kind === 'spell' && (/^\s*Level\s+\d\s+\w+/m.test(head) || /Using\s+a\s+Higher-Level\s+Spell\s+Slot/i.test(s))) return 'This looks like a 2024 spell, which this app does not use.';
   return undefined;
 }
 
