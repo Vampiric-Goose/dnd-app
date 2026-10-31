@@ -1,0 +1,55 @@
+<script lang="ts">
+  import type { ItemDef, MonsterDef, SpellDef } from '../lib/types.ts';
+  import { message } from './creator/labels.ts';
+
+  type Kind = 'monster' | 'spell' | 'item';
+  type Draft = { monster: MonsterDef; spell: SpellDef; item: ItemDef };
+  let { kind, onread, oncancel }: { kind: Kind; onread: (draft: Draft[Kind], notes: string[]) => void; oncancel: () => void } = $props();
+
+  // The parsers load only when the DM presses Read (their own lazy chunks).
+  const parse = {
+    monster: async (s: string) => (await import('../lib/import/paste/monster.ts')).parseMonsterText(s),
+    spell: async (s: string) => (await import('../lib/import/paste/spell.ts')).parseSpellText(s),
+    item: async (s: string) => (await import('../lib/import/paste/item.ts')).parseItemText(s),
+  };
+  const what = $derived(kind === 'monster' ? 'stat block' : kind);
+  const uid = $props.id();
+  let text = $state('');
+  let busy = $state(false);
+  let error = $state('');
+
+  async function read() {
+    busy = true;
+    error = '';
+    try {
+      const r = await parse[kind](text);
+      onread(r.draft, r.notes);
+    } catch (e) {
+      error = `Could not read the text: ${message(e)}`;
+    } finally {
+      busy = false;
+    }
+  }
+</script>
+
+<div class="card" role="dialog" aria-labelledby="{uid}-h" tabindex="-1" onkeydown={(e) => e.key === 'Escape' && oncancel()}>
+  <h2 id="{uid}-h">Paste a {what}</h2>
+  <div class="field">
+    <label for="{uid}-t">The {what}'s text, as copied from a PDF or web page</label>
+    <!-- svelte-ignore a11y_autofocus (the dialog opens on a click; the text box is what it is for) -->
+    <textarea id="{uid}-t" rows="12" autofocus bind:value={text}></textarea>
+  </div>
+  <p class="muted">The text is read on this device. You review the result in the editor; nothing is saved until you press Save.</p>
+  {#if error}<p role="alert" class="error">{error}</p>{/if}
+  <div class="row">
+    <button type="button" class="primary" disabled={busy || !text.trim()} onclick={read}>Read</button>
+    <button type="button" onclick={oncancel}>Cancel</button>
+  </div>
+</div>
+
+<style>
+  textarea {
+    font: inherit; color: inherit; background: var(--surface); border: 1px solid var(--border); border-radius: 0.35rem;
+    padding: 0.4rem 0.7rem; width: 100%; box-sizing: border-box;
+  }
+</style>

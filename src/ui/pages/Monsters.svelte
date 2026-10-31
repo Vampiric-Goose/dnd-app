@@ -13,6 +13,8 @@
   import { download, downloadPdf, fileName } from '../download.ts';
   import MonsterEditor from '../monsters/MonsterEditor.svelte';
   import StatBlock from '../monsters/StatBlock.svelte';
+  import PasteDialog from '../PasteDialog.svelte';
+  import { pasted } from '../pasted.ts';
   import VirtualList from '../VirtualList.svelte';
 
   let { params }: { params: Record<string, string> } = $props();
@@ -64,10 +66,15 @@
   const go = (id?: string) => { location.hash = '#/monsters' + (id ? `?id=${encodeURIComponent(id)}` : ''); };
   const sub = (m: MonsterDef) => [`CR ${m.cr}`, `${m.size.map((s) => SIZE_NAMES[s]).join('/')} ${monsterType(m)}`, index?.label(m.source) ?? m.source].join(' · ');
 
-  // `monsters/new` (optionally `?from=<id>`: Duplicate) and `monsters/:id/edit` show the editor instead of the library.
+  // `monsters/new` (optionally `?from=<id>`: Duplicate, or `?pasted=1`: the paste dialog's draft) and `monsters/:id/edit` show
+  // the editor instead of the library.
   const editing = $derived(router.path[1] === 'new' || router.path[2] === 'edit');
-  const from = $derived(router.query.get('from') ?? '');
-  async function loadEditor(campaignId: string, id: string | undefined, from: string): Promise<{ initial?: StoredMonster; draft?: MonsterDef }> {
+  const from = $derived(router.query.get('from') ?? (router.query.has('pasted') ? 'pasted' : ''));
+  async function loadEditor(campaignId: string, id: string | undefined, from: string): Promise<{ initial?: StoredMonster; draft?: MonsterDef; notes?: string[] }> {
+    if (from === 'pasted') {
+      if (!pasted.monster) throw new Error('The pasted stat block is gone (the page was reloaded). Paste it again.');
+      return pasted.monster;
+    }
     if (id) {
       const x = await db.monsters.get(id);
       if (!x || x.campaignId !== campaignId) throw new Error('That monster is not in this campaign.');
@@ -85,6 +92,7 @@
   let clash: { file: StoredMonster; monster: StoredMonster; existing: string; edits: string[] } | undefined = $state.raw();
   let keepBtn: HTMLButtonElement | undefined = $state();
   let notice = $state('');
+  let pasting = $state(false);
   $effect(() => { if (clash) keepBtn?.focus(); });
 
   const isPdf = (f: File) => f.type === 'application/pdf' || /\.pdf$/i.test(f.name);
@@ -163,6 +171,12 @@
       {#await loadEditor(app.campaign.id, params.id, from)}
         <p class="muted">Loading…</p>
       {:then r}
+        {#if r.notes?.length}
+          <div class="card" role="note">
+            <strong>Read from pasted text.</strong> Check these before saving:
+            <ul>{#each r.notes as n}<li>{n}</li>{/each}</ul>
+          </div>
+        {/if}
         <MonsterEditor campaignId={app.campaign.id} initial={r.initial} draft={r.draft} />
       {:catch e}
         <h1>Monsters</h1>
@@ -190,11 +204,15 @@
       </div>
     </div>
   {/if}
+  {#if pasting && app.campaign}
+    <PasteDialog kind="monster" oncancel={() => (pasting = false)} onread={(draft, notes) => { pasted.monster = { draft: draft as MonsterDef, notes }; pasting = false; navigate('monsters/new?pasted=1'); }} />
+  {/if}
   <div class="layout" class:has-detail={!!selected}>
     <section class="browse" aria-label="Browse">
       <div class="row actions">
         {#if app.campaign}
           <button type="button" class="primary" onclick={() => navigate('monsters/new')}>New monster</button>
+          <button type="button" aria-expanded={pasting} onclick={() => (pasting = !pasting)}>Paste a stat block</button>
           <label class="file"><span>Import monster (.json / .pdf)</span>
             <input type="file" accept=".json,.pdf,application/json,application/pdf" onchange={onImport} />
           </label>

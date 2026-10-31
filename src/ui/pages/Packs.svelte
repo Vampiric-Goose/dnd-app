@@ -4,7 +4,9 @@
   import { selectDataFiles, walkEntries, type FsEntry } from '../../lib/import/dataFolder.ts';
   import { splitImportErrors } from '../../lib/import/summary.ts';
   import { refreshCampaigns, getFullIndex } from '../../lib/store.svelte.ts';
-  import type { Pack, PackMeta } from '../../lib/types.ts';
+  import type { Pack, PackMeta, SpellDef } from '../../lib/types.ts';
+  import PasteDialog from '../PasteDialog.svelte';
+  import SpellEditor from '../spells/SpellEditor.svelte';
 
   type Counts = PackMeta['counts'];
   type Summary = { packs: { name: string; source: string; counts: Counts; patches: number }[]; errors: { file: string; message: string }[]; skipped: string[]; warnings: string[]; skipped2024: number; skippedUnknown: number; files: number };
@@ -16,6 +18,10 @@
   let error = $state('');
   let deleting: PackMeta | undefined = $state();
   let removing: PackMeta | undefined = $state();
+  // Paste a spell: the dialog, then the spell editor on the draft; a save lands in the local pack My spells (R3).
+  let pasteSpell = $state(false);
+  let spellDraft: { draft: SpellDef; notes: string[] } | undefined = $state.raw();
+  let spellNotice = $state('');
 
   const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
   const listPacks = () => db.packs.listMeta().then((m) => (packs = m.filter((p) => p.id !== 'srd')));
@@ -281,6 +287,18 @@
   <label for="pack-files">Import individual files (homebrew)</label>
   <input id="pack-files" type="file" accept=".json" multiple disabled={busy} onchange={onFiles} />
 </div>
+
+<div class="row">
+  <button type="button" aria-expanded={pasteSpell} disabled={!!spellDraft} onclick={() => { pasteSpell = !pasteSpell; spellNotice = ''; }}>Paste a spell</button>
+  {#if spellNotice}<p role="status">{spellNotice}</p>{/if}
+</div>
+{#if pasteSpell}
+  <PasteDialog kind="spell" oncancel={() => (pasteSpell = false)} onread={(draft, notes) => { spellDraft = { draft: draft as SpellDef, notes }; pasteSpell = false; }} />
+{/if}
+{#if spellDraft}
+  <SpellEditor initial={spellDraft.draft} notes={spellDraft.notes} oncancel={() => (spellDraft = undefined)}
+    onsaved={(sp) => { spellDraft = undefined; spellNotice = `Saved ${sp.name} to My spells. Enable My spells in a campaign's Settings to use it.`; void listPacks(); }} />
+{/if}
 
 {#if busy}
   <p role="status">{progress}</p>

@@ -13,6 +13,8 @@
   import { message } from '../creator/labels.ts';
   import EntityDetail from '../EntityDetail.svelte';
   import VirtualList from '../VirtualList.svelte';
+  import PasteDialog from '../PasteDialog.svelte';
+  import { pasted } from '../pasted.ts';
   import { editUnassigned } from './loot.ts';
   import type { Pool } from './pool.ts';
 
@@ -29,6 +31,7 @@
   let selId = $state('');
   let error = $state('');
   let notice = $state('');
+  let pasting = $state(false);
   let panel: 'give' | undefined = $state();
   let target = $state('');
   let qty: number | null = $state(1);
@@ -179,11 +182,15 @@
   const focusOnPhone = (node: HTMLElement) => { if (matchMedia('(max-width: 767px)').matches) node.focus(); };
 </script>
 
+{#if pasting && dm}
+  <PasteDialog kind="item" oncancel={() => (pasting = false)} onread={(draft, notes) => { pasted.item = { draft: draft as ItemDef, notes }; pasting = false; navigate('items/new?pasted=1'); }} />
+{/if}
 <div class="layout" class:has-detail={!!selected}>
   <section class="browse" aria-label="Browse">
     {#if dm}
       <div class="row actions">
         <button type="button" class="primary" onclick={() => navigate('items/new')}>New item</button>
+        <button type="button" aria-expanded={pasting} onclick={() => (pasting = !pasting)}>Paste an item</button>
         <label class="file"><span>Import item (.json / .pdf)</span>
           <input type="file" accept=".json,.pdf,application/json,application/pdf" onchange={onImport} />
         </label>

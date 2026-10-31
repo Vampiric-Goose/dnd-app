@@ -6,6 +6,8 @@
   import { message } from '../creator/labels.ts';
   import ItemEditor from '../items/ItemEditor.svelte';
   import ItemsHome from '../items/ItemsHome.svelte';
+  import { router } from '../../lib/router.svelte.ts';
+  import { pasted } from '../pasted.ts';
 
   let { params }: { params: Record<string, string> } = $props();
 
@@ -15,6 +17,11 @@
 
   // `items` is the page (All items and Unassigned tabs); `items/new` and `items/:id` edit. Awaiting by (campaign, id) remounts the editor for a different item.
   async function load(campaignId: string, id: string): Promise<StoredItem> {
+    // `items/new?pasted=1`: the paste dialog's draft, unsaved until Save.
+    if (id === 'new' && router.query.has('pasted')) {
+      if (!pasted.item) throw new Error('The pasted item is gone (the page was reloaded). Paste it again.');
+      return { ...blank(campaignId), ...pasted.item.draft, id: '', source: 'Homebrew', campaignId, updatedAt: 0 };
+    }
     if (id === 'new') return blank(campaignId);
     const it = await db.items.get(id);
     if (!it || it.campaignId !== campaignId) throw new Error('That item is not in this campaign.');
@@ -38,7 +45,13 @@
       {#await load(campaign.id, params.id)}
         <p class="muted">Loading…</p>
       {:then initial}
-        <ItemEditor {initial} isNew={params.id === 'new'} />
+        {#if params.id === 'new' && router.query.has('pasted') && pasted.item?.notes.length}
+          <div class="card" role="note">
+            <strong>Read from pasted text.</strong> Check these before saving:
+            <ul>{#each pasted.item.notes as n}<li>{n}</li>{/each}</ul>
+          </div>
+        {/if}
+        <ItemEditor {initial} isNew={params.id === 'new'} pasted={params.id === 'new' && router.query.has('pasted')} />
       {:catch e}
         <h1>Items</h1>
         <p role="alert" class="error">{message(e)}</p>

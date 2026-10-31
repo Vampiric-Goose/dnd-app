@@ -17,7 +17,8 @@
   import EffectsEditor from './EffectsEditor.svelte';
   import PlayerViewEditor from './PlayerViewEditor.svelte';
 
-  let { initial, isNew }: { initial: StoredItem; isNew: boolean } = $props();
+  // `pasted`: a draft read from pasted text. It counts as unsaved work until the first Save, so leaving asks first.
+  let { initial, isNew, pasted = false }: { initial: StoredItem; isNew: boolean; pasted?: boolean } = $props();
 
   const TYPES: ItemType[] = ['weapon', 'armor', 'shield', 'ammunition', 'gear', 'pack', 'tool', 'wondrous', 'potion', 'ring', 'rod', 'scroll', 'staff', 'wand', 'other'];
   const RARITIES: Rarity[] = ['common', 'uncommon', 'rare', 'very rare', 'legendary', 'artifact', 'varies'];
@@ -103,7 +104,7 @@
   // Unsaved work: everything the editor holds, compared with what it held at the last load or save.
   const snapshotKey = (id = draft.id) => JSON.stringify([{ ...$state.snapshot(draft), id }, textDraft, curseDraft, weightDraft, costDraft, acDraft, maxDraft, rangeNear, rangeFar]);
   let baseline = $state(snapshotKey());
-  const dirty = $derived(snapshotKey() !== baseline);
+  const dirty = $derived((pasted && !saved) || snapshotKey() !== baseline);
 
   $effect(() => {
     const guard = () => !dirty || confirm('Discard unsaved changes to this item?');
