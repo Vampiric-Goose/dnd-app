@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { setContext } from 'svelte';
+  import { setContext, untrack } from 'svelte';
   import { exportRecord } from '../../lib/backup.ts';
   import { characterSummary } from '../../lib/character/play.ts';
   import { db, StorageError } from '../../lib/db.ts';
@@ -8,6 +8,8 @@
   import { computeSheet } from '../../lib/rules/sheet.ts';
   import { DEFAULT_SETTINGS } from '../../lib/settings.ts';
   import { transfer } from '../../lib/items/inventory.ts';
+  import { replay } from '../../lib/sync/merge.ts';
+  import { session } from '../../lib/sync/session.svelte.ts';
   import { app, refreshCampaigns } from '../../lib/store.svelte.ts';
   import { toast } from '../../lib/toast.svelte.ts';
   import type { Campaign, CampaignSettings, Character, OverrideKey } from '../../lib/types.ts';
@@ -34,16 +36,24 @@
 
   let moving = false; // a transfer is committing: autosave stays out of its way (R44)
 
-  async function flush() {
+  // B5: one save at a time. A flush (timer, route leave, page hide) runs after the one in flight, from what that one stored.
+  let saving: Promise<void> = Promise.resolve();
+  function flush(): Promise<void> {
     clearTimeout(timer);
     timer = undefined;
+    return (saving = saving.then(save));
+  }
+
+  async function save() {
     const cur = c;
     if (!cur || cur === saved || moving) return;
     try {
       const stored = await db.characters.put($state.snapshot(cur) as Character);
-      // N1: continue from what was stored, so the next save's base (sync) includes this one. Edits made meanwhile keep their values.
+      if (c?.id !== cur.id) return; // the route moved on meanwhile
+      // N1: continue from what was stored, so the next save's base (sync) includes this one. B4: edits made meanwhile are replayed onto
+      // the stored record, so a remote value this save kept is not reverted by the edit's stale copy of it.
       saved = stored;
-      c = c === cur ? stored : c && { ...c, sync: stored.sync };
+      c = c === cur ? stored : replay(stored, cur, $state.snapshot(c) as Character);
     } catch (e) {
       // The in-memory state is kept; the next edit tries again.
       toast(e instanceof StorageError ? e.message : `Could not save: ${message(e)}`, true);
@@ -68,6 +78,16 @@
       live = false;
       void flush(); // leaving the page (route change) must not lose the last edit
     };
+  });
+
+  // Stage 3: sync stored something. With no unsaved edits the sheet shows the stored record; with some, the next save rebases onto it (C1).
+  $effect(() => {
+    void session.rev;
+    untrack(() => {
+      const id = c?.id;
+      if (!id || c !== saved || moving) return;
+      db.characters.get(id).then((found) => { if (found && c === saved && c?.id === id) saved = c = found; }, () => {});
+    });
   });
 
   // Debounced autosave.
@@ -102,13 +122,15 @@
   // The receiver is read fresh from storage. On failure nothing in memory changes. On success the sheet adopts what was
   // written as its saved baseline, so autosave doesn't write a stale copy over it.
   async function transferTo(entryId: string, qty: number, to: string) {
-    const cur = c;
-    if (!cur) return;
+    if (!c) return;
     if (moving) { toast("Another move is still saving. Try again in a moment.", true); return; }
-    if (to === cur.id) { toast("That item is already with this character.", true); return; }
+    if (to === c.id) { toast("That item is already with this character.", true); return; }
     moving = true;
     clearTimeout(timer);
     try {
+      await saving; // B5: a save in flight finishes first; the move then starts from what it stored (it saves any newer edits too)
+      const cur = c;
+      if (!cur) return;
       const camp = to === 'loot' ? await db.campaigns.get(cur.campaignId ?? '') : undefined;
       const other = to === 'loot' ? undefined : await db.characters.get(to);
       if (!camp && !other) throw new Error('Could not find where to send it.');
@@ -120,8 +142,8 @@
         : { characters: [$state.snapshot(next) as Character, $state.snapshot({ ...other!, inventory: moved.to }) as Character] });
       if (c?.id === cur.id) { // still on this sheet (the route may have changed while it committed)
         saved = stored; // N1: as stored, with its sync
-        // Edits made while it committed stay and autosave: the same move is applied to the latest inventory.
-        c = c === cur ? stored : { ...c, sync: stored.sync, inventory: transfer(c.inventory, [], entryId, qty).from };
+        // Edits made while it committed stay and autosave.
+        c = c === cur ? stored : replay(stored, cur, $state.snapshot(c) as Character); // B4: only the edits made meanwhile
       }
       if (camp) await refreshCampaigns().catch(() => {});
       toast(`Moved to ${camp ? 'Unassigned' : other!.name || 'Unnamed'}.`);
@@ -151,7 +173,7 @@
     }
   }
 
-  const last = $derived(shownRolls(rollLog, app.viewer)[0]); // R6: never a private (monster) roll in Player view
+  const last = $derived(shownRolls(rollLog, app.viewer).find((r) => !r.from)); // R6: never a private (monster) roll in Player view; this device's own
   const nat = $derived(last && natD20(last.detail));
 
   // R46: sheet edits (overrides, custom effects) are the DM's, through one Edit mode. Not saved; it never outlives the DM view or the page.

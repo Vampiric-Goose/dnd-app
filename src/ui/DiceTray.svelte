@@ -71,7 +71,7 @@
         <li class:nat20={nat === 'nat20'} class:nat1={nat === 'nat1'}>
           <strong class="total">{r.total}</strong>
           <span>
-            {r.label}{#if nat === 'nat20'} <b>Natural 20!</b>{:else if nat === 'nat1'} <b>Natural 1</b>{/if}
+            {#if r.from}<span class="from">{r.from}: </span>{/if}{r.label}{#if nat === 'nat20'} <b>Natural 20!</b>{:else if nat === 'nat1'} <b>Natural 1</b>{/if}
             {#if !r.public}<span class="muted">(private)</span>{/if}
             <br /><small class="muted">{r.label === r.expr ? "" : r.expr + ": "}{r.detail}</small>
           </span>
@@ -147,6 +147,10 @@
     border: 1px solid var(--border);
     border-radius: 0.35rem;
     overflow-wrap: anywhere;
+  }
+
+  .from {
+    font-weight: 600;
   }
 
   .total {

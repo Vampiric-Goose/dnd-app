@@ -5,9 +5,11 @@
   import { characterListProblem } from '../../lib/recordShape.ts';
   import { navigate } from '../../lib/router.svelte.ts';
   import { app, getFullIndex } from '../../lib/store.svelte.ts';
+  import { session } from '../../lib/sync/session.svelte.ts';
   import type { Character } from '../../lib/types.ts';
   import { message } from '../creator/labels.ts';
   import { download, fileName } from '../download.ts';
+  import Roster from '../sync/Roster.svelte';
 
   let chars: Character[] = $state.raw([]);
   let damaged: Character[] = $state.raw([]); // stored records the list itself can't read (R60/4: only that; the full check is for imports)
@@ -19,6 +21,7 @@
   let deleting: Character | undefined = $state.raw();
   let trash: (TrashEntry & { campaignId: string })[] = $state.raw([]); // R9: deleted characters of the campaigns this device hosts
   let purging: string | undefined = $state();
+  let emptying = $state(false);
 
   const hosted = (id?: string) => app.campaigns.find((x) => x.id === id)?.sync?.role === 'dm';
 
@@ -33,7 +36,7 @@
     }
     loaded = true;
   }
-  load();
+  $effect(() => { void session.rev; load(); }); // and again whenever sync stored something
 
   const shown = $derived(chars.filter((c) => filter === 'all' || (filter === 'none' ? !c.campaignId : c.campaignId === filter)));
   const campaignName = (id?: string) => app.campaigns.find((x) => x.id === id)?.name;
@@ -118,11 +121,22 @@
     }
   }
 
-  // R9: the session (Task 5) re-sends a restored character to its owner's devices.
+  // R9: db.trash.restore tells the sync session (onLocalChange), which re-sends the character to its owner's devices.
   async function restore(e: TrashEntry & { campaignId: string }) {
     try {
       await db.trash.restore(e.campaignId, e.character.id);
       notice = `Restored ${e.character.name || 'Unnamed'}.`;
+      await load();
+    } catch (err) {
+      error = message(err);
+    }
+  }
+
+  // B1: every deleted character of the shown campaigns, permanently.
+  async function emptyTrash() {
+    try {
+      for (const id of new Set(trash.filter((e) => filter === 'all' || filter === e.campaignId).map((e) => e.campaignId))) await db.trash.empty(id);
+      emptying = false;
       await load();
     } catch (err) {
       error = message(err);
@@ -157,6 +171,8 @@
     </div>
   </div>
 {/if}
+
+{#if app.campaign?.sync}<Roster campaign={app.campaign} />{/if}
 
 <div class="row">
   <button class="primary" onclick={() => navigate('characters/new')}>New character</button>
@@ -221,6 +237,16 @@
 
 {#if trash.some((e) => filter === 'all' || filter === e.campaignId)}
   <h2>Deleted characters</h2>
+  <div class="row">
+    {#if !emptying}<button class="danger" onclick={() => (emptying = true)}>Empty deleted characters</button>{/if}
+  </div>
+  {#if emptying}
+    <div role="alertdialog" aria-label="Confirm emptying deleted characters" class="row">
+      <p>Delete all {trash.filter((e) => filter === 'all' || filter === e.campaignId).length} deleted characters permanently? This cannot be undone.</p>
+      <button class="danger" onclick={emptyTrash}>Delete them permanently</button>
+      <button onclick={() => (emptying = false)}>Keep them</button>
+    </div>
+  {/if}
   <ul class="plain">
     {#each trash.filter((e) => filter === 'all' || filter === e.campaignId) as e (e.character.id)}
       {@const name = typeof e.character.name === 'string' && e.character.name ? e.character.name : 'Unnamed'}

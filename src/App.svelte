@@ -1,18 +1,26 @@
 <script lang="ts">
-  import { onMount, type Component } from 'svelte';
+  import { onMount, untrack, type Component } from 'svelte';
   import { APP_NAME } from './lib/app.ts';
   import { requestPersistence } from './lib/db.ts';
   import { router } from './lib/router.svelte.ts';
   import { app, startup } from './lib/store.svelte.ts';
+  import { follow } from './lib/sync/session.svelte.ts';
   import BackupBanner from './ui/BackupBanner.svelte';
   import CampaignPicker from './ui/CampaignPicker.svelte';
   import DiceTray from './ui/DiceTray.svelte';
   import Toast from './ui/Toast.svelte';
+  import SyncStatus from './ui/sync/SyncStatus.svelte';
   import ViewerToggle from './ui/ViewerToggle.svelte';
 
   onMount(() => {
     void requestPersistence();
     void startup();
+  });
+
+  // Stage 3: hosting resumes, or a joined campaign reconnects, for the open campaign (the session loads the engine only then).
+  $effect(() => {
+    const c = app.campaign; // a new object whenever campaigns are re-read
+    if (app.ready) untrack(() => void follow(c));
   });
 
   type Params = Record<string, string>;
@@ -38,6 +46,7 @@
     ['packs', 'Packs', () => import('./ui/pages/Packs.svelte')],
     ['settings', 'CampaignSettings', () => import('./ui/pages/CampaignSettings.svelte')],
     ['about', 'About', () => import('./ui/pages/About.svelte')],
+    ['join/:code', 'Join', () => import('./ui/pages/Join.svelte')],
   ];
 
   // Monsters are DM information (R2): no link in Player view.
@@ -76,6 +85,7 @@
 <div class="shell">
   <header>
     <strong>{APP_NAME}</strong>
+    <SyncStatus />
     <div class="campaign-slot"><CampaignPicker /></div>
     <ViewerToggle />
   </header>

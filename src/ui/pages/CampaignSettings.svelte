@@ -3,6 +3,7 @@
   import { db } from '../../lib/db.ts';
   import { app, saveCampaign } from '../../lib/store.svelte.ts';
   import type { Campaign, CampaignSettings, PackMeta } from '../../lib/types.ts';
+  import HostPanel from '../sync/HostPanel.svelte';
 
   type Bool = { [K in keyof CampaignSettings]: CampaignSettings[K] extends boolean ? K : never }[keyof CampaignSettings];
   type Module = keyof CampaignSettings['initiativeModules'];
@@ -30,6 +31,7 @@
   ];
 
   const c = $derived(app.campaign);
+  const readOnly = $derived(c?.sync?.role === 'player'); // a joined campaign: the DM's settings, sent by sync
   let packs: PackMeta[] = $state([]);
   let error = $state('');
 
@@ -39,7 +41,7 @@
 
   // Edits a copy, then saves it; the store re-reads the campaign so the controls show what was stored.
   async function change(edit: (c: Campaign) => void) {
-    if (!app.campaign) return;
+    if (!app.campaign || readOnly) return;
     const next = $state.snapshot(app.campaign) as Campaign;
     edit(next);
     error = '';
@@ -68,8 +70,17 @@
 {#if !c}
   <p>{app.ready ? 'No campaign is open.' : 'Loading…'} <a href="#/">Open or create a campaign</a> first.</p>
 {:else}
-  <p>Settings for <strong>{c.name}</strong>. Changes save as you make them.</p>
+  {#if readOnly}
+    <p role="note">Settings are set by your DM. You joined <strong>{c.name}</strong> as {c.sync?.playerId}.</p>
+  {:else}
+    <p>Settings for <strong>{c.name}</strong>. Changes save as you make them.</p>
+  {/if}
   {#if error}<p role="alert" class="error">{error}</p>{/if}
+
+  {#if !readOnly}<HostPanel campaign={c} />{/if}
+
+  <fieldset class="bare" disabled={readOnly}>
+  <legend class="sr-only">Campaign settings</legend>
 
   <h2>Character rules</h2>
   {#each rules as [key, label, help] (key)}
@@ -155,9 +166,16 @@
       </label>
     {/each}
   </fieldset>
+  </fieldset>
 {/if}
 
 <style>
+  fieldset.bare {
+    border: 0;
+    padding: 0;
+    margin: 0;
+  }
+
   fieldset {
     border: 1px solid var(--border);
     border-radius: 0.5rem;
