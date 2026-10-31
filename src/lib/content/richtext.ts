@@ -58,6 +58,27 @@ const mapText = (r: RichText, f: (s: string) => string): RichText => r.map((b): 
   : 'table' in b ? { table: { ...(b.table.caption !== undefined && { caption: f(b.table.caption) }), head: b.table.head.map(x => f(x)), rows: b.table.rows.map(row => row.map(x => f(x))) } }
   : { h: f(b.h), blocks: mapText(b.blocks, f) });
 
+const strs = (v: unknown): v is string[] => Array.isArray(v) && v.every(x => typeof x === 'string');
+
+/**
+ * Is `b` a well-formed Block: `{p}`, `{list}`, `{table: {caption?, head, rows}}` or `{h, blocks}` with every string a string and every
+ * nested block valid? Everything that reads rich text (`lines`, `redact`, the renderers) assumes this, so data from a file or storage
+ * must pass it first. `depth` stops a hostile, deeply nested file from running the stack out.
+ */
+export function isBlock(b: unknown, depth = 0): b is Block {
+  if (typeof b !== 'object' || b === null || Array.isArray(b) || depth > 32) return false;
+  const o = b as Record<string, unknown>;
+  if ('p' in o) return typeof o.p === 'string';
+  if ('list' in o) return strs(o.list);
+  if ('table' in o) {
+    const t = o.table as Record<string, unknown> | null;
+    return typeof t === 'object' && t !== null && strs(t.head) && Array.isArray(t.rows) && t.rows.every(strs) && (t.caption === undefined || typeof t.caption === 'string');
+  }
+  return typeof o.h === 'string' && Array.isArray(o.blocks) && o.blocks.every(x => isBlock(x, depth + 1));
+}
+
+export const isRichText = (r: unknown): r is RichText => Array.isArray(r) && r.every(b => isBlock(b));
+
 /** Marks stripped; redaction markers dropped but their text kept, so pass redacted text for player-facing output. */
 export const richToPlain = (r: RichText): string =>
   lines(r).map(l => l.replace(MARK, '').replace(/\*\*(.+?)\*\*/g, '$1').replace(/\*(.+?)\*/g, '$1')).join('\n');

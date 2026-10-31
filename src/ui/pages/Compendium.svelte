@@ -5,6 +5,7 @@
   import { router } from '../../lib/router.svelte.ts';
   import { app, getIndex } from '../../lib/store.svelte.ts';
   import type { Entity, EntityKind, ItemDef } from '../../lib/types.ts';
+  import { soundItem } from '../../lib/items/homebrew.ts';
   import { displayItem } from '../../lib/items/playerView.ts';
   import EntityDetail from '../EntityDetail.svelte';
   import VirtualList from '../VirtualList.svelte';
@@ -43,7 +44,7 @@
     index = undefined;
     error = '';
     Promise.all([getIndex(id), id ? db.items.list(id) : Promise.resolve([])]).then(
-      ([ix, items]) => { if (seq === loadSeq) { index = ix; homebrew = items; } },
+      ([ix, items]) => { if (seq === loadSeq) { index = ix; homebrew = items.filter(soundItem); } }, // a damaged record would throw in the list and the detail
       (e) => { if (seq === loadSeq) error = e instanceof Error ? e.message : String(e); },
     );
   });

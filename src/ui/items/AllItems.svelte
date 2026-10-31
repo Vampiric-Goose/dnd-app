@@ -33,6 +33,7 @@
   let target = $state('');
   let qty: number | null = $state(1);
   let busy = $state(false);
+  let confirmingRemove = $state(false);
   let giveBtn: HTMLButtonElement | undefined = $state();
   let giveSelect: HTMLSelectElement | undefined = $state();
 
@@ -125,7 +126,25 @@
     }
   }
 
-  const isPdf = (f: File) => f.type === 'application/pdf' || /\.pdf$/i.test(f.name);
+  // Damaged records (old bad imports, a damaged restore) are hidden everywhere; this is how the DM clears them out.
+  async function removeDamaged() {
+    if (busy) return;
+    busy = true;
+    error = notice = '';
+    try {
+      const n = pool.damaged.length;
+      for (const d of pool.damaged) await db.items.delete(d.id);
+      await reload();
+      confirmingRemove = false;
+      toast(`Removed ${n} damaged ${n === 1 ? 'item' : 'items'}.`);
+    } catch (e) {
+      error = `Could not remove them: ${message(e)}`;
+    } finally {
+      busy = false;
+    }
+  }
+
+  const isPdf =(f: File) => f.type === 'application/pdf' || /\.pdf$/i.test(f.name);
 
   // importRecord and importPdf don't save: this is where the item is put, as this campaign's homebrew under a fresh id.
   async function onImport(e: Event & { currentTarget: HTMLInputElement }) {
@@ -145,11 +164,12 @@
         if (rec.kind !== 'item') throw new Error('That file is a character. Import it on the Characters page.');
         data = rec.data;
       }
-      const item = importedItem(data, campaign.id);
+      const { item, ignored } = importedItem(data, campaign.id);
       await db.items.put(item);
       await reload();
       selId = item.id;
-      notice = `Imported ${item.name} as homebrew.`;
+      const lost = ignored.map((k) => `a damaged ${k === 'defaultView' ? 'player view' : k} block`);
+      notice = `Imported ${item.name} as homebrew${lost.length ? ` (ignored ${lost.join(', ')})` : ''}.`;
     } catch (err) {
       error = message(err);
     }
@@ -193,6 +213,22 @@
         <select bind:value={source}><option value="">All</option>{#each sources as s (s)}<option value={s}>{pool.index.label(s)}</option>{/each}</select>
       </label>
     </div>
+
+    {#if pool.damaged.length}
+      <div class="row damaged">
+        <p role="status">{pool.damaged.length} damaged {pool.damaged.length === 1 ? 'item' : 'items'} hidden</p>
+        {#if dm && !confirmingRemove}
+          <button type="button" onclick={() => (confirmingRemove = true)}>Remove damaged items</button>
+        {/if}
+      </div>
+      {#if dm && confirmingRemove}
+        <div role="alertdialog" aria-label="Confirm removing damaged items" class="row">
+          <p>Permanently remove {pool.damaged.length} damaged homebrew {pool.damaged.length === 1 ? 'item' : 'items'}? This cannot be undone.</p>
+          <button type="button" class="danger" disabled={busy} onclick={removeDamaged}>Remove</button>
+          <button type="button" onclick={() => (confirmingRemove = false)}>Keep them</button>
+        </div>
+      {/if}
+    {/if}
 
     <p class="muted count" aria-live="polite">{hits.length} {hits.length === 1 ? 'item' : 'items'}</p>
     <div class="listwrap">
@@ -256,6 +292,8 @@
   .grow { flex: 1 1 12rem; }
   .inline { margin: 0; flex-direction: row; align-items: center; gap: 0.4rem; }
   .inline input { width: 5rem; }
+  .damaged { align-items: center; }
+  .damaged p { margin: 0.25rem 0; }
   .count { margin: 0.25rem 0; }
   .listwrap { height: 60dvh; min-height: 16rem; }
   .name, .small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.25; }

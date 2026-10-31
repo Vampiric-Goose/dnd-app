@@ -1,5 +1,6 @@
 import { fold } from '../content/ids.ts';
 import type { ItemDef, StoredItem } from '../types.ts';
+import { soundItem } from './homebrew.ts';
 import { displayItem } from './playerView.ts';
 
 // Pure (no Svelte/Vite/DOM): the Items page's "All items" list. SRD and pack items plus the campaign's homebrew, merged,
@@ -20,7 +21,7 @@ export interface CatalogFilter { q?: string; magic?: '' | 'magic' | 'mundane'; t
 /** One row per item, by name. Build once per (content, viewer); `filterCatalog` is the cheap part to repeat on each keystroke. */
 export function catalogRows(items: ItemDef[], homebrew: StoredItem[], viewer: 'dm' | 'player'): CatalogRow[] {
   const mk = (item: ItemDef, stored?: StoredItem): CatalogRow => {
-    if (typeof item.name !== 'string' || !item.name || !Array.isArray(item.text)) throw new Error('damaged item');
+    if (stored && !soundItem(stored)) throw new Error('damaged item');
     const shown = displayItem(item, viewer);
     return { item, stored, shown, source: stored ? HOMEBREW_SOURCE : item.source, folded: fold(shown.name) };
   };

@@ -66,7 +66,7 @@ test('customize keeps an existing base item, so a customized +1 Longsword stays 
 });
 
 test('a malformed imported item is rejected with a message, never saved', () => {
-  const bad = (x: object, msg: RegExp) => expect(() => importedItem({ ...longsword, ...x } as never, 'c2')).toThrow(msg);
+  const bad = (x: object, msg: RegExp) => expect(() => importedItem({ ...longsword, ...x }, 'c2')).toThrow(msg);
   bad({ name: undefined }, /name/i);
   bad({ name: '   ' }, /name/i);
   bad({ text: 'not a list' }, /text/i);
@@ -80,29 +80,31 @@ test('a malformed imported item is rejected with a message, never saved', () => 
 
 test('import defaults a missing text and drops malformed blocks', () => {
   const { text: _t, ...noText } = longsword;
-  const got = importedItem({
+  const { item: got, ignored } = importedItem({
     ...noText, bonuses: { attack: 'x' }, charges: { max: 'many' }, weapon: { damage: 5 }, armor: 7, effects: 'nope', junk: 1,
-  } as never, 'c2');
+  }, 'c2');
   expect(got.text).toEqual([]);
   for (const k of ['bonuses', 'charges', 'weapon', 'armor', 'effects', 'junk']) expect(got, k).not.toHaveProperty(k);
-  expect(importedItem(longsword, 'c2').weapon).toEqual(longsword.weapon); // a good block survives
+  expect([...ignored].sort()).toEqual(['armor', 'bonuses', 'charges', 'effects', 'weapon']); // told to the DM; `junk` is not a block, so not listed
+  expect(importedItem(longsword, 'c2').item.weapon).toEqual(longsword.weapon); // a good block survives
+  expect(importedItem(longsword, 'c2').ignored).toEqual([]);
 });
 
 test('a bad stored record is skipped by the list instead of breaking it', () => {
   const nameless = { ...brew, id: 'item:homebrew-bbbbbbbb@HOMEBREW', name: undefined } as unknown as StoredItem;
   const badText = { ...brew, id: 'item:homebrew-cccccccc@HOMEBREW', text: 'x' } as unknown as StoredItem;
+  const badBlock = { ...brew, id: 'item:homebrew-dddddddd@HOMEBREW', text: [{}] } as unknown as StoredItem;
   for (const viewer of ['dm', 'player'] as const) {
-    const rows = catalogRows(SRD, [nameless, badText, brew], viewer);
-    expect(rows.filter((r) => r.stored).length).toBeLessThanOrEqual(2);
-    expect(rows.map((r) => r.item.id)).not.toContain(nameless.id);
-    expect(rows.length).toBeGreaterThanOrEqual(4);
+    const rows = catalogRows(SRD, [nameless, badText, badBlock, brew], viewer);
+    expect(rows.filter((r) => r.stored).map((r) => r.item.id)).toEqual([brew.id]); // exactly the sound one
+    expect(rows).toHaveLength(SRD.length + 1);
   }
 });
 
 test('an imported item gets a fresh id, this campaign and the homebrew source', () => {
-  const got = importedItem(brew, 'c2');
+  const { item: got } = importedItem(brew, 'c2');
   expect(got).toMatchObject({ name: 'Cloudy Flask', campaignId: 'c2', source: 'Homebrew', defaultView: brew.defaultView });
   expect(got.id).not.toBe(brew.id);
   expect(got.id).toMatch(/@HOMEBREW$/);
-  expect(importedItem(longsword, 'c2').campaignId).toBe('c2'); // a PDF's plain item has no record fields
+  expect(importedItem(longsword, 'c2').item.campaignId).toBe('c2'); // a PDF's plain item has no record fields
 });

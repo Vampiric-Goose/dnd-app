@@ -1,5 +1,6 @@
 <script lang="ts">
   import { db } from '../../lib/db.ts';
+  import { soundItem } from '../../lib/items/homebrew.ts';
   import { app } from '../../lib/store.svelte.ts';
   import type { StoredItem } from '../../lib/types.ts';
   import { message } from '../creator/labels.ts';
@@ -17,6 +18,7 @@
     if (id === 'new') return blank(campaignId);
     const it = await db.items.get(id);
     if (!it || it.campaignId !== campaignId) throw new Error('That item is not in this campaign.');
+    if (!soundItem(it)) throw new Error('That item is damaged and cannot be opened. Remove it with "Remove damaged items" on the Items page.');
     return it;
   }
 </script>

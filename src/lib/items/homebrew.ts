@@ -1,5 +1,6 @@
-import { isRec, type Rec } from '../recordShape.ts';
-import type { ItemDef, ItemType, PlayerView, Rarity, Recharge, StoredItem } from '../types.ts';
+import { isRichText } from '../content/richtext.ts';
+import { isRec } from '../recordShape.ts';
+import type { Choice, Effect, ItemDef, ItemType, PlayerView, Rarity, Recharge, StoredItem } from '../types.ts';
 
 // Pure (no Svelte/Vite/DOM): how a homebrew record is made from another item.
 
@@ -23,8 +24,28 @@ export function customize(item: ItemDef, campaignId: string): StoredItem {
 const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 const str = (v: unknown): v is string => typeof v === 'string';
 const strs = (v: unknown): v is string[] => Array.isArray(v) && v.every(str);
-const blocks = (v: unknown): v is Rec[] => Array.isArray(v) && v.every(isRec);
 const oneOf = <T extends string>(list: readonly T[], v: unknown): v is T => list.includes(v as T);
+
+// Effects are only checked for their shape (a record with a type), not each type's fields.
+const effectsOk = (v: unknown): v is Effect[] => Array.isArray(v) && v.every((e) => isRec(e) && str(e.type));
+const traitOk = (t: unknown, depth: number): boolean =>
+  isRec(t) && str(t.name) && isRichText(t.text) && (t.effects === undefined || effectsOk(t.effects)) && (t.choices === undefined || choicesOk(t.choices, depth + 1));
+function choicesOk(v: unknown, depth = 0): v is Choice[] {
+  return depth <= 8 && Array.isArray(v) && v.every((c) => isRec(c) && str(c.type) && (c.type !== 'option' || (Array.isArray(c.options) && c.options.every((t) => traitOk(t, depth)))));
+}
+
+/**
+ * The one guard for a stored item (R-guard): a name, and every piece of rich text the app reads is well-formed. A record that fails
+ * would make `displayItem` and the lists throw, so every place that reads stored items filters through this.
+ */
+export function soundItem(item: StoredItem | ItemDef): boolean {
+  if (!isRec(item) || !str(item.name) || !item.name.trim() || !isRichText(item.text)) return false;
+  const i = item as unknown as Record<string, unknown>;
+  if (i.curse !== undefined && !isRichText(i.curse)) return false;
+  if (i.choices !== undefined && !choicesOk(i.choices)) return false;
+  const v = i.defaultView;
+  return v === undefined || (isRec(v) && (v.text === undefined || isRichText(v.text)));
+}
 
 function weapon(w: unknown): ItemDef['weapon'] {
   if (!isRec(w) || !oneOf(['simple', 'martial'], w.category) || typeof w.ranged !== 'boolean' || !str(w.damage) || !str(w.damageType) || !strs(w.properties)) return undefined;
@@ -49,38 +70,45 @@ function charges(c: unknown): ItemDef['charges'] {
 }
 
 function view(v: unknown): PlayerView | undefined {
-  if (!isRec(v) || !strs(v.hidden) || !strs(v.revealed)) return undefined;
-  return { hidden: v.hidden as PlayerView['hidden'], revealed: v.revealed, ...(str(v.name) && { name: v.name }), ...(blocks(v.text) && { text: v.text as unknown as PlayerView['text'] }) };
+  if (!isRec(v) || !strs(v.hidden) || !strs(v.revealed) || (v.text !== undefined && !isRichText(v.text))) return undefined;
+  return { hidden: v.hidden as PlayerView['hidden'], revealed: v.revealed, ...(str(v.name) && { name: v.name }), ...(v.text !== undefined && { text: v.text }) };
 }
+
+const present = (v: unknown) => v !== undefined && !(Array.isArray(v) && !v.length) && !(isRec(v) && !Object.keys(v).length); // an empty block is nothing to lose
 
 /**
  * An imported item file (JSON or PDF) as this campaign's homebrew: a fresh id, so it never replaces anything.
- * The file is untrusted: what the rest of the app relies on (name, text, type and the numbers) must be valid or it throws a message
- * the page can show; optional blocks that are malformed are dropped; fields this app does not know are not kept.
+ * The file is untrusted. What the rest of the app relies on (name, text, type, the numbers) must be valid or this throws a message the
+ * page can show. Optional blocks that are malformed are dropped, and `ignored` names each one so the DM is told. Fields this app does
+ * not know are not kept.
  */
-export function importedItem(data: unknown, campaignId: string): StoredItem {
+export function importedItem(data: unknown, campaignId: string): { item: StoredItem; ignored: string[] } {
   if (!isRec(data)) throw new Error('That file does not hold an item.');
   const d = data;
   if (!str(d.name) || !d.name.trim()) throw new Error('The item has no name.');
-  if (d.text !== undefined && !blocks(d.text)) throw new Error(`The item "${d.name}" has a damaged description (text).`);
+  if (d.text !== undefined && !isRichText(d.text)) throw new Error(`The item "${d.name}" has a damaged description (text).`);
   if (!oneOf(ITEM_TYPES, d.type)) throw new Error(`The item "${d.name}" has an unknown type.`);
   if (d.magic !== undefined && typeof d.magic !== 'boolean') throw new Error(`The item "${d.name}" has a damaged magic flag.`);
   if (d.weight !== undefined && !num(d.weight)) throw new Error(`The item "${d.name}" has a damaged weight.`);
   if (d.costCp !== undefined && !num(d.costCp)) throw new Error(`The item "${d.name}" has a damaged cost.`);
   if (d.rarity !== undefined && !oneOf(RARITIES, d.rarity)) throw new Error(`The item "${d.name}" has an unknown rarity.`);
 
-  const w = weapon(d.weapon), a = armor(d.armor), b = bonuses(d.bonuses), c = charges(d.charges), v = view(d.defaultView);
-  const out: StoredItem = {
-    id: newHomebrewId(), kind: 'item', name: d.name.trim(), source: 'Homebrew', campaignId, updatedAt: Date.now(),
-    text: (d.text ?? []) as unknown as ItemDef['text'], type: d.type, magic: d.magic === true,
-    ...(num(d.weight) && { weight: d.weight }), ...(num(d.costCp) && { costCp: d.costCp }), ...(d.rarity !== undefined && { rarity: d.rarity as Rarity }),
-    ...(str(d.baseItemId) && { baseItemId: d.baseItemId }), ...(str(d.category) && { category: d.category }),
-    ...((str(d.attunement) || typeof d.attunement === 'boolean') && { attunement: d.attunement as string | boolean }),
-    ...(d.consumable === true && { consumable: true }), ...(strs(d.aliases) && d.aliases.length && { aliases: d.aliases }),
-    ...(blocks(d.curse) && d.curse.length && { curse: d.curse as unknown as ItemDef['text'] }),
-    ...(Array.isArray(d.effects) && blocks(d.effects) && { effects: d.effects as unknown as ItemDef['effects'] }),
-    ...(Array.isArray(d.choices) && blocks(d.choices) && { choices: d.choices as unknown as ItemDef['choices'] }),
-    ...(w && { weapon: w }), ...(a && { armor: a }), ...(b && { bonuses: b }), ...(c && { charges: c }), ...(v && { defaultView: v }),
+  const kept = {
+    weapon: weapon(d.weapon), armor: armor(d.armor), bonuses: bonuses(d.bonuses), charges: charges(d.charges), defaultView: view(d.defaultView),
+    curse: isRichText(d.curse) && d.curse.length ? d.curse : undefined,
+    effects: effectsOk(d.effects) ? d.effects : undefined,
+    choices: choicesOk(d.choices) ? d.choices : undefined,
   };
-  return structuredClone(out);
+  const ignored = Object.entries(kept).filter(([k, v]) => v === undefined && present(d[k])).map(([k]) => k);
+  const out = {
+    id: newHomebrewId(), kind: 'item', name: d.name.trim(), source: 'Homebrew', campaignId, updatedAt: Date.now(),
+    text: d.text ?? [], type: d.type, magic: d.magic === true,
+    ...(d.srd === true && { srd: true }),
+    ...(num(d.weight) && { weight: d.weight }), ...(num(d.costCp) && { costCp: d.costCp }), ...(d.rarity !== undefined && { rarity: d.rarity }),
+    ...(str(d.baseItemId) && { baseItemId: d.baseItemId }), ...(str(d.category) && { category: d.category }),
+    ...((str(d.attunement) || typeof d.attunement === 'boolean') && { attunement: d.attunement }),
+    ...(d.consumable === true && { consumable: true }), ...(strs(d.aliases) && d.aliases.length && { aliases: d.aliases }),
+    ...Object.fromEntries(Object.entries(kept).filter(([, v]) => v !== undefined)),
+  } as StoredItem;
+  return { item: structuredClone(out), ignored };
 }
