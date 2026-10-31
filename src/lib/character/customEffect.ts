@@ -118,6 +118,28 @@ export function buildEffect(type: Effect['type'], values: Record<string, FieldVa
   return { effect: out as Effect };
 }
 
+/**
+ * Is a stored or imported effect well-formed for its type? Checked against the same field model the form uses: a select holds one of
+ * its options, a number is a number, a formula a number or text, an abilities list only ability keys. A missing check box reads false.
+ */
+export function effectOk(e: unknown): e is Effect {
+  if (typeof e !== 'object' || e === null || Array.isArray(e)) return false;
+  const r = e as Record<string, unknown>;
+  if (typeof r.type !== 'string' || !Object.hasOwn(EFFECT_FIELDS, r.type)) return false;
+  return EFFECT_FIELDS[r.type as Effect['type']].every((f) => {
+    const v = r[f.name];
+    if (v === undefined) return !!f.optional || f.kind === 'check';
+    switch (f.kind) {
+      case 'select': return f.options!.includes(v as string);
+      case 'integer': return typeof v === 'number' && Number.isFinite(v);
+      case 'formula': return typeof v === 'string' || (typeof v === 'number' && Number.isFinite(v));
+      case 'check': return typeof v === 'boolean';
+      case 'abilities': return Array.isArray(v) && v.every((a) => (ABILITIES as string[]).includes(a));
+      default: return typeof v === 'string';
+    }
+  });
+}
+
 /** 'bonus: target ac, value 1' for the list of added effects. */
 export const describeEffect = (e: Effect): string =>
   `${e.type}: ${Object.entries(e).filter(([k]) => k !== 'type').map(([k, v]) => `${k} ${Array.isArray(v) ? v.join('/') || 'none' : v}`).join(', ')}`;

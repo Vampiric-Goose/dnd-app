@@ -2,7 +2,7 @@ import { strip2024 } from './character/strip2024.ts';
 import { restorablePack } from './content/sources.ts';
 import { db, sha256Hex, type BlobRecord } from './db.ts';
 import { playerCharacter } from './items/playerView.ts';
-import { isRec, problem, SHAPES, type Rec, type Shape } from './recordShape.ts';
+import { campaignProblem, characterProblem, isRec, problem, SHAPES, type Rec } from './recordShape.ts';
 import type { Campaign, Character, Pack, StoredItem } from './types.ts';
 
 const json = (o: unknown) => new Blob([JSON.stringify(o)], { type: 'application/json' });
@@ -26,11 +26,11 @@ const fromBase64 = (b64: string) => Uint8Array.from(atob(b64), (c) => c.charCode
 const damaged = (why: string) => new Error('Backup file is damaged: ' + why);
 
 /** A list of records; missing means empty. Every element is checked before anything is written. */
-function records<T>(o: Rec, key: string, shape: Shape): T[] {
+function records<T>(o: Rec, key: string, check: (r: unknown) => string | undefined): T[] {
   const list = o[key] ?? [];
   if (!Array.isArray(list)) throw damaged(`${key} is not a list`);
   list.forEach((r, i) => {
-    const why = problem(r, shape);
+    const why = check(r);
     if (why) throw damaged(`${key}[${i}] ${why}`);
   });
   return list;
@@ -85,10 +85,10 @@ export async function importBackup(file: Blob): Promise<{ campaigns: number; cha
   if (o?.format !== 'dnd-app-backup') throw new Error('Not a dnd-app backup file');
   if (o.version !== 1) throw new Error('Unsupported backup version ' + o.version);
   const snapshot = {
-    campaigns: records<Campaign>(o, 'campaigns', SHAPES.campaign),
-    characters: records<Character>(o, 'characters', SHAPES.character),
-    items: records<StoredItem>(o, 'items', SHAPES.item),
-    packs: records<Pack>(o, 'packs', SHAPES.pack),
+    campaigns: records<Campaign>(o, 'campaigns', campaignProblem),
+    characters: records<Character>(o, 'characters', characterProblem),
+    items: records<StoredItem>(o, 'items', (r) => problem(r, SHAPES.item)),
+    packs: records<Pack>(o, 'packs', (r) => problem(r, SHAPES.pack)),
     blobs: await blobRecords(o),
   };
   // R52: never the built-in SRD (id `srd`) nor a pack claiming a reserved source; the caller is told which were left out.
@@ -112,7 +112,7 @@ export async function importRecord(file: Blob): Promise<{ kind: 'character'; dat
   const o = await parse(file);
   const kind = o?.format === 'dnd-app-character' ? 'character' : o?.format === 'dnd-app-item' ? 'item' : undefined;
   if (!o || !kind || o.version !== 1) throw new Error('Not a dnd-app character or item file');
-  const why = problem(o.data, SHAPES[kind]);
+  const why = kind === 'character' ? characterProblem(o.data) : problem(o.data, SHAPES.item);
   if (why) throw new Error(`Record file is damaged: ${kind} ${why}`);
   const data = kind === 'character' ? strip2024(o.data as Character) : o.data as StoredItem; // R54
   const taken = !!(await (kind === 'character' ? db.characters.get(data.id) : db.items.get(data.id)));

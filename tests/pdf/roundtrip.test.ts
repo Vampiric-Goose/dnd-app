@@ -62,7 +62,7 @@ test('a corrupt or foreign app.data is rejected with a clear message', async () 
     [b64({ format: 'dnd-app-character', version: 2, data: {} }), 'newer version'],
     [b64({ format: 'dnd-app-character', version: 1, data: { id: 'x' } }), 'character has no build'],
     [b64({ format: 'dnd-app-item', version: 1, data: { id: 'x', kind: 'monster' } }), 'item is not an item'],
-    [b64({ format: 'dnd-app-character', version: 1, data: { ...c, overrides: undefined } }), 'cannot be computed'],
+    [b64({ format: 'dnd-app-character', version: 1, data: { ...c, overrides: undefined } }), 'character has no overrides'], // I2: caught by the deep check, before the sheet
   ];
   for (const [data, message] of cases) await expect(importPdf(await withData(data))).rejects.toThrow(message);
   await expect(importPdf(new TextEncoder().encode('definitely not a pdf'))).rejects.toThrow('not a readable PDF');

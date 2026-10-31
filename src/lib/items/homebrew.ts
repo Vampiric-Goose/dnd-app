@@ -1,3 +1,4 @@
+import { effectOk } from '../character/customEffect.ts';
 import { isRichText } from '../content/richtext.ts';
 import { isRec } from '../recordShape.ts';
 import type { Choice, Effect, ItemDef, ItemType, PlayerView, Rarity, Recharge, StoredItem } from '../types.ts';
@@ -26,8 +27,8 @@ const str = (v: unknown): v is string => typeof v === 'string';
 const strs = (v: unknown): v is string[] => Array.isArray(v) && v.every(str);
 const oneOf = <T extends string>(list: readonly T[], v: unknown): v is T => list.includes(v as T);
 
-// Effects are only checked for their shape (a record with a type), not each type's fields.
-const effectsOk = (v: unknown): v is Effect[] => Array.isArray(v) && v.every((e) => isRec(e) && str(e.type));
+// Each effect is checked for its type's fields (the custom-effect form's model), so the sheet can rely on them.
+const effectsOk = (v: unknown): v is Effect[] => Array.isArray(v) && v.every(effectOk);
 const traitOk = (t: unknown, depth: number): boolean =>
   isRec(t) && str(t.name) && isRichText(t.text) && (t.effects === undefined || effectsOk(t.effects)) && (t.choices === undefined || choicesOk(t.choices, depth + 1));
 function choicesOk(v: unknown, depth = 0): v is Choice[] {
@@ -35,13 +36,14 @@ function choicesOk(v: unknown, depth = 0): v is Choice[] {
 }
 
 /**
- * The one guard for a stored item (R-guard): a name, and every piece of rich text the app reads is well-formed. A record that fails
+ * The one guard for a stored item (R-guard): a name, every piece of rich text the app reads is well-formed, and every effect fits its type. A record that fails
  * would make `displayItem` and the lists throw, so every place that reads stored items filters through this.
  */
 export function soundItem(item: StoredItem | ItemDef): boolean {
   if (!isRec(item) || !str(item.name) || !item.name.trim() || !isRichText(item.text)) return false;
   const i = item as unknown as Record<string, unknown>;
   if (i.curse !== undefined && !isRichText(i.curse)) return false;
+  if (i.effects !== undefined && !effectsOk(i.effects)) return false;
   if (i.choices !== undefined && !choicesOk(i.choices)) return false;
   const v = i.defaultView;
   return v === undefined || (isRec(v) && (v.text === undefined || isRichText(v.text)));

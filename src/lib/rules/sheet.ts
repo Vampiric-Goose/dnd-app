@@ -103,7 +103,7 @@ export function computeSheet(c: Character, opts: SheetOpts): Sheet {
   }
   const saveProf = new Set<string>(first?.saves);
   const CATEGORY = { skill: profs.skills, tool: profs.tools, weapon: profs.weapons, armor: profs.armor, language: profs.languages, save: saveProf };
-  for (const { effect: e } of ofType(effects, 'proficiency')) CATEGORY[e.category].add(e.value);
+  for (const { effect: e } of ofType(effects, 'proficiency')) CATEGORY[e.category]?.add(e.value); // an unknown category is ignored, not a crash
   for (const { effect: e } of ofType(effects, 'expertise')) expertise.add(e.skill);
 
   // Saves
@@ -127,7 +127,7 @@ export function computeSheet(c: Character, opts: SheetOpts): Sheet {
   // AC
   let base: number;
   if (armor) base = armor.ac + (armor.category === 'light' ? mods.dex : armor.category === 'medium' ? Math.min(mods.dex, armor.dexCap ?? Infinity) : 0);
-  else base = Math.max(10 + mods.dex, ...ofType(effects, 'acBase').filter(b => !shield || b.effect.shieldAllowed).map(b => b.effect.base + b.effect.abilities.reduce((t, a) => t + mods[a], 0)));
+  else base = Math.max(10 + mods.dex, ...ofType(effects, 'acBase').filter(b => !shield || b.effect.shieldAllowed).map(b => b.effect.base + (b.effect.abilities ?? []).reduce((t, a) => t + mods[a], 0)));
   const ac = override('ac', base + (shield?.ac ?? 0) + itemBonus('ac') + bonus('ac'));
 
   // HP and hit dice

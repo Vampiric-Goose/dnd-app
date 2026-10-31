@@ -2,12 +2,15 @@
   import { importRecord, keepBoth } from '../../lib/backup.ts';
   import { characterSummary } from '../../lib/character/play.ts';
   import { db } from '../../lib/db.ts';
+  import { characterProblem } from '../../lib/recordShape.ts';
   import { navigate } from '../../lib/router.svelte.ts';
   import { app, getFullIndex } from '../../lib/store.svelte.ts';
   import type { Character } from '../../lib/types.ts';
   import { message } from '../creator/labels.ts';
 
   let chars: Character[] = $state.raw([]);
+  let damaged: Character[] = $state.raw([]); // stored records that fail characterProblem: listing them would throw
+  let confirmingRemove = $state(false);
   let loaded = $state(false);
   let filter = $state('all'); // 'all', 'none' or a campaign id
   let error = $state('');
@@ -16,7 +19,9 @@
 
   async function load() {
     try {
-      chars = (await db.characters.list()).sort((a, b) => a.name.localeCompare(b.name));
+      const all = await db.characters.list();
+      damaged = all.filter((c) => characterProblem(c));
+      chars = all.filter((c) => !characterProblem(c)).sort((a, b) => a.name.localeCompare(b.name));
     } catch (e) {
       error = message(e);
     }
@@ -80,6 +85,17 @@
     }
   }
 
+  // Mirrors the Items page: damaged records are hidden, and this is how they are cleared out.
+  async function removeDamaged() {
+    try {
+      for (const d of damaged) await db.characters.delete(d.id);
+      confirmingRemove = false;
+      await load();
+    } catch (e) {
+      error = message(e);
+    }
+  }
+
   async function confirmDelete() {
     const d = deleting!;
     try {
@@ -121,6 +137,20 @@
     </select>
   </label>
 </div>
+
+{#if damaged.length}
+  <div class="row">
+    <p role="status">{damaged.length} damaged {damaged.length === 1 ? 'character' : 'characters'} hidden</p>
+    {#if !confirmingRemove}<button onclick={() => (confirmingRemove = true)}>Remove damaged characters</button>{/if}
+  </div>
+  {#if confirmingRemove}
+    <div role="alertdialog" aria-label="Confirm removing damaged characters" class="row">
+      <p>Permanently remove {damaged.length} damaged {damaged.length === 1 ? 'character' : 'characters'}? This cannot be undone.</p>
+      <button class="danger" onclick={removeDamaged}>Remove</button>
+      <button onclick={() => (confirmingRemove = false)}>Keep them</button>
+    </div>
+  {/if}
+{/if}
 
 {#if !loaded}
   <p class="muted">Loading…</p>

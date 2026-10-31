@@ -1,6 +1,6 @@
 import { strip2024 } from '../character/strip2024.ts';
 import type { ContentIndex } from '../content/index.ts';
-import { isRec, problem, SHAPES } from '../recordShape.ts';
+import { characterProblem, isRec, problem, SHAPES } from '../recordShape.ts';
 import { computeSheet } from '../rules/sheet.ts';
 import { DEFAULT_SETTINGS } from '../settings.ts';
 import type { Ability, CampaignSettings, Character, ItemDef, OverrideKey, Sheet, Skill } from '../types.ts';
@@ -75,7 +75,7 @@ export async function importPdf(bytes: Uint8Array, index?: IndexSource): Promise
   if (!map) throw new Error('Unrecognised PDF: no supported form fields');
   let data: Character;
   try { data = map.toCharacter(fields, typeof index === 'function' ? await index() : index); } catch (e) { throw new Error(`Could not read this ${map.id} sheet: ${reason(e)}`); }
-  const why = problem(data, SHAPES.character);
+  const why = characterProblem(data);
   if (why) throw new Error(`Could not read this ${map.id} sheet: character ${why}`);
   return { kind: 'character', data: strip2024(data), edits: [] };
 }
@@ -91,7 +91,7 @@ function fromData(payload: string, fields: Record<string, string | boolean>): Im
     if (why) throw damaged(`item ${why}`);
     return { kind: 'item', data: env.data as ItemDef };
   }
-  const why = problem(env.data, SHAPES.character);
+  const why = characterProblem(env.data);
   if (why) throw damaged(`character ${why}`);
   const settings = { ...DEFAULT_SETTINGS, ...(isRec(env.settings) ? env.settings : {}) } as CampaignSettings;
   const viewer: Viewer = env.viewer === 'player' ? 'player' : 'dm';
