@@ -175,7 +175,7 @@
           {#if campaignName(c.campaignId)}<span class="muted">· {campaignName(c.campaignId)}</span>{/if}
         </div>
         <div class="row">
-          <a href="#/characters/{c.id}/level-up">Level up</a>
+          {#if app.viewer === 'dm'}<a href="#/characters/{c.id}/level-up">Level up</a>{/if}
           <button class="danger" aria-label="Delete {c.name}" onclick={() => (deleting = c)}>Delete</button>
         </div>
         {#if deleting?.id === c.id}

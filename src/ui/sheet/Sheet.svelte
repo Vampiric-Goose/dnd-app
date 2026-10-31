@@ -178,7 +178,7 @@
     <h1>{c.name || 'Unnamed'}</h1>
     <p class="muted">{characterSummary(c)}{sheet.totalLevel ? ` · level ${sheet.totalLevel}` : ''}</p>
     <div class="row">
-      <button type="button" class="primary" onclick={() => navigate(`characters/${c!.id}/level-up`)}>Level up</button>
+      {#if app.viewer === 'dm'}<button type="button" class="primary" onclick={() => navigate(`characters/${c!.id}/level-up`)}>Level up</button>{/if}
       <button type="button" onclick={exportJson}>Export JSON</button>
       <button type="button" disabled={exporting} onclick={exportPdf}>Export PDF</button>
       {#if app.viewer === 'dm'}

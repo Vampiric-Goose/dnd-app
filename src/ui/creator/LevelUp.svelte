@@ -98,7 +98,9 @@
 <h1>Level up{c ? `: ${c.name}` : ''}</h1>
 {#if error}<p role="alert" class="error">{error}</p>{/if}
 
-{#if c && index && sheet && oldSheet}
+{#if app.viewer !== 'dm'}
+  <p class="muted">Levelling up is done in DM view.</p>
+{:else if c && index && sheet && oldSheet}
   <p>Level {base?.build.levels.length} → <strong>{c.build.levels.length}</strong>. Max HP {oldSheet.maxHp} → <strong>{sheet.maxHp}</strong>.</p>
 
   <section class="card">
