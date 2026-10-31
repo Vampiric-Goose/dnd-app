@@ -7,7 +7,7 @@
   type Module = keyof CampaignSettings['initiativeModules'];
 
   const rules: [Bool, string, string][] = [
-    ['allowOverrides', 'Allow manual overrides', 'Players may type over computed sheet values such as AC or speed.'],
+    ['allowOverrides', 'Allow rule overrides', 'The creator and level-up let you ignore prerequisites and type in ability scores. Problems become warnings.'],
     ['customOrigin', 'Custom origin', 'Let characters set their own ability bonuses instead of the race\'s.'],
     ['optionalClassFeatures', 'Optional class features', 'Offer the optional features some classes can swap in.'],
     ['multiclassing', 'Multiclassing', 'Allow characters to take levels in a second class.'],
@@ -102,6 +102,9 @@
     <input type="checkbox" checked disabled />
     <span>System Reference Document 5.1 (always on)</span>
   </label>
+  {#if packs.length > 1}
+    <button type="button" disabled={packs.every((p) => c.enabledPacks.includes(p.id))} onclick={() => change((n) => (n.enabledPacks = [...new Set([...n.enabledPacks, ...packs.map((p) => p.id)])]))}>Use all</button>
+  {/if}
   {#each packs as p (p.id)}
     <label class="check">
       <input type="checkbox" checked={c.enabledPacks.includes(p.id)} onchange={(e) => togglePack(p.id, e)} />
