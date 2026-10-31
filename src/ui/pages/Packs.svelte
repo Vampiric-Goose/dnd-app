@@ -1,6 +1,7 @@
 <script lang="ts">
   import { packAllowed, sourceLabel } from '../../lib/content/sources.ts';
   import { db } from '../../lib/db.ts';
+  import { selectDataFiles, walkEntries, type FsEntry } from '../../lib/import/dataFolder.ts';
   import { splitImportErrors } from '../../lib/import/summary.ts';
   import { refreshCampaigns, getFullIndex } from '../../lib/store.svelte.ts';
   import type { Pack, PackMeta } from '../../lib/types.ts';
@@ -31,20 +32,81 @@
 
   const tick = () => new Promise<void>((r) => setTimeout(r));
 
-  async function onFiles(e: Event & { currentTarget: HTMLInputElement }) {
+  type Item = { name: string; text: () => Promise<string> };
+  type Plan = { total: number; items: Item[]; skipped: { reason: string; count: number }[]; homebrew: boolean };
+  let plan: Plan | undefined = $state.raw(); // a scanned folder, waiting for Import or Cancel
+
+  // Folder picking needs `webkitdirectory` (desktop browsers); most phones lack it.
+  const folderOk = 'webkitdirectory' in document.createElement('input');
+  const coarse = matchMedia('(pointer: coarse)').matches;
+  let folderInput: HTMLInputElement | undefined = $state();
+  let dragging = $state(false);
+
+  const entryFile = (entry: FsEntry) => new Promise<File>((ok, fail) => (entry as FileSystemFileEntry).file(ok, fail));
+
+  /** Works out which of these files to import and shows the summary. Reads no file contents (a File handle only gives its size). */
+  async function propose(paths: string[], getFile: (path: string) => Promise<File>) {
+    let sel = selectDataFiles(paths);
+    if (sel.root === null) { // homebrew: the 5 MB cap needs sizes
+      const sizes = new Map<string, number>();
+      for (const p of sel.use) sizes.set(p, (await getFile(p)).size);
+      sel = selectDataFiles(paths, (p) => sizes.get(p));
+    }
+    const { root } = sel;
+    plan = {
+      total: sel.use.length + sel.skipped.reduce((n, s) => n + s.count, 0),
+      items: sel.use.map((p) => ({ name: root ? p.slice(root.length + 1) : p, text: async () => (await getFile(p)).text() })),
+      skipped: sel.skipped,
+      homebrew: root === null,
+    };
+  }
+
+  async function onFolder(e: Event & { currentTarget: HTMLInputElement }) {
+    const files = [...(e.currentTarget.files ?? [])];
+    e.currentTarget.value = '';
+    if (!files.length) return;
+    summary = undefined;
+    error = '';
+    const byPath = new Map(files.map((f) => [f.webkitRelativePath || f.name, f]));
+    await propose([...byPath.keys()], async (p) => byPath.get(p)!).catch((err) => (error = message(err)));
+  }
+
+  async function onDrop(e: DragEvent) {
+    e.preventDefault();
+    dragging = false;
+    if (busy) return;
+    // The entries must be taken synchronously: the browser invalidates the drop data after the first await.
+    const roots = [...(e.dataTransfer?.items ?? [])].map((i) => i.webkitGetAsEntry()).filter((x) => x !== null);
+    if (!roots.length) return;
+    summary = undefined;
+    error = '';
+    try {
+      const found = await walkEntries(roots);
+      const byPath = new Map(found.map((f) => [f.path, f.entry]));
+      await propose([...byPath.keys()], (p) => entryFile(byPath.get(p)!));
+    } catch (err) {
+      error = message(err);
+    }
+  }
+
+  function onFiles(e: Event & { currentTarget: HTMLInputElement }) {
     const files = [...(e.currentTarget.files ?? [])];
     e.currentTarget.value = ''; // so choosing the same files again fires change
-    if (!files.length) return;
+    if (files.length) importFiles(files.map((f) => ({ name: f.name, text: () => f.text() })));
+  }
+
+  async function importFiles(files: Item[]) {
+    plan = undefined;
     busy = true;
     error = '';
     summary = undefined;
     try {
-      // Read and parse each file; one bad file is reported and skipped.
+      // Read and parse each file, one at a time, so only one file's text is in memory; one bad file is reported and skipped.
       const parsed: { name: string; json: unknown }[] = [];
       const readErrors: { file: string; message: string }[] = [];
       let last = performance.now();
       for (const [i, f] of files.entries()) {
-        progress = `Reading file ${i + 1} of ${files.length}…`;
+        progress = `Reading ${i + 1} / ${files.length}…`;
         try {
           parsed.push({ name: f.name, json: JSON.parse(await f.text()) });
         } catch (err) {
@@ -122,11 +184,42 @@
 <h1>Packs</h1>
 <p>
   Import your own copies of 5etools-format books. Files are read on this device only and nothing is uploaded.
-  Select all the files at once (for example, everything in a data folder): books reference each other, so importing them together gives the best result.
+  Choose your 5etools <code>data</code> folder and the app picks out the files it needs: books reference each other, so importing them together gives the best result.
 </p>
 
+<section
+  class="card drop"
+  class:dragging
+  aria-label="Import a 5etools data folder"
+  ondragover={(e) => { e.preventDefault(); dragging = true; }}
+  ondragleave={() => (dragging = false)}
+  ondrop={onDrop}
+>
+  {#if folderOk}
+    <input bind:this={folderInput} type="file" webkitdirectory hidden tabindex="-1" aria-hidden="true" onchange={onFolder} />
+    <button class="primary" disabled={busy} onclick={() => folderInput?.click()}>Import a 5etools data folder</button>
+    <span class="muted"> or drop the folder here.</span>
+  {/if}
+  {#if !folderOk || coarse}
+    <p class="muted">Picking a folder works in desktop browsers. On a phone, import individual files, or import on a computer and move the data over with a backup.</p>
+  {/if}
+</section>
+
+{#if plan}
+  <section class="card" aria-label="Folder scan">
+    <p role="status">
+      {#if plan.homebrew}No 5etools data folder was recognised, so every .json file under 5 MB is treated as homebrew. {/if}
+      Found {plan.total} {plan.total === 1 ? 'file' : 'files'} · importing {plan.items.length}{plan.skipped.length ? ' · skipped: ' + plan.skipped.map((s) => `${s.reason} ${s.count}`).join(', ') : ''}
+    </p>
+    <div class="row">
+      <button class="primary" disabled={busy || !plan.items.length} onclick={() => plan && importFiles(plan.items)}>Import</button>
+      <button disabled={busy} onclick={() => (plan = undefined)}>Cancel</button>
+    </div>
+  </section>
+{/if}
+
 <div class="field">
-  <label for="pack-files">5etools data files (.json, several allowed)</label>
+  <label for="pack-files">Import individual files (homebrew)</label>
   <input id="pack-files" type="file" accept=".json" multiple disabled={busy} onchange={onFiles} />
 </div>
 
@@ -225,3 +318,9 @@
 {:else}
   <p class="muted">No books imported yet.</p>
 {/each}
+
+<style>
+  .drop.dragging {
+    outline: 2px dashed var(--accent);
+  }
+</style>

@@ -1,9 +1,10 @@
 // Dry-runs the 5etools importer over a local data folder and prints what it would import:
 //   npm run import-check -- <5etools>/data
-import { readdirSync, readFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { join, relative, sep } from 'node:path';
 import { ContentIndex } from '../src/lib/content/index.ts';
 import { entityAllowed, is2024Source, packAllowed, sourceLabel } from '../src/lib/content/sources.ts';
+import { selectDataFiles } from '../src/lib/import/dataFolder.ts';
 import { import5etools } from '../src/lib/import/fivetools/index.ts';
 import type { Pack } from '../src/lib/types.ts';
 
@@ -13,12 +14,16 @@ if (!dir) {
   process.exit(2);
 }
 
+// The same selection the Packs page makes: only the files the importer uses (or every small .json for a homebrew folder).
+const all = readdirSync(dir, { recursive: true, withFileTypes: true })
+  .filter(e => e.isFile() && e.name.endsWith('.json'))
+  .map(e => relative(dir, join(e.parentPath, e.name)).split(sep).join('/'));
+const sel = selectDataFiles(all, p => statSync(join(dir, p)).size);
+console.log(`Found ${all.length} files, importing ${sel.use.length}${sel.root === null ? ' (no 5etools data folder recognised: treated as homebrew)' : ''}; skipped: ${sel.skipped.map(s => `${s.reason} ${s.count}`).join(', ') || 'nothing'}\n`);
 const files: { name: string; json: unknown }[] = [];
 const unreadable: string[] = [];
-for (const e of readdirSync(dir, { recursive: true, withFileTypes: true })) {
-  if (!e.isFile() || !e.name.endsWith('.json')) continue;
-  const path = join(e.parentPath, e.name), name = relative(dir, path);
-  try { files.push({ name, json: JSON.parse(readFileSync(path, 'utf8')) }); } catch (err) { unreadable.push(`${name}: ${(err as Error).message}`); }
+for (const name of sel.use) {
+  try { files.push({ name, json: JSON.parse(readFileSync(join(dir, name), 'utf8')) }); } catch (err) { unreadable.push(`${name}: ${(err as Error).message}`); }
 }
 
 const srd: Pack = JSON.parse(readFileSync(new URL('../src/data/srd.json', import.meta.url), 'utf8'));
