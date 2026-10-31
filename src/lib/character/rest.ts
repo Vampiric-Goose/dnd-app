@@ -8,16 +8,16 @@ const withState = (c: Character, s: Partial<State>): Character => ({ ...c, state
 const NO_SAVES = { success: 0, fail: 0 };
 
 /** Clears used resources and restores item charges (rolled, through rechargeEntry); a long rest also covers short-rest ones. */
-function recharge(c: Character, sheet: Sheet, event: 'short' | 'long'): Pick<Character, 'inventory'> & { resourcesUsed: State['resourcesUsed'] } {
+function recharge(c: Character, sheet: Sheet, event: 'short' | 'long', rng?: () => number): Pick<Character, 'inventory'> & { resourcesUsed: State['resourcesUsed'] } {
   const reset = new Set(sheet.resources.filter(r => r.recharge === 'short' || r.recharge === event).map(r => r.name));
   return {
     resourcesUsed: Object.fromEntries(Object.entries(c.state.resourcesUsed).filter(([n]) => !reset.has(n))),
-    inventory: c.inventory.map(e => rechargeEntry(e, event)),
+    inventory: c.inventory.map(e => rechargeEntry(e, event, rng)),
   };
 }
 
 /** Spends hit dice (never more than are left); each heals max(0, roll + Con mod). Pact slots and short-rest resources/items recharge. */
-export function shortRest(c: Character, spent: { die: number; rolls: number[] }[], sheet: Sheet): Character {
+export function shortRest(c: Character, spent: { die: number; rolls: number[] }[], sheet: Sheet, rng?: () => number): Character {
   const used = { ...c.state.hitDiceUsed };
   let heal = 0;
   for (const { die, rolls } of spent) {
@@ -26,13 +26,13 @@ export function shortRest(c: Character, spent: { die: number; rolls: number[] }[
     used[die] = (used[die] ?? 0) + taken.length;
     for (const r of taken) heal += Math.max(0, r + sheet.mods.con);
   }
-  const { resourcesUsed, inventory } = recharge(c, sheet, 'short');
+  const { resourcesUsed, inventory } = recharge(c, sheet, 'short', rng);
   return applyHealing({ ...withState(c, { hitDiceUsed: used, pactSlotsUsed: 0, resourcesUsed }), inventory }, heal, sheet);
 }
 
 /** Full HP, half the hit dice back (largest first, at least 1), all slots and short/long resources and items, one less exhaustion.
  *  R26: no benefit when dead or below 1 HP (PHB p.186); the character comes back unchanged. */
-export function longRest(c: Character, sheet: Sheet): Character {
+export function longRest(c: Character, sheet: Sheet, rng?: () => number): Character {
   if (c.state.dead || c.state.hp <= 0) return c;
   const used = { ...c.state.hitDiceUsed };
   let regain = Math.max(1, Math.floor(sheet.totalLevel / 2));
@@ -41,7 +41,7 @@ export function longRest(c: Character, sheet: Sheet): Character {
     if (used[die] !== undefined) used[die] -= n;
     regain -= n;
   }
-  const { resourcesUsed, inventory } = recharge(c, sheet, 'long');
+  const { resourcesUsed, inventory } = recharge(c, sheet, 'long', rng);
   return {
     ...withState(c, {
       hp: sheet.maxHp, tempHp: 0, hitDiceUsed: used, slotsUsed: [], pactSlotsUsed: 0, resourcesUsed,

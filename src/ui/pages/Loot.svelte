@@ -75,7 +75,7 @@
         <EntryRow
           entry={e} viewer={app.viewer} {targets} moveLabel="Give to…"
           canRefresh={!!pool && !!e.sourceId && !!latestItem(pool, e.sourceId)}
-          onchange={(next) => edit((loot) => loot.map((x) => (x.id === e.id ? next : x)))}
+          onchange={(fn) => edit((loot) => loot.map((x) => (x.id === e.id ? fn(x) : x)))}
           onremove={() => edit((loot) => loot.filter((x) => x.id !== e.id))}
           onrefresh={() => {
             const latest = pool && e.sourceId ? latestItem(pool, e.sourceId) : undefined;

@@ -26,7 +26,7 @@
     const n = fold(q.trim());
     const own = pool.homebrew.filter((h) => fold(nameOf(h)).includes(n));
     return [...own, ...pool.index.search(q, ['item'], Infinity).filter((e): e is ItemDef => e.kind === 'item')]
-      .filter((i) => (!type || i.type === type) && (!rarity || i.rarity === rarity));
+      .filter((i) => (!type || seen(i).type === type) && (!rarity || seen(i).rarity === rarity)); // what the viewer sees, so a hidden rarity can't be probed
   });
 
   function pick(i: ItemDef) {

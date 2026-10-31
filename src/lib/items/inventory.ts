@@ -1,4 +1,5 @@
 import { rollDice } from '../dice.ts';
+import { pruneRevealed } from './playerView.ts';
 import type { InventoryEntry, ItemDef, PlayerView, Recharge } from '../types.ts';
 
 // Pure (no Svelte/Vite/DOM): shared with Node scripts. Every operation returns new entries; none mutates.
@@ -26,7 +27,8 @@ export const useCharge = (e: InventoryEntry, n = 1): InventoryEntry =>
 export function rechargeEntry(e: InventoryEntry, event: Recharge, rng?: () => number): InventoryEntry {
   const c = e.item.charges;
   if (!c || c.recharge === 'none' || (c.recharge !== event && !(event === 'long' && c.recharge === 'short'))) return e;
-  const restored = c.rechargeAmount ? rollDice(c.rechargeAmount, { rng }).total : c.max;
+  let restored = c.max; // a malformed rechargeAmount falls back to a full recharge rather than breaking the rest
+  if (c.rechargeAmount) try { restored = rollDice(c.rechargeAmount, { rng }).total; } catch { /* keep the full recharge */ }
   return { ...e, chargesUsed: Math.max(0, e.chargesUsed - restored) };
 }
 
@@ -37,9 +39,9 @@ export const carriedWeight = (entries: InventoryEntry[], currency: Record<'cp' |
   entries.reduce((sum, e) => sum + e.quantity * (e.item.weight ?? 0), 0)
   + (currency.cp + currency.sp + currency.ep + currency.gp + currency.pp) / 50;
 
-/** Swaps in the latest definition of the item, keeping what the character did with it. */
+/** Swaps in the latest definition of the item, keeping what the character did with it. Revealed ids the new text no longer has are dropped. */
 export const refreshEntry = (e: InventoryEntry, latest: ItemDef): InventoryEntry =>
-  ({ ...e, item: latest, chargesUsed: Math.min(e.chargesUsed, maxCharges(latest)) });
+  ({ ...e, item: latest, chargesUsed: Math.min(e.chargesUsed, maxCharges(latest)), ...(e.view && { view: pruneRevealed(latest, e.view) }) });
 
 /**
  * Moves `qty` of an entry to another inventory as a new entry (new id, not equipped or attuned). Asking for

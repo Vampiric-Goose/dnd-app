@@ -2,6 +2,7 @@ import { expect, test } from 'vitest';
 import { applyDamage, applyHealing, longRest, rollDeathSave, shortRest } from '../../src/lib/character/rest.ts';
 import { computeSheet } from '../../src/lib/rules/sheet.ts';
 import { DEFAULT_SETTINGS } from '../../src/lib/settings.ts';
+import { makeEntry, useCharge } from '../../src/lib/items/inventory.ts';
 import { mkChar } from '../fixtures/content.ts';
 
 const dm = { settings: DEFAULT_SETTINGS, viewer: 'dm' as const };
@@ -40,4 +41,18 @@ test('damage, death saves', () => {
   const failing = rollDeathSave(down, 5);
   expect(applyHealing(failing, 50, s).state).toMatchObject({ hp: 10, deathSaves: { success: 0, fail: 0 } });
   expect(rollDeathSave(rollDeathSave(rollDeathSave(down, 10), 12), 19).state).toMatchObject({ stable: true, deathSaves: { success: 0, fail: 0 } });
+});
+
+test('rest recharge: short clears short items; long clears short and long; dawn, dusk and none stay (fix round 1)', () => {
+  const wand = (name: string, recharge: 'short' | 'long' | 'dawn' | 'dusk' | 'none') => useCharge(makeEntry({ kind: 'item', id: 'item:' + name + '@t', name, source: 't', text: [], type: 'wand', magic: true, charges: { max: 3, recharge } }), 3);
+  const c = mkChar({ race: 'human', base: {}, levels: ['fighter'] });
+  c.inventory = (['short', 'long', 'dawn', 'dusk', 'none'] as const).map(r => wand(r, r));
+  const used = (x: typeof c) => x.inventory.map(e => e.chargesUsed);
+  expect(used(shortRest(c, [], computeSheet(c, dm)))).toEqual([0, 3, 3, 3, 3]);
+  expect(used(longRest(c, computeSheet(c, dm)))).toEqual([0, 0, 3, 3, 3]);
+});
+test('rest recharge rolls rechargeAmount with the given rng (fix round 1)', () => {
+  const c = mkChar({ race: 'human', base: {}, levels: ['fighter'] });
+  c.inventory = [useCharge(makeEntry({ kind: 'item', id: 'item:rod@t', name: 'Rod', source: 't', text: [], type: 'rod', magic: true, charges: { max: 6, recharge: 'long', rechargeAmount: '1d6+1' } }), 6)];
+  expect(longRest(c, computeSheet(c, dm), () => 0.4).inventory[0].chargesUsed).toBe(2); // d6=3, +1: 4 of 6 restored
 });

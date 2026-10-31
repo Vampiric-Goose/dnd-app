@@ -161,3 +161,14 @@ test('displayItem: DM sees the true text without markers, player sees the cover 
   expect(displayItem(potion, 'player').text).toEqual([{ p: 'Looks like healing. ██████' }]); // no defaultView: still fail-closed
   expect('curse' in displayItem(potion, 'dm')).toBe(false);
 });
+
+test('a bad rechargeAmount recharges fully instead of throwing (fix round 1)', () => {
+  const bad = useCharge(makeEntry({ ...item('Wand'), charges: { max: 4, recharge: 'dawn', rechargeAmount: 'lots' } }), 4);
+  expect(rechargeEntry(bad, 'dawn').chargesUsed).toBe(0);
+});
+test('refreshEntry drops revealed ids the new text no longer has (fix round 1)', () => {
+  const old = makeEntry(item('Idol'), { view: { hidden: [], revealed: ['r1', 'r2'] } });
+  const latest = { ...item('Idol'), text: [{ p: 'Now {{redact:r1}}different{{/redact}}.' }] } as ItemDef;
+  expect(refreshEntry(old, latest).view?.revealed).toEqual(['r1']);
+  expect(refreshEntry(makeEntry(item('Plain')), latest).view).toBeUndefined();
+});

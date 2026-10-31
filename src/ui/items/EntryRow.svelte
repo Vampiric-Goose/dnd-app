@@ -16,7 +16,7 @@
     targets: { id: string; label: string }[];
     moveLabel: string; // 'Transfer' or 'Give to…'
     canRefresh: boolean;
-    onchange: (e: InventoryEntry) => void;
+    onchange: (fn: (e: InventoryEntry) => InventoryEntry) => void; // applied to the latest copy of the entry
     onremove: () => void;
     onrefresh: () => void;
     onmove: (targetId: string, qty: number) => Promise<void>;
@@ -39,13 +39,21 @@
     target = targets[0]?.id ?? '';
     qty = 1;
   };
-  const patch = (p: Partial<InventoryEntry>) => onchange({ ...entry, ...p });
+  const patch = (p: Partial<InventoryEntry>) => onchange((x) => ({ ...x, ...p }));
+
+  // The player view is the DM's: it can't stay on screen after switching to Player.
+  $effect(() => { if (viewer !== 'dm' && panel === 'view') panel = undefined; });
+
+  function menuKey(e: KeyboardEvent) {
+    if (e.key !== 'Escape' || !menu) return;
+    menu = false;
+    (e.currentTarget as HTMLElement).querySelector('summary')?.focus();
+  }
   const amount = $derived(Math.min(entry.quantity, Math.max(1, Math.floor(qty ?? 1))));
   const meta = $derived([v.shown.type, v.shown.magic ? v.shown.rarity : undefined, v.shown.weight !== undefined ? `${v.shown.weight} lb` : undefined].filter(Boolean).join(' · '));
 
   function use() {
-    const next = useItem(entry);
-    if (next) onchange(next);
+    if (useItem(entry)) onchange((x) => useItem(x) ?? x);
     else onremove();
   }
 
@@ -61,11 +69,12 @@
     {#if v.secret}<span class="badge">Secret</span>{/if}
     <span class="muted meta">{meta}</span>
     <span class="row qty" role="group" aria-label="Quantity of {v.name}">
-      <button type="button" aria-label="One fewer {v.name}" disabled={entry.quantity <= 1} onclick={() => patch({ quantity: entry.quantity - 1 })}>−</button>
+      <button type="button" aria-label="One fewer {v.name}" disabled={entry.quantity <= 1} onclick={() => onchange((x) => ({ ...x, quantity: Math.max(1, x.quantity - 1) }))}>−</button>
       <output>{entry.quantity}</output>
-      <button type="button" aria-label="One more {v.name}" onclick={() => patch({ quantity: entry.quantity + 1 })}>+</button>
+      <button type="button" aria-label="One more {v.name}" onclick={() => onchange((x) => ({ ...x, quantity: x.quantity + 1 }))}>+</button>
     </span>
-    <details class="menu" bind:open={menu}>
+    <!-- svelte-ignore a11y_no_noninteractive_element_interactions (Escape bubbles up from the menu's own buttons) -->
+    <details class="menu" bind:open={menu} onkeydown={menuKey}>
       <summary aria-label="Actions for {v.name}">Actions</summary>
       <div class="pop">
         <button type="button" onclick={() => open('details')}>Details</button>
@@ -80,10 +89,10 @@
   {#if gear}
     <div class="row">
       {#if v.canEquip}
-        <label class="check"><input type="checkbox" checked={entry.equipped} onchange={(e) => patch({ equipped: e.currentTarget.checked })} /> Equipped</label>
+        <label class="check"><input type="checkbox" aria-label="Equipped: {v.name}" checked={entry.equipped} onchange={(e) => patch({ equipped: e.currentTarget.checked })} /> Equipped</label>
       {/if}
       {#if v.needsAttune}
-        <label class="check"><input type="checkbox" checked={entry.attuned} aria-describedby={warnAttune ? `${uid}-warn` : undefined} onchange={(e) => patch({ attuned: e.currentTarget.checked })} /> Attuned</label>
+        <label class="check"><input type="checkbox" aria-label="Attuned: {v.name}" checked={entry.attuned} aria-describedby={warnAttune ? `${uid}-warn` : undefined} onchange={(e) => patch({ attuned: e.currentTarget.checked })} /> Attuned</label>
       {/if}
       {#if v.consumable}<button type="button" onclick={use}>Use</button>{/if}
     </div>
@@ -91,20 +100,23 @@
     {#if v.maxCharges > 0}
       <div class="row">
         <Pips total={v.maxCharges} used={Math.min(entry.chargesUsed, v.maxCharges)} label="{v.name} charges" onchange={(n) => patch({ chargesUsed: n })} />
-        <button type="button" disabled={entry.chargesUsed >= v.maxCharges} onclick={() => onchange(useCharge(entry))}>Use charge</button>
+        <button type="button" disabled={entry.chargesUsed >= v.maxCharges} onclick={() => onchange((x) => useCharge(x))}>Use charge</button>
         <span class="muted">{v.maxCharges - entry.chargesUsed} of {v.maxCharges} left</span>
       </div>
     {/if}
   {/if}
 
-  <label class="field notes">Notes <input type="text" autocomplete="off" value={entry.notes} onchange={(e) => patch({ notes: e.currentTarget.value })} /></label>
+  <!-- On party loot a player must not read the DM's notes; on their own inventory the notes are theirs. -->
+  {#if gear || viewer === 'dm'}
+  <label class="field notes">Notes <input type="text" aria-label="Notes: {v.name}" autocomplete="off" value={entry.notes} onchange={(e) => patch({ notes: e.currentTarget.value })} /></label>
+  {/if}
 
   {#if panel === 'details'}
     <div class="panel">
       <EntityDetail entity={v.shown} />
       <button type="button" onclick={() => (panel = undefined)}>Close</button>
     </div>
-  {:else if panel === 'view'}
+  {:else if panel === 'view' && viewer === 'dm'}
     <div class="panel" role="group" aria-label="Player view of {v.name}">
       <PlayerViewEditor item={entry.item} view={draft} onchange={(next) => (draft = next)} />
       <div class="row">
@@ -127,7 +139,7 @@
       </div>
     </div>
   {:else if panel === 'remove'}
-    <div class="panel" role="alertdialog" aria-label="Remove {v.name}">
+    <div class="panel" role="group" aria-label="Remove {v.name}">
       <p>Remove {entry.quantity > 1 ? `all ${entry.quantity} × ` : ''}{v.name}? This cannot be undone.</p>
       <div class="row">
         <button type="button" class="danger" onclick={onremove}>Remove</button>

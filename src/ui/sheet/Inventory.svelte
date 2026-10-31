@@ -43,7 +43,11 @@
   const targets = $derived([...(campaignId ? [{ id: 'loot', label: 'Party loot' }] : []), ...others.map((o) => ({ id: o.id, label: o.name || 'Unnamed' }))]);
 
   const COINS = ['cp', 'sp', 'ep', 'gp', 'pp'] as const;
-  const setCoin = (k: (typeof COINS)[number], n: number) => update((x) => ({ ...x, currency: { ...x.currency, [k]: Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0 } }));
+  function setCoin(k: (typeof COINS)[number], input: HTMLInputElement) {
+    const n = Number.isFinite(input.valueAsNumber) ? Math.max(0, Math.floor(input.valueAsNumber)) : 0;
+    update((x) => ({ ...x, currency: { ...x.currency, [k]: n } }));
+    input.value = String(n); // show what was stored (no negatives, fractions or blanks)
+  }
 
   const unit = $derived(sheet.carrying.capacity / 15); // Strength × size multiplier
   const lb = (n: number) => Math.round(n * 10) / 10;
@@ -68,7 +72,7 @@
     <legend>Currency</legend>
     <div class="row">
       {#each COINS as k (k)}
-        <label class="field">{k.toUpperCase()} <input type="number" min="0" step="1" value={c.currency[k]} onchange={(e) => setCoin(k, e.currentTarget.valueAsNumber)} /></label>
+        <label class="field">{k.toUpperCase()} <input type="number" min="0" step="1" value={c.currency[k]} onchange={(e) => setCoin(k, e.currentTarget)} /></label>
       {/each}
     </div>
   </fieldset>
@@ -104,7 +108,7 @@
           entry={e} viewer={app.viewer} gear {targets} moveLabel="Transfer"
           warnAttune={e.attuned ? sheet.attunedCount > ATTUNEMENT_LIMIT : sheet.attunedCount >= ATTUNEMENT_LIMIT}
           canRefresh={!!pool && !!e.sourceId && !!latestItem(pool, e.sourceId)}
-          onchange={(next) => replace(e.id, () => next)}
+          onchange={(fn) => replace(e.id, fn)}
           onremove={() => update((x) => ({ ...x, inventory: x.inventory.filter((y) => y.id !== e.id) }))}
           onrefresh={() => {
             const latest = pool && e.sourceId ? latestItem(pool, e.sourceId) : undefined;

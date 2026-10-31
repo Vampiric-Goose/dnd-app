@@ -98,7 +98,9 @@
   // written as its saved baseline, so autosave doesn't write a stale copy over it.
   async function transferTo(entryId: string, qty: number, to: string) {
     const cur = c;
-    if (!cur || moving) return;
+    if (!cur) return;
+    if (moving) { toast("Another move is still saving. Try again in a moment.", true); return; }
+    if (to === cur.id) { toast("That item is already with this character.", true); return; }
     moving = true;
     clearTimeout(timer);
     try {
@@ -111,8 +113,11 @@
       await db.saveTogether(camp
         ? { characters: [$state.snapshot(next) as Character], campaign: $state.snapshot({ ...camp, loot: moved.to }) as Campaign }
         : { characters: [$state.snapshot(next) as Character, $state.snapshot({ ...other!, inventory: moved.to }) as Character] });
-      saved = next;
-      c = c === cur ? next : { ...c!, inventory: moved.from }; // edits made while it committed stay (and autosave)
+      if (c?.id === cur.id) { // still on this sheet (the route may have changed while it committed)
+        saved = next;
+        // Edits made while it committed stay and autosave: the same move is applied to the latest inventory.
+        c = c === cur ? next : { ...c, inventory: transfer(c.inventory, [], entryId, qty).from };
+      }
       if (camp) await refreshCampaigns().catch(() => {});
       toast(`Moved to ${camp ? 'Party loot' : other!.name || 'Unnamed'}.`);
     } catch (e) {
