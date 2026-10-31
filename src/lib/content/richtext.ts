@@ -4,7 +4,7 @@ import type { Block, RichText } from '../types.ts';
 
 const BAR = '██████'; // fixed width, so the bar doesn't leak the hidden text's length
 // An opener (group 1 = id; the closing braces are optional so a malformed opener still counts) or a closer.
-const MARK = /\{\{redact:([^}]*)(?:\}\})?|\{\{\/redact\}\}/g;
+export const MARK = /\{\{redact:([^}]*)(?:\}\})?|\{\{\/redact\}\}/g;
 const TAG = /\{@(\w+)(?:\s+([^{}]*))?\}/g;
 
 const ATK: Record<string, string> = {
@@ -100,6 +100,26 @@ export const redactionIds = (r: RichText): string[] => {
   const open: string[] = [], ids = new Set<string>();
   for (const l of lines(r)) scan(l, open, new Set(), ids);
   return [...ids];
+};
+
+/** The text inside each redaction (id -> hidden text), for the DM's list of redactions. Nested spans count in their outer ones; blocks are joined with a space. */
+export const redactionTexts = (r: RichText): Map<string, string> => {
+  const open: string[] = [], out = new Map<string, string>();
+  const add = (t: string) => { for (const id of open) out.set(id, [out.get(id), t].filter(Boolean).join(' ')); };
+  for (const l of lines(r)) {
+    let at = 0;
+    for (const m of l.matchAll(MARK)) {
+      add(l.slice(at, m.index));
+      at = m.index + m[0].length;
+      if (m[1] === undefined) open.pop();
+      else {
+        open.push(m[1]);
+        if (!out.has(m[1])) out.set(m[1], '');
+      }
+    }
+    add(l.slice(at));
+  }
+  return out;
 };
 
 export interface Span { t: string; b: boolean; i: boolean }

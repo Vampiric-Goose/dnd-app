@@ -28,8 +28,8 @@
     ['characters/:id', 'Sheet', () => import('./ui/sheet/Sheet.svelte')],
     ['characters/:id/level-up', 'LevelUp', () => import('./ui/creator/LevelUp.svelte')],
     ['compendium', 'Compendium', () => import('./ui/pages/Compendium.svelte')],
-    ['items', 'Items'],
-    ['items/:id', 'ItemEditor'],
+    ['items', 'Items', () => import('./ui/pages/Items.svelte')],
+    ['items/:id', 'ItemEditor', () => import('./ui/pages/Items.svelte')], // the same page; `:id` is an item id or "new"
     ['loot', 'Loot'],
     ['packs', 'Packs', () => import('./ui/pages/Packs.svelte')],
     ['settings', 'CampaignSettings', () => import('./ui/pages/CampaignSettings.svelte')],

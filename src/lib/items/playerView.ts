@@ -73,11 +73,14 @@ export const revealRedaction = (view: PlayerView, id: string): PlayerView =>
   ({ ...view, hidden: [...view.hidden], revealed: view.revealed.includes(id) ? [...view.revealed] : [...view.revealed, id] });
 
 /**
- * The player now knows everything, all at once: a view with no cover name or override text, nothing hidden
- * and every redaction revealed. (Dropping the view would leave the bars up, since no view still redacts.)
+ * The view of an item its player fully knows: no cover name or override text, nothing hidden and every
+ * redaction revealed. (Dropping the view would leave the bars up, since no view still redacts.)
  */
-export const identify = (entry: InventoryEntry): InventoryEntry => {
-  const { text, curse, choices } = entry.item;
+export const revealedView = (item: ItemDef): PlayerView => {
+  const { text, curse, choices } = item;
   const ids = [text, curse ?? [], ...choiceTexts(choices)].flatMap(redactionIds);
-  return { ...entry, view: { hidden: [], revealed: [...new Set(ids)] } };
+  return { hidden: [], revealed: [...new Set(ids)] };
 };
+
+/** The player now knows everything, all at once. */
+export const identify = (entry: InventoryEntry): InventoryEntry => ({ ...entry, view: revealedView(entry.item) });
