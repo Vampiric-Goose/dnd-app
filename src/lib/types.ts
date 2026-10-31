@@ -75,15 +75,16 @@ export interface MonsterDef extends Base {
   vulnerable: string[]; resist: string[]; immune: string[]; conditionImmune: string[]; // display strings
   senses: string[]; passive: number; languages: string[];
   cr: string; // '0', '1/8', '1/4', '1/2', '1'…'30', or '—'
+  xp?: number; // only when the book prints XP other than its CR's (read it with monsterXp); drop it when the CR is edited
   traits: Trait[]; actions: Trait[]; bonusActions: Trait[]; reactions: Trait[];
   legendary: Trait[]; legendaryCount?: number; legendaryIntro?: RichText;
-  mythic?: Trait[]; lair?: RichText; regional?: RichText;
+  mythic?: Trait[]; mythicIntro?: RichText; lair?: RichText; regional?: RichText;
   environment?: string[];
 } // spellcasting and innate spellcasting are traits (or actions) whose text lists the spells
 export type Entity = RaceDef | SubraceDef | ClassDef | SubclassDef | FeatureDef | OptionalFeatureDef | BackgroundDef | FeatDef | SpellDef | ItemDef | ConditionDef | MonsterDef;
 export type EntityKind = Entity['kind'];
 export type EntityOfKind<K extends EntityKind> = Extract<Entity, { kind: K }>;
-export interface EntityPatch { targetId: string; alias: string; text?: RichText; addFeatures?: FeatureRef[] }
+export interface EntityPatch { targetId: string; alias: string; text?: RichText; addFeatures?: FeatureRef[]; /** monsters: the book's lair actions and regional effects */ lair?: RichText; regional?: RichText }
 export interface Pack { id: string; name: string; source: string; homebrew?: boolean; importedAt: number; hash: string; entities: Entity[]; patches: EntityPatch[] }
 export interface PackMeta { id: string; name: string; source: string; homebrew?: boolean; importedAt: number; hash: string; counts: Partial<Record<EntityKind, number>> }
 export type HideableField = 'rarity' | 'attunement' | 'bonuses' | 'effects' | 'charges' | 'curse';

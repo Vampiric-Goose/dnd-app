@@ -2,9 +2,9 @@
 import { slug } from '../../content/ids.ts';
 import { renderTags } from '../../content/richtext.ts';
 import { SKILL_ABILITY, abilityMod } from '../../rules/constants.ts';
-import { CR_LADDER } from '../../rules/monsters.ts';
+import { CR_LADDER, crProf } from '../../rules/monsters.ts';
 import type { Ability, MonsterDef, RichText, Size, Skill, Trait } from '../../types.ts';
-import { ABILITIES, arr, base, fail, rich, table, traits, type Ctx, type Raw } from './common.ts';
+import { ABILITIES, arr, base, fail, mapStrings, rich, table, traits, type Ctx, type Raw } from './common.ts';
 
 const SIZES: Size[] = ['T', 'S', 'M', 'L', 'H', 'G'];
 const SIZE_NAME = table<string>({ T: 'Tiny', S: 'Small', M: 'Medium', L: 'Large', H: 'Huge', G: 'Gargantuan' });
@@ -118,9 +118,43 @@ const spellTrait = (s: Raw): Trait => {
   return { name: text(s.name ?? 'Spellcasting'), text: [...rich(s.headerEntries), ...(lines.length ? [{ list: lines }] : []), ...rich(s.footerEntries)] };
 };
 
-export function monster(r: Raw, ctx: Ctx, id: string, name: string): MonsterDef {
-  const who = `monster "${name}" (${r.source})`;
+const warnedVars = new WeakMap<Ctx, Set<string>>(); // one warning per unknown variable per import
+
+/**
+ * Fills 5etools template variables (`<$title_short_name$>`, `{@dc <$spell_dc__cha$>}`, …) from the finished monster, as 5etools
+ * renders them: proficiency from its CR, modifiers from its scores, "the …" short names unless it is a named creature.
+ * An unknown variable is left as written.
+ */
+function fillVariables(r: Raw, ctx: Ctx, warn: (msg: string) => void): Raw {
+  const pb = crProf(String(isObj(r.cr) ? r.cr.cr : r.cr)) ?? 2;
+  const mod = (a: string) => abilityMod(typeof r[a] === 'number' ? r[a] : 10);
+  const stem = String(r.name).split(',')[0].replace(/(?:adult|ancient|young) \w+ (dragon|dracolich)/gi, '$1');
+  const short = typeof r.shortName === 'string' ? r.shortName : r.shortName === true ? String(r.name) : r.isNamedCreature || r.isNpc ? stem.split(' ')[0] : stem.toLowerCase();
+  const the = (title: boolean) => (r.isNamedCreature ? '' : title ? 'The ' : 'the ');
+  const value = (v: string): string | undefined => {
+    if (v === 'name') return String(r.name);
+    if (v === 'short_name' || v === 'title_short_name') return the(v !== 'short_name') + short;
+    const [k, arg = ''] = v.split('__'), ability = (ABILITIES as string[]).includes(arg);
+    if (k === 'spell_dc' && ability) return String(8 + pb + mod(arg));
+    if (k === 'to_hit' && ability) return String(pb + mod(arg)); // the template wraps it in {@hit}, which adds the sign
+    if (k === 'damage_mod' && ability) { const m = mod(arg); return m === 0 ? '' : ` ${m > 0 ? '+' : '-'} ${Math.abs(m)}`; }
+    const avg = k === 'damage_avg' ? /^(\d+(?:\.\d+)?)\+(str|dex|con|int|wis|cha)$/.exec(arg) : null;
+    return avg ? String(Math.floor(+avg[1] + mod(avg[2]))) : undefined;
+  };
+  return mapStrings(r, s => (!s.includes('<$') ? s : s.replace(/<\$([^$]*)\$>/g, (all, v: string) => {
+    const out = value(v);
+    if (out !== undefined) return out;
+    const seen = warnedVars.get(ctx) ?? new Set<string>();
+    warnedVars.set(ctx, seen);
+    if (!seen.has(v)) { seen.add(v); warn(`unknown template variable ${all} left as written`); }
+    return all;
+  })));
+}
+
+export function monster(raw: Raw, ctx: Ctx, id: string, name: string): MonsterDef {
+  const who = `monster "${name}" (${raw.source})`;
   const warn = (msg: string) => ctx.warn?.(`${who}: ${msg}`);
+  const r = fillVariables(raw, ctx, warn);
   const size = arr(r.size).filter((s): s is Size => SIZES.includes(s));
   if (!size.length) fail('missing size');
   const ac = arr(r.ac).map(a => {
@@ -156,7 +190,8 @@ export function monster(r: Raw, ctx: Ctx, id: string, name: string): MonsterDef 
     ...sections,
     ...(sections.legendary.length && { legendaryCount: typeof r.legendaryActions === 'number' ? r.legendaryActions : 3 }),
     ...(r.legendaryHeader !== undefined && { legendaryIntro: rich(r.legendaryHeader) }),
-    ...(mythic.length && { mythic }),
+    ...(typeof r.cr?.xp === 'number' && { xp: r.cr.xp }),
+    ...(mythic.length && { mythic }), ...(r.mythicHeader !== undefined && { mythicIntro: rich(r.mythicHeader) }),
     ...(lair.length && { lair }), ...(regional.length && { regional }),
     ...(arr(r.environment).length && { environment: arr(r.environment).map(String) }),
   };

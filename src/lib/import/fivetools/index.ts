@@ -281,7 +281,9 @@ export async function import5etools(
   const emit = (def: Entity, twin: Entity | undefined) => {
     const p = pack(def.source);
     // An empty text (mundane gear often has none) would blank the SRD's own description.
-    if (twin) p.patches.set(twin.id, { targetId: twin.id, alias: def.source, ...(def.text.length && { text: def.text }) });
+    // The SRD has no lair actions or regional effects; a book monster brings its own (from its legendary group).
+    const lair = def.kind === 'monster' ? { ...(def.lair && { lair: def.lair }), ...(def.regional && { regional: def.regional }) } : {};
+    if (twin) p.patches.set(twin.id, { targetId: twin.id, alias: def.source, ...(def.text.length && { text: def.text }), ...lair });
     else p.entities.set(def.id, def);
   };
   const bases: { view: Raw; def: ItemDef }[] = [];

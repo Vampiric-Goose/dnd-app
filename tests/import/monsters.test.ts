@@ -1,6 +1,8 @@
 import { expect, test } from 'vitest';
 import { ContentIndex } from '../../src/lib/content/index.ts';
 import { import5etools } from '../../src/lib/import/fivetools/index.ts';
+import { entriesToRich, renderTags } from '../../src/lib/content/richtext.ts';
+import { crXp, monsterXp } from '../../src/lib/rules/monsters.ts';
 import type { MonsterDef, Pack } from '../../src/lib/types.ts';
 import { run, runRaw } from '../fixtures/import.ts';
 import { srdPackFixture } from '../fixtures/srdPack.ts';
@@ -38,7 +40,7 @@ const glimmerfang = mon({
   bonus: [{ name: 'Skitter', entries: ['It skitters.'] }],
   reaction: [{ name: 'Flinch', entries: ['It flinches.'] }],
   legendary: [{ name: 'Blink', entries: ['It blinks 10 feet.'] }],
-  legendaryActions: 2, legendaryHeader: ['The glimmerfang can take 2 legendary actions.'],
+  legendaryActions: 2, legendaryHeader: ['The glimmerfang can take 2 legendary actions.'], mythicHeader: ['After a flare, it can use these.'],
   mythic: [{ name: 'Flare', entries: ['It flares.'] }],
   spellcasting: [
     { name: 'Innate Spellcasting', type: 'spellcasting', headerEntries: ['It casts:'], will: ['{@spell light}'],
@@ -83,6 +85,8 @@ test('a full monster converts to a MonsterDef, each 5etools rule applied', async
   expect(m.legendaryCount).toBe(2);
   expect(m.legendaryIntro).toEqual([{ p: 'The glimmerfang can take 2 legendary actions.' }]);
   expect(m.mythic?.map(t => t.name)).toEqual(['Flare']);
+  expect(m.mythicIntro).toEqual([{ p: 'After a flare, it can use these.' }]);
+  expect([m.xp, monsterXp(m)]).toEqual([undefined, crXp('2')]);
   expect(m.traits[1].text).toEqual([{ p: 'It casts:' }, { list: ['At will: light', '3/day: blur', '1/day each: sleep, fog cloud'] }]);
   // displayAs: 'action' puts the spellcasting among the actions
   expect(m.actions[2]).toEqual({ name: 'Spellcasting', text: [{ p: 'A 3rd-level spellcaster.' },
@@ -212,18 +216,19 @@ test('scalar modes and maxSize (as the Reduced Threat template uses them)', asyn
   const big = mon({ name: 'Big Ogre', size: ['H'], hp: { average: 45, formula: '6d12 + 6' }, save: { con: '+5' }, skill: { athletics: '+6' },
     action: [{ name: 'Slam', entries: ['{@atk mw} {@hit 6} to hit. {@dc 14} Strength save.'] }] });
   const r = await run({
-    'bestiary/bestiary-tst.json': { monster: [big, { name: 'Small Ogre', source: 'TST', _copy: { name: 'Big Ogre', source: 'TST', _templates: [{ name: 'Lesser', source: 'TST' }] } }] },
+    'bestiary/bestiary-tst.json': { monster: [big, { name: 'Small Ogre', source: 'TST', _copy: { name: 'Big Ogre', source: 'TST', _templates: [{ name: 'Lesser', source: 'TST' }, { name: 'Halved', source: 'TST' }] } }] },
     'bestiary/template.json': { monsterTemplate: [{ name: 'Lesser', source: 'TST', apply: { _mod: {
       _: { mode: 'maxSize', max: 'L' },
       hp: [{ mode: 'scalarMultProp', prop: 'average', scalar: 0.5, floor: true }, { mode: 'prefixSuffixStringProp', prop: 'formula', prefix: 'half of ', suffix: '' }],
       save: { mode: 'scalarAddProp', prop: '*', scalar: -2 }, skill: { mode: 'scalarAddProp', prop: '*', scalar: -2 },
       action: [{ mode: 'scalarAddHit', scalar: -2 }, { mode: 'scalarAddDc', scalar: -2 }],
-    } } }] },
+    } } }, { name: 'Halved', source: 'TST', apply: { _mod: { _: { mode: 'scalarMultXp', scalar: 0.5, floor: true } } } }] },
   });
   expect(r.errors).toEqual([]);
   const s = byName(r, 'Small Ogre')!;
   expect([s.size, s.hp, s.saves, s.skills, s.actions[0].text]).toEqual([['L'], { average: 22, formula: 'half of 6d12 + 6' }, { con: 3 }, { athletics: 4 },
     [{ p: '*Melee Weapon Attack:* +4 to hit. DC 12 Strength save.' }]]);
+  expect([s.xp, monsterXp(s), monsterXp(byName(r, 'Big Ogre')!)]).toEqual([100, 100, 200]); // CR 1 is 200 XP; scalarMultXp halves it
 });
 
 test('an official monster marked srd and named like an SRD monster patches it (alias) instead of duplicating', async () => {
@@ -237,6 +242,52 @@ test('an official monster marked srd and named like an SRD monster patches it (a
   const mm = r.packs.find(p => p.source === 'MM')!;
   expect(mm.patches).toEqual([{ targetId: 'monster:cave-lurker@SRD', alias: 'MM' }]);
   expect(mm.entities.map(e => e.id)).toEqual(['monster:cave-shrieker@MM']);
+
+  // M4: the SRD has no lair actions; the book monster's legendary group reaches the SRD monster through its patch.
+  const withLair = await import5etools([
+    { name: 'bestiary/bestiary-mm.json', json: { monster: [mon({ name: 'Cave Lurker', source: 'MM', srd: true, legendaryGroup: { name: 'Lurker Cave', source: 'MM' } })] } },
+    { name: 'bestiary/legendarygroups.json', json: { legendaryGroup: [{ name: 'Lurker Cave', source: 'MM', lairActions: ['Stalactites fall.'], regionalEffects: ['Echoes linger.'] }] } },
+  ], { index: new ContentIndex([srd]), rawLookup: async () => undefined });
+  const patch = withLair.packs[0].patches[0];
+  expect(patch).toEqual({ targetId: 'monster:cave-lurker@SRD', alias: 'MM', lair: [{ p: 'Stalactites fall.' }], regional: [{ p: 'Echoes linger.' }] });
+  const lurker = new ContentIndex([srd, ...withLair.packs]).get('monster:cave-lurker@SRD') as MonsterDef;
+  expect([lurker.lair, lurker.regional, lurker.aliases]).toEqual([[{ p: 'Stalactites fall.' }], [{ p: 'Echoes linger.' }], ['MM']]);
+});
+
+test('template variables are filled from the finished monster; an unknown one is left as written with one warning', async () => {
+  const fiendish = { name: 'Fiendish', source: 'TST', apply: { _mod: { trait: { mode: 'appendArr', items: { name: 'Hellish Rebuke', entries: [
+    '<$title_short_name$> rebukes; <$short_name$> glows. Save {@dc <$spell_dc__cha$>}. {@hit <$to_hit__str$>} to hit, <$damage_avg__2.5+str$> ({@damage 1d4<$damage_mod__str$>}). <$bogus$>',
+  ] } } } } };
+  const r = await run({
+    'bestiary/bestiary-tst.json': { monster: [
+      mon({ name: 'Grim Ogre', cr: '5', str: 14, cha: 16 }),
+      mon({ name: 'Vex', isNamedCreature: true, isNpc: true, cr: '1/2', str: 10, cha: 10 }),
+      { name: 'Fiendish Ogre', source: 'TST', _copy: { name: 'Grim Ogre', source: 'TST', _templates: [{ name: 'Fiendish', source: 'TST' }] } },
+      { name: 'Fiendish Vex', source: 'TST', isNamedCreature: true, _copy: { name: 'Vex', source: 'TST', _templates: [{ name: 'Fiendish', source: 'TST' }] } },
+    ] },
+    'bestiary/template.json': { monsterTemplate: [fiendish] },
+  });
+  expect(r.errors).toEqual([]);
+  // CR 5: proficiency +3. Cha 16 (+3): DC 8 + 3 + 3 = 14. Str 14 (+2): +5 to hit, 1d4 + 2, average floor(2.5 + 2) = 4.
+  expect(byName(r, 'Fiendish Ogre')!.traits[0].text).toEqual([{ p: 'The fiendish ogre rebukes; the fiendish ogre glows. Save DC 14. +5 to hit, 4 (1d4 + 2). <$bogus$>' }]);
+  // A named creature takes no "the"; CR 1/2: +2, modifiers 0.
+  expect(byName(r, 'Fiendish Vex')!.traits[0].text).toEqual([{ p: 'Fiendish rebukes; Fiendish glows. Save DC 10. +2 to hit, 2 (1d4). <$bogus$>' }]);
+  expect(r.warnings.filter(w => w.includes('<$bogus$>'))).toHaveLength(1);
+});
+
+test('an explicit cr.xp is kept as the monster\'s XP', async () => {
+  const r = await run({ 'bestiary/bestiary-tst.json': { monster: [mon({ name: 'Harmless Mote', cr: { cr: '0', xp: 0 } })] } });
+  const m = byName(r, 'Harmless Mote')!;
+  expect([m.cr, m.xp, monsterXp(m)]).toEqual(['0', 0, 0]);
+});
+
+test('attack tags and list-item names render as the book prints them', () => {
+  expect(['mw,rw', 'ms,rs', 'm,r', 'ms', 'rs'].map(a => renderTags(`{@atk ${a}}`))).toEqual([
+    '*Melee or Ranged Weapon Attack:*', '*Melee or Ranged Spell Attack:*', '*Melee or Ranged Attack:*', '*Melee Spell Attack:*', '*Ranged Spell Attack:*']);
+  expect(renderTags('{@hitYourSpellAttack} to hit')).toBe('your spell attack modifier to hit');
+  expect(renderTags('{@hitYourSpellAttack Bonus equals your spell attack modifier} to hit')).toBe('Bonus equals your spell attack modifier to hit');
+  expect(entriesToRich([{ type: 'list', items: [{ type: 'item', name: 'Charm Ray:', entry: 'Swap it.' }, { type: 'item', name: 'Sleep Ray', entry: 'Doze.' }] }]))
+    .toEqual([{ list: ['**Charm Ray:** Swap it.', '**Sleep Ray.** Doze.'] }]);
 });
 
 test('untrusted _mod keys cannot reach Object.prototype', async () => {

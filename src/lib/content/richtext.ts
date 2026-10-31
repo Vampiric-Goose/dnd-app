@@ -9,7 +9,7 @@ export const MARK = /\{\{redact:([^}]*)(?:\}\})?|\{\{\/redact\}\}/g;
 const TAG = /\{@(\w+)(?:\s+([^{}]*))?\}/g;
 
 const ATK: Record<string, string> = {
-  m: 'Melee', r: 'Ranged', mw: 'Melee Weapon', rw: 'Ranged Weapon', ms: 'Melee Spell', rs: 'Ranged Spell', 'mw,rw': 'Melee or Ranged Weapon',
+  m: 'Melee', r: 'Ranged', mw: 'Melee Weapon', rw: 'Ranged Weapon', ms: 'Melee Spell', rs: 'Ranged Spell', 'mw,rw': 'Melee or Ranged Weapon', 'ms,rs': 'Melee or Ranged Spell', 'm,r': 'Melee or Ranged',
 };
 // Index of the display-text part when it isn't the third one (default 2). Used only when that part
 // exists and is non-empty; otherwise the tag shows part 0.
@@ -28,6 +28,7 @@ const tag = (name: string, arg = ''): string => {
     case 'dc': return `DC ${p0}`;
     case 'atk': return `*${ATK[p0] ?? p0} Attack:*`;
     case 'h': return '*Hit:* ';
+    case 'hitYourSpellAttack': return p0 || 'your spell attack modifier';
     case 'recharge': return p0 && +p0 < 6 ? `(Recharge ${p0}–6)` : '(Recharge 6)';
     case 'chance': return `${p0} percent`;
     default: return parts[DISPLAY_AT[name] ?? 2] || p0;
@@ -193,7 +194,9 @@ const cell = (c: unknown): string =>
 
 const itemText = (it: Obj): string => {
   const body = flat(entriesToRich(it.entry !== undefined ? [it.entry] : arr(it.entries)));
-  return (typeof it.name === 'string' ? `**${renderTags(it.name)}.** ${body}` : body).trim();
+  if (typeof it.name !== 'string') return body.trim();
+  const n = renderTags(it.name);
+  return `**${n}${/[.:!?]$/.test(n) ? '' : '.'}** ${body}`.trim(); // a name that ends in its own punctuation gets no period
 };
 const isItem = (x: unknown): x is Obj => isObj(x) && (x.type === 'item' || x.type === 'itemSub');
 
