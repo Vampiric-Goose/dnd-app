@@ -29,6 +29,8 @@
     ['characters/:id', 'Sheet', () => import('./ui/sheet/Sheet.svelte')],
     ['characters/:id/level-up', 'LevelUp', () => import('./ui/creator/LevelUp.svelte')],
     ['compendium', 'Compendium', () => import('./ui/pages/Compendium.svelte')],
+    ['monsters', 'Monsters', () => import('./ui/pages/Monsters.svelte')],
+    ['monsters/:id', 'Monsters', () => import('./ui/pages/Monsters.svelte')], // the library with that monster's stat block open
     ['items', 'Items', () => import('./ui/pages/Items.svelte')],
     ['items/:id', 'ItemEditor', () => import('./ui/pages/Items.svelte')], // the same page; `:id` is an item id or "new"
     ['packs', 'Packs', () => import('./ui/pages/Packs.svelte')],
@@ -36,15 +38,17 @@
     ['about', 'About', () => import('./ui/pages/About.svelte')],
   ];
 
-  const nav: [label: string, segment: string][] = [
+  // Monsters are DM information (R2): no link in Player view.
+  const nav = $derived<[label: string, segment: string][]>([
     ['Campaigns', ''],
     ['Characters', 'characters'],
     ['Compendium', 'compendium'],
+    ...(app.viewer === 'dm' ? [['Monsters', 'monsters'] as [string, string]] : []),
     ['Items', 'items'],
     ['Packs', 'packs'],
     ['Settings', 'settings'],
     ['About', 'about'],
-  ];
+  ]);
 
   function match(key: string) {
     const path = key.split('/').filter(Boolean);
@@ -144,8 +148,8 @@
   }
 
   nav a {
-    flex: 1 1 auto; /* size by label so "Compendium" fits at 375px */
-    padding: 0.9rem 0.15rem;
+    flex: 1 1 auto; /* size by label so all eight labels fit at 375px */
+    padding: 0.9rem 0.05rem;
     text-align: center;
     font-size: 0.7rem;
     color: var(--muted);
