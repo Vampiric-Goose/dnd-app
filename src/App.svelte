@@ -3,7 +3,7 @@
   import { APP_NAME } from './lib/app.ts';
   import { requestPersistence } from './lib/db.ts';
   import { router } from './lib/router.svelte.ts';
-  import { startup } from './lib/store.svelte.ts';
+  import { app, startup } from './lib/store.svelte.ts';
   import BackupBanner from './ui/BackupBanner.svelte';
   import CampaignPicker from './ui/CampaignPicker.svelte';
   import DiceTray from './ui/DiceTray.svelte';
@@ -82,6 +82,7 @@
 
   <main>
     <BackupBanner />
+    {#if app.error && key !== ''}<p role="alert" class="error">{app.error}</p>{/if}<!-- the Campaigns page shows it itself -->
     {#if !current}
       <h1>Page not found</h1>
       <p><a href="#/">Back to Campaigns</a></p>

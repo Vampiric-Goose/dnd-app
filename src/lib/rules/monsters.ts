@@ -47,7 +47,9 @@ export function hpFormula(count: number, size: Size, con: number): string {
 }
 
 /** DMG "Creating a monster": CR from defensive and offensive halves, each adjusted one step per 2 points off the row. */
-export function suggestCr(x: { hp: number; ac: number; dpr: number; attack?: number; dc?: number }): { cr: string; defensive: string; offensive: string } {
+export function suggestCr(input: { hp: number; ac: number; dpr: number; attack?: number; dc?: number }): { cr: string; defensive: string; offensive: string } {
+  const fin = (v: number | undefined) => (typeof v === 'number' && Number.isFinite(v) ? v : 0); // a blank field counts as 0, so it never suggests CR 30
+  const x = { hp: fin(input.hp), ac: fin(input.ac), dpr: fin(input.dpr), attack: input.attack === undefined ? undefined : fin(input.attack), dc: input.dc === undefined ? undefined : fin(input.dc) };
   const last = CR_LADDER.length - 1;
   const clamp = (n: number) => Math.min(last, Math.max(0, n));
   const band = (k: 'hpMax' | 'dprMax', v: number) => { const i = TABLE.findIndex((r) => v <= r[k]); return i < 0 ? last : i; };

@@ -44,6 +44,12 @@ test('suggestCr', () => {
   expect(suggestCr({ hp: 3, ac: 10, dpr: 0, attack: 0 }).cr).toBe('0');
 });
 
+test('suggestCr: blank (non-finite) fields count as 0, never CR 30', () => {
+  expect(suggestCr({ hp: NaN, ac: NaN, dpr: undefined as any }).cr).toBe('0');
+  expect(suggestCr({ hp: 85, ac: 13, dpr: 14, attack: NaN }).offensive).toBe('1/2');
+  expect(suggestCr({ hp: Infinity, ac: 13, dpr: 14, attack: 3 }).defensive).toBe('0');
+});
+
 test('suggestCr table endpoints: CR 19 and CR 30 bands, and beyond the ladder', () => {
   expect(suggestCr({ hp: 355, ac: 18, dpr: 122, attack: 10 }).defensive).toBe('19');
   expect(suggestCr({ hp: 400, ac: 19, dpr: 140, attack: 10 }).defensive).toBe('20');

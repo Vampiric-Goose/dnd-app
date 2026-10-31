@@ -2,7 +2,7 @@ import { exportBackup } from './backup.ts';
 import { ContentIndex } from './content/index.ts';
 import { loadSrd } from './content/srd.ts';
 import { entityAllowed, mayPatch, packAllowed, patchAllowed } from './content/sources.ts';
-import { db } from './db.ts';
+import { db, onUpgradeBlocked } from './db.ts';
 import type { Campaign, Pack } from './types.ts';
 
 export const app: {
@@ -37,13 +37,17 @@ export async function saveCampaign(c: Campaign): Promise<void> {
   await refreshCampaigns();
 }
 
+const BLOCKED = 'Another tab of this app is open with an older version. Close it to finish updating.';
+
 /** Loads campaigns, the current campaign and the last-backup time. Never throws. */
 export async function startup(): Promise<void> {
+  onUpgradeBlocked(() => { app.error = BLOCKED; }); // the open below waits until the older tab closes, then carries on
   try {
     app.campaigns = (await db.campaigns.list()).sort((a, b) => a.name.localeCompare(b.name));
     const id = await db.meta.get<string>('currentCampaign');
     app.campaign = app.campaigns.find((c) => c.id === id);
     app.lastBackupAt = await db.meta.get<number>('lastBackupAt');
+    if (app.error === BLOCKED) app.error = undefined;
   } catch (e) {
     app.error = 'Could not open local storage: ' + msg(e);
   } finally {

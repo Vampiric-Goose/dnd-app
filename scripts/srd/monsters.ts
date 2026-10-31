@@ -43,6 +43,30 @@ const traits = (list: Raw[] = []): Trait[] =>
 const bonuses = (m: Raw, prefix: string): [string, number][] =>
   m.proficiencies.filter((p: Raw) => p.proficiency.index.startsWith(prefix)).map((p: Raw): [string, number] => [p.proficiency.index.slice(prefix.length), p.value]);
 
+/** A shield-only entry after another is that same armor with a shield (azer: natural armor 15, 17 with a shield), not a second way to be armored. */
+function armorClasses(list: Raw[]): MonsterDef['ac'] {
+  const out: MonsterDef['ac'] = [];
+  for (const a of list) {
+    const prev = out[out.length - 1];
+    const shield = a.type === 'armor' && a.armor?.length === 1 && a.armor[0].index === 'shield';
+    if (shield && prev) out[out.length - 1] = { value: a.value, from: prev.from ? `${prev.from}, shield` : 'shield' };
+    else out.push({ value: a.value, ...(acFrom(a) && { from: acFrom(a) }) });
+  }
+  return out;
+}
+
+/** Comma-separated, except inside parentheses and inside an "understands X, Y, and Z but can't speak" run, which is one entry. */
+function languageList(s: string | undefined): string[] {
+  if (!s || s === '—') return [];
+  const out: string[] = [];
+  let open = false;
+  for (const part of s.split(/,\s*(?![^()]*\))/)) {
+    if (open) out[out.length - 1] += `, ${part}`; else out.push(part);
+    open = /^understands /i.test(out[out.length - 1]) && !/ but /.test(out[out.length - 1]);
+  }
+  return out;
+}
+
 export function convertMonsters(raw: Raw[]): MonsterDef[] {
   return raw.map((m): MonsterDef => {
     const who = `monster ${m.name}`;
@@ -62,7 +86,7 @@ export function convertMonsters(raw: Raw[]): MonsterDef[] {
       size: [SIZE[m.size] ?? fail(`${who}: size ${m.size}`)],
       type: m.subtype ? `${m.type} (${m.subtype})` : m.type,
       alignment: m.alignment,
-      ac: m.armor_class.map((a: Raw) => ({ value: a.value, ...(acFrom(a) && { from: acFrom(a) }) })),
+      ac: armorClasses(m.armor_class),
       hp: { average: m.hit_points, formula: String(m.hit_points_roll).replace(/\s*([+-])\s*/, ' $1 ') },
       speed,
       scores: Object.fromEntries(ABILITY_KEYS.map(([k, long]) => [k, m[long]])) as MonsterDef['scores'],
@@ -70,7 +94,7 @@ export function convertMonsters(raw: Raw[]): MonsterDef[] {
       vulnerable: m.damage_vulnerabilities, resist: m.damage_resistances, immune: m.damage_immunities,
       conditionImmune: m.condition_immunities.map((c: Raw) => c.index),
       senses, passive: passive ?? fail(`${who}: no passive perception`),
-      languages: m.languages && m.languages !== '—' ? m.languages.split(/,\s*(?![^()]*\))/) : [],
+      languages: languageList(m.languages),
       cr: CR[m.challenge_rating] ?? String(m.challenge_rating),
       traits: traits(m.special_abilities), actions: traits(m.actions), bonusActions: [], reactions: traits(m.reactions),
       legendary,

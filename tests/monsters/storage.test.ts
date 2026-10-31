@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import { openDB } from 'idb';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { applyBackup, exportBackup, exportRecord, importRecord, readBackup } from '../../src/lib/backup.ts';
-import { db, resetDb } from '../../src/lib/db.ts';
+import { db, onUpgradeBlocked, resetDb } from '../../src/lib/db.ts';
 import { blankMonster, duplicateMonster, newMonsterId, soundMonster } from '../../src/lib/monsters/homebrew.ts';
 import type { MonsterDef, Pack, StoredMonster } from '../../src/lib/types.ts';
 import { camp, char, item } from '../fixtures/records.ts';
@@ -145,4 +145,38 @@ test('a backup with no monsters key still restores', async () => {
   expect(await db.monsters.list('c1')).toEqual([]);
   await expect(restore(backup({ monsters: {} }))).rejects.toThrow('monsters is not a list');
   await expect(restore(backup({ monsters: [{ kind: 'item', id: 'q' }] }))).rejects.toThrow('monsters[0] is not an monster');
+});
+
+test('soundMonster: hp formula, speed values, save and skill keys', () => {
+  const b = blankMonster('c');
+  const bad = (patch: object) => expect(soundMonster({ ...b, ...patch })).toBe(false);
+  expect(soundMonster({ ...b, hp: { average: 9, formula: '2d6 + 2' }, speed: { walk: 30, fly: 60, hover: true, note: 'in animal form' }, saves: { dex: 3 }, skills: { stealth: 5, 'sleight-of-hand': 4 } })).toBe(true);
+  bad({ hp: { average: 9, formula: 7 } });
+  bad({ speed: { walk: 30, fly: '60 ft.' } });
+  bad({ speed: { walk: 30, swim: NaN } });
+  bad({ speed: { walk: 30, hover: 'yes' } });
+  bad({ speed: { walk: 30, note: 5 } });
+  bad({ saves: { luck: 3 } });
+  bad({ skills: { stealthy: 3 } });
+  bad({ skills: { stealth: '5' } });
+});
+
+test('opening while an older tab holds version 1 reports it, then completes once that tab closes', async () => {
+  const v1 = await openDB('dnd-app', 1, { upgrade(d) { d.createObjectStore('campaigns', { keyPath: 'id' }); } }); // no versionchange handler: it stays open
+  const hook = vi.fn();
+  onUpgradeBlocked(hook);
+  const pending = db.monsters.list('c1');
+  await vi.waitFor(() => expect(hook).toHaveBeenCalledTimes(1));
+  v1.close();
+  expect(await pending).toEqual([]);
+  onUpgradeBlocked(undefined);
+});
+
+test('this tab steps aside when a newer version wants to upgrade', async () => {
+  await db.monsters.put(mon('a'));
+  let blocked = false;
+  const v3 = await openDB('dnd-app', 3, { blocked() { blocked = true; } });
+  expect(blocked).toBe(false); // our connection closed on versionchange, so nothing waited
+  v3.close();
+  await resetDb();
 });

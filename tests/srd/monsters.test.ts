@@ -59,6 +59,20 @@ test('SRD printing conventions', () => {
   expect(mon('adult-black-dragon').senses).toEqual(['blindsight 60 ft.', 'darkvision 120 ft.']);
 });
 
+test('a shield is part of the main AC, not a second entry', () => {
+  expect(mon('azer').ac).toEqual([{ value: 17, from: 'natural armor, shield' }]);
+  expect(mon('lizardfolk').ac).toEqual([{ value: 15, from: 'natural armor, shield' }]);
+  expect(mon('goblin').ac).toEqual([{ value: 15, from: 'leather armor, shield' }]); // control: one entry already
+  expect(mon('ankheg').ac).toHaveLength(2); // a genuinely different second AC stays
+  expect(monsters.filter((m) => m.ac.some((a) => a.from === 'shield')).map((m) => m.id)).toEqual([]);
+});
+
+test('an understands-but-cannot-speak language run stays one entry', () => {
+  expect(mon('kraken').languages).toEqual(["understands Abyssal, Celestial, Infernal, and Primordial but can't speak", 'telepathy 120 ft.']);
+  expect(mon('giant-elk').languages).toEqual(['Giant Elk', "understands Common, Elvish, and Sylvan but can't speak"]);
+  expect(mon('dretch').languages).toEqual(['Abyssal', 'telepathy 60 ft. (works only with creatures that understand Abyssal)']);
+});
+
 test('every monster is well formed', () => {
   for (const m of monsters) {
     expect(CR_LADDER, m.id).toContain(m.cr);

@@ -25,6 +25,9 @@ type Stores = StoreNames<Schema>;
 
 const NAME = 'dnd-app';
 let conn: Promise<IDBPDatabase<Schema>> | undefined;
+let onBlocked: (() => void) | undefined;
+/** Called when opening is held up by another tab on an older version; the open itself finishes once that tab closes. */
+export const onUpgradeBlocked = (fn: (() => void) | undefined): void => { onBlocked = fn; };
 
 function open() {
   return (conn ??= openDB<Schema>(NAME, 2, {
@@ -41,6 +44,10 @@ function open() {
       }
       if (oldVersion < 2) d.createObjectStore('monsters', { keyPath: 'id' }).createIndex('campaignId', 'campaignId'); // stage 2: the DM's own monsters
     },
+    // An older tab holds the old version open: the upgrade waits (and still completes by itself once that tab closes).
+    blocked() { onBlocked?.(); },
+    // A newer version of the app wants to upgrade: step aside so this tab never blocks it, and reopen on the next use.
+    blocking() { const c = conn; conn = undefined; void c?.then((d) => d.close()); },
     terminated() { conn = undefined; },
   }).catch((e) => { conn = undefined; throw e; })); // don't cache a failed open
 }

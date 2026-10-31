@@ -2,7 +2,7 @@ import { is2024 } from '../character/strip2024.ts';
 import { isRichText } from '../content/richtext.ts';
 import { traitOk } from '../items/homebrew.ts';
 import { isRec } from '../recordShape.ts';
-import { ABILITIES } from '../rules/constants.ts';
+import { ABILITIES, SKILL_ABILITY } from '../rules/constants.ts';
 import type { MonsterDef, StoredMonster } from '../types.ts';
 import { uid } from '../uid.ts';
 
@@ -34,7 +34,8 @@ const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinit
 const str = (v: unknown): v is string => typeof v === 'string';
 const strs = (v: unknown): v is string[] => Array.isArray(v) && v.every(str);
 const traits = (v: unknown): boolean => Array.isArray(v) && v.every((t) => traitOk(t, 0));
-const numbers = (v: unknown): boolean => isRec(v) && Object.values(v).every(num);
+const numbersFor = (v: unknown, keys: readonly string[]): boolean => isRec(v) && Object.entries(v).every(([k, n]) => keys.includes(k) && num(n));
+const speedOk = (v: unknown): boolean => isRec(v) && num(v.walk) && Object.entries(v).every(([k, x]) => k === 'hover' ? typeof x === 'boolean' : k === 'note' ? str(x) : num(x));
 
 /**
  * The one guard for a stored or imported monster: everything the stat block and the lists read is present and the right type.
@@ -45,10 +46,10 @@ export function soundMonster(m: unknown): boolean {
   if (!Array.isArray(m.size) || !m.size.length || !m.size.every((s) => ['T', 'S', 'M', 'L', 'H', 'G'].includes(s as string))) return false;
   if (!str(m.type) || !str(m.alignment) || !str(m.cr) || !num(m.passive)) return false;
   if (!Array.isArray(m.ac) || !m.ac.length || !m.ac.every((a) => isRec(a) && num(a.value) && (a.from === undefined || str(a.from)))) return false;
-  if (!isRec(m.hp) || !(num(m.hp.average) || str(m.hp.special))) return false;
-  if (!isRec(m.speed) || !num(m.speed.walk)) return false;
+  if (!isRec(m.hp) || !(num(m.hp.average) || str(m.hp.special)) || (m.hp.formula !== undefined && !str(m.hp.formula))) return false;
+  if (!speedOk(m.speed)) return false;
   if (!isRec(m.scores) || !ABILITIES.every((a) => num((m.scores as Record<string, unknown>)[a]))) return false;
-  if (!numbers(m.saves) || !numbers(m.skills)) return false;
+  if (!numbersFor(m.saves, ABILITIES) || !numbersFor(m.skills, Object.keys(SKILL_ABILITY))) return false;
   if (![m.vulnerable, m.resist, m.immune, m.conditionImmune, m.senses, m.languages].every(strs)) return false;
   if (![m.traits, m.actions, m.bonusActions, m.reactions, m.legendary].every(traits)) return false;
   if (m.legendaryCount !== undefined && !num(m.legendaryCount)) return false;

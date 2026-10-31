@@ -153,7 +153,7 @@
 {/if}
 
 <h2>Import a backup</h2>
-<p class="muted">Restores campaigns, characters, items, books and images from a backup file. Matching records are overwritten.</p>
+<p class="muted">Restores campaigns, characters, items, monsters, books and images from a backup file. Matching records are overwritten.</p>
 <div class="field">
   <label for="import-backup">Backup file (.json)</label>
   <input id="import-backup" type="file" accept=".json,application/json" disabled={importing} onchange={onImport} />
