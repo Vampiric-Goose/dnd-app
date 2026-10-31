@@ -5,15 +5,17 @@
   import { rollLog } from '../../lib/rolls.svelte.ts';
   import { computeSheet } from '../../lib/rules/sheet.ts';
   import { DEFAULT_SETTINGS } from '../../lib/settings.ts';
-  import { app } from '../../lib/store.svelte.ts';
+  import { transfer } from '../../lib/items/inventory.ts';
+  import { app, refreshCampaigns } from '../../lib/store.svelte.ts';
   import { toast } from '../../lib/toast.svelte.ts';
-  import type { Character, OverrideKey } from '../../lib/types.ts';
+  import type { Campaign, Character, OverrideKey } from '../../lib/types.ts';
   import { message } from '../creator/labels.ts';
   import Abilities from './Abilities.svelte';
   import Attacks from './Attacks.svelte';
   import Combat from './Combat.svelte';
   import CustomEffects from './CustomEffects.svelte';
   import Features from './Features.svelte';
+  import Inventory from './Inventory.svelte';
   import RestDialogs from './RestDialogs.svelte';
   import Spells from './Spells.svelte';
 
@@ -27,11 +29,13 @@
   let saved: Character | undefined; // what is in storage (or was loaded from it)
   let timer: ReturnType<typeof setTimeout> | undefined;
 
+  let moving = false; // a transfer is committing: autosave stays out of its way (R44)
+
   async function flush() {
     clearTimeout(timer);
     timer = undefined;
     const cur = c;
-    if (!cur || cur === saved) return;
+    if (!cur || cur === saved || moving) return;
     try {
       await db.characters.put($state.snapshot(cur) as Character);
       saved = cur;
@@ -87,6 +91,36 @@
   // R37: moves the character into or out of a campaign; embedded content stays as it is.
   function setCampaign(id: string) {
     update(({ campaignId: _, ...rest }) => (id ? { ...rest, campaignId: id } : rest));
+  }
+
+  // R44: moves `qty` of an entry to Party loot ('loot') or another character, and commits both sides in one transaction.
+  // The receiver is read fresh from storage. On failure nothing in memory changes. On success the sheet adopts what was
+  // written as its saved baseline, so autosave doesn't write a stale copy over it.
+  async function transferTo(entryId: string, qty: number, to: string) {
+    const cur = c;
+    if (!cur || moving) return;
+    moving = true;
+    clearTimeout(timer);
+    try {
+      const camp = to === 'loot' ? await db.campaigns.get(cur.campaignId ?? '') : undefined;
+      const other = to === 'loot' ? undefined : await db.characters.get(to);
+      if (!camp && !other) throw new Error('Could not find where to send it.');
+      const moved = transfer(cur.inventory, camp?.loot ?? other!.inventory, entryId, qty);
+      if (moved.from === cur.inventory) throw new Error('Nothing was moved.');
+      const next: Character = { ...cur, inventory: moved.from };
+      await db.saveTogether(camp
+        ? { characters: [$state.snapshot(next) as Character], campaign: $state.snapshot({ ...camp, loot: moved.to }) as Campaign }
+        : { characters: [$state.snapshot(next) as Character, $state.snapshot({ ...other!, inventory: moved.to }) as Character] });
+      saved = next;
+      c = c === cur ? next : { ...c!, inventory: moved.from }; // edits made while it committed stay (and autosave)
+      if (camp) await refreshCampaigns().catch(() => {});
+      toast(`Moved to ${camp ? 'Party loot' : other!.name || 'Unnamed'}.`);
+    } catch (e) {
+      toast(e instanceof StorageError ? e.message : `Could not move it: ${message(e)}`, true);
+    } finally {
+      moving = false;
+      if (c && c !== saved) timer = setTimeout(flush, 500);
+    }
   }
 
   const last = $derived(rollLog[0]);
@@ -152,6 +186,8 @@
       <CustomEffects {c} {update} />
     </div>
   </div>
+
+  <Inventory {c} {sheet} {settings} {update} ontransfer={transferTo} />
 
   <RestDialogs bind:mode={restMode} {c} {sheet} {update} />
 {/if}

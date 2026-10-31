@@ -69,3 +69,15 @@ test('blobs hash by SHA-256 and round-trip; raw5e and meta store values', async 
   await db.meta.set('x', 42);
   expect(await db.meta.get<number>('x')).toBe(42);
 });
+
+test('saveTogether writes characters and campaign atomically', async () => {
+  const a = char('a', 'c1'), b = char('b', 'c1');
+  await db.saveTogether({ characters: [a, b], campaign: camp('c1') });
+  expect((await db.characters.list()).map((c) => c.id).sort()).toEqual(['a', 'b']);
+  expect((await db.campaigns.get('c1'))!.updatedAt).toBeGreaterThan(0);
+  expect((await db.characters.get('a'))!.updatedAt).toBeGreaterThan(0);
+  // a failure on the second record rolls the first back
+  await expect(db.saveTogether({ characters: [{ ...a, name: 'changed' }, {} as Character], campaign: camp('c2') })).rejects.toThrow(/Could not save/);
+  expect((await db.characters.get('a'))!.name).toBe('a');
+  expect(await db.campaigns.get('c2')).toBeUndefined();
+});

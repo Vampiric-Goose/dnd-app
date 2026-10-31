@@ -20,11 +20,13 @@ export async function refreshCampaigns(): Promise<void> {
   app.campaigns = (await db.campaigns.list()).sort((a, b) => a.name.localeCompare(b.name));
   const id = app.campaign?.id;
   app.campaign = app.campaigns.find((c) => c.id === id);
+  if (!app.campaign) app.viewer = 'dm'; // the toggle shows only with a campaign, so nothing may stay hidden without one
 }
 
 /** Opens a campaign (or none) and remembers the choice. */
 export async function setCampaign(id: string | undefined): Promise<void> {
   app.campaign = app.campaigns.find((c) => c.id === id);
+  if (!app.campaign) app.viewer = 'dm';
   await db.meta.set('currentCampaign', app.campaign?.id ?? null);
 }
 

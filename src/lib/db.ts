@@ -151,6 +151,11 @@ export const db = {
     get: async <T>(key: string) => (await (await open()).get('meta', key)) as T | undefined,
     set: (key: string, value: unknown) => write(['meta'], (tx) => tx.objectStore('meta').put(value, key)),
   },
+  /** R44: characters and a campaign in one transaction (an item transfer touches both sides), stamping updatedAt like put. */
+  saveTogether: ({ characters = [], campaign }: { characters?: Character[]; campaign?: Campaign }) => write(['characters', 'campaigns'], async (tx) => {
+    for (const c of characters) await tx.objectStore('characters').put({ ...c, updatedAt: Date.now() });
+    if (campaign) await tx.objectStore('campaigns').put({ ...campaign, updatedAt: Date.now() });
+  }),
   /** Backup import: one atomic upsert that keeps the records' own updatedAt. */
   restore: (s: Snapshot) => write(['campaigns', 'characters', 'items', 'packs', 'packMeta', 'blobs'], async (tx) => {
     for (const r of s.campaigns) await tx.objectStore('campaigns').put(r);

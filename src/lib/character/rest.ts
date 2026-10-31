@@ -1,4 +1,5 @@
-import type { Character, Recharge, Sheet } from '../types.ts';
+import { rechargeEntry } from '../items/inventory.ts';
+import type { Character, Sheet } from '../types.ts';
 
 // Pure (no Svelte/Vite/DOM): shared with Node scripts. Every function returns a new Character.
 
@@ -6,12 +7,12 @@ type State = Character['state'];
 const withState = (c: Character, s: Partial<State>): Character => ({ ...c, state: { ...c.state, ...s } });
 const NO_SAVES = { success: 0, fail: 0 };
 
-/** Clears used resources and item charges whose recharge is in `on`. */
-function recharge(c: Character, sheet: Sheet, on: Recharge[]): Pick<Character, 'inventory'> & { resourcesUsed: State['resourcesUsed'] } {
-  const reset = new Set(sheet.resources.filter(r => on.includes(r.recharge)).map(r => r.name));
+/** Clears used resources and restores item charges (rolled, through rechargeEntry); a long rest also covers short-rest ones. */
+function recharge(c: Character, sheet: Sheet, event: 'short' | 'long'): Pick<Character, 'inventory'> & { resourcesUsed: State['resourcesUsed'] } {
+  const reset = new Set(sheet.resources.filter(r => r.recharge === 'short' || r.recharge === event).map(r => r.name));
   return {
     resourcesUsed: Object.fromEntries(Object.entries(c.state.resourcesUsed).filter(([n]) => !reset.has(n))),
-    inventory: c.inventory.map(e => (e.item.charges && on.includes(e.item.charges.recharge) ? { ...e, chargesUsed: 0 } : e)),
+    inventory: c.inventory.map(e => rechargeEntry(e, event)),
   };
 }
 
@@ -25,7 +26,7 @@ export function shortRest(c: Character, spent: { die: number; rolls: number[] }[
     used[die] = (used[die] ?? 0) + taken.length;
     for (const r of taken) heal += Math.max(0, r + sheet.mods.con);
   }
-  const { resourcesUsed, inventory } = recharge(c, sheet, ['short']);
+  const { resourcesUsed, inventory } = recharge(c, sheet, 'short');
   return applyHealing({ ...withState(c, { hitDiceUsed: used, pactSlotsUsed: 0, resourcesUsed }), inventory }, heal, sheet);
 }
 
@@ -40,7 +41,7 @@ export function longRest(c: Character, sheet: Sheet): Character {
     if (used[die] !== undefined) used[die] -= n;
     regain -= n;
   }
-  const { resourcesUsed, inventory } = recharge(c, sheet, ['short', 'long']);
+  const { resourcesUsed, inventory } = recharge(c, sheet, 'long');
   return {
     ...withState(c, {
       hp: sheet.maxHp, tempHp: 0, hitDiceUsed: used, slotsUsed: [], pactSlotsUsed: 0, resourcesUsed,

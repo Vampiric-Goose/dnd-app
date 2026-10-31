@@ -8,6 +8,7 @@
   import CampaignPicker from './ui/CampaignPicker.svelte';
   import DiceTray from './ui/DiceTray.svelte';
   import Toast from './ui/Toast.svelte';
+  import ViewerToggle from './ui/ViewerToggle.svelte';
 
   onMount(() => {
     void requestPersistence();
@@ -30,7 +31,7 @@
     ['compendium', 'Compendium', () => import('./ui/pages/Compendium.svelte')],
     ['items', 'Items', () => import('./ui/pages/Items.svelte')],
     ['items/:id', 'ItemEditor', () => import('./ui/pages/Items.svelte')], // the same page; `:id` is an item id or "new"
-    ['loot', 'Loot'],
+    ['loot', 'Loot', () => import('./ui/pages/Loot.svelte')],
     ['packs', 'Packs', () => import('./ui/pages/Packs.svelte')],
     ['settings', 'CampaignSettings', () => import('./ui/pages/CampaignSettings.svelte')],
     ['about', 'About', () => import('./ui/pages/About.svelte')],
@@ -72,6 +73,7 @@
   <header>
     <strong>{APP_NAME}</strong>
     <div class="campaign-slot"><CampaignPicker /></div>
+    <ViewerToggle />
   </header>
 
   <nav aria-label="Main">
@@ -117,6 +119,7 @@
     display: flex;
     align-items: center;
     gap: 1rem;
+    flex-wrap: wrap;
     padding: 0.5rem 1rem;
     background: var(--surface);
     border-bottom: 1px solid var(--border);
