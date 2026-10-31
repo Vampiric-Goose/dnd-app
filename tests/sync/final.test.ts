@@ -2,7 +2,7 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, test } from 'vitest';
 import { classesFor, isSidekick } from '../../src/lib/character/build.ts';
-import { db, DeletedError, resetDb } from '../../src/lib/db.ts';
+import { db, DeletedError, onLocalChange, resetDb } from '../../src/lib/db.ts';
 import { sha256Text } from '../../src/lib/sync/code.ts';
 import { Guest } from '../../src/lib/sync/guest.ts';
 import { Host } from '../../src/lib/sync/host.ts';
@@ -77,6 +77,15 @@ describe('M3: a DM save outside the hosted campaign', () => {
 describe('db', () => {
   beforeEach(resetDb);
   const joined = (): Campaign => ({ ...camp(CID), sync: { role: 'player', code: CODE, node: 'pnode001', playerId: 'A1' } });
+
+  test('a backup restore tells the sync session about every restored record', async () => {
+    const seen: string[] = [];
+    onLocalChange((k, id) => seen.push(`${k}:${id}`));
+    try {
+      await db.restore({ campaigns: [camp(CID)], characters: [char('r', CID)], items: [], packs: [], blobs: [] });
+    } finally { onLocalChange(undefined); }
+    expect(seen).toEqual([`campaign:${CID}`, 'character:r']);
+  });
 
   test('M4: a character moved into a joined campaign becomes that player’s, whatever owner it had', async () => {
     await db.campaigns.put(joined());
@@ -169,5 +178,27 @@ describe('R11: sidekick classes are for the DM', () => {
     expect(all.map(isSidekick)).toEqual([false, true, true]);
     expect(classesFor(all, false).map((k) => k.name)).toEqual(['fighter']);
     expect(classesFor(all, true).map((k) => k.name)).toEqual(['fighter', 'warrior', 'expert']);
+  });
+});
+
+describe('re-review minors', () => {
+  test('a far-future deleteChar.at refused for a full trash does not pin the character clock', async () => {
+    const d = new Device();
+    d.putCampaign(hosted({ A1: {} }));
+    d.edit({ ...char('x', CID), ownerId: 'A1' });
+    const host = new Host({ ...d.hostDeps(CID), trashFull: async () => true });
+    const raw = rawLink();
+    host.accept(raw.link);
+    raw.deliver({ t: 'hello', code: CODE, playerId: 'A1' });
+    raw.deliver({ t: 'deleteChar', id: 'x', at: '999999999999999:000000:evil' });
+    await settle(host);
+    expect(Object.values(d.char('x')!.sync!.clock).every((v) => !v.startsWith('9'))).toBe(true);
+  });
+
+  test('a welcome with a long campaign name joins, with the name cut to 200', async () => {
+    const { p, raw, guest } = await guestOn();
+    raw.deliver(welcome({ campaign: { id: CID, name: 'R'.repeat(300), settings: camp(CID).settings, enabledPacks: [] } }));
+    await settle(guest);
+    expect([guest.status, p.campaigns.get(CID)?.name.length]).toEqual(['online', 200]);
   });
 });

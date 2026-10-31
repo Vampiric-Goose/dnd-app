@@ -80,8 +80,8 @@ export function cleanSettings(v: unknown): CampaignSettings | undefined {
 /** The campaign as the host sent it, with clean settings, or undefined. */
 function playerCampaign(v: unknown): CampaignForPlayers | undefined {
   const settings = isRec(v) ? cleanSettings(v.settings) : undefined;
-  if (!isRec(v) || !settings || typeof v.id !== 'string' || typeof v.name !== 'string' || v.name.length > 200 || !Array.isArray(v.enabledPacks) || !v.enabledPacks.every((x) => typeof x === 'string')) return undefined;
-  return { id: v.id, name: v.name, settings, enabledPacks: v.enabledPacks as string[] };
+  if (!isRec(v) || !settings || typeof v.id !== 'string' || typeof v.name !== 'string' || !Array.isArray(v.enabledPacks) || !v.enabledPacks.every((x) => typeof x === 'string')) return undefined;
+  return { id: v.id, name: v.name.slice(0, 200), settings, enabledPacks: v.enabledPacks as string[] };
 }
 const str = (x: unknown) => typeof x === 'string' && x.length <= 500;
 const fin = (x: unknown) => typeof x === 'number' && Number.isFinite(x);

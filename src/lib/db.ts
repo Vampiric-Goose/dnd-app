@@ -432,7 +432,15 @@ export const db = {
     return { replaced, newer };
   },
   /** Backup import: one atomic upsert that keeps the records' own updatedAt. */
-  restore: (s: Snapshot) => write(['campaigns', 'characters', 'items', 'monsters', 'packs', 'packMeta', 'blobs', 'meta'], async (tx) => {
+  restore: async (s: Snapshot) => {
+    await restoreSnapshot(s);
+    // Online players get the restored values now, not on their next reconnect.
+    for (const c of s.campaigns) changed('campaign', c.id);
+    for (const c of s.characters) changed('character', c.id);
+  },
+};
+
+const restoreSnapshot = (s: Snapshot) => write(['campaigns', 'characters', 'items', 'monsters', 'packs', 'packMeta', 'blobs', 'meta'], async (tx) => {
     // B7: a character the file or the store holds is live: no tombstone or trash entry for it survives the restore.
     const inFile = new Set(s.characters.map((c) => c.id));
     const live = async (id: string) => inFile.has(id) || (await tx.objectStore('characters').getKey(id)) !== undefined;
@@ -476,8 +484,7 @@ export const db = {
       for (const e of list) if (!ids.has(e.character.id) && !(await live(e.character.id))) add.push({ ...e, character: strip2024(e.character) }); // B7
       if (add.length) await tx.objectStore('meta').put([...add, ...had].sort((a, b) => a.at - b.at).slice(-TRASH_CAP), trashKey(cid));
     }
-  }),
-};
+  });
 
 /** Ask the browser not to evict our data. False when unsupported or denied. */
 export async function requestPersistence(): Promise<boolean> {

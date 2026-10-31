@@ -7,7 +7,7 @@ import { idSource, is2024Source, restorablePack } from '../content/sources.ts';
 import type { RollEntry } from '../rolls.svelte.ts';
 import type { Campaign, CampaignSync, Character, Pack, PackMeta } from '../types.ts';
 import { newJoinCode, nextPlayerId, sha256Text } from './code.ts';
-import { hlcNow, hlcReceive } from './hlc.ts';
+import { hlcNow, hlcReceive, MAX_AHEAD } from './hlc.ts';
 import type { Link } from './link.ts';
 import { canon, latestClock, mergeCharacter, type Synced } from './merge.ts';
 import { campaignForPlayers, characterForPlayer, packForPlayers, rosterEntry, unprojectCharacter } from './project.ts';
@@ -312,6 +312,9 @@ export class Host {
     const s = await this.#deps.loadCharacter(id);
     if (!camp || !s) return; // never reached the DM (or already gone): nothing to delete
     if (s.ownerId !== pid || s.campaignId !== camp.id) return this.#send(c, { t: 'notYours', id }); // M1, as in #chars
+    // A wall time past MAX_AHEAD (a skewed or crafted clock) counts as a delete made now, so it can't pin this character's clocks.
+    const now = this.#deps.now?.() ?? Date.now();
+    if (Number(at.slice(0, 15)) > now + MAX_AHEAD) at = hlcNow(camp.sync!.node, camp.sync?.last, now);
     // A change the DM's copy holds from after the deletion (or a restore, R9) wins: the player's device gets the character back.
     if (at <= latestClock(s)) return this.#send(c, { t: 'chars', characters: [characterForPlayer(s)] });
     if (await this.#deps.trashFull?.()) {
