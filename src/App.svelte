@@ -3,7 +3,7 @@
   import { requestPersistence } from './lib/db.ts';
   import { dmOnly, router } from './lib/router.svelte.ts';
   import { app, startup } from './lib/store.svelte.ts';
-  import { follow } from './lib/sync/session.svelte.ts';
+  import { follow, session } from './lib/sync/session.svelte.ts';
   import { rollViewer } from './lib/rolls.svelte.ts';
   import BackupBanner from './ui/BackupBanner.svelte';
   import CampaignPicker from './ui/CampaignPicker.svelte';
@@ -164,6 +164,9 @@
 
 <DiceTray />
 <Toast />
+{#if app.campaign?.sync?.role === 'player' && session.tracker?.ask}
+  {#await import('./ui/initiative/InitiativePrompt.svelte') then { default: InitiativePrompt }}<InitiativePrompt campaign={app.campaign} />{/await}
+{/if}
 
 <style>
   /*

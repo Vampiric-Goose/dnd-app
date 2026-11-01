@@ -1,7 +1,6 @@
 // The map's db helpers (lazy: reached from the map page only). Token builders that need the combat engine live here, not in scene.ts.
 import { addCombatants, monsterCombatant, pcCombatant } from '../combat/combat.ts';
 import { fightScene, prepareStart, remove, updateCombat } from '../combat/store.ts';
-export { startNow } from '../combat/store.ts';
 import { db } from '../db.ts';
 import type { CampaignSettings, Character, Combat, Combatant, MonsterDef, Scene, Sheet, Size } from '../types.ts';
 import { addTokens, patchToken, tokensFromCombat, type NewToken } from './scene.ts';

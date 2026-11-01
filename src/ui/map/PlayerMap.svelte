@@ -9,8 +9,7 @@
   import { computeSheet } from '../../lib/rules/sheet.ts';
   import { currentActor } from '../../lib/sync/project.ts';
   import { sceneForPlayers, type PlayerScene } from '../../lib/sync/scene.ts';
-  import { clearDeclared, declareAction, sendDrag, sendEndTurn, sendInitiative, sendUse, sendMove, session } from '../../lib/sync/session.svelte.ts';
-  import { rollD20 } from '../sheet/roll.ts';
+  import { clearDeclared, declareAction, sendDrag, sendEndTurn, sendUse, sendMove, session } from '../../lib/sync/session.svelte.ts';
   import { budgetFeet, effectiveSpeed, originOf, remainingFeet } from '../../lib/combat/movement.ts';
   import { pcActions, slotsLeft, type TurnAction } from '../../lib/combat/turnActions.ts';
   import { featureList } from '../../lib/character/play.ts';
@@ -87,17 +86,6 @@
       return { r, c, econ: r.econ, sheet, actions: pcActions(c, sheet, featureList(c, settings)), x: { economy: { used, extra, bonus, attacks, light, surged }, reactionUsed: reaction } as Combatant };
     } catch { return undefined; }
   });
-  // A fight being set up (the DM's Start combat): each of the player's characters without an initiative gets a Roll button.
-  const toRoll = $derived(session.tracker?.round === 0 ? session.tracker.rows.flatMap((r) => { const c = mine(r.characterId); return c && r.init === undefined ? [c] : []; }) : []);
-  let rolled: Record<string, boolean> = $state({});
-  function rollInitiative(c: Character) {
-    if (offline()) return;
-    try {
-      const r = rollD20('Initiative', computeSheet(c, { settings, viewer: 'player' }).initiative);
-      if (r) { sendInitiative(c.id, r.total); rolled[c.id] = true; }
-    } catch (e) { error = e instanceof Error ? e.message : String(e); }
-  }
-
   /** The tracker a use was sent under: its buttons stay off until the next tracker arrives or 3 s pass (a double tap sends one use). */
   let sentUnder: object | undefined = $state.raw();
   let sentTimer: ReturnType<typeof setTimeout> | undefined;
@@ -187,14 +175,6 @@
       {#if error}<p role="alert" class="error">{error}</p>{/if}
       <h2 class="scene-name">{view.name}</h2>
       {#if !joined}<p class="muted note">Player view: read-only</p>{/if}
-      {#if toRoll.length}
-        <div class="roll-init" role="group" aria-label="Initiative">
-          <p class="status">Combat is starting: roll initiative.</p>
-          {#each toRoll as c (c.id)}
-            <button type="button" class="primary" disabled={rolled[c.id]} onclick={() => rollInitiative(c)}>{rolled[c.id] ? `${c.name}: sent` : `Roll initiative${toRoll.length > 1 ? ` for ${c.name}` : ''}`}</button>
-          {/each}
-        </div>
-      {/if}
       {#if turn && fight}
         <TurnPanel name={turn.c.name} order={fight.rows} self={turn.r.id} current={fight.current} round={fight.round}
           hp={turn.c.state.hp} maxHp={turn.sheet.maxHp} tempHp={turn.c.state.tempHp} conditions={turn.c.state.conditions}
@@ -255,21 +235,8 @@
     color: var(--text-strong);
   }
 
-  .switch button,
-  .roll-init button {
+  .switch button {
     min-height: 44px;
-  }
-
-  .roll-init {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-    margin-bottom: 0.9rem;
-  }
-
-  .roll-init .status {
-    flex-basis: 100%;
-    margin: 0.4rem 0 0;
   }
 
   .switch button[aria-pressed='true'] {

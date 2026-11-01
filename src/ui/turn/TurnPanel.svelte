@@ -14,7 +14,7 @@
   import { rollD20, rollTo } from '../sheet/roll.ts';
   import { untrack, type Snippet } from 'svelte';
 
-  type Pip = 'action' | 'bonus' | 'reaction' | 'extra';
+  type Pip = 'action' | 'bonus' | 'reaction';
   let {
     name, order, self, current, round, hp, maxHp, tempHp = 0, tone = 'accent', conditions, moveLeft, x, perAction = 1, onTurn, actions,
     slots = [], concentrating = false, dm = false, busy = false, canEnd, endLabel = 'End turn', onuse, onend, onpip, onstrip, top,
@@ -33,7 +33,7 @@
     dm?: boolean; canEnd: boolean; endLabel?: string;
     /** false: not sent (offline), so nothing rolls. */
     onuse: (a: TurnAction, slot?: number) => boolean | void; onend: () => void;
-    /** DM: set or clear a pip; 'extra' adds an Action (Haste). */
+    /** DM: set or clear a pip. */
     onpip?: (pip: Pip, used: boolean) => void;
     /** DM: show another creature from the strip. */
     onstrip?: (id: string) => void;
@@ -111,10 +111,6 @@
     {#each { length: 1 + e.extra } as _, i}{@render pip('action', i < e.used, 1 + e.extra > 1 ? `Action ${i + 1}` : 'Action')}{/each}
     {@render pip('bonus', e.bonus, 'Bonus')}
     {@render pip('reaction', !!x.reactionUsed, 'Reaction')}
-    {#if dm && onpip}
-      <button type="button" class="add" aria-label="Add an Action (Haste and the like)" onclick={() => onpip('extra', true)}>+</button>
-      {#if e.extra > 0}<button type="button" class="add" aria-label="Take back an extra Action" onclick={() => onpip('extra', false)}>−</button>{/if}
-    {/if}
   </div>
   {#if blocked}<p class="muted small">No actions or reactions: {conditions.filter((c) => /incapacitated|stunned|paralyzed|petrified|unconscious/i.test(c)).join(', ')}.</p>{/if}
 
@@ -287,11 +283,6 @@
 
   .pips.blocked .pip {
     opacity: 0.45;
-  }
-
-  .add {
-    min-width: 44px;
-    min-height: 44px;
   }
 
   .card,

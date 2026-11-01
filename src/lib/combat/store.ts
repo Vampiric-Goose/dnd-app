@@ -253,18 +253,9 @@ export const prepareStart = (cid: string, waitFor: Set<string>): Promise<string[
   const c = await update(cid, (k) => {
     let out = k;
     for (const x of k.combatants) if (x.init === undefined && !(x.characterId && waitFor.has(x.characterId))) out = setInit(out, x.id, rollInit(x.initMod));
-    return { ...out, autoStart: true };
+    return { ...out, autoStart: true, askInit: true };
   });
   await readyStart(cid);
   return c.combatants.filter((x) => x.init === undefined).map((x) => x.name);
 });
 
-/** The DM's Start now: rolls for everyone still missing (players who haven't rolled too) and starts round 1. */
-export const startNow = (cid: string): Promise<void> => serial(async () => {
-  await update(cid, (k) => {
-    let out = k;
-    for (const x of k.combatants) if (x.init === undefined) out = setInit(out, x.id, rollInit(x.initMod));
-    return { ...out, autoStart: true };
-  });
-  await readyStart(cid);
-});

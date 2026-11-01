@@ -79,6 +79,8 @@
   const status = $derived(round === 0 ? 'Setup' : `Round ${round}${turnName ? ` · ${turnName}'s turn` : ''}`);
 
   const charById = $derived(new Map(chars.map((c) => [c.id, c])));
+  /** Players' characters in the fight still without initiative: the party rolls its own, from a pop-up the DM sends. */
+  const unrolled = $derived(list.filter((x) => x.kind === 'pc' && x.init === undefined && !!charById.get(x.characterId ?? '')?.ownerId));
   const monById = $derived(new Map(pool.map((m) => [m.id, m])));
   const outside = $derived(chars.filter((c) => !list.some((x) => x.characterId === c.id)));
   let pickChar = $state('');
@@ -179,6 +181,9 @@
       {/if}
       <div class="acts">
         {#if round === 0}
+          {#if unrolled.length}
+            <button type="button" disabled={combat?.askInit} onclick={() => edit((c) => ({ ...c, askInit: true }))}>{combat?.askInit ? `Waiting for ${unrolled.map((x) => x.name).join(', ')}` : 'Ask the party for initiative'}</button>
+          {/if}
           <button type="button" class="primary" disabled={!list.length} onclick={() => run(() => turn(cid, 'start'))}>Start</button>
         {:else}
           <button type="button" aria-label="Previous turn" onclick={() => edit(prev)}>◀ Prev</button>

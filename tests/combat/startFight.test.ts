@@ -4,7 +4,9 @@ import { beforeEach, expect, test } from 'vitest';
 import { applyInitiative } from '../../src/lib/combat/store.ts';
 import { db, resetDb } from '../../src/lib/db.ts';
 import { addTokens, newScene } from '../../src/lib/map/scene.ts';
-import { startFight, startNow } from '../../src/lib/map/store.ts';
+import { startFight } from '../../src/lib/map/store.ts';
+import { trackerForPlayers } from '../../src/lib/sync/project.ts';
+import { cleanTracker } from '../../src/lib/sync/guest.ts';
 import type { Character, MonsterDef, Pack, Sheet } from '../../src/lib/types.ts';
 import { DEFAULT_SETTINGS } from '../../src/lib/settings.ts';
 import { camp, char } from '../fixtures/records.ts';
@@ -43,18 +45,22 @@ test('Start combat: all tokens join and the scene is shown; the goblin and the D
   expect(k.autoStart).toBeUndefined();
 });
 
-test('with no players to wait for, round 1 starts at once; Start now rolls for anyone still missing', async () => {
+test('asking the party: their tracker carries the ask during setup only, and it survives the guest check', async () => {
+  const { s, o } = await setup();
+  await startFight('c1', s.id, o);
+  const k = (await db.combat.get('c1'))!;
+  expect(k.askInit).toBe(true);
+  const v = trackerForPlayers(k, o.chars, o.settings, undefined, 'A1')!;
+  expect(v.ask).toBe(true);
+  expect(cleanTracker(JSON.parse(JSON.stringify(v)))!.ask).toBe(true);
+  expect(trackerForPlayers({ ...k, askInit: undefined }, o.chars, o.settings, undefined, 'A1')!.ask).toBeUndefined();
+  expect(trackerForPlayers({ ...k, round: 1, turn: k.combatants[0].id }, o.chars, o.settings, undefined, 'A1')!.ask).toBeUndefined();
+});
+
+test('with no players to wait for, round 1 starts at once', async () => {
   const { s, o } = await setup();
   await db.characters.put({ ...pc('ana'), updatedAt: 1 }); // ana is the DM's too now
   const r = await startFight('c1', s.id, { ...o, chars: [pc('ana'), pc('dmc')] });
   expect(r.waiting).toEqual([]);
   expect((await db.combat.get('c1'))!.round).toBe(1);
-
-  await resetDb();
-  const again = await setup();
-  await startFight('c1', again.s.id, again.o);
-  await startNow('c1');
-  const k = (await db.combat.get('c1'))!;
-  expect(k.round).toBe(1);
-  expect(k.combatants.every((x) => x.init !== undefined)).toBe(true);
 });

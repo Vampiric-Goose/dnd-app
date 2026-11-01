@@ -9,11 +9,11 @@
   import { snap, type Pt } from '../../lib/map/grid.ts';
   import { addTokens, liveHp, MAX_SIDE, MAX_TOKENS, moveTokens, newScene, patchToken, regrid, removeTokens, tokenColor, type NewToken } from '../../lib/map/scene.ts';
   import { arrowsOn } from '../../lib/map/actions.ts';
-  import { addTokensToCombat, editScene, startFight, startNow, tokenForCharacter, tokenForMonster } from '../../lib/map/store.ts';
+  import { addTokensToCombat, editScene, startFight, tokenForCharacter, tokenForMonster } from '../../lib/map/store.ts';
   import { currentRun, patchCombatant } from '../../lib/combat/combat.ts';
   import { budgetApplies, budgetFeet, combatantForToken, effectiveSpeed, originOf, recordMove } from '../../lib/combat/movement.ts';
   import { editCharacter, turn, updateCombat } from '../../lib/combat/store.ts';
-  import { dropAction, grantAction, setPip } from '../../lib/combat/economy.ts';
+  import { setPip } from '../../lib/combat/economy.ts';
   import { applyUse, attacksPerAction, monsterActions, payment, pcActions, problemOf, slotsLeft, spendOn, type TurnAction } from '../../lib/combat/turnActions.ts';
   import { featureList } from '../../lib/character/play.ts';
   import TurnPanel from '../turn/TurnPanel.svelte';
@@ -335,9 +335,9 @@
     if (v.ch && (pay.level !== undefined || a.resource)) await editCharacter(v.ch.id, (c) => spendOn(c, pay.level, a.resource, pay.pact));
     await reload();
   });
-  const onpip = (pip: 'action' | 'bonus' | 'reaction' | 'extra', used: boolean) => run(async () => {
+  const onpip = (pip: 'action' | 'bonus' | 'reaction', used: boolean) => run(async () => {
     const id = view?.x.id;
-    await updateCombat(cid, (k) => ({ ...k, combatants: k.combatants.map((z) => (z.id !== id ? z : pip === 'extra' ? (used ? grantAction(z) : dropAction(z)) : setPip(z, pip, used))) }));
+    await updateCombat(cid, (k) => ({ ...k, combatants: k.combatants.map((z) => (z.id !== id ? z : setPip(z, pip, used))) }));
     await reload();
   });
   const nextTurn = () => run(async () => { await turn(cid, 'next'); await reload(); });
@@ -453,8 +453,7 @@
         {:else if id === 'turn' && waiting}
           <div class="waiting">
             <h2>Rolling initiative</h2>
-            {#if waiting.length}<p>Waiting for {waiting.map((x) => x.name).join(', ')}. Round 1 starts once they've rolled.</p>{/if}
-            <button type="button" class="primary" disabled={busy} onclick={() => run(async () => { await startNow(cid); await reload(); })}>Start now{waiting.length ? ' (roll for them)' : ''}</button>
+            <p>Waiting for {waiting.map((x) => x.name).join(', ')}. Round 1 starts once they've rolled.</p>
           </div>
         {:else if id === 'turn'}
           <p class="muted">No one is acting.</p>
@@ -636,9 +635,6 @@
     font-size: 1.1rem;
   }
 
-  .waiting button {
-    min-height: 44px;
-  }
 
   .switch button[aria-pressed='true'] {
     border-color: var(--accent);

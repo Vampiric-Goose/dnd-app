@@ -57,14 +57,8 @@ export function spend(x: Combatant, cost: Cost, attack?: { perAction: number }):
   return { ...x, economy: { ...e, used: e.used + 1, attacks: attack ? 1 : 0 } };
 }
 
-/** One more Action this turn (Action Surge, Haste). Never a Bonus action. */
+/** One more Action this turn (Action Surge). Never a Bonus action. */
 export const grantAction = (x: Combatant): Combatant => ({ ...x, economy: { ...econ(x), extra: econ(x).extra + 1 } });
-
-/** The DM's fix for an extra Action given by mistake: one fewer (never below the turn's own one). */
-export function dropAction(x: Combatant): Combatant {
-  const e = econ(x), extra = Math.max(0, e.extra - 1);
-  return { ...x, economy: { ...e, extra, used: Math.min(e.used, 1 + extra) } };
-}
 
 /** The DM's fix: mark a pip used or unused (an Action: one more or one fewer used, within the Actions this turn has). */
 export function setPip(x: Combatant, pip: 'action' | 'bonus' | 'reaction', used: boolean): Combatant {

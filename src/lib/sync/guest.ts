@@ -131,7 +131,7 @@ export function cleanTracker(v: unknown): TrackerView | undefined {
         && { econ: { used: r.econ.used as number, extra: r.econ.extra as number, attacks: r.econ.attacks as number, perAction: r.econ.perAction as number, bonus: r.econ.bonus === true, light: r.econ.light === true, surged: r.econ.surged === true, reaction: r.econ.reaction === true, conc: r.econ.conc === true } })}];
   })).slice(0, MAX_ROWS);
   const current = rows.some((r) => r.id === v.current) ? v.current as string : undefined;
-  return { round: v.round as number, ...(current !== undefined && { current }), rows };
+  return { round: v.round as number, ...(current !== undefined && { current }), rows, ...(v.ask === true && v.round === 0 && { ask: true as const }) };
 }
 /** B3: a tombstone clock from the DM, unless it claims a wall time past MAX_AHEAD (then the local clock is used). */
 const fairAt = (at: unknown, now: number): string | undefined =>

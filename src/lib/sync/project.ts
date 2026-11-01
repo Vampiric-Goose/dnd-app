@@ -56,7 +56,7 @@ export interface TrackerRow { id: string; name: string; characterId?: string; in
   econ?: TurnEcon /* the viewer's own character's pips this turn, in a running fight */ }
 /** Turn panel: Actions used and extra, the Bonus action, attacks in the Attack action, the Reaction, attacks one Attack action allows. */
 export interface TurnEcon { used: number; extra: number; bonus: boolean; attacks: number; light?: boolean; surged?: boolean; reaction: boolean; perAction: number; /** concentrating */ conc: boolean }
-export interface TrackerView { round: number; current?: string; rows: TrackerRow[] }
+export interface TrackerView { round: number; current?: string; rows: TrackerRow[]; /** the DM asked for initiative (setup only) */ ask?: true }
 
 /**
  * The tracker as players see it, an allowlist (spec 3.6): no hidden combatants, no monsters during setup (round 0), and of everything
@@ -103,7 +103,7 @@ export function trackerForPlayers(c: Combat | undefined, characters: Character[]
     current = sent.get(c.combatants[(j + c.combatants.length) % c.combatants.length].id);
     if (current !== undefined && j < 0) round = c.round - 1;
   }
-  return { round, ...(current !== undefined && { current }), rows };
+  return { round, ...(current !== undefined && { current }), rows, ...(c.round === 0 && c.askInit && { ask: true as const }) };
 }
 
 /** Stage 5's movement gate: the characterId whose turn it is, if any. */
