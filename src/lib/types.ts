@@ -114,6 +114,27 @@ export interface Campaign { id: string; name: string; createdAt: number; updated
 /** Stage 3: a hosted (dm) or joined (player) campaign. `node`: this device's random 8-character HLC node id; `last`: its latest HLC. */
 export interface CampaignSync { role: 'dm' | 'player'; code: string; node: string; last?: Hlc;
   players?: Record<string, { name?: string; removed?: boolean }>; playerId?: string /* role player */; deleted?: Record<string, Hlc> /* character id tombstones */ }
+/** Stage 4: when a condition ends: after `rounds` (≥ 1) matching triggers, at the start or end of combatant `of`'s turn. */
+export interface Duration { rounds: number; at: 'start' | 'end'; of: string }
+export interface Combatant {
+  id: string; kind: 'pc' | 'monster' | 'lair'; name: string;
+  characterId?: string;                  // pc
+  monsterId?: string; ac?: number;       // monster (ac shown to the DM only)
+  group?: string;                        // grouped identical monsters share it (= monsterId) and act as one turn
+  init?: number;                         // undefined = not rolled (sorts last)
+  initMod: number; dex: number;          // dex: the Dex SCORE, tiebreak 1
+  tie: number;                           // tiebreak 2: rng() in [0,1), stored when added, so the order is stable
+  conSave: number;                       // for the concentration prompt
+  hidden?: boolean;
+  hp?: number; maxHp?: number; tempHp?: number;  // monsters only (a PC's live on the character)
+  conditions?: string[];                 // monsters only (a PC's are character.state.conditions)
+  durations?: Record<string, Duration>;  // condition name → when it ends (PCs too)
+  concentrating?: boolean; legendary?: { max: number; used: number }; reactionUsed?: boolean; notes?: string;
+}
+/** The live fight of a campaign. `combatants` is the order; round 0 = setup; `turn` = the current combatant's id. */
+export interface Combat { campaignId: string; combatants: Combatant[]; round: number; turn?: string; groupMonsters: boolean; updatedAt: number }
+/** A prepared encounter (at most 50 lines, each count 1–99). */
+export interface Encounter { id: string; campaignId: string; name: string; monsters: { monsterId: string; count: number }[]; updatedAt: number }
 export interface Attack { entryId: string; name: string; toHit: number; damage: string; damageType: string; versatile?: string; properties: string[] }
 export interface Sheet {
   totalLevel: number; prof: number; scores: Scores; mods: Scores;
