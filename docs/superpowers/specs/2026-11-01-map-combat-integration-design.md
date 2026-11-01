@@ -46,9 +46,11 @@ Next → Previous → Next never resets twice and Previous never hands back a fr
 movement as it was. A hidden combatant's turn doesn't touch anyone else's entry. While a hidden combatant acts, players still see the last
 visible turn (S4-R4), and that player keeps their leftover feet, with no fresh budget and no refusal that would give the hidden turn away.
 Movement state is part of what syncs, as follows: a player gets only their own characters' remaining feet; no monster movement reaches
-players. Feet are measured per move as the
-grid distance between where the token was and where it lands (`feetBetween`, using the campaign's diagonal rule), summed over the turn;
-moving back costs movement too (2014 rules). A grouped monster turn (several tokens act as one) tracks each token separately.
+players. *(Revised 11-01, user feedback: refundable.)* The entry keeps the turn's
+origin (where the token stood before its first move this turn) and movement used is the grid distance from that origin to where the
+token stands now (`feetBetween`, the campaign's diagonal rule), so moving back gives movement back and a slipped drag can be undone.
+A grouped monster turn (several tokens act as one) tracks each token separately; the turn bar's Dash covers every token of the run.
+Dash limits: a player's own Dash button gives at most 1 a turn; the DM may add Dashes up to 3 in all (`PLAYER_DASHES`, `MAX_DASHES`).
 
 **Limit.** Budget = speed × (1 + Dashes taken this turn). Dash stacks (2014 rules allow it: Cunning Action, Action Surge), so it's a
 count rather than a yes/no. While dragging, a player's own token on its own turn **stops at the limit**: the drop point is

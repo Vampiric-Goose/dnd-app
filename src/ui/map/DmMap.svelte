@@ -11,8 +11,7 @@
   import { arrowsOn } from '../../lib/map/actions.ts';
   import { addTokensToCombat, editScene, tokenForCharacter, tokenForMonster } from '../../lib/map/store.ts';
   import { currentRun, patchCombatant } from '../../lib/combat/combat.ts';
-  import { budgetApplies, combatantForToken, effectiveSpeed, recordMove, remainingFeet } from '../../lib/combat/movement.ts';
-  import { feetBetween } from '../../lib/map/grid.ts';
+  import { budgetApplies, budgetFeet, combatantForToken, effectiveSpeed, originOf, recordMove } from '../../lib/combat/movement.ts';
   import { updateCombat } from '../../lib/combat/store.ts';
   import { toast } from '../../lib/toast.svelte.ts';
   import { soundMonster } from '../../lib/monsters/homebrew.ts';
@@ -221,22 +220,22 @@
     await reload(); // a new hash: MapCanvas loads it without re-decoding the background (M2)
   });
 
-  /** One scene write, then the feet each moved token walked go on the budget of its combatant if that one is taking its turn (P2). */
+  /** One scene write; then a moved token whose combatant is taking its turn gets the turn's origin, where it stood (its first move only; P2). */
   const onmove = (ids: string[], primary: string, to: Pt) => run(async () => {
     if (!scene) return;
-    let walked: { t: Token; feet: number }[] = [];
+    let walked: { t: Token; from: Pt }[] = [];
     await editScene(scene.id, (s) => {
       const out = moveTokens(s, ids, primary, to);
       walked = out.tokens.flatMap((t) => {
         const o = s.tokens.find((x) => x.id === t.id);
-        return o && (o.x !== t.x || o.y !== t.y) ? [{ t, feet: feetBetween(s.grid, o, t, settings.diagonal) }] : [];
+        return o && (o.x !== t.x || o.y !== t.y) ? [{ t, from: { x: o.x, y: o.y } }] : [];
       });
       return out;
     });
     if (walked.length && budgetApplies(combat, settings)) await updateCombat(cid, (c) => {
       if (!budgetApplies(c, settings)) return c;
       const now = currentRun(c);
-      for (const { t, feet } of walked) { const x = combatantForToken(c, t); if (x && now.has(x.id)) c = recordMove(c, x.id, feet); }
+      for (const { t, from } of walked) { const x = combatantForToken(c, t); if (x && now.has(x.id)) c = recordMove(c, x.id, from); }
       return c;
     });
     await reload();
@@ -252,7 +251,8 @@
   const limitOf = (id: string) => {
     const t = scene?.tokens.find((x) => x.id === id), x = t && combat && budgetApplies(combat, settings) ? combatantForToken(combat, t) : undefined;
     const speed = x && turnIds.has(x.id) ? speedFor(x) : undefined;
-    return speed === undefined ? undefined : { left: remainingFeet(speed, combat!.movement?.[x!.id]), clamp: false };
+    const m = speed === undefined ? undefined : combat!.movement?.[x!.id];
+    return speed === undefined ? undefined : { from: originOf(m), budget: budgetFeet(speed, m), clamp: false };
   };
   /** One stroke, rectangle or Reveal all / Hide all: one write, painted onto the fresh record's fog. */
   const onfog = (e: FogEdit) => edit((s) => ({ ...s, fog: paintFog(s.fog, s.width, s.height, e) }));

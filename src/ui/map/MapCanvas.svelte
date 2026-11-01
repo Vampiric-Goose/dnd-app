@@ -20,12 +20,13 @@
   // fog: drawn only when set (the caller passes it only with the Fog of war setting on); black for players, a shade for the DM.
   // onfog: the DM's fog tools, shown only when it is set; one call per stroke, rectangle or Reveal all / Hide all.
   // corner: extra controls floated top-right, beside the tool switcher (the DM's scene picker).
-  // limitOf: a token's movement budget this turn (feet left); with `clamp` the drag ghost stops at it, without, the label turns red past it.
+  // limitOf: a token's movement this turn: the turn's origin (none yet: the token) and its budget; with `clamp` the drag ghost stays within
+  // the budget of the origin, without, the label turns red past it.
   // arrows: declared actions to draw; ondeclare: a right-drag (touch: long-press then drag) drew one (unset = no arrow gesture);
   // onclear: the ✕ on a clearable arrow's head was tapped.
   let { width, height, image, grid, tokens, dm, diagonal, selected, canDrag, speedOf, limitOf, onselect, onmove, rev = 0, fog, fogStyle = dm ? 'shade' : 'black', onfog, corner, arrows = [], ondeclare, onclear }: {
     width: number; height: number; image?: string; grid: Grid; tokens: CanvasToken[]; dm: boolean; diagonal: '5-5-5' | '5-10-5'; selected: string[];
-    canDrag: (id: string) => boolean; speedOf?: (id: string) => number | undefined; limitOf?: (id: string) => { left: number; clamp: boolean } | undefined;
+    canDrag: (id: string) => boolean; speedOf?: (id: string) => number | undefined; limitOf?: (id: string) => { from?: Pt; budget: number; clamp: boolean } | undefined;
     onselect: (ids: string[]) => void; onmove: (ids: string[], primary: string, to: Pt) => void; rev?: number;
     fog?: string; fogStyle?: 'black' | 'shade'; onfog?: (e: FogEdit) => void; corner?: Snippet;
     arrows?: Arrow[]; ondeclare?: (d: { from: Pt; fromToken?: string; to: Pt; toToken?: string }) => void; onclear?: (id: string) => void;
@@ -399,10 +400,11 @@
     }
     if (drag && primary) {
       const feet = feetBetween(grid, primary, drag.ghost, diagonal), lim = limitOf?.(drag.id), speed = lim ? undefined : speedOf?.(drag.id);
+      const used = lim ? feetBetween(grid, lim.from ?? primary, drag.ghost, diagonal) : 0; // from the turn's origin: moving back gives movement back
       // M5: the drop would be refused (any moved token would leave the scene)
       const off = tokens.some((t) => (t.id === drag.id || drag.ids.includes(t.id)) && !(t.x + dx >= 0 && t.x + dx <= width && t.y + dy >= 0 && t.y + dy <= height));
-      const text = lim ? `${feet} ft · ${Math.max(0, lim.left - feet)} left` : speed !== undefined && feet > speed ? `${feet} ft · past speed ${speed} ft` : `${feet} ft`;
-      label(ctx, pal, off ? `${text} · off the map` : text, toScreen(view, drag.ghost), !!lim && feet > lim.left);
+      const text = lim ? `${feet} ft · ${Math.max(0, lim.budget - used)} left` : speed !== undefined && feet > speed ? `${feet} ft · past speed ${speed} ft` : `${feet} ft`;
+      label(ctx, pal, off ? `${text} · off the map` : text, toScreen(view, drag.ghost), !!lim && used > lim.budget);
     }
   }
 
@@ -568,7 +570,7 @@
         const t = tokens.find((x) => x.id === (mode as { id: string }).id);
         if (!t) { mode = { k: 'none' }; break; }
         const to = { x: w.x - mode.grab.x, y: w.y - mode.grab.y }, lim = limitOf?.(t.id);
-        mode.ghost = lim?.clamp ? clampMove(grid, t, to, t.size, lim.left, diagonal) : snap(grid, to, t.size);
+        mode.ghost = lim?.clamp ? clampMove(grid, t, to, t.size, lim.budget, diagonal, lim.from) : snap(grid, to, t.size);
         break;
       }
       case 'pan':

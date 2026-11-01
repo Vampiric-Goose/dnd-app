@@ -1,7 +1,7 @@
 // Pure (no Svelte/Vite/DOM). Stage 3: everything a player receives is built here, and none of it may carry hidden data (spec 3.6):
 // no loot (R50), no sync secrets or player list, no monsters, no item secrets (R51), only summaries of other players' characters.
 // Stage 4: the initiative tracker's player view (trackerForPlayers).
-import { budgetApplies } from '../combat/movement.ts';
+import { budgetApplies, originOf } from '../combat/movement.ts';
 import { entityAllowed, packAllowed, patchAllowed } from '../content/sources.ts';
 import type { ContentIndex } from '../content/index.ts';
 import { playerCharacter, restoreSecrets } from '../items/playerView.ts';
@@ -50,7 +50,7 @@ export function healthStatus(hp: number | undefined, maxHp: number | undefined):
 }
 
 export interface TrackerRow { id: string; name: string; characterId?: string; init?: number; hp?: number; maxHp?: number; health?: HealthStatus;
-  moved?: Movement /* a player character's movement this turn, while a budget applies */ }
+  moved?: Movement /* a player character's turn origin and Dashes, while a budget applies */ }
 export interface TrackerView { round: number; current?: string; rows: TrackerRow[] }
 
 /**
@@ -75,9 +75,9 @@ export function trackerForPlayers(c: Combat | undefined, characters: Character[]
     const ch = x.characterId === undefined ? undefined : byId.get(x.characterId);
     if (x.characterId !== undefined && !ch) continue;
     if (ch?.ownerId) {
-      const m = budget && ch.ownerId === viewer ? c.movement?.[x.id] : undefined;
+      const m = budget && ch.ownerId === viewer ? c.movement?.[x.id] : undefined, from = originOf(m);
       rows.push({ id: x.id, name: ch.name, characterId: ch.id, ...(x.init !== undefined && { init: x.init }), hp: ch.state.hp, maxHp: maxHp(ch),
-        ...(m && { moved: { feet: m.feet, dashes: m.dashes } }) });
+        ...(m && { moved: { ...(from && { from }), dashes: m.dashes } }) });
       sent.set(x.id, x.id);
       continue;
     }

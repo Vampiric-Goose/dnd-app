@@ -566,15 +566,16 @@ export class Host {
     const why = moveProblem(await this.#deps.loadScene(), m, pid, chars, combat, camp.settings);
     if (why?.violation) return this.#violation(c, why.error);
     // checked again on the fresh record, in the write (the DM may have hidden the token since); its cost is measured on that record too
-    let cost: ReturnType<typeof moveCost>;
+    let moved: { combatantId: string; from: { x: number; y: number } } | undefined;
     if (!why) await this.#deps.updateScene(m.sceneId, (s) => {
       if (moveProblem(s, m, pid, chars, combat, camp.settings)) return s;
-      const id = s.tokens.find((t) => t.id === m.tokenId)!.characterId;
-      cost = moveCost(s, m, chars.find((ch) => ch.id === id)!, combat, camp.settings);
+      const t = s.tokens.find((x) => x.id === m.tokenId)!;
+      const cost = moveCost(s, m, chars.find((ch) => ch.id === t.characterId)!, combat, camp.settings);
+      if (cost) moved = { combatantId: cost.combatantId, from: { x: t.x, y: t.y } };
       return moveTokens(s, [m.tokenId], m.tokenId, m);
     });
-    const k = cost;
-    if (k) await this.#deps.updateCombat?.((x) => recordMove(x, k.combatantId, k.feet)); // the db change re-sends the tracker
+    const k = moved;
+    if (k) await this.#deps.updateCombat?.((x) => recordMove(x, k.combatantId, k.from)); // the turn's first move sets its origin (the db change re-sends the tracker)
     await this.#sendScene(camp, c);
   }
 

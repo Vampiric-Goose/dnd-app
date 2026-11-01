@@ -10,7 +10,7 @@
   import { currentActor } from '../../lib/sync/project.ts';
   import { sceneForPlayers, type PlayerScene } from '../../lib/sync/scene.ts';
   import { clearDeclared, declareAction, sendDash, sendMove, session } from '../../lib/sync/session.svelte.ts';
-  import { effectiveSpeed, PLAYER_DASHES, remainingFeet } from '../../lib/combat/movement.ts';
+  import { budgetFeet, effectiveSpeed, originOf, PLAYER_DASHES, remainingFeet } from '../../lib/combat/movement.ts';
   import type { Campaign, Character } from '../../lib/types.ts';
   import MapCanvas from './MapCanvas.svelte';
   import Drawer from '../kit/Drawer.svelte';
@@ -52,14 +52,16 @@
   const owned = $derived(view?.tokens.filter((t) => mine(t.characterId)) ?? []);
   const myTurn = $derived(owned.some((t) => t.characterId === actor));
   const status = $derived(!owned.length ? '' : unsent && session.status !== 'online' ? "You're offline: that move wasn't sent." : settings.freeMovement ? 'Free movement is on.' : myTurn ? 'Your turn: drag your token.' : 'Wait for your turn to move.');
-  // Movement budget (spec 1): the tracker carries each player character's movement this turn while one applies.
+  // Movement budget (spec 1): the tracker carries each player character's turn origin and Dashes while one applies; used = distance
+  // from that origin to where the token stands (moving back gives movement back).
   const budget = $derived(!!session.tracker && session.tracker.round >= 1 && !settings.freeMovement);
   const budgetOf = (characterId: string | undefined) => {
     const c = mine(characterId), row = c && session.tracker?.rows.find((r) => r.characterId === c.id);
-    if (!budget || !c || !row) return undefined;
+    if (!budget || !c || !row || !view) return undefined;
     try {
       const speed = effectiveSpeed(computeSheet(c, { settings, viewer: 'player' }).speed.walk, c.state.conditions, c.state.exhaustion);
-      return { left: remainingFeet(speed, row.moved), dashes: row.moved?.dashes ?? 0 };
+      const at = view.tokens.find((t) => t.characterId === c.id);
+      return { left: remainingFeet(speed, row.moved, at, view.grid, settings.diagonal), from: originOf(row.moved), budget: budgetFeet(speed, row.moved), dashes: row.moved?.dashes ?? 0 };
     } catch { return undefined; }
   };
   /** The tracker a Dash was sent under: the button stays off until the next tracker arrives or 3 s pass (a double tap sends one Dash). */
@@ -73,7 +75,7 @@
   }
   $effect(() => () => clearTimeout(dashTimer));
   const turnBudget = $derived(myTurn && !(unsent && session.status !== 'online') ? budgetOf(actor) : undefined);
-  const limitOf = (id: string) => { const b = budgetOf(tokenOf(id)?.characterId); return b && { left: b.left, clamp: true }; };
+  const limitOf = (id: string) => { const b = budgetOf(tokenOf(id)?.characterId); return b && { from: b.from, budget: b.budget, clamp: true }; };
 
   const tokenOf = (id: string) => view?.tokens.find((t) => t.id === id);
   const canDrag = (id: string) => {

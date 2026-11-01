@@ -1,7 +1,7 @@
 // Pure (no Svelte/Vite/DOM). Stage 5: the battle map scene as players get it (an allowlist, spec 3.6), the check on a player's token
 // move, and the guest's rebuild of what a host sent. Lazy: only host.ts and guest.ts import it.
 import { applyFog, cleanFog, decodeFog, isRevealed } from '../map/fog.ts';
-import { budgetApplies, combatantForToken, effectiveSpeed, remainingFeet } from '../combat/movement.ts';
+import { budgetApplies, budgetFeet, combatantForToken, effectiveSpeed, originOf } from '../combat/movement.ts';
 import { feetBetween, snap } from '../map/grid.ts';
 import { liveHp } from '../map/scene.ts';
 import { isRec, sceneProblem } from '../recordShape.ts';
@@ -66,20 +66,22 @@ export function moveProblem(s: Scene | undefined, m: { sceneId: string; tokenId:
   const p = snap(s.grid, m, t.size);
   if (!(p.x >= 0 && p.x <= s.width && p.y >= 0 && p.y <= s.height)) return { error: 'off the map', violation: false };
   const cost = moveCost(s, m, ch, combat, settings);
-  if (cost && cost.feet > cost.left) return { error: 'too far', violation: false }; // spec 1: the player's screen snaps back
+  if (cost && cost.feet > cost.budget) return { error: 'too far', violation: false }; // spec 1: the player's screen snaps back
 }
 
 /**
- * A player character's move under the movement budget: its combatant, the feet it costs (token centre to the snapped drop) and the feet
- * it has left. Undefined when no budget applies or the character has no combatant. Speed is the player view's (no hidden item bonus).
+ * A player character's move under the movement budget: its combatant, how far the snapped drop is from the turn's origin (the token
+ * itself before its first move this turn) and the budget. Undefined when no budget applies or the character has no combatant. Speed is
+ * the player view's (no hidden item bonus).
  */
 export function moveCost(s: Scene, m: { tokenId: string; x: number; y: number }, ch: Character, combat: Combat | undefined,
-  settings: CampaignSettings): { combatantId: string; feet: number; left: number } | undefined {
+  settings: CampaignSettings): { combatantId: string; feet: number; budget: number } | undefined {
   const t = s.tokens.find((x) => x.id === m.tokenId);
   const x = t && budgetApplies(combat, settings) ? combatantForToken(combat!, { characterId: ch.id }) : undefined;
   if (!t || !x) return undefined;
   const speed = effectiveSpeed(computeSheet(ch, { settings, viewer: 'player' }).speed.walk, ch.state.conditions, ch.state.exhaustion);
-  return { combatantId: x.id, feet: feetBetween(s.grid, t, snap(s.grid, m, t.size), settings.diagonal), left: remainingFeet(speed, combat!.movement?.[x.id]) };
+  const mv = combat!.movement?.[x.id];
+  return { combatantId: x.id, feet: feetBetween(s.grid, originOf(mv) ?? t, snap(s.grid, m, t.size), settings.diagonal), budget: budgetFeet(speed, mv) };
 }
 
 const HEALTH: readonly string[] = ['Unhurt', 'Hurt', 'Bloodied', 'Down'] satisfies HealthStatus[];

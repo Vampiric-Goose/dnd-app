@@ -138,8 +138,8 @@ export interface Combat { campaignId: string; combatants: Combatant[]; round: nu
   /** Combatant id → its movement this turn (dropped where its own turn starts). */ movement?: Record<string, Movement>;
   /** The saved encounter this fight was resumed from (Group C). */ encounterId?: string;
   /** This fight's identity: new when a fight is made or resumed, kept by saves (the map's arrows end with it). */ fightId?: string }
-/** Map ↔ combat: feet used and Dashes taken on the current turn. */
-export interface Movement { feet: number; dashes: number }
+/** Map ↔ combat: where the token stood when its turn's movement began (set by its first move) and Dashes taken this turn. */
+export interface Movement { from?: { x: number; y: number }; dashes: number }
 /** A fight saved into an encounter: the whole combat, plus the shown scene's tokens and fog at save time (none when no scene was shown). */
 export interface SavedFight { combat: Combat; map?: { sceneId: string; tokens: Token[]; fog?: string }; savedAt: number }
 /** A prepared encounter (at most 50 lines, each count 1–99), or a saved fight (`fight`, with `monsters` empty). */

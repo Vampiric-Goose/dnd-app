@@ -121,8 +121,8 @@ export function cleanTracker(v: unknown): TrackerView | undefined {
     return [{ id: r.id, name: r.name, ...(s(r.characterId, 100) && { characterId: r.characterId }), ...(fin(r.init) && { init: r.init as number }),
       ...(fin(r.hp) && { hp: r.hp as number }), ...(fin(r.maxHp) && { maxHp: r.maxHp as number }),
       ...(typeof r.health === 'string' && HEALTH.includes(r.health) && { health: r.health as HealthStatus }),
-      ...(isRec(r.moved) && fin(r.moved.feet) && fin(r.moved.dashes) && (r.moved.feet as number) >= 0 && (r.moved.dashes as number) >= 0
-        && { moved: { feet: r.moved.feet as number, dashes: r.moved.dashes as number } })}];
+      ...(isRec(r.moved) && fin(r.moved.dashes) && (r.moved.dashes as number) >= 0 && { moved: { dashes: r.moved.dashes as number,
+        ...(isRec(r.moved.from) && fin(r.moved.from.x) && fin(r.moved.from.y) && { from: { x: r.moved.from.x as number, y: r.moved.from.y as number } }) } })}];
   })).slice(0, MAX_ROWS);
   const current = rows.some((r) => r.id === v.current) ? v.current as string : undefined;
   return { round: v.round as number, ...(current !== undefined && { current }), rows };

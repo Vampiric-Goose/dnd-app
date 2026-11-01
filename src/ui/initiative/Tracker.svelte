@@ -1,13 +1,14 @@
 <script lang="ts">
   import { addCombatants, addMonsters, lairCombatant, MAX_COMBATANTS, pcCombatant, prev, rollInit, setInit } from '../../lib/combat/combat.ts';
   import { deleteEncounter, endCombat, saveFight, saveFightAs, turn, updateCombat } from '../../lib/combat/store.ts';
-  import { budgetApplies, dashRun, effectiveSpeed, MAX_DASHES, remainingFeet, resetMovement, undoDash } from '../../lib/combat/movement.ts';
+  import { budgetApplies, budgetFeet, combatantForToken, dashRun, effectiveSpeed, MAX_DASHES, resetMovement, undoDash, usedFeet } from '../../lib/combat/movement.ts';
   import type { ContentIndex } from '../../lib/content/index.ts';
   import { db } from '../../lib/db.ts';
+  import { session } from '../../lib/sync/session.svelte.ts';
   import { computeSheet } from '../../lib/rules/sheet.ts';
   import { saveCampaign } from '../../lib/store.svelte.ts';
   import { toast } from '../../lib/toast.svelte.ts';
-  import type { Campaign, CampaignSettings, Character, Combat, Combatant, Encounter, MonsterDef } from '../../lib/types.ts';
+  import type { Campaign, CampaignSettings, Character, Combat, Combatant, Encounter, MonsterDef, Scene } from '../../lib/types.ts';
   import Drawer from '../kit/Drawer.svelte';
   import Menu, { type MenuItem } from '../kit/Menu.svelte';
   import Tabs from '../kit/Tabs.svelte';
@@ -49,20 +50,35 @@
     else if (x.monsterId) walk = monById.get(x.monsterId)?.speed.walk;
     return walk === undefined ? undefined : effectiveSpeed(walk, conds, exh);
   }
+  // Movement used is the distance from the turn's origin to where the token stands, so the tokens' scenes are read too (the shown one first).
+  let scenes: Scene[] = $state.raw([]);
+  $effect(() => {
+    void session.rev; void combat;
+    const id = cid;
+    db.scenes.list(id).then((s) => { if (id === cid) scenes = s.sort((a, b) => Number(!!b.shown) - Number(!!a.shown)); }, (e) => console.warn(e));
+  });
+  /** The combatant's token and its scene's grid (the shown scene first), if any. */
+  const tokenOf = (c: Combat, id: string) => {
+    for (const s of scenes) { const t = s.tokens.find((t) => combatantForToken(c, t)?.id === id); if (t) return { at: { x: t.x, y: t.y }, grid: s.grid }; }
+  };
   // Movement budget (spec 1): the current run (a grouped monster turn is several, each on its own budget). The readout is its first
   // combatant's; Dash, Undo Dash and Reset movement apply to every member, so each grouped token gets the Dash.
   const mover = $derived.by(() => {
     const r = currentRun(combat);
     if (!r || !combat || !budgetApplies(combat, settings)) return undefined;
-    const run = list.slice(r[0], r[1] + 1).flatMap((x) => { const speed = speedOf(x); return speed === undefined ? [] : [{ id: x.id, speed }]; });
+    const c = combat;
+    const run = list.slice(r[0], r[1] + 1).flatMap((x) => {
+      const speed = speedOf(x), tk = tokenOf(c, x.id);
+      return speed === undefined ? [] : [{ id: x.id, speed, used: usedFeet(c.movement?.[x.id], tk?.at, tk?.grid, settings.diagonal) }];
+    });
     if (!run.length) return undefined;
-    const m = combat.movement?.[run[0].id];
-    return { run, ids: run.map((x) => x.id), left: remainingFeet(run[0].speed, m), dashes: m?.dashes ?? 0 };
+    const m = c.movement?.[run[0].id];
+    return { run, ids: run.map((x) => x.id), left: Math.max(0, budgetFeet(run[0].speed, m) - run[0].used), dashes: m?.dashes ?? 0 };
   });
   /** Undo Dash for the whole run, only when every member can (their Dash counts stay together). */
-  const undoRun = (c: Combat, run: { id: string; speed: number }[]): Combat => {
+  const undoRun = (c: Combat, run: { id: string; speed: number; used: number }[]): Combat => {
     let out = c;
-    for (const { id, speed } of run) { const n = undoDash(out, id, speed); if (n === out) return c; out = n; }
+    for (const { id, speed, used } of run) { const n = undoDash(out, id, speed, used); if (n === out) return c; out = n; }
     return out;
   };
   const resetRun = (c: Combat, ids: string[]): Combat => ids.reduce(resetMovement, c);
