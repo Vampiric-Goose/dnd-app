@@ -6,9 +6,8 @@ import type { ContentIndex } from '../content/index.ts';
 import { idSource, is2024Source, restorablePack } from '../content/sources.ts';
 import type { RollEntry } from '../rolls.svelte.ts';
 import { toBase64 } from '../base64.ts';
-import { addDash, budgetApplies, combatantForToken, recordMove } from '../combat/movement.ts';
-import { grantAction, spend, useProblem } from '../combat/economy.ts';
-import { attacksPerAction, pcActions } from '../combat/turnActions.ts';
+import { budgetApplies, combatantForToken, recordMove } from '../combat/movement.ts';
+import { applyUse, attacksPerAction, payment, pcActions, problemOf, spendOn } from '../combat/turnActions.ts';
 import { featureList } from '../character/play.ts';
 import { computeSheet } from '../rules/sheet.ts';
 import { moveTokens } from '../map/scene.ts';
@@ -341,31 +340,20 @@ export class Host {
     const sheet = computeSheet(ch, { settings: camp.settings, viewer: 'player' }), features = featureList(ch, camp.settings);
     const a = pcActions(ch, sheet, features).find((x) => x.id === m.action);
     if (!a) return refuse('that action is not available');
-    const level = a.spell && a.spell.level > 0 ? m.slot ?? a.spell.level : undefined;
-    if (level !== undefined && (level < a.spell!.level || (sheet.slots[level - 1] ?? 0) - (ch.state.slotsUsed[level - 1] ?? 0) < 1)) return refuse(`no level ${level} slot left`);
-    if (a.uses && a.uses.left < 1) return refuse(`no ${a.name} left`);
+    const { level, problem } = payment(a, sheet, ch, m.slot);
+    if (problem) return refuse(problem);
     if ((level !== undefined || a.resource) && !this.#deps.editCharacter) return refuse('this device cannot spend it');
     const chars = (await this.#deps.loadCharacters()).filter((x) => x.campaignId === camp.id);
-    const attack = a.group === 'attack' && a.cost === 'action' ? { perAction: attacksPerAction(features) } : undefined;
+    const per = attacksPerAction(features);
     let why: string | undefined = 'not in the fight';
     await this.#deps.updateCombat((k) => {
       const x = k.round >= 1 ? combatantForToken(k, { characterId: ch.id }) : undefined;
-      why = x && useProblem(x, a.cost, ch.state.conditions, currentActor(trackerForPlayers(k, chars, camp.settings)) === ch.id, attack);
+      why = x && problemOf(x, a, ch.state.conditions, currentActor(trackerForPlayers(k, chars, camp.settings)) === ch.id, per);
       if (!x || why) { why ??= 'not in the fight'; return k; }
-      let y = spend(x, a.cost, attack);
-      if (a.grants === 'action') y = grantAction(y);
-      if (a.spell?.concentration) y = { ...y, concentrating: true };
-      const next = { ...k, combatants: k.combatants.map((z) => (z.id === x.id ? y : z)) };
-      return a.grants === 'dash' ? addDash(next, x.id) : next;
+      return applyUse(k, x, a, per);
     });
     if (why) return refuse(why);
-    if (level !== undefined || a.resource) {
-      await this.#deps.editCharacter!(ch.id, (x) => ({ ...x, state: {
-        ...x.state,
-        ...(level !== undefined && { slotsUsed: Object.assign(Array.from({ length: Math.max(x.state.slotsUsed.length, level) }, (_, i) => x.state.slotsUsed[i] ?? 0), { [level - 1]: (x.state.slotsUsed[level - 1] ?? 0) + 1 }) }),
-        ...(a.resource && { resourcesUsed: { ...x.state.resourcesUsed, [a.resource]: (x.state.resourcesUsed[a.resource] ?? 0) + 1 } }),
-      } }));
-    }
+    if (level !== undefined || a.resource) await this.#deps.editCharacter!(ch.id, (x) => spendOn(x, level, a.resource));
   }
 
   /** Turn panel: the player's own character (else a violation) ends its turn, only while it is acting as players see it; else ignored. */

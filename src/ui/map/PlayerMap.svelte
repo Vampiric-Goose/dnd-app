@@ -9,10 +9,13 @@
   import { computeSheet } from '../../lib/rules/sheet.ts';
   import { currentActor } from '../../lib/sync/project.ts';
   import { sceneForPlayers, type PlayerScene } from '../../lib/sync/scene.ts';
-  import { clearDeclared, declareAction, sendDrag, sendUse, sendMove, session } from '../../lib/sync/session.svelte.ts';
-  import { budgetFeet, effectiveSpeed, originOf, PLAYER_DASHES, remainingFeet } from '../../lib/combat/movement.ts';
-  import type { Campaign, Character } from '../../lib/types.ts';
+  import { clearDeclared, declareAction, sendDrag, sendEndTurn, sendUse, sendMove, session } from '../../lib/sync/session.svelte.ts';
+  import { budgetFeet, effectiveSpeed, originOf, remainingFeet } from '../../lib/combat/movement.ts';
+  import { pcActions, slotsLeft, type TurnAction } from '../../lib/combat/turnActions.ts';
+  import { featureList } from '../../lib/character/play.ts';
+  import type { Campaign, Character, Combatant } from '../../lib/types.ts';
   import MapCanvas from './MapCanvas.svelte';
+  import TurnPanel from '../turn/TurnPanel.svelte';
   import Drawer from '../kit/Drawer.svelte';
   import Workspace from '../kit/Workspace.svelte';
 
@@ -64,16 +67,34 @@
       return { left: remainingFeet(speed, row.moved, at, view.grid, settings.diagonal), from: originOf(row.moved), budget: budgetFeet(speed, row.moved), dashes: row.moved?.dashes ?? 0 };
     } catch { return undefined; }
   };
-  /** The tracker a Dash was sent under: the button stays off until the next tracker arrives or 3 s pass (a double tap sends one Dash). */
-  let dashUnder: object | undefined = $state.raw();
-  let dashTimer: ReturnType<typeof setTimeout> | undefined;
-  function dash() {
-    dashUnder = session.tracker;
-    sendUse(actor!, 'std:dash');
-    clearTimeout(dashTimer);
-    dashTimer = setTimeout(() => (dashUnder = undefined), 3000);
+  // Turn panel: in a fight, the player's character that is acting, else their next to act; a switcher when they have several there.
+  const fight = $derived(session.tracker && session.tracker.round >= 1 ? session.tracker : undefined);
+  const myRows = $derived(fight?.rows.filter((r) => r.econ && mine(r.characterId)) ?? []);
+  let chosen: string | undefined = $state();
+  $effect(() => { void fight?.current; chosen = undefined; }); // a new turn: back to the acting (or next) one
+  const turn = $derived.by(() => {
+    if (!fight || !myRows.length) return undefined;
+    const i = Math.max(0, fight.rows.findIndex((r) => r.id === fight.current));
+    const r = myRows.find((x) => x.id === chosen) ?? [...fight.rows.slice(i), ...fight.rows.slice(0, i)].find((x) => myRows.includes(x));
+    const c = mine(r?.characterId);
+    if (!r?.econ || !c) return undefined;
+    try {
+      const sheet = computeSheet(c, { settings, viewer: 'player' });
+      const { used, extra, bonus, attacks, reaction } = r.econ;
+      return { r, c, econ: r.econ, sheet, actions: pcActions(c, sheet, featureList(c, settings)), x: { economy: { used, extra, bonus, attacks }, reactionUsed: reaction } as Combatant };
+    } catch { return undefined; }
+  });
+  /** The tracker a use was sent under: its buttons stay off until the next tracker arrives or 3 s pass (a double tap sends one use). */
+  let sentUnder: object | undefined = $state.raw();
+  let sentTimer: ReturnType<typeof setTimeout> | undefined;
+  function useAction(a: TurnAction, slot?: number) {
+    if (!turn) return;
+    sentUnder = session.tracker;
+    sendUse(turn.c.id, a.id, slot);
+    clearTimeout(sentTimer);
+    sentTimer = setTimeout(() => (sentUnder = undefined), 3000);
   }
-  $effect(() => () => clearTimeout(dashTimer));
+  $effect(() => () => clearTimeout(sentTimer));
   const turnBudget = $derived(myTurn && !(unsent && session.status !== 'online') ? budgetOf(actor) : undefined);
   const limitOf = (id: string) => { const b = budgetOf(tokenOf(id)?.characterId); return b && { from: b.from, budget: b.budget, clamp: true }; };
 
@@ -150,11 +171,23 @@
       {#if error}<p role="alert" class="error">{error}</p>{/if}
       <h2 class="scene-name">{view.name}</h2>
       {#if !joined}<p class="muted note">Player view: read-only</p>{/if}
-      {#if turnBudget && actor}
-        <div class="turn">
-          <p class="status" role="status" aria-live="polite">Your turn: <span class="num">{turnBudget.left}</span> ft left{turnBudget.dashes ? ` · Dashed ×${turnBudget.dashes}` : ''}.</p>
-          <button type="button" aria-label="Dash" disabled={turnBudget.dashes >= PLAYER_DASHES || (!!dashUnder && dashUnder === session.tracker)} onclick={dash}>Dash</button>
-        </div>
+      {#if turn && fight}
+        <TurnPanel name={turn.c.name} order={fight.rows} self={turn.r.id} current={fight.current} round={fight.round}
+          hp={turn.c.state.hp} maxHp={turn.sheet.maxHp} tempHp={turn.c.state.tempHp} conditions={turn.c.state.conditions}
+          moveLeft={turn.c.id === actor ? turnBudget?.left : undefined} x={turn.x} perAction={turn.econ.perAction} onTurn={turn.c.id === actor}
+          actions={turn.actions} slots={slotsLeft(turn.sheet, turn.c)} concentrating={turn.econ.conc}
+          busy={!!sentUnder && sentUnder === session.tracker} canEnd={turn.c.id === actor} onuse={useAction} onend={() => sendEndTurn(turn!.c.id)}>
+          {#snippet top()}
+            {#if myRows.length > 1}
+              <div class="row switch" role="group" aria-label="Your characters">
+                {#each myRows as r (r.id)}<button type="button" aria-pressed={r.id === turn!.r.id} onclick={() => (chosen = r.id)}>{r.name}</button>{/each}
+              </div>
+            {/if}
+          {/snippet}
+        </TurnPanel>
+        {#if unsent && session.status !== 'online'}<p class="status" role="status">{status}</p>{/if}
+      {:else if turnBudget && actor}
+        <p class="status" role="status" aria-live="polite">Your turn: <span class="num">{turnBudget.left}</span> ft left{turnBudget.dashes ? ` · Dashed ×${turnBudget.dashes}` : ''}.</p>
       {:else}
         <p class="status" role="status" aria-live="polite">{status}</p>
       {/if}
@@ -198,16 +231,12 @@
     color: var(--text-strong);
   }
 
-  .turn {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.4rem 0.75rem;
-    margin: 0.4rem 0 0.9rem;
+  .switch button {
+    min-height: 44px;
   }
 
-  .turn .status {
-    margin: 0;
+  .switch button[aria-pressed='true'] {
+    border-color: var(--accent);
   }
 
   .tokens {

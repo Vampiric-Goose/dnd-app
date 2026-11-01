@@ -3,8 +3,9 @@
 import { spellList } from '../character/play.ts';
 import { getKind } from '../character/choices.ts';
 import { richToPlain } from '../content/richtext.ts';
-import type { Attack, Character, MonsterDef, RichText, Sheet } from '../types.ts';
-import type { Cost } from './economy.ts';
+import type { Attack, Character, Combat, Combatant, MonsterDef, RichText, Sheet } from '../types.ts';
+import { BLOCKING, grantAction, spend, useProblem, type Cost } from './economy.ts';
+import { addDash } from './movement.ts';
 
 export interface TurnAction {
   id: string; name: string; cost: Cost;
@@ -14,6 +15,8 @@ export interface TurnAction {
   resource?: string; uses?: { left: number; max: number };
   /** What using it gives beyond the pip: another Action (Action Surge) or a Dash's movement. */
   grants?: 'action' | 'dash';
+  /** A legendary action: the legendary uses it costs (taken at the end of another creature's turn). */
+  legendary?: number;
 }
 
 /** The cost a feature's text states: "as a bonus action" / "use a bonus action", "as an action" / "use your action", a reaction; else none. */
@@ -67,7 +70,7 @@ export function pcActions(c: Character, sheet: Sheet, features: { name: string; 
     }
   }
   for (const r of sheet.resources) {
-    const f = features.find((x) => x.name === r.name), surge = r.name === 'Action Surge';
+    const f = features.find((x) => x.name === r.name || x.name.startsWith(`${r.name} (`)), surge = r.name === 'Action Surge'; // SRD: "Action Surge (1 use)"
     out.push({
       id: `res:${r.name}`, name: r.name, cost: surge ? 'none' : f ? costOfText(richToPlain(f.text)) : 'none', group: 'resource', resource: r.name,
       uses: { left: Math.max(0, r.max - (c.state.resourcesUsed[r.name] ?? 0)), max: r.max }, ...(f && { text: f.text }), ...(surge && { grants: 'action' as const }),
@@ -82,5 +85,47 @@ export const primaryAction = (list: TurnAction[]): TurnAction | undefined => lis
 export function monsterActions(m: MonsterDef): TurnAction[] {
   const of = (list: MonsterDef['actions'], cost: Cost, key: string) => list.map((t, i): TurnAction => ({ id: `mon:${key}:${i}`, name: t.name, cost, group: 'monster', text: t.text }));
   const traits = m.traits.flatMap((t, i): TurnAction[] => { const cost = costOfText(richToPlain(t.text)); return cost === 'none' ? [] : [{ id: `mon:trait:${i}`, name: t.name, cost, group: 'monster', text: t.text }]; });
-  return [...of(m.actions, 'action', 'action'), ...of(m.bonusActions, 'bonus', 'bonus'), ...traits, ...of(m.reactions, 'reaction', 'reaction')];
+  const legendary = m.legendary.map((t, i): TurnAction => ({ id: `mon:legendary:${i}`, name: t.name, cost: 'none', group: 'monster', text: t.text,
+    legendary: Number(/costs (\d) actions/i.exec(t.name)?.[1] ?? 1) }));
+  return [...of(m.actions, 'action', 'action'), ...of(m.bonusActions, 'bonus', 'bonus'), ...traits, ...of(m.reactions, 'reaction', 'reaction'), ...legendary];
+}
+
+/** An attack that is part of the Attack action (Extra Attack counts it); undefined for anything else. */
+export const attackOf = (a: TurnAction, perAction: number) => (a.group === 'attack' && a.cost === 'action' ? { perAction } : undefined);
+
+/** Why the creature can't use it now (its pip, a use left, legendary uses), or undefined. Slots are `payment`'s check. */
+export function problemOf(x: Combatant, a: TurnAction, conditions: readonly string[], onTurn: boolean, perAction = 1): string | undefined {
+  if (a.uses && a.uses.left < 1) return `no ${a.name} left`;
+  if (a.legendary === undefined) return useProblem(x, a.cost, conditions, onTurn, attackOf(a, perAction));
+  if (onTurn) return "only at the end of another creature's turn";
+  const block = conditions.find((c) => BLOCKING.includes(c.toLowerCase()));
+  if (block) return block;
+  return !x.legendary || x.legendary.max - x.legendary.used < a.legendary ? 'no legendary actions left' : undefined;
+}
+
+/** Spell slots left per level (index 0 = 1st). */
+export const slotsLeft = (sheet: Sheet, c: Character): number[] => sheet.slots.map((n, i) => n - (c.state.slotsUsed[i] ?? 0));
+
+/** A levelled spell's slot level (the chosen one, else its own) and why it can't be paid, if so. Cantrips and the rest: no level. */
+export function payment(a: TurnAction, sheet: Sheet, c: Character, slot?: number): { level?: number; problem?: string } {
+  const level = a.spell && a.spell.level > 0 ? slot ?? a.spell.level : undefined;
+  if (level !== undefined && (level < a.spell!.level || (slotsLeft(sheet, c)[level - 1] ?? 0) < 1)) return { level, problem: `no level ${level} slot left` };
+  return { level };
+}
+
+/** The fight after the use (check problemOf first): its pip, an extra Action, concentration, a Dash's movement, legendary uses. */
+export function applyUse(k: Combat, x: Combatant, a: TurnAction, perAction = 1): Combat {
+  let y = spend(x, a.cost, attackOf(a, perAction));
+  if (a.grants === 'action') y = grantAction(y);
+  if (a.spell?.concentration) y = { ...y, concentrating: true };
+  if (a.legendary && y.legendary) y = { ...y, legendary: { ...y.legendary, used: y.legendary.used + a.legendary } };
+  const next = { ...k, combatants: k.combatants.map((z) => (z.id === x.id ? y : z)) };
+  return a.grants === 'dash' ? addDash(next, x.id) : next;
+}
+
+/** The character after paying: a slot of `level` and one use of `resource`. */
+export function spendOn(c: Character, level: number | undefined, resource: string | undefined): Character {
+  const slotsUsed = [...c.state.slotsUsed];
+  if (level !== undefined) { while (slotsUsed.length < level) slotsUsed.push(0); slotsUsed[level - 1] += 1; }
+  return { ...c, state: { ...c.state, slotsUsed, ...(resource && { resourcesUsed: { ...c.state.resourcesUsed, [resource]: (c.state.resourcesUsed[resource] ?? 0) + 1 } }) } };
 }

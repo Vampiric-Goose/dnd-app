@@ -12,7 +12,11 @@
   import { addTokensToCombat, editScene, tokenForCharacter, tokenForMonster } from '../../lib/map/store.ts';
   import { currentRun, patchCombatant } from '../../lib/combat/combat.ts';
   import { budgetApplies, budgetFeet, combatantForToken, effectiveSpeed, originOf, recordMove } from '../../lib/combat/movement.ts';
-  import { updateCombat } from '../../lib/combat/store.ts';
+  import { editCharacter, turn, updateCombat } from '../../lib/combat/store.ts';
+  import { grantAction, setPip } from '../../lib/combat/economy.ts';
+  import { applyUse, attacksPerAction, monsterActions, payment, pcActions, slotsLeft, spendOn, type TurnAction } from '../../lib/combat/turnActions.ts';
+  import { featureList } from '../../lib/character/play.ts';
+  import TurnPanel from '../turn/TurnPanel.svelte';
   import { toast } from '../../lib/toast.svelte.ts';
   import { soundMonster } from '../../lib/monsters/homebrew.ts';
   import { router } from '../../lib/router.svelte.ts';
@@ -108,8 +112,15 @@
   let tab = $state('tokens');
   let sheet = $state(false); // phones: the panel opened without a selection
   let newDialog: HTMLDialogElement | undefined = $state();
-  // A new pick on the map or in the list shows it.
-  $effect(() => { if (selected.length) untrack(() => (tab = 'selected')); });
+  // A new pick on the map or in the list shows it: in a fight, one creature in it shows in the Turn tab (without changing the turn).
+  $effect(() => {
+    if (!selected.length) return;
+    untrack(() => {
+      const t = selected.length === 1 ? scene?.tokens.find((x) => x.id === selected[0]) : undefined;
+      const x = t && fighting ? combatantForToken(combat!, t) : undefined;
+      if (x) { viewId = x.id; tab = 'turn'; } else tab = 'selected';
+    });
+  });
   const sceneItems = $derived<MenuItem[]>([
     ...scenes.map((s) => ({ label: `${s.name}${s.shown ? ' (shown)' : ''}`, checked: s.id === scene?.id, onselect: () => pick(s.id) })),
     { separator: true },
@@ -276,6 +287,41 @@
   const ondeclare = (d: { from: Pt; fromToken?: string; to: Pt; toToken?: string }) => {
     if (scene) void declareAction({ sceneId: scene.id, from: d.fromToken ? { tokenId: d.fromToken } : d.from, to: d.toToken ? { tokenId: d.toToken } : d.to, kind: 'intent' });
   };
+  // --- the Turn tab (turn panel spec): follows the acting creature (a grouped run: its first, with a switcher among the group) ---
+  const fighting = $derived(!!combat && combat.round >= 1);
+  let viewId: string | undefined = $state();
+  $effect(() => { const on = fighting; untrack(() => { if (on) tab = 'turn'; else if (tab === 'turn') tab = 'tokens'; }); });
+  $effect(() => { void combat?.turn; void combat?.round; untrack(() => (viewId = undefined)); });
+  const runList = $derived(combat ? combat.combatants.filter((x) => turnIds.has(x.id)) : []);
+  const view = $derived.by(() => {
+    const x = combat?.combatants.find((z) => z.id === viewId) ?? runList[0];
+    if (!x) return undefined;
+    const ch = x.characterId ? chars.find((c) => c.id === x.characterId) : undefined, sheet = ch && sheets.get(ch.id);
+    if (ch && sheet) {
+      const features = featureList(ch, settings);
+      return { x, ch, sheet, name: ch.name, hp: ch.state.hp, maxHp: sheet.maxHp, tempHp: ch.state.tempHp, conditions: ch.state.conditions,
+        actions: pcActions(ch, sheet, features), perAction: attacksPerAction(features), slots: slotsLeft(sheet, ch) };
+    }
+    const m = x.monsterId ? monsterById.get(x.monsterId) : undefined;
+    return { x, name: x.name, hp: x.hp, maxHp: x.maxHp, tempHp: x.tempHp, conditions: x.conditions ?? [], actions: m ? monsterActions(m) : [], perAction: 1 };
+  });
+  /** The DM's use: pips and what it pays, no turn checks (the panel greys out what the rules don't allow). */
+  const useAction = (a: TurnAction, slot?: number) => run(async () => {
+    const v = view;
+    if (!v || !combat) return;
+    const pay = v.ch && v.sheet ? payment(a, v.sheet, v.ch, slot) : {};
+    if (pay.problem) throw new Error(`Not done: ${pay.problem}.`);
+    await updateCombat(cid, (k) => { const y = k.combatants.find((z) => z.id === v.x.id); return y ? applyUse(k, y, a, v.perAction) : k; });
+    if (v.ch && (pay.level !== undefined || a.resource)) await editCharacter(v.ch.id, (c) => spendOn(c, pay.level, a.resource));
+    await reload();
+  });
+  const onpip = (pip: 'action' | 'bonus' | 'reaction' | 'extra', used: boolean) => run(async () => {
+    const id = view?.x.id;
+    await updateCombat(cid, (k) => ({ ...k, combatants: k.combatants.map((z) => (z.id !== id ? z : pip === 'extra' ? grantAction(z) : setPip(z, pip, used))) }));
+    await reload();
+  });
+  const nextTurn = () => run(async () => { await turn(cid, 'next'); await reload(); });
+
   const GRID_NAMES = { square: 'Square', 'hex-flat': 'Hex (flat)', 'hex-pointy': 'Hex (pointy)' } as const;
 </script>
 
@@ -309,7 +355,7 @@
         ondrag={(id, at) => { if (scene?.shown) sendDrag(scene.id, id, at); }}
       />
     {/key}
-    <button type="button" class="sheet-btn" onclick={() => (sheet = true)}>Tokens and scene</button>
+    <button type="button" class="sheet-btn" onclick={() => (sheet = true)}>{fighting ? 'Turn and tokens' : 'Tokens and scene'}</button>
   {:else}
     <div class="empty">
       <h2>No scenes yet</h2>
@@ -361,12 +407,29 @@
 {#snippet side()}
   {#if scene}
     <Tabs label="Map panel" bind:value={tab} tabs={[
+      ...(fighting ? [{ id: 'turn', label: 'Turn' }] : []),
       { id: 'selected', label: 'Selected', ...(selected.length > 0 && { count: selected.length }) },
       { id: 'tokens', label: 'Tokens', count: scene.tokens.length },
       { id: 'scene', label: 'Scene' },
     ]}>
       {#snippet panel(id)}
-        {#if id === 'selected'}
+        {#if id === 'turn' && view && combat}
+          <TurnPanel dm name={view.name} order={combat.combatants} self={view.x.id} current={combat.turn} round={combat.round}
+            hp={view.hp} maxHp={view.maxHp} tempHp={view.tempHp} tone={view.ch ? 'accent' : 'danger'} conditions={view.conditions}
+            x={view.x} perAction={view.perAction} onTurn={turnIds.has(view.x.id)} actions={view.actions} slots={view.slots}
+            concentrating={!!view.x.concentrating} canEnd={!busy} endLabel="Next turn ▶" onuse={useAction} onend={nextTurn} {onpip}
+            onstrip={(id) => (viewId = id)}>
+            {#snippet top()}
+              {#if runList.length > 1}
+                <div class="row switch" role="group" aria-label="This group">
+                  {#each runList as x (x.id)}<button type="button" aria-pressed={x.id === view!.x.id} onclick={() => (viewId = x.id)}>{x.name}</button>{/each}
+                </div>
+              {/if}
+            {/snippet}
+          </TurnPanel>
+        {:else if id === 'turn'}
+          <p class="muted">No one is acting.</p>
+        {:else if id === 'selected'}
           <SelectedTokens tokens={canvasTokens.filter((t) => selected.includes(t.id))} {busy} onselect={(ids) => (selected = ids)}
             onpatch={patch} onremove={removeIds} onportrait={portrait} oncombat={addToCombat} />
         {:else if id === 'tokens'}
@@ -533,6 +596,14 @@
 
   .addchar select {
     max-width: 100%;
+  }
+
+  .switch button {
+    min-height: 44px;
+  }
+
+  .switch button[aria-pressed='true'] {
+    border-color: var(--accent);
   }
 
   .detect {

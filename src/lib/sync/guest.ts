@@ -128,7 +128,7 @@ export function cleanTracker(v: unknown): TrackerView | undefined {
       ...(isRec(r.moved) && fin(r.moved.dashes) && (r.moved.dashes as number) >= 0 && { moved: { dashes: r.moved.dashes as number,
         ...(isRec(r.moved.from) && fin(r.moved.from.x) && fin(r.moved.from.y) && { from: { x: r.moved.from.x as number, y: r.moved.from.y as number } }) } }),
       ...(isRec(r.econ) && [r.econ.used, r.econ.extra, r.econ.attacks, r.econ.perAction].every((v) => fin(v) && (v as number) >= 0 && (v as number) <= 20)
-        && { econ: { used: r.econ.used as number, extra: r.econ.extra as number, attacks: r.econ.attacks as number, perAction: r.econ.perAction as number, bonus: r.econ.bonus === true, reaction: r.econ.reaction === true } })}];
+        && { econ: { used: r.econ.used as number, extra: r.econ.extra as number, attacks: r.econ.attacks as number, perAction: r.econ.perAction as number, bonus: r.econ.bonus === true, reaction: r.econ.reaction === true, conc: r.econ.conc === true } })}];
   })).slice(0, MAX_ROWS);
   const current = rows.some((r) => r.id === v.current) ? v.current as string : undefined;
   return { round: v.round as number, ...(current !== undefined && { current }), rows };

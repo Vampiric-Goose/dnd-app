@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { describe, expect, test } from 'vitest';
-import { attacksPerAction, castingCost, costOfText, monsterActions, offhandDamage, pcActions, primaryAction } from '../../src/lib/combat/turnActions.ts';
-import type { Attack, Character, MonsterDef, Pack, Sheet, SpellDef } from '../../src/lib/types.ts';
+import { applyUse, attacksPerAction, castingCost, costOfText, monsterActions, offhandDamage, payment, pcActions, primaryAction, problemOf, slotsLeft, spendOn, type TurnAction } from '../../src/lib/combat/turnActions.ts';
+import type { Attack, Character, Combat, Combatant, MonsterDef, Pack, Sheet, SpellDef } from '../../src/lib/types.ts';
 
 const srd: Pack = JSON.parse(fs.readFileSync('src/data/srd.json', 'utf8'));
 const goblin = srd.entities.find((e) => e.id === 'monster:goblin@SRD') as MonsterDef;
@@ -82,4 +82,42 @@ test('monsterActions: a goblin attacks with its Action', () => {
   expect(list.map((a) => a.name)).toEqual(expect.arrayContaining(['Scimitar', 'Shortbow']));
   expect(list.every((a) => a.cost === 'action' || a.cost === 'bonus' || a.cost === 'reaction')).toBe(true);
   expect(list.find((a) => a.name === 'Scimitar')?.cost).toBe('action');
+});
+
+describe('using an action', () => {
+  const cb = (o: Partial<Combatant> = {}): Combatant => ({ id: 'x', kind: 'monster', name: 'x', init: 10, initMod: 0, dex: 10, tie: 0.5, conSave: 0, ...o });
+  const fight = (x: Combatant): Combat => ({ campaignId: 'c', combatants: [x], round: 1, turn: x.id, groupMonsters: false, updatedAt: 0 });
+  const legend = { id: 'mon:legendary:1', name: 'Wing Attack (Costs 2 Actions)', cost: 'none', group: 'monster', legendary: 2 } as TurnAction;
+
+  test('legendary actions: off its turn only, with the uses they cost', () => {
+    const x = cb({ legendary: { max: 3, used: 2 } });
+    expect(problemOf(x, legend, [], true)).toMatch(/another creature/);
+    expect(problemOf(x, legend, [], false)).toBe('no legendary actions left');
+    expect(problemOf(cb({ legendary: { max: 3, used: 0 } }), legend, ['Stunned'], false)).toBe('Stunned');
+    const k = applyUse(fight(cb({ legendary: { max: 3, used: 0 } })), cb({ legendary: { max: 3, used: 0 } }), legend);
+    expect(k.combatants[0].legendary?.used).toBe(2);
+  });
+
+  test('a resource with no uses left is refused; Action Surge grants an Action; Dash adds movement', () => {
+    const res = { id: 'res:Rage', name: 'Rage', cost: 'bonus', group: 'resource', uses: { left: 0, max: 2 } } as TurnAction;
+    expect(problemOf(cb(), res, [], true)).toBe('no Rage left');
+    const surge = { id: 'res:Action Surge', name: 'Action Surge', cost: 'none', group: 'resource', grants: 'action' } as TurnAction;
+    expect(applyUse(fight(cb()), cb(), surge).combatants[0].economy?.extra).toBe(1);
+    const dash = { id: 'cunning:dash', name: 'Cunning Action: Dash', cost: 'bonus', group: 'feature', grants: 'dash' } as TurnAction;
+    const k = applyUse(fight(cb()), cb(), dash);
+    expect(k.combatants[0].economy?.bonus).toBe(true);
+    expect(k.movement?.x?.dashes).toBe(1);
+  });
+
+  test('payment: slot levels at or above the spell, free ones only; spendOn pays a slot and a use', () => {
+    const c = character(); c.state.slotsUsed = [2];
+    const sh = sheet({ slots: [2, 1] });
+    const sleep = { id: 'spell:sleep', name: 'Sleep', cost: 'action', group: 'spell', spell: { id: 's', level: 1, concentration: false } } as TurnAction;
+    expect(slotsLeft(sh, c)).toEqual([0, 1]);
+    expect(payment(sleep, sh, c)).toEqual({ level: 1, problem: 'no level 1 slot left' });
+    expect(payment(sleep, sh, c, 2)).toEqual({ level: 2 });
+    const paid = spendOn(c, 2, 'Rage');
+    expect(paid.state.slotsUsed).toEqual([2, 1]);
+    expect(paid.state.resourcesUsed.Rage).toBe(1);
+  });
 });
