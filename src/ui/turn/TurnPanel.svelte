@@ -49,7 +49,20 @@
     return ids.map((id) => order.find((r) => r.id === id)!);
   });
   const primary = $derived(primaryAction(actions) ?? actions.find((a) => a.group === 'monster' && a.cost === 'action'));
-  const GROUPS: [Cost, string][] = [['action', 'Action'], ['bonus', 'Bonus action'], ['reaction', 'Reaction'], ['none', 'No cost']];
+  // The pop-up's sections; each entry says what it costs.
+  type Section = 'attacks' | 'utility' | 'unique' | 'spells';
+  const SECTIONS: [Section, string][] = [['attacks', 'Attacks'], ['utility', 'Utility'], ['unique', 'Unique'], ['spells', 'Spells']];
+  const COSTS: Cost[] = ['action', 'bonus', 'reaction', 'none'];
+  const COST_LABEL: Record<Cost, string> = { action: 'Action', bonus: 'Bonus', reaction: 'Reaction', none: 'Free' };
+  /** Attacks: weapons, off-hand, a monster's attacks (a to-hit roll, or Multiattack); Utility: the standard actions; Spells; the rest
+   * (class and race features, resources, a monster's traits, reactions and legendary actions) is Unique. */
+  function sectionOf(a: TurnAction): Section {
+    if (a.group === 'attack') return 'attacks';
+    if (a.group === 'standard') return 'utility';
+    if (a.group === 'spell') return 'spells';
+    if (a.group === 'monster' && !a.legendary && a.cost === 'action' && (/multiattack/i.test(a.name) || (a.text && rollParts(richToPlain(a.text)).some((p) => 'hit' in p && p.hit)))) return 'attacks';
+    return 'unique';
+  }
   const freeSlots = (a: TurnAction) => slots.flatMap((n, i) => (n > 0 && i + 1 >= a.spell!.level ? [i + 1] : []));
   let slotFor: Record<string, number> = $state({});
   /** Who a spell that needs a target goes to (default: the creature shown). */
@@ -130,8 +143,8 @@
     <h2 id="actions-title">{name}: actions</h2>
     <button type="button" aria-label="Close" onclick={() => dialog?.close()}>✕</button>
   </div>
-  {#each GROUPS as [cost, label]}
-    {@const list = actions.filter((a) => a.cost === cost)}
+  {#each SECTIONS as [sec, label]}
+    {@const list = actions.filter((a) => sectionOf(a) === sec).sort((p, q) => COSTS.indexOf(p.cost) - COSTS.indexOf(q.cost))}
     {#if list.length}
       {@const shared = list.every((a) => problem(a) === problem(list[0])) ? problem(list[0]) : undefined}
       <h3>{label}{#if shared}<span class="small">{` · ${shared}`}</span>{/if}</h3>
@@ -159,6 +172,7 @@
   {@const parts = a.group === 'monster' && a.text ? rollParts(richToPlain(a.text)).filter((p) => 'expr' in p) : []}
   <div class="what">
     <strong>{a.name}</strong>
+    {#if full}<span class="cost small">{a.legendary ? `Legendary ×${a.legendary}` : COST_LABEL[a.cost]}</span>{/if}
     {#if a.uses}<span class="muted small"><span class="num">{a.uses.left}</span>/<span class="num">{a.uses.max}</span> left</span>{/if}
     {#if a.legendary}<span class="muted small">{x.legendary ? `${x.legendary.max - x.legendary.used} legendary left` : ''}</span>{/if}
     {#if a.attack && a.cost === 'action' && perAction > 1 && inAttack}<span class="muted small">Attack <span class="num">{e.attacks + 1}</span> of <span class="num">{perAction}</span></span>{/if}
@@ -321,6 +335,13 @@
 
   .what strong {
     color: var(--text-strong);
+  }
+
+  .cost {
+    padding: 0 0.4rem;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    color: var(--muted);
   }
 
   .rolls {
