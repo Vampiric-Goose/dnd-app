@@ -11,6 +11,9 @@
   import type { MonsterDef, Size, StoredMonster } from '../../lib/types.ts';
   import { message } from '../creator/labels.ts';
   import { download, downloadPdf, fileName } from '../download.ts';
+  import Menu, { type MenuItem } from '../kit/Menu.svelte';
+  import Pill from '../kit/Pill.svelte';
+  import Workspace from '../kit/Workspace.svelte';
   import MonsterEditor from '../monsters/MonsterEditor.svelte';
   import StatBlock from '../monsters/StatBlock.svelte';
   import PasteDialog from '../PasteDialog.svelte';
@@ -51,20 +54,50 @@
   const pool = $derived<MonsterDef[]>(index ? [...own, ...index.all('monster')] : []);
   const types = $derived([...new Set(pool.map(monsterType))].filter(Boolean).sort());
   const sources = $derived([...new Set(pool.map((m) => m.source))].sort());
-  const rows = $derived(filterMonsters(pool, {
+  const filter = $derived({
     q,
-    cr: crMin || crMax ? [crValue(crMin || '0')!, crValue(crMax || '30')!] : undefined,
+    cr: crMin || crMax ? [crValue(crMin || '0')!, crValue(crMax || '30')!] as [number, number] : undefined,
     type: type || undefined,
     size: (size || undefined) as Size | undefined,
     source: source || undefined,
-  }));
+  });
+  const rows = $derived(filterMonsters(pool, filter));
+
+  // Pull-down counts: what each option would show with the other filters kept.
+  function counts(skip: 'cr' | 'type' | 'size' | 'source', keys: (m: MonsterDef) => readonly string[]): Map<string, number> {
+    const out = new Map<string, number>();
+    for (const m of filterMonsters(pool, { ...filter, [skip]: undefined })) for (const k of keys(m)) out.set(k, (out.get(k) ?? 0) + 1);
+    return out;
+  }
+  type Filter = { id: string; label: string; value: string; set: (v: string) => void; options: { value: string; label: string; count: number }[] };
+  const filters = $derived.by<Filter[]>(() => {
+    const opts = (vals: readonly string[], label: (v: string) => string, c: Map<string, number>) => vals.map((v) => ({ value: v, label: label(v), count: c.get(v) ?? 0 }));
+    const cr = counts('cr', (m) => [m.cr]);
+    return [
+      { id: 'crMin', label: 'CR from', value: crMin, set: (v) => (crMin = v), options: opts(CR_LADDER, (c) => `CR ${c}`, cr) },
+      { id: 'crMax', label: 'CR to', value: crMax, set: (v) => (crMax = v), options: opts(CR_LADDER, (c) => `CR ${c}`, cr) },
+      { id: 'type', label: 'Type', value: type, set: (v) => (type = v), options: opts(types, (t) => t, counts('type', (m) => [monsterType(m)])) },
+      { id: 'size', label: 'Size', value: size, set: (v) => (size = v), options: opts(Object.keys(SIZE_NAMES), (k) => SIZE_NAMES[k as Size], counts('size', (m) => m.size)) },
+      { id: 'source', label: 'Source', value: source, set: (v) => (source = v), options: opts(sources, (s) => index?.label(s) ?? s, counts('source', (m) => [m.source])) },
+    ];
+  });
+  const valueLabel = (f: Filter) => {
+    const o = f.options.find((x) => x.value === f.value)?.label ?? f.value;
+    return f.id === 'crMin' ? `${o} or more` : f.id === 'crMax' ? `${o} or less` : o;
+  };
+  const menuItems = (f: Filter): MenuItem[] => [
+    { label: 'Any', checked: f.value === '', onselect: () => f.set('') },
+    ...f.options.map((o) => ({ label: o.label, count: o.count, checked: f.value === o.value, onselect: () => f.set(o.value) })),
+  ];
+  const anyFilter = $derived(filters.some((f) => f.value !== ''));
+  const clearFilters = () => { crMin = crMax = type = size = source = ''; };
 
   const select = $derived(router.query.get('id') ?? params.id ?? '');
   const selected = $derived<MonsterDef | undefined>(own.find((m) => m.id === select) ?? (index?.get(select)?.kind === 'monster' ? index.get(select) as MonsterDef : undefined));
   const isOwn = $derived(!!selected && own.some((m) => m.id === selected.id));
 
   const go = (id?: string) => { location.hash = '#/monsters' + (id ? `?id=${encodeURIComponent(id)}` : ''); };
-  const sub = (m: MonsterDef) => [`CR ${m.cr}`, `${m.size.map((s) => SIZE_NAMES[s]).join('/')} ${monsterType(m)}`, index?.label(m.source) ?? m.source].join(' · ');
+  const kindOf = (m: MonsterDef) => `${m.size.map((s) => SIZE_NAMES[s]).join('/')} ${monsterType(m)}`;
 
   // `monsters/new` (optionally `?from=<id>`: Duplicate, or `?pasted=1`: the paste dialog's draft) and `monsters/:id/edit` show
   // the editor instead of the library.
@@ -158,8 +191,8 @@
     download(exportRecord('monster', data), fileName(m.name, 'json', 'monster'));
   }
 
-  // On a phone the detail replaces the list: put focus on its back button so keyboard users are not left behind.
-  const focusOnPhone = (node: HTMLElement) => { if (matchMedia('(max-width: 767px)').matches) node.focus(); };
+  let fileInput: HTMLInputElement | undefined = $state();
+  const togglePaste = () => { if (!pasting || leaveGuard.fn?.() !== false) pasting = !pasting; };
 </script>
 
 {#if editing && app.campaign}
@@ -174,7 +207,7 @@
         <p class="muted">Loading…</p>
       {:then r}
         {#if r.notes?.length}
-          <div class="card" role="note">
+          <div class="note" role="note">
             <strong>Read from pasted text.</strong> Check these before saving:
             <ul>{#each r.notes as n}<li>{n}</li>{/each}</ul>
           </div>
@@ -191,139 +224,280 @@
   <h1>Monsters</h1>
   <p>Monsters are visible to the DM only.</p>
 {:else}
-  <h1>Monsters</h1>
-  {#if editing}<p>{app.ready ? 'Open a campaign to make monsters.' : 'Loading…'}</p>{/if}
-  {#if error}<p role="alert" class="error">{error}</p>{/if}
-  {#if notice}<p role="status">{notice}</p>{/if}
-  {#if clash}
-    <!-- svelte-ignore a11y_no_noninteractive_element_interactions (Escape bubbles up from the dialog's own buttons) -->
-    <div role="alertdialog" aria-label="Monster already exists" class="card" tabindex="-1" onkeydown={(e) => e.key === 'Escape' && (clash = undefined)}>
-      <p>This campaign already has a monster with this id: “{clash.existing}”. Replace “{clash.existing}” with the imported “{clash.monster.name}”, or keep both?</p>
-      <div class="row">
-        <button type="button" class="danger" onclick={() => resolveClash('replace')}>Replace “{clash.existing}”</button>
-        <button type="button" class="primary" bind:this={keepBtn} onclick={() => resolveClash('keep')}>Keep both</button>
-        <button type="button" onclick={() => (clash = undefined)}>Cancel</button>
-      </div>
-    </div>
-  {/if}
-  {#if pasting && app.campaign}
-    <PasteDialog kind="monster" oncancel={() => (pasting = false)} onread={(draft, notes) => { pasted.monster = { draft: draft as MonsterDef, notes }; pasting = false; navigate('monsters/new?pasted=1'); }} />
-  {/if}
-  <div class="layout" class:has-detail={!!selected}>
+  <Workspace panelLabel="Stat block" open={!!select && !!index} onclose={() => go()}>
     <section class="browse" aria-label="Browse">
-      <div class="row actions">
+      <div class="top">
+        <h1>Monsters</h1>
         {#if app.campaign}
           <button type="button" class="primary" onclick={() => navigate('monsters/new')}>New monster</button>
-          <button type="button" aria-expanded={pasting} onclick={() => { if (!pasting || leaveGuard.fn?.() !== false) pasting = !pasting; }}>Paste a stat block</button>
-          <label class="file"><span>Import monster (.json / .pdf)</span>
-            <input type="file" accept=".json,.pdf,application/json,application/pdf" onchange={onImport} />
-          </label>
-        {:else}
-          <p class="muted">Open a campaign to make monsters.</p>
+          <Menu label="Import" align="end" items={[
+            { label: 'Paste a stat block', onselect: togglePaste },
+            { label: 'Import monster (.json / .pdf)', onselect: () => fileInput?.click() },
+          ]} />
+          <input bind:this={fileInput} type="file" accept=".json,.pdf,application/json,application/pdf" hidden onchange={onImport} />
         {/if}
       </div>
+      {#if !app.campaign}<p class="muted">Open a campaign to make monsters.</p>{/if}
+      {#if editing}<p>{app.ready ? 'Open a campaign to make monsters.' : 'Loading…'}</p>{/if}
+      {#if error && index}<p role="alert" class="error">{error}</p>{/if}
+      {#if notice}<p role="status">{notice}</p>{/if}
+      {#if clash}
+        <!-- svelte-ignore a11y_no_noninteractive_element_interactions (Escape bubbles up from the dialog's own buttons) -->
+        <div role="alertdialog" aria-label="Monster already exists" class="note" tabindex="-1" onkeydown={(e) => e.key === 'Escape' && (clash = undefined)}>
+          <p>This campaign already has a monster with this id: “{clash.existing}”. Replace “{clash.existing}” with the imported “{clash.monster.name}”, or keep both?</p>
+          <div class="row">
+            <button type="button" class="danger" onclick={() => resolveClash('replace')}>Replace “{clash.existing}”</button>
+            <button type="button" class="primary" bind:this={keepBtn} onclick={() => resolveClash('keep')}>Keep both</button>
+            <button type="button" onclick={() => (clash = undefined)}>Cancel</button>
+          </div>
+        </div>
+      {/if}
+      {#if pasting && app.campaign}
+        <PasteDialog kind="monster" oncancel={() => (pasting = false)} onread={(draft, notes) => { pasted.monster = { draft: draft as MonsterDef, notes }; pasting = false; navigate('monsters/new?pasted=1'); }} />
+      {/if}
 
-      <div class="row filters">
-        <label class="field grow">Search
-          <input type="search" bind:value={q} autocomplete="off" />
+      <div class="filters">
+        <label class="search">
+          <span class="sr-only">Search</span>
+          <input type="search" bind:value={q} autocomplete="off" placeholder="Search…" />
         </label>
-        <label class="field">CR from
-          <select bind:value={crMin}>
-            <option value="">Any</option>
-            {#each CR_LADDER as c}<option value={c}>{c}</option>{/each}
-          </select>
-        </label>
-        <label class="field">CR to
-          <select bind:value={crMax}>
-            <option value="">Any</option>
-            {#each CR_LADDER as c}<option value={c}>{c}</option>{/each}
-          </select>
-        </label>
-        <label class="field">Type
-          <select bind:value={type}>
-            <option value="">All</option>
-            {#each types as t}<option value={t}>{t}</option>{/each}
-          </select>
-        </label>
-        <label class="field">Size
-          <select bind:value={size}>
-            <option value="">All</option>
-            {#each Object.entries(SIZE_NAMES) as [k, v]}<option value={k}>{v}</option>{/each}
-          </select>
-        </label>
-        <label class="field">Source
-          <select bind:value={source}>
-            <option value="">All</option>
-            {#each sources as s}<option value={s}>{index?.label(s) ?? s}</option>{/each}
-          </select>
-        </label>
+        {#each filters as f (f.id)}
+          <Menu label={f.value ? valueLabel(f) : f.label} ariaLabel={f.value ? `${f.label}: ${valueLabel(f)}` : undefined} active={f.value !== ''} items={menuItems(f)} />
+        {/each}
       </div>
 
-      {#if error}
+      {#if !index && error}
         <p class="error" role="alert">Could not load the monsters: {error}</p>
       {:else if !index}
         <p class="muted">Loading…</p>
       {:else}
-        <p class="muted count" aria-live="polite">{rows.length} {rows.length === 1 ? 'monster' : 'monsters'}</p>
+        <div class="active">
+          {#each filters.filter((f) => f.value) as f (f.id)}
+            <Pill label={valueLabel(f)} onremove={() => f.set('')} />
+          {/each}
+          <span class="muted count" aria-live="polite"><span class="num">{rows.length}</span> {rows.length === 1 ? 'monster' : 'monsters'}</span>
+          {#if anyFilter}<button type="button" class="clear" onclick={clearFilters}>clear</button>{/if}
+        </div>
         <div class="listwrap">
+          <div class="cols head" aria-hidden="true"><span>Name</span><span>CR</span><span>Type</span><span>Source</span></div>
           <VirtualList items={rows} {selected} label="Monsters" onselect={(m) => go(m.id)}>
             {#snippet row(m)}
-              <span class="name">{m.name}</span>
-              <span class="muted small">{sub(m)}</span>
+              <span class="cols">
+                <span class="name">{m.name}</span>
+                <span class="cr"><span class="phone">CR </span><span class="num">{m.cr}</span></span>
+                <span class="kind">{kindOf(m)}</span>
+                <span class="from">{index?.label(m.source) ?? m.source}</span>
+              </span>
             {/snippet}
           </VirtualList>
         </div>
       {/if}
     </section>
 
-    <section class="detail" aria-label="Stat block">
+    {#snippet panel()}
       {#if selected}
-        <button type="button" class="back" onclick={() => go()} {@attach focusOnPhone}>&larr; Back to list</button>
-        <div class="card">
-          <div class="row">
-            {#if app.campaign}
-              <button type="button" onclick={() => navigate(`monsters/new?from=${encodeURIComponent(selected!.id)}`)}>Duplicate</button>
-              {#if isOwn}<button type="button" onclick={() => navigate(`monsters/${selected!.id}/edit`)}>Edit</button>{/if}
-            {/if}
-            <button type="button" onclick={() => exportJson(selected!)}>Export JSON</button>
-            <button type="button" onclick={() => exportPdf(selected!)}>Export PDF</button>
-          </div>
-          <StatBlock monster={selected} {index} />
+        <div class="actions">
+          {#if app.campaign}
+            {#if isOwn}<button type="button" onclick={() => navigate(`monsters/${selected!.id}/edit`)}>Edit</button>{/if}
+            <button type="button" onclick={() => navigate(`monsters/new?from=${encodeURIComponent(selected!.id)}`)}>Duplicate</button>
+          {/if}
+          <Menu label="Export" align="end" items={[
+            { label: 'Export JSON', onselect: () => exportJson(selected!) },
+            { label: 'Export PDF', onselect: () => exportPdf(selected!) },
+          ]} />
         </div>
+        <StatBlock monster={selected} {index} />
       {:else if select && index}
         <p class="muted">That monster is not in this campaign's content.</p>
       {:else}
-        <p class="muted placeholder">Select a monster to read its stat block.</p>
+        <p class="muted">Select a monster to read its stat block.</p>
       {/if}
-    </section>
-  </div>
+    {/snippet}
+  </Workspace>
 {/if}
 
 <style>
-  .layout { display: block; }
-  .file { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin: 0; }
-  .file span { white-space: nowrap; }
-  .filters { align-items: flex-end; }
-  .filters .field { margin: 0.25rem 0; min-width: 0; }
-  .grow { flex: 1 1 12rem; }
-  .count { margin: 0.25rem 0; }
-  .listwrap { height: 60dvh; min-height: 16rem; }
-  .name, .small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.25; }
-  .small { font-size: 0.75rem; }
-  .detail { min-width: 0; }
-  .placeholder { display: none; }
+  .browse {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
 
-  @media (max-width: 767px) {
-    .has-detail .browse { display: none; }
-    .detail:not(:has(.card)) { display: none; }
+  .browse > p {
+    margin: 0;
+  }
+
+  .top {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem;
+    margin-top: 0.6rem;
+  }
+
+  .top h1 {
+    flex: 1;
+    margin: 0;
+  }
+
+  .note {
+    padding: 0.5rem 0.75rem;
+    border-left: 2px solid var(--accent);
+    background: var(--panel);
+    margin: 0.5rem 0;
+  }
+
+  .note p {
+    margin: 0 0 0.5rem;
+  }
+
+  .filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+
+  .search {
+    flex: 1 1 12rem;
+    min-width: 0;
+  }
+
+  .search input {
+    width: 100%;
+  }
+
+  .active {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem;
+    min-height: 1.6rem;
+  }
+
+  .clear {
+    min-height: 0;
+    padding: 0 0.2rem;
+    border: 0;
+    background: none;
+    color: var(--muted);
+    text-decoration: underline;
+    text-underline-offset: 0.15em;
+  }
+
+  .clear:hover:not(:disabled) {
+    background: none;
+    color: var(--text);
+  }
+
+  .listwrap {
+    display: flex;
+    flex-direction: column;
+    height: 65dvh;
+    min-height: 16rem;
+    border-top: 1px solid var(--line);
+  }
+
+  .listwrap :global([role='listbox']) {
+    flex: 1;
+  }
+
+  /* Phones: name on the first line, "CR · type · source" under it. Desktop: four columns under a header. */
+  .cols {
+    display: grid;
+    grid-template-columns: auto auto minmax(0, 1fr);
+    grid-template-areas: 'name name name' 'cr kind from';
+    column-gap: 0.6rem;
+    line-height: 1.25;
+  }
+
+  .cols > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .name {
+    grid-area: name;
+  }
+
+  .cr,
+  .kind,
+  .from {
+    color: var(--muted);
+    font-size: 0.8rem;
+  }
+
+  .cr {
+    grid-area: cr;
+  }
+
+  .kind {
+    grid-area: kind;
+  }
+
+  .from {
+    grid-area: from;
+    text-align: right;
+  }
+
+  .head {
+    display: none;
+  }
+
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-bottom: 0.5rem;
   }
 
   @media (min-width: 768px) {
-    .layout { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 1rem; align-items: start; }
-    .listwrap { height: calc(100dvh - 17rem); }
-    .detail { position: sticky; top: 0.5rem; max-height: calc(100dvh - 1rem); overflow-y: auto; }
-    .detail .card { margin-top: 0; }
-    .placeholder { display: block; }
-    .back { display: none; }
+    .browse {
+      height: calc(100dvh - var(--topbar-h) - 1.75rem);
+    }
+
+    .listwrap {
+      flex: 1;
+      height: auto;
+    }
+
+    .cols {
+      grid-template-columns: minmax(0, 1.6fr) 3.5rem minmax(0, 1.2fr) minmax(0, 1fr);
+      grid-template-areas: 'name cr kind from';
+      align-items: baseline;
+    }
+
+    .cr,
+    .kind,
+    .from {
+      font-size: 0.9rem;
+    }
+
+    .cr {
+      color: var(--text);
+    }
+
+    .from {
+      text-align: left;
+    }
+
+    .phone {
+      display: none;
+    }
+
+    .head {
+      display: grid;
+      padding: 0.35rem 0.75rem;
+      overflow: hidden;
+      scrollbar-gutter: stable;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .head > span {
+      color: var(--label);
+      font-size: 0.72rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
   }
 </style>

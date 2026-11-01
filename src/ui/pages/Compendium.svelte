@@ -8,6 +8,10 @@
   import { soundItem } from '../../lib/items/homebrew.ts';
   import { displayItem } from '../../lib/items/playerView.ts';
   import EntityDetail from '../EntityDetail.svelte';
+  import Menu, { type MenuItem } from '../kit/Menu.svelte';
+  import Pill from '../kit/Pill.svelte';
+  import Tabs from '../kit/Tabs.svelte';
+  import Workspace from '../kit/Workspace.svelte';
   import VersionToggle from '../VersionToggle.svelte';
   import VirtualList from '../VirtualList.svelte';
   import { versions } from '../creator/labels.ts';
@@ -73,15 +77,53 @@
   const spellClasses = $derived(tab === 'spell' ? [...new Set(pool.flatMap((e) => (e.kind === 'spell' ? e.classes : [])))].sort() : []);
   const itemTypes = $derived(tab === 'item' ? [...new Set(pool.flatMap((e) => (e.kind === 'item' ? [e.type] : [])))].sort() : []);
 
-  const shown = $derived(
-    found.filter((raw) => {
-      const e = look(raw); // rows keep the real record: its id is what the detail opens
-      if (source && e.source !== source) return false;
-      if (e.kind === 'spell') return (level === '' || e.level === +level) && (!cls || e.classes.includes(cls));
-      if (e.kind === 'item') return (!itemType || e.type === itemType) && (!rarity || e.rarity === rarity) && (!magic || e.magic === (magic === 'magic'));
-      return true;
-    }),
-  );
+  type Facet = 'source' | 'level' | 'cls' | 'itemType' | 'rarity' | 'magic';
+  // The filters, all but `skip`: a pull-down counts what each of its options would show with the other filters kept.
+  function passes(raw: Entity, skip?: Facet): boolean {
+    const e = look(raw); // rows keep the real record: its id is what the detail opens
+    if (skip !== 'source' && source && e.source !== source) return false;
+    if (e.kind === 'spell') return (skip === 'level' || level === '' || e.level === +level) && (skip === 'cls' || !cls || e.classes.includes(cls));
+    if (e.kind === 'item') return (skip === 'itemType' || !itemType || e.type === itemType) && (skip === 'rarity' || !rarity || e.rarity === rarity) && (skip === 'magic' || !magic || e.magic === (magic === 'magic'));
+    return true;
+  }
+  const shown = $derived(found.filter((raw) => passes(raw)));
+
+  function counts(skip: Facet, keys: (e: Entity) => readonly (string | number | undefined)[]): Map<string, number> {
+    const m = new Map<string, number>();
+    for (const raw of found) {
+      if (!passes(raw, skip)) continue;
+      for (const k of keys(look(raw))) if (k !== undefined) m.set(String(k), (m.get(String(k)) ?? 0) + 1);
+    }
+    return m;
+  }
+
+  // The pull-down filters of this tab: the value, how to set it, and the options with their counts.
+  type Filter = { id: Facet; label: string; value: string; set: (v: string) => void; options: { value: string; label: string; count: number }[] };
+  const filters = $derived.by<Filter[]>(() => {
+    const opts = (vals: string[], label: (v: string) => string, c: Map<string, number>) => vals.map((v) => ({ value: v, label: label(v), count: c.get(v) ?? 0 }));
+    const out: Filter[] = [];
+    if (tab === 'spell') {
+      out.push(
+        { id: 'level', label: 'Level', value: level, set: (v) => (level = v), options: opts(['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'], (n) => (n === '0' ? 'Cantrip' : `Level ${n}`), counts('level', (e) => [e.kind === 'spell' ? e.level : undefined])) },
+        { id: 'cls', label: 'Class', value: cls, set: (v) => (cls = v), options: opts(spellClasses, cap, counts('cls', (e) => (e.kind === 'spell' ? e.classes : []))) },
+      );
+    } else if (tab === 'item') {
+      out.push(
+        { id: 'itemType', label: 'Type', value: itemType, set: (v) => (itemType = v), options: opts(itemTypes, cap, counts('itemType', (e) => [e.kind === 'item' ? e.type : undefined])) },
+        { id: 'rarity', label: 'Rarity', value: rarity, set: (v) => (rarity = v), options: opts(rarities, cap, counts('rarity', (e) => [e.kind === 'item' ? e.rarity : undefined])) },
+        { id: 'magic', label: 'Magic', value: magic, set: (v) => (magic = v), options: opts(['magic', 'mundane'], cap, counts('magic', (e) => [e.kind === 'item' ? (e.magic ? 'magic' : 'mundane') : undefined])) },
+      );
+    }
+    out.push({ id: 'source', label: 'Source', value: source, set: (v) => (source = v), options: opts(sources, (s) => index?.label(s) ?? s, counts('source', (e) => [e.source])) });
+    return out;
+  });
+  const valueLabel = (f: Filter) => f.options.find((o) => o.value === f.value)?.label ?? f.value;
+  const menuItems = (f: Filter): MenuItem[] => [
+    { label: `Any ${f.label.toLowerCase()}`, checked: f.value === '', onselect: () => f.set('') },
+    ...f.options.map((o) => ({ label: o.label, count: o.count, checked: f.value === o.value, onselect: () => f.set(o.value) })),
+  ];
+  const anyFilter = $derived(filters.some((f) => f.value !== ''));
+  const clearFilters = () => { source = level = cls = itemType = rarity = magic = ''; };
 
   // Subclasses and subraces are listed indented under their parent, never as flat rows. A
   // child that matches the filters brings its parent along so it always has context.
@@ -117,78 +159,35 @@
   const go = (id?: string) => { location.hash = `#/compendium?kind=${tab}` + (id ? `&id=${encodeURIComponent(id)}` : ''); };
 
   const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
-  function sub(e: Entity): string {
-    const what =
-      e.kind === 'spell' ? (e.level === 0 ? `${cap(e.school)} cantrip` : `Level ${e.level} ${e.school}`)
+  // A row's second and third columns (on a phone, its second line): what it is, and where it is from.
+  function what(e: Entity): string {
+    return e.kind === 'spell' ? (e.level === 0 ? `${cap(e.school)} cantrip` : `Level ${e.level} ${e.school}`)
       : e.kind === 'item' ? [cap(e.type), e.magic && e.rarity].filter(Boolean).join(', ')
       : e.kind === 'class' ? `d${e.hitDie}`
       : e.kind === 'subclass' ? 'Subclass'
       : e.kind === 'subrace' ? 'Subrace'
       : '';
-    const all = siblings(e);
-    const from = all.length > 1 ? `${all.length} versions: ${all.map((v) => v.source).join(', ')}` : (index?.label(e.source) ?? e.source);
-    return [what, from].filter(Boolean).join(' · ');
   }
-
-  // On a phone the detail replaces the list: put focus on its back button so keyboard users are not left behind.
-  const focusOnPhone = (node: HTMLElement) => { if (matchMedia('(max-width: 767px)').matches) node.focus(); };
+  function from(e: Entity): string {
+    const all = siblings(e);
+    return all.length > 1 ? `${all.length} versions: ${all.map((v) => v.source).join(', ')}` : (index?.label(e.source) ?? e.source);
+  }
+  const whatHead = $derived(({ spell: 'Level', item: 'Type', class: 'Hit die' } as Record<string, string>)[tab] ?? 'Kind');
 </script>
 
-<h1>Compendium</h1>
-
-<div class="layout" class:has-detail={!!selected}>
+<Workspace panelLabel="Details" open={!!select && !!index} onclose={() => go()}>
   <section class="browse" aria-label="Browse">
-    <div class="row tabs" role="group" aria-label="Kind">
-      {#each tabs as t}
-        <button type="button" aria-pressed={tab === t.id} class:primary={tab === t.id} onclick={() => reset(t.id)}>{t.label}</button>
-      {/each}
-    </div>
+    <h1>Compendium</h1>
+    <Tabs label="Kind" {tabs} bind:value={tab} onchange={reset} />
 
-    <div class="row filters">
-      <label class="field grow">Search
-        <input type="search" bind:value={q} autocomplete="off" />
+    <div class="filters">
+      <label class="search">
+        <span class="sr-only">Search</span>
+        <input type="search" bind:value={q} autocomplete="off" placeholder="Search…" />
       </label>
-      <label class="field">Source
-        <select bind:value={source}>
-          <option value="">All</option>
-          {#each sources as s}<option value={s}>{index?.label(s) ?? s}</option>{/each}
-        </select>
-      </label>
-      {#if tab === 'spell'}
-        <label class="field">Level
-          <select bind:value={level}>
-            <option value="">All</option>
-            <option value="0">Cantrip</option>
-            {#each [1, 2, 3, 4, 5, 6, 7, 8, 9] as n}<option value={String(n)}>{n}</option>{/each}
-          </select>
-        </label>
-        <label class="field">Class
-          <select bind:value={cls}>
-            <option value="">All</option>
-            {#each spellClasses as c}<option value={c}>{cap(c)}</option>{/each}
-          </select>
-        </label>
-      {:else if tab === 'item'}
-        <label class="field">Type
-          <select bind:value={itemType}>
-            <option value="">All</option>
-            {#each itemTypes as t}<option value={t}>{cap(t)}</option>{/each}
-          </select>
-        </label>
-        <label class="field">Rarity
-          <select bind:value={rarity}>
-            <option value="">All</option>
-            {#each rarities as r}<option value={r}>{cap(r)}</option>{/each}
-          </select>
-        </label>
-        <label class="field">Magic
-          <select bind:value={magic}>
-            <option value="">All</option>
-            <option value="magic">Magic</option>
-            <option value="mundane">Mundane</option>
-          </select>
-        </label>
-      {/if}
+      {#each filters as f (f.id)}
+        <Menu label={f.value ? valueLabel(f) : f.label} ariaLabel={f.value ? `${f.label}: ${valueLabel(f)}` : undefined} active={f.value !== ''} items={menuItems(f)} />
+      {/each}
     </div>
 
     {#if error}
@@ -196,61 +195,179 @@
     {:else if !index}
       <p class="muted">Loading…</p>
     {:else}
-      <p class="muted count" aria-live="polite">{rows.length} {rows.length === 1 ? 'entry' : 'entries'}</p>
+      <div class="active">
+        {#each filters.filter((f) => f.value) as f (f.id)}
+          <Pill label={valueLabel(f)} onremove={() => f.set('')} />
+        {/each}
+        <span class="muted count" aria-live="polite"><span class="num">{rows.length}</span> {rows.length === 1 ? 'entry' : 'entries'}</span>
+        {#if anyFilter}<button type="button" class="clear" onclick={clearFilters}>clear</button>{/if}
+      </div>
       <div class="listwrap">
+        <div class="cols head" aria-hidden="true"><span>Name</span><span>{whatHead}</span><span>Source</span></div>
         <VirtualList items={rows} {selected} label={tabs.find((t) => t.id === tab)?.label ?? 'Entries'} onselect={(e) => go(e.id)}>
           {#snippet row(raw)}
             {@const e = raw.kind === 'item' ? displayItem(raw, app.viewer) : raw}
-            <span class="name" class:child={!!parentOf(e)}>{e.name}</span>
-            <span class="muted small" class:child={!!parentOf(e)}>{sub(e)}</span>
+            <span class="cols">
+              <span class="name" class:child={!!parentOf(e)}>{e.name}</span>
+              <span class="what" class:child={!!parentOf(e)}>{what(e)}</span>
+              <span class="from">{from(e)}</span>
+            </span>
           {/snippet}
         </VirtualList>
       </div>
     {/if}
   </section>
 
-  <section class="detail" aria-label="Details">
+  {#snippet panel()}
     {#if selected}
-      <button type="button" class="back" onclick={() => go()} {@attach focusOnPhone}>&larr; Back to list</button>
-      <div class="card">
-        {#if siblings(selected).length > 1}
-          <VersionToggle versions={siblings(selected)} value={selected.id} label={(s) => index?.label(s) ?? s} onchange={(id) => go(id)} />
-        {/if}
-        <EntityDetail entity={selected} {index} />
-      </div>
+      {#if siblings(selected).length > 1}
+        <VersionToggle versions={siblings(selected)} value={selected.id} label={(s) => index?.label(s) ?? s} onchange={(id) => go(id)} />
+      {/if}
+      <EntityDetail entity={selected} {index} />
     {:else if select && index}
       <p class="muted">That entry is not in this campaign's content.</p>
     {:else}
-      <p class="muted placeholder">Select an entry to read it.</p>
+      <p class="muted">Select an entry to read it.</p>
     {/if}
-  </section>
-</div>
+  {/snippet}
+</Workspace>
 
 <style>
-  .layout { display: block; }
-  .tabs { margin-bottom: 0.5rem; }
-  .filters { align-items: flex-end; }
-  .filters .field { margin: 0.25rem 0; min-width: 0; }
-  .grow { flex: 1 1 12rem; }
-  .count { margin: 0.25rem 0; }
-  .listwrap { height: 60dvh; min-height: 16rem; }
-  .name, .small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.25; }
-  .small { font-size: 0.75rem; }
-  .child { padding-left: 1.25rem; }
-  .detail { min-width: 0; }
-  .placeholder { display: none; }
+  .browse {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
 
-  @media (max-width: 767px) {
-    .has-detail .browse { display: none; }
-    .detail:not(:has(.card)) { display: none; }
+  h1 {
+    margin: 0.6rem 0 0;
+  }
+
+  .filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+
+  .search {
+    flex: 1 1 12rem;
+    min-width: 0;
+  }
+
+  .search input {
+    width: 100%;
+  }
+
+  .active {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem;
+    min-height: 1.6rem;
+  }
+
+  .clear {
+    min-height: 0;
+    padding: 0 0.2rem;
+    border: 0;
+    background: none;
+    color: var(--muted);
+    text-decoration: underline;
+    text-underline-offset: 0.15em;
+  }
+
+  .clear:hover:not(:disabled) {
+    background: none;
+    color: var(--text);
+  }
+
+  .listwrap {
+    display: flex;
+    flex-direction: column;
+    height: 65dvh;
+    min-height: 16rem;
+    border-top: 1px solid var(--line);
+  }
+
+  .listwrap :global([role='listbox']) {
+    flex: 1;
+  }
+
+  /* One row: name, what, source. The header reserves the list's scrollbar gutter so the columns line up. */
+  .cols {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: 'name name' 'what from';
+    column-gap: 0.75rem;
+    line-height: 1.25;
+  }
+
+  .cols > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .name {
+    grid-area: name;
+  }
+
+  .what,
+  .from {
+    color: var(--muted);
+    font-size: 0.8rem;
+  }
+
+  .what {
+    grid-area: what;
+  }
+
+  .from {
+    grid-area: from;
+  }
+
+  .child {
+    padding-left: 1.25rem;
+  }
+
+  .head {
+    display: none;
   }
 
   @media (min-width: 768px) {
-    .layout { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 1rem; align-items: start; }
-    .listwrap { height: calc(100dvh - 17rem); }
-    .detail { position: sticky; top: 0.5rem; max-height: calc(100dvh - 1rem); overflow-y: auto; }
-    .detail .card { margin-top: 0; }
-    .placeholder { display: block; }
-    .back { display: none; }
+    .browse {
+      height: calc(100dvh - var(--topbar-h) - 1.75rem);
+    }
+
+    .listwrap {
+      flex: 1;
+      height: auto;
+    }
+
+    .cols {
+      grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1fr);
+      grid-template-areas: 'name what from';
+      align-items: baseline;
+    }
+
+    .what,
+    .from {
+      font-size: 0.9rem;
+    }
+
+    .head {
+      display: grid;
+      padding: 0.35rem 0.75rem;
+      overflow: hidden;
+      scrollbar-gutter: stable;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .head > span {
+      color: var(--label);
+      font-size: 0.72rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
   }
 </style>

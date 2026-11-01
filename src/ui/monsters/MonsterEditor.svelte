@@ -11,6 +11,7 @@
   import { app } from '../../lib/store.svelte.ts';
   import type { Ability, MonsterDef, RichText, Size, Skill, StoredMonster, Trait } from '../../lib/types.ts';
   import { ABILITY_NAMES, message, signed, titleCase } from '../creator/labels.ts';
+  import Drawer from '../kit/Drawer.svelte';
   import TraitListEditor from './TraitListEditor.svelte';
 
   /**
@@ -172,10 +173,13 @@
 
 <svelte:window onbeforeunload={(e) => { if (dirty) e.preventDefault(); }} />
 
-<p><a href={saved ? `#/monsters?id=${encodeURIComponent(m.id)}` : '#/monsters'}>Back to monsters</a></p>
+<div class="editor">
+<p class="back"><a href={saved ? `#/monsters?id=${encodeURIComponent(m.id)}` : '#/monsters'}>Back to monsters</a></p>
 <h1>{saved ? m.name || 'Monster' : 'New monster'}</h1>
 
-<div class="card">
+<!-- Folded sections show what they hold in one line; a problem() message names the field to open. -->
+<Drawer title="Basics" open>
+  {#snippet summary()}{m.name.trim() || 'Unnamed'} · {SIZE_NAMES[size]} {m.type.trim()}{/snippet}
   <div class="field"><label for="mo-name">Name</label><input id="mo-name" type="text" autocomplete="off" bind:value={m.name} /></div>
   <div class="row">
     <div class="field">
@@ -191,10 +195,10 @@
       <datalist id="mo-aligns">{#each [...ALIGNMENTS.map((a) => a.toLowerCase()), 'unaligned', 'any alignment'] as a}<option value={a}></option>{/each}</datalist>
     </div>
   </div>
-</div>
+</Drawer>
 
-<h2>Defense</h2>
-<div class="card">
+<Drawer title="Defense">
+  {#snippet summary()}AC <span class="num">{assembled.ac.map((a) => a.value).join(', ')}</span> · HP <span class="num">{'average' in assembled.hp ? assembled.hp.average : 'special'}</span> · <span class="num">{speeds.walk || 0}</span> ft{/snippet}
   <fieldset>
     <legend>Armor class</legend>
     {#each m.ac as a, i}
@@ -238,10 +242,10 @@
   {#each [['vulnerable', 'Damage vulnerabilities'], ['resist', 'Damage resistances'], ['immune', 'Damage immunities'], ['conditionImmune', 'Condition immunities']] as const as [k, label]}
     <div class="field"><label for="mo-{k}">{label} (comma separated)</label><input id="mo-{k}" type="text" autocomplete="off" bind:value={lists[k]} /></div>
   {/each}
-</div>
+</Drawer>
 
-<h2>Abilities</h2>
-<div class="card">
+<Drawer title="Abilities">
+  {#snippet summary()}{#each ABILITIES as a, i}{i ? ' · ' : ''}{a.toUpperCase()} <span class="num">{m.scores[a]}</span>{/each}{/snippet}
   <div class="row">
     {#each ABILITIES as a}
       <div class="field narrow"><label for="mo-{a}">{ABILITY_NAMES[a]}</label><input id="mo-{a}" type="number" min="1" max="30" bind:value={m.scores[a]} /></div>
@@ -271,10 +275,10 @@
   <div class="field"><label for="mo-senses">Senses (comma separated)</label><input id="mo-senses" type="text" autocomplete="off" placeholder="darkvision 60 ft." bind:value={lists.senses} /></div>
   <div class="field narrow"><label for="mo-passive">Passive Perception</label><input id="mo-passive" type="text" inputmode="numeric" autocomplete="off" placeholder={String(passiveDefault(assembled))} bind:value={passive} /></div>
   <div class="field"><label for="mo-langs">Languages (comma separated)</label><input id="mo-langs" type="text" autocomplete="off" bind:value={lists.languages} /></div>
-</div>
+</Drawer>
 
-<h2>Challenge</h2>
-<div class="card">
+<Drawer title="Challenge">
+  {#snippet summary()}CR <span class="num">{m.cr}</span> · <span class="num">{(monsterXp(m) ?? 0).toLocaleString('en-US')}</span> XP{#if showCr} · suggested <span class="num">{suggestion.cr}</span>{/if}{/snippet}
   <div class="row">
     <div class="field">
       <label for="mo-cr">Challenge rating</label>
@@ -297,9 +301,10 @@
       <p class="muted">Hit points and armor class come from above; damage and attack start from the actions.</p>
     </section>
   {/if}
-</div>
+</Drawer>
 
-<h2>Traits and actions</h2>
+<Drawer title="Traits and actions">
+  {#snippet summary()}{SECTIONS.map(([k, label]) => `${m[k].length} ${label.toLowerCase()}`).join(' · ')}{/snippet}
 <p class="muted">Text: blank line between paragraphs, "- " for list items, **bold** and *italic*. Write attacks as in the book (“+4 to hit … Hit: 5 (1d6 + 2) slashing damage”) so they roll from the stat block.</p>
 {#each SECTIONS as [k, label]}
   <TraitListEditor id="mo-{k}" {label} traits={m[k]} onchange={(ts) => setTraits(k, ts)} />
@@ -314,31 +319,39 @@
 <div class="field"><label for="mo-mintro">Mythic actions intro (optional)</label><textarea id="mo-mintro" rows="2" bind:value={texts.mythicIntro}></textarea></div>
 <div class="field"><label for="mo-lair">Lair actions</label><textarea id="mo-lair" rows="4" bind:value={texts.lair}></textarea></div>
 <div class="field"><label for="mo-regional">Regional effects</label><textarea id="mo-regional" rows="4" bind:value={texts.regional}></textarea></div>
+</Drawer>
 
 {#if error}<p role="alert" class="error">{error}</p>{/if}
 {#if notice && !dirty}<p role="status">{notice}</p>{/if}
-<div class="row">
+<div class="row savebar">
   <button type="button" class="primary" disabled={saving} onclick={save}>Save monster</button>
-  {#if saved}<button type="button" class="danger" onclick={askDelete}>Delete</button>{/if}
   {#if dirty}<span class="muted">Unsaved changes</span>{/if}
+  {#if saved}<button type="button" class="danger end" onclick={askDelete}>Delete</button>{/if}
 </div>
 {#if confirmingDelete}
-  <div role="alertdialog" aria-label="Confirm delete" aria-describedby="mo-del-msg" class="row">
+  <div role="alertdialog" aria-label="Confirm delete" aria-describedby="mo-del-msg" class="row confirm">
     <p id="mo-del-msg">Delete “{m.name}”? This cannot be undone.</p>
     <button type="button" class="danger" bind:this={delBtn} onclick={remove}>Delete monster</button>
     <button type="button" onclick={() => (confirmingDelete = false)}>Keep it</button>
   </div>
 {/if}
+</div>
 
 <style>
-  fieldset { border: 1px solid var(--border); border-radius: 0.5rem; margin: 0.75rem 0; min-width: 0; }
+  .editor { max-width: 60rem; }
+  .back { margin: 0.6rem 0 0; }
+  h1 { margin-top: 0.4rem; }
+  /* fieldsets inside a drawer: a caption and a hairline, not a box */
+  fieldset { border: 0; border-top: 1px solid var(--line); border-radius: 0; margin: 0.75rem 0; padding: 0.25rem 0 0; min-width: 0; }
+  legend { padding: 0 0.4rem 0 0; }
+  h3 { color: var(--label); font-size: 0.72rem; font-weight: 500; letter-spacing: 0.12em; text-transform: uppercase; margin: 1rem 0 0.4rem; }
   .narrow input { width: 7rem; }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: 0.25rem 1rem; }
   .bonus { display: grid; grid-template-columns: 1fr 4rem auto; align-items: center; gap: 0.4rem; }
-  .bonus input { width: 4rem; }
-  .suggest { border-top: 1px solid var(--border); margin-top: 0.5rem; }
-  textarea {
-    font: inherit; color: inherit; background: var(--surface); border: 1px solid var(--border); border-radius: 0.35rem;
-    padding: 0.4rem 0.7rem; width: 100%; box-sizing: border-box;
-  }
+  .bonus input { width: 4rem; font-family: var(--mono); }
+  .suggest { border-top: 1px solid var(--line); margin-top: 0.5rem; }
+  .savebar { border-top: 1px solid var(--line); padding-top: 0.75rem; margin-top: 0.25rem; }
+  .end { margin-left: auto; }
+  .confirm { border-left: 2px solid var(--danger); padding: 0.25rem 0.75rem; margin: 0.75rem 0; }
+  .confirm p { flex: 1 1 100%; margin: 0; }
 </style>

@@ -37,6 +37,6 @@
 
 <style>
   .scroll { overflow-x: auto; }
-  table { border-collapse: collapse; }
-  th, td { border: 1px solid currentColor; padding: 0.2em 0.5em; text-align: left; }
+  table { border-collapse: collapse; margin: 0.5rem 0; }
+  th, td { padding: 0.25em 0.5em; text-align: left; }
 </style>

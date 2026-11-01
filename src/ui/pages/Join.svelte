@@ -6,6 +6,7 @@
   import NetLog from '../sync/NetLog.svelte';
   import RelaySettings from '../sync/RelaySettings.svelte';
   import RetryNow from '../sync/RetryNow.svelte';
+  import SettingsGroup from '../SettingsGroup.svelte';
 
   let { params }: { params: { code?: string } } = $props();
 
@@ -51,90 +52,133 @@
 <h1>Join a campaign</h1>
 
 {#if !params.code}
-  <form onsubmit={(e) => { e.preventDefault(); if (typedCode) navigate(`join/${typedCode}`); }}>
-    <div class="field">
-      <label for="join-code">Join code or link from your DM</label>
-      <input id="join-code" bind:value={typed} autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="ABCD EFGH JKMN" aria-invalid={typed && !typedCode ? 'true' : undefined} />
-    </div>
-    {#if typed && !typedCode}<p class="muted">A join code has 12 letters and digits.</p>{/if}
-    <button class="primary" type="submit" disabled={!typedCode}>Continue</button>
-  </form>
+  <SettingsGroup title="Join code">
+    <form onsubmit={(e) => { e.preventDefault(); if (typedCode) navigate(`join/${typedCode}`); }}>
+      <div class="field">
+        <label for="join-code">Join code or link from your DM</label>
+        <input id="join-code" class="code-in" bind:value={typed} autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="ABCD EFGH JKMN" aria-invalid={typed && !typedCode ? 'true' : undefined} />
+      </div>
+      {#if typed && !typedCode}<p class="muted">A join code has 12 letters and digits.</p>{/if}
+      <button class="primary" type="submit" disabled={!typedCode}>Continue</button>
+    </form>
+  </SettingsGroup>
 {:else if !valid}
   <p role="alert" class="error">This join link is not complete. A join code has 12 letters and digits; ask your DM for the link again.</p>
 {:else if !app.ready}
   <p class="muted">Loading…</p>
 {:else if !started}
-  <p>Join code <strong class="code">{code}</strong></p>
-  {#if joined}
-    <div class="card">
-      <p>You have already joined <strong>{joined.name}</strong> as {joined.sync?.playerId}.</p>
-      <button class="primary" onclick={open}>Open {joined.name}</button>
-    </div>
-  {/if}
-  <form onsubmit={submit}>
-    <fieldset>
-      <legend>How are you joining?</legend>
-      <label class="check"><input type="radio" name="mode" value="new" bind:group={mode} /> Join as a new player</label>
-      <label class="check"><input type="radio" name="mode" value="id" bind:group={mode} /> I already have a player ID</label>
-    </fieldset>
-    {#if mode === 'new'}
-      <div class="field">
-        <label for="join-name">Display name (optional)</label>
-        <input id="join-name" bind:value={name} maxlength="60" autocomplete="nickname" />
-      </div>
-    {:else}
-      <div class="field">
-        <label for="join-id">Player ID (a letter and a digit, such as A1)</label>
-        <input id="join-id" bind:value={pid} maxlength="2" autocapitalize="characters" autocomplete="off" spellcheck="false" aria-invalid={pid && !pidOk ? 'true' : undefined} />
+  <SettingsGroup title="Join">
+    <p>Join code <strong class="code">{code}</strong></p>
+    {#if joined}
+      <div class="note">
+        <p>You have already joined <strong>{joined.name}</strong> as {joined.sync?.playerId}.</p>
+        <button class="primary" onclick={open}>Open {joined.name}</button>
       </div>
     {/if}
-    <button class="primary" type="submit" disabled={mode === 'id' && !pidOk}>Join</button>
-  </form>
-  <p class="muted">Players can join from anywhere over the internet. A few networks (some mobile carriers, schools and workplaces) block direct connections; if joining fails, try another network.</p>
-  <RelaySettings />
+    <form onsubmit={submit}>
+      <fieldset>
+        <legend>How are you joining?</legend>
+        <label class="check"><input type="radio" name="mode" value="new" bind:group={mode} /> Join as a new player</label>
+        <label class="check"><input type="radio" name="mode" value="id" bind:group={mode} /> I already have a player ID</label>
+      </fieldset>
+      {#if mode === 'new'}
+        <div class="field">
+          <label for="join-name">Display name (optional)</label>
+          <input id="join-name" bind:value={name} maxlength="60" autocomplete="nickname" />
+        </div>
+      {:else}
+        <div class="field">
+          <label for="join-id">Player ID (a letter and a digit, such as A1)</label>
+          <input id="join-id" class="code-in" bind:value={pid} maxlength="2" autocapitalize="characters" autocomplete="off" spellcheck="false" aria-invalid={pid && !pidOk ? 'true' : undefined} />
+        </div>
+      {/if}
+      <button class="primary" type="submit" disabled={mode === 'id' && !pidOk}>Join</button>
+    </form>
+  </SettingsGroup>
+  <SettingsGroup title="Connection">
+    <p class="muted">Players can join from anywhere over the internet. A few networks (some mobile carriers, schools and workplaces) block direct connections; if joining fails, try another network.</p>
+    <RelaySettings />
+  </SettingsGroup>
 {:else}
-  {#if session.confirm}
-    <div role="alertdialog" aria-label="Confirm joining" class="card">
-      <p>{session.confirm.text}</p>
-      <div class="row">
-        <button class="danger" onclick={() => session.confirm?.answer(true)}>Join anyway</button>
-        <button class="primary" onclick={() => session.confirm?.answer(false)}>Cancel</button>
+  <SettingsGroup title="Joining">
+    {#if session.confirm}
+      <div role="alertdialog" aria-label="Confirm joining" class="note warn">
+        <p>{session.confirm.text}</p>
+        <div class="row">
+          <button class="danger" onclick={() => session.confirm?.answer(true)}>Join anyway</button>
+          <button class="primary" onclick={() => session.confirm?.answer(false)}>Cancel</button>
+        </div>
       </div>
-    </div>
-  {/if}
-  <p role="status">
-    {#if session.status === 'connecting'}Connecting to your DM…
-    {:else if session.status === 'offline'}Could not reach your DM yet. {session.reason} <RetryNow />
-    {:else if session.status === 'rejected'}Not joined. {reasons[session.reason] ?? session.reason}
-    {:else if session.status === 'online'}Joined as {session.role === 'player' ? app.campaigns.find((c) => c.id === session.campaignId)?.sync?.playerId : ''}.
     {/if}
-  </p>
-  {#if packs && packs.total}
-    <label class="field">
-      <span>Downloading books: {packs.done} of {packs.total}</span>
-      <progress value={packs.totalBytes ? packs.bytes : packs.done} max={packs.totalBytes || packs.total}></progress>
-    </label>
-  {/if}
-  {#if packs?.error}<p role="alert" class="error">{packs.error}</p>{/if}
-  {#if session.status === 'rejected'}<button onclick={() => (started = false)}>Back</button>{/if}
-  <RelaySettings />
-  <NetLog />
+    <p role="status">
+      {#if session.status === 'connecting'}Connecting to your DM…
+      {:else if session.status === 'offline'}Could not reach your DM yet. {session.reason} <RetryNow />
+      {:else if session.status === 'rejected'}Not joined. {reasons[session.reason] ?? session.reason}
+      {:else if session.status === 'online'}Joined as {session.role === 'player' ? app.campaigns.find((c) => c.id === session.campaignId)?.sync?.playerId : ''}.
+      {/if}
+    </p>
+    {#if packs && packs.total}
+      <label class="field">
+        <span>Downloading books: <span class="num">{packs.done}</span> of <span class="num">{packs.total}</span></span>
+        <progress value={packs.totalBytes ? packs.bytes : packs.done} max={packs.totalBytes || packs.total}></progress>
+      </label>
+    {/if}
+    {#if packs?.error}<p role="alert" class="error">{packs.error}</p>{/if}
+    {#if session.status === 'rejected'}<button onclick={() => (started = false)}>Back</button>{/if}
+  </SettingsGroup>
+  <SettingsGroup title="Connection">
+    <RelaySettings />
+    <NetLog />
+  </SettingsGroup>
 {/if}
 
 <style>
   .code {
-    font-family: ui-monospace, monospace;
+    font-family: var(--mono);
     letter-spacing: 0.1em;
+    color: var(--text-strong);
+  }
+
+  .code-in {
+    font-family: var(--mono);
+    letter-spacing: 0.08em;
+    max-width: 20rem;
+  }
+
+  #join-name {
+    max-width: 24rem;
   }
 
   fieldset {
-    border: 1px solid var(--border);
-    border-radius: 0.5rem;
+    border: 0;
+    padding: 0;
     margin: 0.75rem 0;
     min-width: 0;
   }
 
+  legend {
+    padding: 0;
+    margin-bottom: 0.25rem;
+  }
+
+  .note {
+    border-left: 2px solid var(--accent);
+    background: var(--panel);
+    padding: 0.5rem 0.75rem;
+    margin: 0.75rem 0;
+  }
+
+  .note.warn {
+    border-left-color: var(--danger);
+  }
+
+  .note p {
+    margin: 0 0 0.5rem;
+  }
+
   progress {
     width: 100%;
+    max-width: 30rem;
+    accent-color: var(--accent);
   }
 </style>

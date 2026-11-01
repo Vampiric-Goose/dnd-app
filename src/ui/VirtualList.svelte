@@ -93,13 +93,16 @@
 </div>
 
 <style>
+  /* Hairline rows on the page ground; the selected row uses the kit's selected style (raised + accent bar). */
   .list {
     overflow-y: auto;
     height: 100%;
     min-height: 0;
-    border: 1px solid var(--border);
-    border-radius: 0.35rem;
-    background: var(--surface);
+    scrollbar-gutter: stable; /* a header above the list can reserve the same gutter and line up its columns */
+  }
+
+  .list:focus-visible {
+    outline-offset: -2px;
   }
 
   .spacer {
@@ -115,13 +118,20 @@
     display: flex;
     flex-direction: column;
     justify-content: center;
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid var(--line);
     cursor: pointer;
     overflow: hidden;
   }
 
-  .selected {
-    background: color-mix(in srgb, var(--accent) 18%, transparent);
+  .item:hover {
+    background: color-mix(in srgb, var(--raised) 55%, transparent);
+  }
+
+  .selected,
+  .selected:hover {
+    background: var(--raised);
+    box-shadow: inset 2px 0 var(--accent);
+    color: var(--text-strong);
   }
 
   .list:focus-visible .active {

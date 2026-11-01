@@ -187,11 +187,12 @@
 
 <style>
   h2 { margin: 0.25rem 0 0; }
+  h4 { color: var(--text-strong); }
   .sub { margin: 0 0 0.75rem; }
-  .facts { display: grid; grid-template-columns: max-content 1fr; gap: 0.15rem 0.75rem; margin: 0 0 0.75rem; }
-  dt { font-weight: 600; }
+  .facts { display: grid; grid-template-columns: max-content 1fr; gap: 0.2rem 0.75rem; margin: 0 0 0.75rem; }
+  dt { color: var(--label); font-size: 0.72rem; letter-spacing: 0.12em; text-transform: uppercase; padding-top: 0.2em; }
   dd { margin: 0; }
-  table { border-collapse: collapse; margin: 0.5rem 0; }
-  th, td { border: 1px solid var(--border); padding: 0.2em 0.5em; text-align: left; vertical-align: top; }
+  table { margin: 0.5rem 0; }
+  th, td { vertical-align: top; }
   .scroll { overflow-x: auto; }
 </style>

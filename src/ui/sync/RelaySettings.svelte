@@ -1,6 +1,7 @@
 <script lang="ts">
   // This device's TURN relay: needed on networks that block direct connections (hotel and other shared Wi-Fi, some mobile data).
   import { db } from '../../lib/db.ts';
+  import Drawer from '../kit/Drawer.svelte';
   import { parseRelay, RELAY_KEY, storedRelay, type Relay } from '../../lib/sync/relay.ts';
 
   let urls = $state(''), username = $state(''), credential = $state('');
@@ -60,8 +61,8 @@
   }
 </script>
 
-<details class="relay">
-  <summary>Relay server {saved ? '(set)' : '(optional)'}</summary>
+<Drawer title="Relay server">
+  {#snippet summary()}{saved ? 'Set' : 'Optional'}{/snippet}
   <p class="muted">Hotel and other shared Wi-Fi, some mobile data, and some school or work networks block direct connections between devices. A relay (TURN) server passes the traffic along instead. Get free credentials from a TURN provider (for example metered.ca) and paste them here. They are stored only on this device. The DM setting one is usually enough; a player can add one too.</p>
   <div class="field">
     <label for="relay-urls">Server addresses (one per line)</label>
@@ -78,19 +79,23 @@
   <div class="row">
     <button type="button" class="primary" onclick={save}>Save</button>
     <button type="button" disabled={testing} onclick={test}>Test</button>
-    {#if saved}<button type="button" class="danger" onclick={clear}>Remove</button>{/if}
+    {#if saved}<button type="button" class="danger end" onclick={clear}>Remove</button>{/if}
   </div>
   {#if msg}<p role="status">{msg}</p>{/if}
-</details>
+</Drawer>
 
 <style>
-  .relay {
-    margin: 0.75rem 0;
-  }
-
   textarea {
     width: 100%;
-    font: inherit;
-    box-sizing: border-box;
+    font-family: var(--mono);
+    font-size: 0.9em;
+  }
+
+  .field input {
+    max-width: 24rem;
+  }
+
+  .end {
+    margin-left: auto;
   }
 </style>

@@ -64,7 +64,7 @@
 
 <svelte:window onbeforeunload={(e) => { if (!saved) e.preventDefault(); }} />
 
-<section class="card" aria-labelledby="sp-h">
+<section class="editor" aria-labelledby="sp-h">
   <h2 id="sp-h">New spell</h2>
   {#if notes.length}
     <div role="note">
@@ -112,10 +112,11 @@
 </section>
 
 <style>
-  fieldset { border: 1px solid var(--border); border-radius: 0.5rem; margin: 0.75rem 0; min-width: 0; }
+  .editor { border-top: 1px solid var(--line); padding-top: 0.25rem; margin: 0.75rem 0; }
+  h2 { margin-top: 0.5rem; }
+  [role='note'] { border-left: 2px solid var(--accent); padding: 0.25rem 0.75rem; background: var(--panel); }
+  fieldset { border: 0; border-top: 1px solid var(--line); border-radius: 0; padding: 0.25rem 0 0; min-width: 0; }
+  legend { padding: 0 0.4rem 0 0; }
   .grow { flex: 1 1 14rem; margin: 0; }
-  textarea {
-    font: inherit; color: inherit; background: var(--surface); border: 1px solid var(--border); border-radius: 0.35rem;
-    padding: 0.4rem 0.7rem; width: 100%; box-sizing: border-box;
-  }
+  textarea { width: 100%; }
 </style>
