@@ -1,5 +1,6 @@
 <script lang="ts">
   import { session } from '../../lib/sync/session.svelte.ts';
+  import RetryNow from './RetryNow.svelte';
 
   const online = $derived(Object.keys(session.online).length);
   const text = $derived.by(() => {
@@ -29,7 +30,7 @@
 {#if text}
   <span role="status"><a class="chip" class:bad={session.status === 'rejected' || session.status === 'offline' || session.status === 'retrying'} href={session.role === 'dm' ? '#/settings' : '#/characters'} title={title || undefined}>
     {text}{#if session.status === 'rejected' && title}<span class="sr-only">: {title}</span>{/if}
-  </a></span>
+  </a>{#if session.status === 'retrying' || session.status === 'offline'} <RetryNow compact />{/if}</span>
 {/if}
 
 <style>

@@ -37,10 +37,12 @@ export const session = $state({
   rev: 0,
   /** M9: a question waiting for the user. */
   confirm: undefined as { text: string; answer(ok: boolean): void } | undefined,
+  /** S5-R1: when the next automatic retry (host re-register or guest redial) is due, in ms since the epoch; undefined = none waiting. */
+  retryAt: undefined as number | undefined,
 });
 
-/** Reconnect delays: 2 s, 5 s, 15 s, then every 30 s, for as long as the page is open. */
-export const backoff = (attempt: number): number => [2000, 5000, 15000][attempt] ?? 30000;
+/** S5-R1: reconnect delays 2 s, 5 s, 15 s, 30 s, 2 min, then every 5 min (a busy public sync server refuses rapid retries). */
+export const backoff = (attempt: number): number => [2000, 5000, 15000, 30000, 120000][attempt] ?? 300000;
 
 let transport = async (): Promise<Transport> => (await import('./peer.ts')).transport;
 /** Tests: a fake transport instead of PeerJS. */
@@ -77,7 +79,7 @@ export function stopSession(): void {
     r.listener?.close();
   }
   session.confirm?.answer(false);
-  Object.assign(session, { role: undefined, campaignId: undefined, status: 'off', reason: '', online: {}, roster: [], tracker: undefined, scene: undefined, packs: undefined, welcomed: false, confirm: undefined });
+  Object.assign(session, { role: undefined, campaignId: undefined, status: 'off', reason: '', online: {}, roster: [], tracker: undefined, scene: undefined, packs: undefined, welcomed: false, confirm: undefined, retryAt: undefined });
 }
 
 function begin(role: Run['role'], code: string, campaignId?: string): Run {
@@ -130,11 +132,12 @@ async function listen(r: Run): Promise<void> {
       clearTimeout(r.timer);
       if (up) {
         r.attempt = 0;
-        Object.assign(session, { status: 'hosting', reason: '' });
+        Object.assign(session, { status: 'hosting', reason: '', retryAt: undefined });
         return;
       }
-      Object.assign(session, { status: 'retrying', reason: why ?? '' });
-      r.timer = setTimeout(() => r.listener?.retry(), backoff(r.attempt++));
+      const ms = backoff(r.attempt++);
+      Object.assign(session, { status: 'retrying', reason: why ?? '', retryAt: Date.now() + ms });
+      r.timer = setTimeout(() => { session.retryAt = undefined; r.listener?.retry(); }, ms);
     },
   });
 }
@@ -240,7 +243,7 @@ async function startGuest(o: { code: string; playerId?: string; name?: string; c
 
 async function dial(r: Run): Promise<void> {
   if (!live(r)) return;
-  session.status = 'connecting';
+  Object.assign(session, { status: 'connecting', retryAt: undefined });
   try {
     const link = await r.t!.dial((r.peerId ??= await peerIdFor(r.code)));
     if (!live(r)) return link.close();
@@ -255,7 +258,20 @@ async function dial(r: Run): Promise<void> {
 /** Schedules the next dial, once: a close and a bye for the same disconnect both report offline. */
 function redial(r: Run): void {
   if (r.timer !== undefined) return;
-  r.timer = setTimeout(() => { r.timer = undefined; void dial(r); }, backoff(r.attempt++));
+  const ms = backoff(r.attempt++);
+  session.retryAt = Date.now() + ms;
+  r.timer = setTimeout(() => { r.timer = undefined; void dial(r); }, ms);
+}
+
+/** S5-R1: "Retry now": the waiting retry runs at once (the backoff keeps its place, so the next wait is not shorter). */
+export function retryNow(): void {
+  const r = run;
+  if (!r || session.retryAt === undefined) return;
+  clearTimeout(r.timer);
+  r.timer = undefined;
+  session.retryAt = undefined;
+  if (r.role === 'dm') r.listener?.retry();
+  else void dial(r);
 }
 
 function guestStatus(r: Run, s: GuestStatus, reason?: string): void {
@@ -268,6 +284,7 @@ function guestStatus(r: Run, s: GuestStatus, reason?: string): void {
   } else if (s === 'rejected') {
     clearTimeout(r.timer); // final (a new code, removed, refused): no more retries
     r.timer = undefined;
+    session.retryAt = undefined;
   } else if (s === 'online') {
     r.attempt = 0;
     session.reason = '';

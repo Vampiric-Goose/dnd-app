@@ -15,11 +15,14 @@ const FLUSH_WAIT = 5000;
 const DIAL_TIMEOUT = 20_000;
 
 /** What the user is told when PeerJS fails. */
+/** S5-R1: the public signaling server may refuse (429) after many retries; the session's backoff stretches to 5 minutes. */
+const SERVER_DOWN = "Can't reach the sync server (it may be busy).";
+
 function why(e: unknown): string {
   switch ((e as { type?: string })?.type) {
     case 'peer-unavailable': return 'The host is not online, or the join code has changed.';
     case 'unavailable-id': return 'Another tab or device is already hosting this campaign.';
-    case 'network': case 'server-error': case 'socket-error': case 'socket-closed': return 'Could not reach the sync server.';
+    case 'network': case 'server-error': case 'socket-error': case 'socket-closed': return SERVER_DOWN;
     case 'browser-incompatible': return 'This browser does not support peer-to-peer connections.';
     default: return e instanceof Error ? e.message : String(e);
   }
@@ -85,7 +88,7 @@ export const transport: Transport = {
     const start = () => {
       peer?.destroy();
       const p = (peer = new Peer(peerId, OPTIONS));
-      const down = (e?: unknown) => { if (!stopped && p === peer) on.status(false, e === undefined ? 'Lost the connection to the sync server.' : why(e)); };
+      const down = (e?: unknown) => { if (!stopped && p === peer) on.status(false, e === undefined ? SERVER_DOWN : why(e)); };
       p.on('open', () => { if (!stopped && p === peer) on.status(true); });
       p.on('connection', (conn) => {
         if (stopped || conn.serialization !== 'json') return void conn.close(); // only our own JSON channel has the size guard

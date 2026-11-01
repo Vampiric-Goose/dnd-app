@@ -2,6 +2,7 @@
   import { navigate } from '../../lib/router.svelte.ts';
   import { app, setCampaign } from '../../lib/store.svelte.ts';
   import { join, leaveJoin, session } from '../../lib/sync/session.svelte.ts';
+  import RetryNow from '../sync/RetryNow.svelte';
 
   let { params }: { params: { code: string } } = $props();
 
@@ -86,7 +87,7 @@
   {/if}
   <p role="status">
     {#if session.status === 'connecting'}Connecting to your DM…
-    {:else if session.status === 'offline'}Could not reach your DM yet ({session.reason}). Trying again…
+    {:else if session.status === 'offline'}Could not reach your DM yet. {session.reason} <RetryNow />
     {:else if session.status === 'rejected'}Not joined. {reasons[session.reason] ?? session.reason}
     {:else if session.status === 'online'}Joined as {session.role === 'player' ? app.campaigns.find((c) => c.id === session.campaignId)?.sync?.playerId : ''}.
     {/if}

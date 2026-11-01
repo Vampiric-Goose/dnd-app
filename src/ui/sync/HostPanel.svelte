@@ -3,6 +3,7 @@
   import { characterListProblem } from '../../lib/recordShape.ts';
   import { hostCampaign, removePlayer, rotateCode, session, stopHosting } from '../../lib/sync/session.svelte.ts';
   import type { Campaign, Character } from '../../lib/types.ts';
+  import RetryNow from './RetryNow.svelte';
 
   let { campaign }: { campaign: Campaign } = $props();
 
@@ -57,7 +58,7 @@
 {:else}
   <p role="status">
     {#if session.status === 'hosting'}Hosting. {onlineNames.length} {onlineNames.length === 1 ? 'player' : 'players'} online.
-    {:else if session.status === 'retrying'}Not reachable right now ({session.reason}). Trying again…
+    {:else if session.status === 'retrying'}Not reachable right now. {session.reason} <RetryNow />
     {:else}Starting…{/if}
   </p>
   <div class="field">

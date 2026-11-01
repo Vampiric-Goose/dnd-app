@@ -21,7 +21,7 @@ import { Device } from './fakes.ts';
 vi.mock('../../src/lib/content/srd.ts', async () => ({ loadSrd: async () => (await import('../fixtures/srdPack.ts')).srdPackFixture }));
 await import('../fixtures/srdPack.ts'); // loaded once here, so the mocked SRD resolves at once inside settle()
 const { app, refreshCampaigns, setCampaign } = await import('../../src/lib/store.svelte.ts');
-const { backoff, follow, hostCampaign, join, rotateCode, sendInitiative, sendMove, session, stopHosting, stopSession, useTransport } = await import('../../src/lib/sync/session.svelte.ts');
+const { backoff, follow, hostCampaign, join, retryNow, rotateCode, sendInitiative, sendMove, session, stopHosting, stopSession, useTransport } = await import('../../src/lib/sync/session.svelte.ts');
 
 const CODE = 'ABCDEFGHJKMN';
 const CID = 'c1';
@@ -187,14 +187,21 @@ describe('DM', () => {
     await follow(app.campaign);
     await settle();
     expect([session.status, session.reason]).toEqual(['retrying', 'server down']);
+    expect(session.retryAt).toBeDefined();
     await vi.advanceTimersByTimeAsync(1999);
     expect(net.registers).toBe(1);
     await vi.advanceTimersByTimeAsync(1);
     expect(net.registers).toBe(2);
-    net.up = true;
-    await vi.advanceTimersByTimeAsync(5000);
+    retryNow(); // S5-R1: Retry now registers at once, and the next wait is the following step (15 s)
     expect(net.registers).toBe(3);
-    expect(session.status).toBe('hosting');
+    await vi.advanceTimersByTimeAsync(14_999);
+    expect(net.registers).toBe(3);
+    net.up = true;
+    await vi.advanceTimersByTimeAsync(1);
+    expect(net.registers).toBe(4);
+    expect([session.status, session.retryAt]).toEqual(['hosting', undefined]);
+    retryNow(); // nothing waiting: nothing happens
+    expect(net.registers).toBe(4);
   });
 });
 
@@ -306,9 +313,9 @@ describe('player', () => {
     return { d, host };
   }
 
-  test('reconnects after 2 s, 5 s, 15 s, then every 30 s; online resets the schedule; a removed player stops retrying', async () => {
+  test('S5-R1: reconnects after 2 s, 5 s, 15 s, 30 s, 2 min, then every 5 min; Retry now; online resets the schedule; a removed player stops retrying', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
-    expect([0, 1, 2, 3, 9].map(backoff)).toEqual([2000, 5000, 15000, 30000, 30000]);
+    expect([0, 1, 2, 3, 4, 5, 9].map(backoff)).toEqual([2000, 5000, 15000, 30000, 120000, 300000, 300000]);
     await db.campaigns.put({ ...camp(CID), sync: { role: 'player', code: CODE, node: 'pnode001', playerId: 'A1' } });
     await refreshCampaigns();
     await setCampaign(CID);
@@ -316,7 +323,7 @@ describe('player', () => {
     await settle();
     expect([session.status, net.dials.length]).toEqual(['offline', 1]);
     const t0 = net.dials[0];
-    for (const ms of [2000, 5000, 15000, 30000, 30000]) {
+    for (const ms of [2000, 5000, 15000, 30000, 120000, 300000]) {
       await vi.advanceTimersByTimeAsync(ms - 1);
       await settle();
       const n = net.dials.length;
@@ -324,11 +331,15 @@ describe('player', () => {
       await settle();
       expect(net.dials.length).toBe(n + 1);
     }
-    expect(net.dials.map((t) => t - t0)).toEqual([0, 2000, 7000, 22000, 52000, 82000]);
+    expect(net.dials.map((t) => t - t0)).toEqual([0, 2000, 7000, 22000, 52000, 172000, 472000]);
+    expect(session.retryAt).toBe(Date.now() + 300000);
+    retryNow(); // dials at once
+    await settle();
+    expect(net.dials.length).toBe(8);
 
     const { d, host } = await dmDevice();
     d.updateSync(CID, (s) => ({ ...s!, players: { A1: { name: 'Ann' } } }));
-    await vi.advanceTimersByTimeAsync(30000);
+    await vi.advanceTimersByTimeAsync(300000);
     await settle(host);
     expect(session.status).toBe('online');
     host.stop(); // 'host stopped': offline, and the schedule starts again at 2 s
