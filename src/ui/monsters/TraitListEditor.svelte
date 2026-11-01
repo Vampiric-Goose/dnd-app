@@ -40,11 +40,10 @@
 </fieldset>
 
 <style>
-  fieldset { border: 1px solid var(--border); border-radius: 0.5rem; margin: 0.75rem 0; min-width: 0; }
-  .trait { border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; margin-bottom: 0.5rem; }
+  /* a caption and a hairline, not a box; each entry is indented under a thin rule */
+  fieldset { border: 0; border-top: 1px solid var(--line); border-radius: 0; margin: 0.75rem 0; padding: 0.25rem 0 0; min-width: 0; }
+  legend { padding: 0 0.4rem 0 0; }
+  .trait { border-left: 1px solid var(--line-strong); padding: 0 0 0.25rem 0.75rem; margin-bottom: 0.75rem; }
   .field { margin: 0.4rem 0; }
-  textarea {
-    font: inherit; color: inherit; background: var(--surface); border: 1px solid var(--border); border-radius: 0.35rem;
-    padding: 0.4rem 0.7rem; width: 100%; box-sizing: border-box;
-  }
+  textarea { width: 100%; }
 </style>

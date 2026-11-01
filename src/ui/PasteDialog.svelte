@@ -43,7 +43,7 @@
   }
 </script>
 
-<div class="card" role="dialog" aria-labelledby="{uid}-h" tabindex="-1" onkeydown={(e) => e.key === 'Escape' && oncancel()}>
+<div class="paste" role="dialog" aria-labelledby="{uid}-h" tabindex="-1" onkeydown={(e) => e.key === 'Escape' && oncancel()}>
   <h2 id="{uid}-h">Paste a {what}</h2>
   <div class="field">
     <label for="{uid}-t">The {what}'s text, as copied from a PDF or web page</label>
@@ -59,8 +59,11 @@
 </div>
 
 <style>
-  textarea {
-    font: inherit; color: inherit; background: var(--surface); border: 1px solid var(--border); border-radius: 0.35rem;
-    padding: 0.4rem 0.7rem; width: 100%; box-sizing: border-box;
-  }
+  /* An inline panel under the control that opened it: accent bar, no card. */
+  .paste { border-left: 2px solid var(--accent); background: var(--panel); padding: 0.5rem 0.9rem 0.75rem; margin: 0.5rem 0; }
+  .paste:focus-visible { outline-offset: -2px; }
+  h2 { margin: 0.25rem 0 0; font-size: 1rem; }
+  .field { margin: 0.5rem 0; }
+  textarea { width: 100%; font-family: var(--mono); font-size: 0.9em; }
+  p { margin: 0.5rem 0; }
 </style>

@@ -3,10 +3,13 @@
   import { characterListProblem } from '../../lib/recordShape.ts';
   import { hostCampaign, removePlayer, rotateCode, session, stopHosting } from '../../lib/sync/session.svelte.ts';
   import type { Campaign, Character } from '../../lib/types.ts';
+  import Drawer from '../kit/Drawer.svelte';
+  import Menu from '../kit/Menu.svelte';
   import NetLog from './NetLog.svelte';
   import RelaySettings from './RelaySettings.svelte';
   import RetryNow from './RetryNow.svelte';
 
+  // The "Play together" group of Campaign settings (the page gives it its caption).
   let { campaign }: { campaign: Campaign } = $props();
 
   const hosting = $derived(session.role === 'dm' && session.campaignId === campaign.id);
@@ -50,7 +53,6 @@
   }
 </script>
 
-<h2>Play together</h2>
 {#if error}<p role="alert" class="error">{error}</p>{/if}
 
 {#if !hosting}
@@ -58,56 +60,18 @@
   {#if !session.role && session.reason}<p role="alert" class="error">{session.reason}</p>{/if}
   <button class="primary" disabled={busy} onclick={() => act(() => hostCampaign(campaign.id))}>{campaign.sync ? 'Host again' : 'Host this campaign'}</button>
 {:else}
-  <p role="status">
-    {#if session.status === 'hosting'}Hosting. {onlineNames.length} {onlineNames.length === 1 ? 'player' : 'players'} online.
-    {:else if session.status === 'retrying'}Not reachable right now. {session.reason} <RetryNow />
-    {:else}Starting…{/if}
-  </p>
-  <div class="field">
-    <span>Join code</span>
-    <div class="row"><strong class="code">{code}</strong><button onclick={() => copy(code, 'Code')}>Copy code</button></div>
-  </div>
-  <div class="field">
-    <label for="join-link">Join link</label>
-    <div class="row"><input id="join-link" class="grow" readonly value={link} onfocus={(e) => e.currentTarget.select()} /><button onclick={() => copy(link, 'Link')}>Copy link</button></div>
-  </div>
-  {#if notice}<p role="status" class="muted">{notice}</p>{/if}
-
-  <h3>Players</h3>
-  {#if !players.length}
-    <p class="muted">No one has joined yet.</p>
-  {:else}
-    <ul class="plain">
-      {#each players as [id, p] (id)}
-        <li class="card">
-          <div class="row">
-            <strong>{id}</strong>
-            {#if p.name}<span>{p.name}</span>{/if}
-            <span class="muted">{p.removed ? 'removed' : session.online[id] ? 'online' : 'offline'}</span>
-          </div>
-          <div class="muted">{charsOf(id) || 'No characters yet'}</div>
-          {#if !p.removed}
-            {#if typeof confirming === 'object' && confirming.remove === id}
-              <div role="alertdialog" aria-label="Confirm removing a player" class="row">
-                <p>Remove {p.name ? `${p.name} (${id})` : id}? They are disconnected and can't join with this ID again. Their characters stay with you.</p>
-                <button class="danger" disabled={busy} onclick={() => act(() => removePlayer(id))}>Remove {id}</button>
-                <button onclick={() => (confirming = undefined)}>Keep them</button>
-              </div>
-            {:else}
-              <button class="danger" onclick={() => (confirming = { remove: id })}>Remove player {id}</button>
-            {/if}
-          {/if}
-        </li>
-      {/each}
-    </ul>
-  {/if}
-
-  <div class="row">
-    <button onclick={() => (confirming = 'rotate')}>Issue a new join code</button>
+  <div class="status">
+    <p role="status">
+      {#if session.status === 'hosting'}Hosting. <span class="num">{onlineNames.length}</span> {onlineNames.length === 1 ? 'player' : 'players'} online.
+      {:else if session.status === 'retrying'}Not reachable right now. {session.reason} <RetryNow />
+      {:else}Starting…{/if}
+    </p>
     <button disabled={busy} onclick={() => act(() => stopHosting(campaign.id))}>Stop hosting</button>
+    <Menu label="⋯" ariaLabel="More hosting actions" caret={false} align="end"
+      items={[{ label: 'Issue a new join code', danger: true, onselect: () => (confirming = 'rotate') }]} />
   </div>
   {#if confirming === 'rotate'}
-    <div role="alertdialog" aria-label="Confirm a new join code" class="card">
+    <div role="alertdialog" aria-label="Confirm a new join code" class="confirm">
       <p>
         Issue a new join code? The old code and link stop working at once.
         {#if onlineNames.length}{onlineNames.join(', ')} {onlineNames.length === 1 ? 'is' : 'are'} disconnected and must rejoin with the new link (their player IDs stay).{:else}No one is online now.{/if}
@@ -118,21 +82,129 @@
       </div>
     </div>
   {/if}
+  <div class="field">
+    <span class="caption">Join code</span>
+    <div class="row"><strong class="code num">{code}</strong><button onclick={() => copy(code, 'Code')}>Copy code</button></div>
+  </div>
+  <div class="field">
+    <label for="join-link">Join link</label>
+    <div class="row"><input id="join-link" class="grow" readonly value={link} onfocus={(e) => e.currentTarget.select()} /><button onclick={() => copy(link, 'Link')}>Copy link</button></div>
+  </div>
+  {#if notice}<p role="status" class="muted">{notice}</p>{/if}
+
+  <Drawer title="Players" open={players.length > 0}>
+    {#snippet summary()}<span class="num">{players.filter(([, p]) => !p.removed).length}</span> joined · <span class="num">{onlineNames.length}</span> online{/snippet}
+    {#if !players.length}
+      <p class="muted">No one has joined yet.</p>
+    {:else}
+      <ul class="plain players">
+        {#each players as [id, p] (id)}
+          <li>
+            <div class="who">
+              <strong class="num">{id}</strong>
+              {#if p.name}<span>{p.name}</span>{/if}
+              <span class="state" class:on={!p.removed && session.online[id]}>{p.removed ? 'removed' : session.online[id] ? 'online' : 'offline'}</span>
+              {#if !p.removed && !(typeof confirming === 'object' && confirming.remove === id)}
+                <span class="end">
+                  <Menu label="⋯" ariaLabel="Actions for player {id}" caret={false} align="end"
+                    items={[{ label: `Remove player ${id}`, danger: true, onselect: () => (confirming = { remove: id }) }]} />
+                </span>
+              {/if}
+            </div>
+            <div class="muted">{charsOf(id) || 'No characters yet'}</div>
+            {#if !p.removed && typeof confirming === 'object' && confirming.remove === id}
+              <div role="alertdialog" aria-label="Confirm removing a player" class="confirm">
+                <p>Remove {p.name ? `${p.name} (${id})` : id}? They are disconnected and can't join with this ID again. Their characters stay with you.</p>
+                <div class="row">
+                  <button class="danger" disabled={busy} onclick={() => act(() => removePlayer(id))}>Remove {id}</button>
+                  <button onclick={() => (confirming = undefined)}>Keep them</button>
+                </div>
+              </div>
+            {/if}
+          </li>
+        {/each}
+      </ul>
+    {/if}
+  </Drawer>
 {/if}
-<p class="muted">Players can join from anywhere over the internet. A few networks (some mobile carriers, schools and workplaces) block direct connections; if joining fails, try another network.</p>
 <RelaySettings />
 <NetLog />
-<p class="muted">Keep hosting in one tab; edits made in other tabs reach players when they reconnect.</p>
-<p class="muted">Give each character to its player with the Player menu on the Characters page; characters with no player stay with you.</p>
+<Drawer title="Tips">
+  {#snippet summary()}Networks, tabs, giving characters to players{/snippet}
+  <p class="muted">Players can join from anywhere over the internet. A few networks (some mobile carriers, schools and workplaces) block direct connections; if joining fails, try another network.</p>
+  <p class="muted">Keep hosting in one tab; edits made in other tabs reach players when they reconnect.</p>
+  <p class="muted">Give each character to its player with the Player menu on the Characters page; characters with no player stay with you.</p>
+</Drawer>
 
 <style>
+  .status {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .status p {
+    flex: 1 1 14rem;
+    margin: 0;
+  }
+
   .code {
-    font-family: ui-monospace, monospace;
-    letter-spacing: 0.1em;
+    color: var(--text-strong);
+    font-size: 1.15rem;
+    letter-spacing: 0.12em;
   }
 
   .grow {
     flex: 1 1 12rem;
     min-width: 0;
+  }
+
+  .players li {
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .players li:last-child {
+    border-bottom: 0;
+  }
+
+  .who {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .who strong {
+    color: var(--text-strong);
+  }
+
+  .state {
+    color: var(--muted);
+    font-size: 0.85rem;
+  }
+
+  .state.on {
+    color: var(--accent);
+  }
+
+  .end {
+    margin-left: auto;
+  }
+
+  .confirm {
+    border-left: 2px solid var(--danger);
+    padding: 0.25rem 0.75rem;
+    margin: 0.5rem 0;
+  }
+
+  .confirm p {
+    margin: 0 0 0.5rem;
+  }
+
+  p + :global(.drawer),
+  .field + :global(.drawer) {
+    margin-top: 0.75rem;
   }
 </style>

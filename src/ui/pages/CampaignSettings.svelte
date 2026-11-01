@@ -3,6 +3,8 @@
   import { db } from '../../lib/db.ts';
   import { app, saveCampaign } from '../../lib/store.svelte.ts';
   import type { Campaign, CampaignSettings, PackMeta } from '../../lib/types.ts';
+  import Drawer from '../kit/Drawer.svelte';
+  import SettingsGroup from '../SettingsGroup.svelte';
   import HostPanel from '../sync/HostPanel.svelte';
 
   type Bool = { [K in keyof CampaignSettings]: CampaignSettings[K] extends boolean ? K : never }[keyof CampaignSettings];
@@ -63,6 +65,11 @@
     const on = e.currentTarget.checked;
     return change((n) => (n.enabledPacks = on ? [...new Set([...n.enabledPacks, id])] : n.enabledPacks.filter((x) => x !== id)));
   };
+
+  // Closed drawers' one-line summaries.
+  const onList = (xs: string[]) => (xs.length ? xs.join(', ') : 'All off');
+  const hpText = { average: 'Average', roll: 'Roll' } as const;
+  const encText = { off: 'Off', standard: 'Standard', variant: 'Variant' } as const;
 </script>
 
 <h1>Campaign settings</h1>
@@ -71,115 +78,139 @@
   <p>{app.ready ? 'No campaign is open.' : 'Loading…'} <a href="#/">Open or create a campaign</a> first.</p>
 {:else}
   {#if readOnly}
-    <p role="note">Settings are set by your DM. You joined <strong>{c.name}</strong> as {c.sync?.playerId}.</p>
+    <p role="note" class="lead">Settings are set by your DM. You joined <strong>{c.name}</strong> as {c.sync?.playerId}.</p>
   {:else}
-    <p>Settings for <strong>{c.name}</strong>. Changes save as you make them.</p>
+    <p class="lead">Settings for <strong>{c.name}</strong>. Changes save as you make them.</p>
   {/if}
   {#if error}<p role="alert" class="error">{error}</p>{/if}
 
-  {#if !readOnly}<HostPanel campaign={c} />{/if}
+  {#if !readOnly}
+    <SettingsGroup title="Play together"><HostPanel campaign={c} /></SettingsGroup>
+  {/if}
 
   <fieldset class="bare" disabled={readOnly}>
   <legend class="sr-only">Campaign settings</legend>
 
-  <h2>Character rules</h2>
-  {#each rules as [key, label, help] (key)}
+  <SettingsGroup title="Character rules">
+    <Drawer title="Options">
+      {#snippet summary()}{onList(rules.filter(([k]) => c.settings[k]).map(([, l]) => l))}{/snippet}
+      {#each rules as [key, label, help] (key)}
+        <label class="check">
+          <input type="checkbox" checked={c.settings[key]} onchange={(e) => setBool(key, e)} />
+          <span>{label}<br /><span class="muted">{help}</span></span>
+        </label>
+      {/each}
+    </Drawer>
+    <Drawer title="Hit points and encumbrance">
+      {#snippet summary()}{hpText[c.settings.hpMethod]} HP on level-up · Encumbrance {encText[c.settings.encumbrance].toLowerCase()}{/snippet}
+      <div class="field">
+        <label for="hp-method">Hit points on level-up</label>
+        <select id="hp-method" value={c.settings.hpMethod} onchange={(e) => change((n) => (n.settings.hpMethod = e.currentTarget.value as 'average' | 'roll'))}>
+          <option value="average">Take the average</option>
+          <option value="roll">Roll</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="encumbrance">Encumbrance</label>
+        <select id="encumbrance" value={c.settings.encumbrance} onchange={(e) => change((n) => (n.settings.encumbrance = e.currentTarget.value as 'off' | 'standard' | 'variant'))}>
+          <option value="off">Off</option>
+          <option value="standard">Standard (carrying capacity)</option>
+          <option value="variant">Variant (encumbered at 5x and 10x Strength)</option>
+        </select>
+      </div>
+    </Drawer>
+  </SettingsGroup>
+
+  <SettingsGroup title="Monsters">
     <label class="check">
-      <input type="checkbox" checked={c.settings[key]} onchange={(e) => setBool(key, e)} />
-      <span>{label}<br /><span class="muted">{help}</span></span>
+      <input type="checkbox" checked={c.settings.crSuggestion} onchange={(e) => setBool('crSuggestion', e)} />
+      <span>CR suggestion<br /><span class="muted">The monster creator suggests a CR from HP, AC, damage and attack bonus (DMG chapter 9).</span></span>
     </label>
-  {/each}
+  </SettingsGroup>
 
-  <div class="field">
-    <label for="hp-method">Hit points on level-up</label>
-    <select id="hp-method" value={c.settings.hpMethod} onchange={(e) => change((n) => (n.settings.hpMethod = e.currentTarget.value as 'average' | 'roll'))}>
-      <option value="average">Take the average</option>
-      <option value="roll">Roll</option>
-    </select>
-  </div>
-
-  <div class="field">
-    <label for="encumbrance">Encumbrance</label>
-    <select id="encumbrance" value={c.settings.encumbrance} onchange={(e) => change((n) => (n.settings.encumbrance = e.currentTarget.value as 'off' | 'standard' | 'variant'))}>
-      <option value="off">Off</option>
-      <option value="standard">Standard (carrying capacity)</option>
-      <option value="variant">Variant (encumbered at 5x and 10x Strength)</option>
-    </select>
-  </div>
-
-  <h2>Monsters</h2>
-  <label class="check">
-    <input type="checkbox" checked={c.settings.crSuggestion} onchange={(e) => setBool('crSuggestion', e)} />
-    <span>CR suggestion<br /><span class="muted">The monster creator suggests a CR from HP, AC, damage and attack bonus (DMG chapter 9).</span></span>
-  </label>
-
-  <h2>Books</h2>
-  <p class="muted">Content from these books can be used by this campaign's characters and items.</p>
-  <label class="check">
-    <input type="checkbox" checked disabled />
-    <span>System Reference Document 5.1 (always on)</span>
-  </label>
-  {#if packs.length > 1}
-    <button type="button" disabled={packs.every((p) => c.enabledPacks.includes(p.id))} onclick={() => change((n) => (n.enabledPacks = [...new Set([...n.enabledPacks, ...packs.map((p) => p.id)])]))}>Use all</button>
-  {/if}
-  {#each packs as p (p.id)}
-    <label class="check">
-      <input type="checkbox" checked={c.enabledPacks.includes(p.id)} onchange={(e) => togglePack(p.id, e)} />
-      <span>{#if p.name === p.source}{sourceLabel(p.source, p.homebrew)}{:else}{p.name} <span class="muted">({p.source})</span>{/if}</span>
-    </label>
-  {:else}
-    <p class="muted">No books imported yet. <a href="#/packs">Import books</a>.</p>
-  {/each}
-
-  <h2>Used in later stages</h2>
-  <p class="muted">These are saved now but have no effect yet.</p>
-
-  <div class="field">
-    <label for="diagonal">Diagonal movement on the map</label>
-    <select id="diagonal" value={c.settings.diagonal} onchange={(e) => change((n) => (n.settings.diagonal = e.currentTarget.value as '5-5-5' | '5-10-5'))}>
-      <option value="5-5-5">Every diagonal costs 5 ft</option>
-      <option value="5-10-5">Alternating 5 ft and 10 ft</option>
-    </select>
-  </div>
-
-  <div class="field">
-    <label for="monster-hp">Monster hit points</label>
-    <select id="monster-hp" value={c.settings.monsterHp} onchange={(e) => change((n) => (n.settings.monsterHp = e.currentTarget.value as 'average' | 'roll'))}>
-      <option value="average">Take the average</option>
-      <option value="roll">Roll</option>
-    </select>
-  </div>
-
-  {#each later as [key, label] (key)}
-    <label class="check">
-      <input type="checkbox" checked={c.settings[key]} onchange={(e) => setBool(key, e)} />
-      <span>{label}</span>
-    </label>
-  {/each}
-
-  <fieldset>
-    <legend>Initiative tracker modules</legend>
-    {#each modules as [key, label] (key)}
+  <SettingsGroup title="Books">
+    <Drawer title="Books in this campaign">
+      {#snippet summary()}SRD 5.1{#if packs.length} + <span class="num">{packs.filter((p) => c.enabledPacks.includes(p.id)).length}</span> of <span class="num">{packs.length}</span> imported{/if}{/snippet}
+      <p class="muted">Content from these books can be used by this campaign's characters and items.</p>
       <label class="check">
-        <input type="checkbox" checked={c.settings.initiativeModules[key]} onchange={(e) => setModule(key, e)} />
-        <span>{label}</span>
+        <input type="checkbox" checked disabled />
+        <span>System Reference Document 5.1 (always on)</span>
       </label>
-    {/each}
-  </fieldset>
+      {#if packs.length > 1}
+        <button type="button" disabled={packs.every((p) => c.enabledPacks.includes(p.id))} onclick={() => change((n) => (n.enabledPacks = [...new Set([...n.enabledPacks, ...packs.map((p) => p.id)])]))}>Use all</button>
+      {/if}
+      {#each packs as p (p.id)}
+        <label class="check">
+          <input type="checkbox" checked={c.enabledPacks.includes(p.id)} onchange={(e) => togglePack(p.id, e)} />
+          <span>{#if p.name === p.source}{sourceLabel(p.source, p.homebrew)}{:else}{p.name} <span class="muted">({p.source})</span>{/if}</span>
+        </label>
+      {:else}
+        <p class="muted">No books imported yet. <a href="#/packs">Import books</a>.</p>
+      {/each}
+    </Drawer>
+  </SettingsGroup>
+
+  <SettingsGroup title="Used in later stages">
+    <p class="muted">These are saved now but have no effect yet.</p>
+    <Drawer title="Map and monsters">
+      {#snippet summary()}Diagonal <span class="num">{c.settings.diagonal}</span> · Monster HP {hpText[c.settings.monsterHp].toLowerCase()} · {onList(later.filter(([k]) => c.settings[k]).map(([, l]) => l))}{/snippet}
+      <div class="field">
+        <label for="diagonal">Diagonal movement on the map</label>
+        <select id="diagonal" value={c.settings.diagonal} onchange={(e) => change((n) => (n.settings.diagonal = e.currentTarget.value as '5-5-5' | '5-10-5'))}>
+          <option value="5-5-5">Every diagonal costs 5 ft</option>
+          <option value="5-10-5">Alternating 5 ft and 10 ft</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label for="monster-hp">Monster hit points</label>
+        <select id="monster-hp" value={c.settings.monsterHp} onchange={(e) => change((n) => (n.settings.monsterHp = e.currentTarget.value as 'average' | 'roll'))}>
+          <option value="average">Take the average</option>
+          <option value="roll">Roll</option>
+        </select>
+      </div>
+
+      {#each later as [key, label] (key)}
+        <label class="check">
+          <input type="checkbox" checked={c.settings[key]} onchange={(e) => setBool(key, e)} />
+          <span>{label}</span>
+        </label>
+      {/each}
+    </Drawer>
+
+    <Drawer title="Initiative tracker modules">
+      {#snippet summary()}<span class="num">{modules.filter(([k]) => c.settings.initiativeModules[k]).length}</span> of <span class="num">{modules.length}</span> on{/snippet}
+      <fieldset class="bare">
+        <legend class="sr-only">Initiative tracker modules</legend>
+        {#each modules as [key, label] (key)}
+          <label class="check">
+            <input type="checkbox" checked={c.settings.initiativeModules[key]} onchange={(e) => setModule(key, e)} />
+            <span>{label}</span>
+          </label>
+        {/each}
+      </fieldset>
+    </Drawer>
+  </SettingsGroup>
   </fieldset>
 {/if}
 
 <style>
+  h1 {
+    margin-bottom: 0.25rem;
+  }
+
+  .lead {
+    margin: 0 0 1rem;
+  }
+
   fieldset.bare {
     border: 0;
     padding: 0;
     margin: 0;
+    min-width: 0;
   }
 
-  fieldset {
-    border: 1px solid var(--border);
-    border-radius: 0.5rem;
-    margin: 0.75rem 0;
-    min-width: 0;
+  select {
+    max-width: 24rem;
   }
 </style>

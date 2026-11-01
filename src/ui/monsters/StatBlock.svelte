@@ -124,7 +124,7 @@
   <hr />
   <dl class="scores">
     {#each ABILITIES as a}
-      <div><dt>{a.toUpperCase()}</dt><dd>{m.scores[a]} ({signed(abilityMod(m.scores[a]))})</dd></div>
+      <div><dt>{a.toUpperCase()}</dt><dd class="num">{m.scores[a]} ({signed(abilityMod(m.scores[a]))})</dd></div>
     {/each}
   </dl>
   <hr />
@@ -141,15 +141,17 @@
 </article>
 
 <style>
-  .statblock { max-width: 42rem; }
-  h2 { margin: 0.25rem 0 0; font-variant: small-caps; }
-  h3 { margin: 1rem 0 0.25rem; padding-bottom: 0.1rem; border-bottom: 1px solid var(--accent); font-variant: small-caps; font-weight: 600; }
+  /* Container query: a very narrow container gets a 3-column score grid. */
+  .statblock { max-width: 42rem; container-type: inline-size; }
+  h2 { margin: 0.25rem 0 0; font-variant: small-caps; letter-spacing: 0.02em; }
+  h3 { margin: 1rem 0 0.25rem; padding-bottom: 0.15rem; border-bottom: 1px solid var(--line-strong); color: var(--accent); font-variant: small-caps; font-weight: 600; letter-spacing: 0.03em; }
   .sub { margin: 0 0 0.5rem; }
   p { margin: 0.25rem 0; }
-  hr { border: 0; border-top: 2px solid var(--accent); margin: 0.5rem 0; }
+  strong { color: var(--text-strong); }
+  hr { border: 0; border-top: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line)); margin: 0.5rem 0; }
   .scores { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0.25rem; margin: 0; text-align: center; }
-  .scores dt { font-weight: 700; }
-  .scores dd { margin: 0; white-space: nowrap; font-size: 0.95rem; }
+  .scores dt { color: var(--label); font-size: 0.72rem; letter-spacing: 0.12em; }
+  .scores dd { margin: 0; font-size: 0.9rem; color: var(--text-strong); } /* wraps "23 (+6)" to two lines in a narrow column */
   .trait { margin: 0.5rem 0; }
   .spells { padding-left: 1rem; }
   ul { margin: 0.25rem 0; padding-left: 1.25rem; }
@@ -164,7 +166,12 @@
     font: inherit;
   }
 
-  @media (max-width: 420px) {
-    .scores { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .roll:hover:not(:disabled) {
+    background: none;
+    border-bottom-style: solid;
+  }
+
+  @container (max-width: 15rem) {
+    .scores { grid-template-columns: repeat(3, minmax(0, 1fr)); row-gap: 0.4rem; }
   }
 </style>

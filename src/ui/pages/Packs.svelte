@@ -6,7 +6,10 @@
   import { refreshCampaigns, getFullIndex } from '../../lib/store.svelte.ts';
   import type { Pack, PackMeta, SpellDef } from '../../lib/types.ts';
   import { leaveGuard } from '../../lib/router.svelte.ts';
+  import Drawer from '../kit/Drawer.svelte';
+  import Menu from '../kit/Menu.svelte';
   import PasteDialog from '../PasteDialog.svelte';
+  import SettingsGroup from '../SettingsGroup.svelte';
   import SpellEditor from '../spells/SpellEditor.svelte';
 
   type Counts = PackMeta['counts'];
@@ -246,73 +249,78 @@
 </script>
 
 <h1>Packs</h1>
-<p>
+<p class="lead">
   Import your own copies of 5etools-format books. Files are read on this device only and nothing is uploaded.
   Choose the 5etools zip as you downloaded it (no need to unzip it), or its <code>data</code> folder, and the app picks out the files it needs: books reference each other, so importing them together gives the best result.
 </p>
 
-<section
-  class="card drop"
-  class:dragging
-  aria-label="Import 5etools"
-  ondragover={(e) => { e.preventDefault(); dragging = true; }}
-  ondragleave={() => (dragging = false)}
-  ondrop={onDrop}
->
-  <input bind:this={zipInput} type="file" accept=".zip,application/zip" hidden tabindex="-1" aria-hidden="true" onchange={onZip} />
-  <button class="primary" disabled={busy} onclick={() => zipInput?.click()}>Import 5etools (zip or folder)</button>
-  {#if folderOk}
-    <input bind:this={folderInput} type="file" webkitdirectory hidden tabindex="-1" aria-hidden="true" onchange={onFolder} />
-    <button disabled={busy} onclick={() => folderInput?.click()}>Choose a data folder instead</button>
-    <span class="muted"> or drop the zip or folder here.</span>
-  {/if}
-  {#if !folderOk || coarse}
-    <p class="muted">On a phone, import the 5etools zip file.</p>
-  {/if}
-</section>
-
-{#if plan}
-  <section class="card" aria-label="Import scan">
-    <p role="status">
-      {#if plan.homebrew}No 5etools data folder was recognised, so every .json file under 5 MB is treated as homebrew. {/if}
-      Found {plan.total} {plan.total === 1 ? 'file' : 'files'} · importing {plan.items.length}{plan.skipped.length ? ' · skipped: ' + plan.skipped.map((s) => `${s.reason} ${s.count}`).join(', ') : ''}
-    </p>
-    <div class="row">
-      <button class="primary" disabled={busy || !plan.items.length} onclick={() => plan && importFiles(plan.items)}>Import</button>
-      <button disabled={busy} onclick={() => (plan = undefined)}>Cancel</button>
-    </div>
+<SettingsGroup title="Import">
+  <section
+    class="drop"
+    class:dragging
+    aria-label="Import 5etools"
+    ondragover={(e) => { e.preventDefault(); dragging = true; }}
+    ondragleave={() => (dragging = false)}
+    ondrop={onDrop}
+  >
+    <input bind:this={zipInput} type="file" accept=".zip,application/zip" hidden tabindex="-1" aria-hidden="true" onchange={onZip} />
+    <button class="primary" disabled={busy} onclick={() => zipInput?.click()}>Import 5etools (zip or folder)</button>
+    {#if folderOk}
+      <input bind:this={folderInput} type="file" webkitdirectory hidden tabindex="-1" aria-hidden="true" onchange={onFolder} />
+      <button disabled={busy} onclick={() => folderInput?.click()}>Choose a data folder instead</button>
+      <span class="muted"> or drop the zip or folder here.</span>
+    {/if}
+    {#if !folderOk || coarse}
+      <p class="muted">On a phone, import the 5etools zip file.</p>
+    {/if}
   </section>
-{/if}
 
-<div class="field">
-  <label for="pack-files">Import individual files (homebrew)</label>
-  <input id="pack-files" type="file" accept=".json" multiple disabled={busy} onchange={onFiles} />
-</div>
+  {#if plan}
+    <section class="scan" aria-label="Import scan">
+      <p role="status">
+        {#if plan.homebrew}No 5etools data folder was recognised, so every .json file under 5 MB is treated as homebrew. {/if}
+        Found <span class="num">{plan.total}</span> {plan.total === 1 ? 'file' : 'files'} · importing <span class="num">{plan.items.length}</span>{plan.skipped.length ? ' · skipped: ' + plan.skipped.map((s) => `${s.reason} ${s.count}`).join(', ') : ''}
+      </p>
+      <div class="row">
+        <button class="primary" disabled={busy || !plan.items.length} onclick={() => plan && importFiles(plan.items)}>Import</button>
+        <button disabled={busy} onclick={() => (plan = undefined)}>Cancel</button>
+      </div>
+    </section>
+  {/if}
 
-<div class="row">
-  <button type="button" aria-expanded={pasteSpell} disabled={!!spellDraft} onclick={() => { if (!pasteSpell || leaveGuard.fn?.() !== false) pasteSpell = !pasteSpell; spellNotice = ''; }}>Paste a spell</button>
-  {#if spellNotice}<p role="status">{spellNotice}</p>{/if}
-</div>
-{#if pasteSpell}
-  <PasteDialog kind="spell" oncancel={() => (pasteSpell = false)} onread={(draft, notes) => { spellDraft = { draft: draft as SpellDef, notes }; pasteSpell = false; }} />
-{/if}
-{#if spellDraft}
-  <SpellEditor initial={spellDraft.draft} notes={spellDraft.notes} oncancel={() => (spellDraft = undefined)}
-    onsaved={(sp) => { spellDraft = undefined; spellNotice = `Saved ${sp.name} to My spells. Enable My spells in a campaign's Settings to use it.`; void listPacks(); }} />
-{/if}
+  {#if busy}
+    <div class="row busy">
+      <p role="status">{progress}</p>
+      {#if reading}<button onclick={() => reading?.abort()}>Cancel</button>{/if}
+    </div>
+  {/if}
+  {#if error}<p role="alert" class="error">{error}</p>{/if}
 
-{#if busy}
-  <p role="status">{progress}</p>
-  {#if reading}<button onclick={() => reading?.abort()}>Cancel</button>{/if}
-{/if}
-{#if error}<p role="alert" class="error">{error}</p>{/if}
+  <Drawer title="Homebrew files and pasted spells" open={pasteSpell || !!spellDraft}>
+    {#snippet summary()}Individual .json files · Paste a spell{/snippet}
+    <div class="field">
+      <label for="pack-files">Import individual files (homebrew)</label>
+      <input id="pack-files" type="file" accept=".json" multiple disabled={busy} onchange={onFiles} />
+    </div>
+    <div class="row">
+      <button type="button" aria-expanded={pasteSpell} disabled={!!spellDraft} onclick={() => { if (!pasteSpell || leaveGuard.fn?.() !== false) pasteSpell = !pasteSpell; spellNotice = ''; }}>Paste a spell</button>
+      {#if spellNotice}<p role="status">{spellNotice}</p>{/if}
+    </div>
+    {#if pasteSpell}
+      <PasteDialog kind="spell" oncancel={() => (pasteSpell = false)} onread={(draft, notes) => { spellDraft = { draft: draft as SpellDef, notes }; pasteSpell = false; }} />
+    {/if}
+    {#if spellDraft}
+      <SpellEditor initial={spellDraft.draft} notes={spellDraft.notes} oncancel={() => (spellDraft = undefined)}
+        onsaved={(sp) => { spellDraft = undefined; spellNotice = `Saved ${sp.name} to My spells. Enable My spells in a campaign's Settings to use it.`; void listPacks(); }} />
+    {/if}
+  </Drawer>
+</SettingsGroup>
 
 {#if summary}
-  <section class="card" aria-label="Import summary">
-    <h2>Import summary</h2>
-    <p>Selected {summary.files} {summary.files === 1 ? "file" : "files"}.</p>
+  <SettingsGroup title="Import summary">
+    <p>Selected <span class="num">{summary.files}</span> {summary.files === 1 ? "file" : "files"}.</p>
     {#if summary.packs.length}
-      <ul>
+      <ul class="plain rows">
         {#each summary.packs as p (p.source)}
           <li>
             <strong>{p.name}</strong>{p.name === p.source ? "" : ` (${p.source})`}: {countText(p.counts)}{p.patches ? `; ${p.patches} updates to SRD entries` : ''}
@@ -325,83 +333,173 @@
     {#if summary.skipped2024}<p>Skipped {summary.skipped2024} entries from the 2024 rules (this app uses the 2014 rules).</p>{/if}
     {#if summary.skippedUnknown}<p>Skipped {summary.skippedUnknown} entries from unrecognised sources (not 2014 official books, and not declared as homebrew). The warnings list the files and sources.</p>{/if}
     {#if summary.skipped.length}
-      <details>
-        <summary class="muted">Skipped {summary.skipped.length} {summary.skipped.length === 1 ? "file" : "files"} with no recognised content</summary>
+      <Drawer title="Skipped {summary.skipped.length} {summary.skipped.length === 1 ? 'file' : 'files'} with no recognised content">
         <ul>
           {#each summary.skipped as name}<li>{name}</li>{/each}
         </ul>
-      </details>
+      </Drawer>
     {/if}
     {#if summary.errors.length}
-      <details open={summary.errors.length <= 10}>
-        <summary>{summary.errors.length} {summary.errors.length === 1 ? 'error' : 'errors'}</summary>
+      <Drawer title="{summary.errors.length} {summary.errors.length === 1 ? 'error' : 'errors'}" open={summary.errors.length <= 10}>
         <ul>
           {#each summary.errors as er}<li><strong>{er.file}</strong>: {er.message}</li>{/each}
         </ul>
-      </details>
+      </Drawer>
     {/if}
     {#if summary.warnings.length}
-      <details>
-        <summary>{summary.warnings.length} {summary.warnings.length === 1 ? 'warning' : 'warnings'}</summary>
+      <Drawer title="{summary.warnings.length} {summary.warnings.length === 1 ? 'warning' : 'warnings'}">
         <ul>
           {#each summary.warnings as w}<li>{w}</li>{/each}
         </ul>
-      </details>
+      </Drawer>
     {/if}
-  </section>
+  </SettingsGroup>
 {/if}
 
 {#if unofficial.length}
-  <section class="card" aria-label="Packs that are not 2014 official content">
-    <h2 class="error">Not 2014 official content</h2>
+  <SettingsGroup title="Not 2014 official content" label="Packs that are not 2014 official content" danger>
     <p role="alert" class="error">
       These packs are not 2014 official content: {unofficial.map((p) => sourceLabel(p.source)).join(', ')}.
       The app ignores them everywhere (the compendium, the character creator, campaign settings) until you remove them.
     </p>
-    {#each unofficial as p (p.id)}
-      <div class="card">
-        <strong>{title(p)}</strong>{#if p.name !== p.source} <span class="muted">({p.source})</span>{/if}
-        <div>{countText(p.counts)}</div>
-        <div class="muted">Imported {new Date(p.importedAt).toLocaleDateString()}</div>
-        <div class="row">
-          <button class="danger" aria-label="Remove {title(p)}" onclick={() => (removing = p)}>Remove</button>
-        </div>
-        {#if removing?.id === p.id}
-          <div role="alertdialog" aria-label="Confirm remove" class="row">
-            <p>Remove “{title(p)}”? This deletes its {countText(p.counts)} from this device and turns it off in every campaign. Characters keep the content they already embedded.</p>
-            <button class="danger" onclick={confirmRemove}>Remove pack</button>
-            <button onclick={() => (removing = undefined)}>Keep it</button>
+    <ul class="plain rows">
+      {#each unofficial as p (p.id)}
+        <li>
+          <div class="book">
+            <div class="info">
+              <strong>{title(p)}</strong>{#if p.name !== p.source}{' '}<span class="muted">({p.source})</span>{/if}
+              <div class="muted small">{countText(p.counts)} · Imported {new Date(p.importedAt).toLocaleDateString()}</div>
+            </div>
+            <button class="danger" aria-label="Remove {title(p)}" onclick={() => (removing = p)}>Remove</button>
           </div>
-        {/if}
-      </div>
-    {/each}
-  </section>
+          {#if removing?.id === p.id}
+            <div role="alertdialog" aria-label="Confirm remove" class="confirm">
+              <p>Remove “{title(p)}”? This deletes its {countText(p.counts)} from this device and turns it off in every campaign. Characters keep the content they already embedded.</p>
+              <div class="row">
+                <button class="danger" onclick={confirmRemove}>Remove pack</button>
+                <button onclick={() => (removing = undefined)}>Keep it</button>
+              </div>
+            </div>
+          {/if}
+        </li>
+      {/each}
+    </ul>
+  </SettingsGroup>
 {/if}
 
-<h2>Imported books</h2>
-<p class="muted">The System Reference Document 5.1 is built in. Enable imported books per campaign in Settings.</p>
-{#each official as p (p.id)}
-  <div class="card">
-    <strong>{title(p)}</strong>{#if p.name !== p.source} <span class="muted">({p.source})</span>{/if}{#if p.homebrew && p.name !== p.source} <span class="muted">· Homebrew</span>{/if}
-    <div>{countText(p.counts)}</div>
-    <div class="muted">Imported {new Date(p.importedAt).toLocaleDateString()}</div>
-    <div class="row">
-      <button class="danger" aria-label="Delete {p.name}" onclick={() => (deleting = p)}>Delete</button>
-    </div>
-    {#if deleting?.id === p.id}
-      <div role="alertdialog" aria-label="Confirm delete" class="row">
-        <p>Delete “{p.name}”? This removes its {countText(p.counts)} from this device. Campaigns that use it lose that content, and characters built from it may show missing entries. {p.id === 'pack:MYSPELLS' ? "These are spells you pasted; they can't be imported again." : 'You can import the files again later.'}</p>
-        <button class="danger" onclick={confirmDelete}>Delete book</button>
-        <button onclick={() => (deleting = undefined)}>Keep it</button>
-      </div>
-    {/if}
-  </div>
-{:else}
-  <p class="muted">No books imported yet.</p>
-{/each}
+<SettingsGroup title="Imported books">
+  <p class="muted">The System Reference Document 5.1 is built in. Enable imported books per campaign in Settings.</p>
+  <ul class="plain rows">
+    {#each official as p (p.id)}
+      <li>
+        <div class="book">
+          <div class="info">
+            <strong>{title(p)}</strong>{#if p.name !== p.source}{' '}<span class="muted">({p.source})</span>{/if}{#if p.homebrew && p.name !== p.source}{' '}<span class="muted">· Homebrew</span>{/if}
+            <div class="muted small">{countText(p.counts)} · Imported {new Date(p.importedAt).toLocaleDateString()}</div>
+          </div>
+          <Menu label="⋯" ariaLabel="More actions for {p.name}" caret={false} align="end"
+            items={[{ label: `Delete ${p.name}`, danger: true, onselect: () => (deleting = p) }]} />
+        </div>
+        {#if deleting?.id === p.id}
+          <div role="alertdialog" aria-label="Confirm delete" class="confirm">
+            <p>Delete “{p.name}”? This removes its {countText(p.counts)} from this device. Campaigns that use it lose that content, and characters built from it may show missing entries. {p.id === 'pack:MYSPELLS' ? "These are spells you pasted; they can't be imported again." : 'You can import the files again later.'}</p>
+            <div class="row">
+              <button class="danger" onclick={confirmDelete}>Delete book</button>
+              <button onclick={() => (deleting = undefined)}>Keep it</button>
+            </div>
+          </div>
+        {/if}
+      </li>
+    {:else}
+      <li class="muted">No books imported yet.</li>
+    {/each}
+  </ul>
+</SettingsGroup>
 
 <style>
+  .lead {
+    max-width: 900px;
+    margin: 0 0 1rem;
+  }
+
+  .drop {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.9rem 1rem;
+    border: 1px dashed var(--line-strong);
+    border-radius: 6px;
+  }
+
+  .drop p {
+    flex-basis: 100%;
+    margin: 0;
+  }
+
   .drop.dragging {
-    outline: 2px dashed var(--accent);
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 6%, transparent);
+  }
+
+  .scan {
+    margin: 0.75rem 0;
+    padding: 0.25rem 0.75rem;
+    border-left: 2px solid var(--accent);
+  }
+
+  .scan p,
+  .busy p {
+    margin: 0.25rem 0 0.5rem;
+  }
+
+  .drop + :global(.drawer),
+  .scan + :global(.drawer),
+  .busy + :global(.drawer),
+  .error + :global(.drawer) {
+    margin-top: 0.75rem;
+  }
+
+  .rows {
+    border-top: 1px solid var(--line);
+  }
+
+  .rows > li {
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .book {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  .info {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .info strong {
+    color: var(--text-strong);
+  }
+
+  .small {
+    font-size: 0.85rem;
+  }
+
+  .confirm {
+    border-left: 2px solid var(--danger);
+    padding: 0.25rem 0.75rem;
+    margin: 0.5rem 0;
+  }
+
+  .confirm p {
+    margin: 0 0 0.5rem;
+  }
+
+  code {
+    font-family: var(--mono);
+    color: var(--text-strong);
   }
 </style>
