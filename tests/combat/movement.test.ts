@@ -2,7 +2,7 @@
 import { describe, expect, test } from 'vitest';
 import { currentRun, newCombat, next, prev, removeStep, start } from '../../src/lib/combat/combat.ts';
 import {
-  addDash, budgetApplies, budgetFeet, clampMove, combatantForToken, effectiveSpeed, MAX_DASHES, originOf, recordMove, remainingFeet,
+  addDash, budgetApplies, budgetFeet, clampMove, combatantForToken, effectiveSpeed, MAX_DASHES, originOf, reachableCells, recordMove, remainingFeet,
   resetMovement, usedFeet,
 } from '../../src/lib/combat/movement.ts';
 import { cellAt, cellCenter, feetBetween, snap } from '../../src/lib/map/grid.ts';
@@ -157,4 +157,12 @@ describe('clampMove (Review Focus 3)', () => {
       expect(along.slice(last + 1).every((q) => feetBetween(hex, a, q, '5-5-5') > left)).toBe(true);
     }
   });
+});
+
+test('reachableCells: the squares a token can reach with the feet left (the highlight), by the grid rule, inside the scene', () => {
+  const g = { type: 'square', size: 70, feet: 5, offsetX: 0, offsetY: 0 } as Grid;
+  expect(reachableCells(g, { x: 35, y: 35 }, 10, '5-5-5', 700, 700)).toHaveLength(9); // a corner: 3 × 3
+  expect(reachableCells(g, { x: 35, y: 35 }, 10, '5-10-5', 700, 700)).toHaveLength(8); // the far diagonal costs 15 ft
+  expect(reachableCells(g, { x: 35, y: 35 }, 0, '5-5-5', 700, 700)).toEqual([]);
+  expect(reachableCells(g, { x: 350, y: 350 }, 5, '5-5-5', 700, 700)).toHaveLength(9);
 });

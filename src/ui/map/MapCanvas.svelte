@@ -11,7 +11,7 @@
   import type { Arrow } from '../../lib/map/actions.ts';
   import { decodeFog, FOG_CELL, fogSize, newFog, paintBrush, paintRect, type FogEdit } from '../../lib/map/fog.ts';
   import { cellCenter, cellsIn, feetBetween, hexCorners, snap, type Cell, type Pt } from '../../lib/map/grid.ts';
-  import { clampMove } from '../../lib/combat/movement.ts';
+  import { clampMove, reachableCells } from '../../lib/combat/movement.ts';
   import { initials, radius, tokenAt, tokensInRect } from '../../lib/map/scene.ts';
   import { affectedCells, tokensInTemplate, type Shape, type Template } from '../../lib/map/templates.ts';
   import { fit, pinch, toScreen, toWorld, zoomAt, type View } from '../../lib/map/view.ts';
@@ -271,6 +271,25 @@
     // tokens (a dragged group drawn at the ghost's offset)
     const sel = new Set(selected);
     const drag = mode.k === 'drag' ? mode : undefined;
+
+    // the squares the selected (or dragged) token can still reach this turn, tinted under the tokens (as chess.com shows legal moves)
+    const moverId = drag?.id ?? (selected.length === 1 ? selected[0] : undefined), mover = moverId !== undefined ? tokens.find((t) => t.id === moverId) : undefined;
+    const lim = mover && canDrag(mover.id) ? limitOf?.(mover.id) : undefined;
+    if (mover && lim) {
+      ctx.save();
+      ctx.globalAlpha = 0.16;
+      ctx.fillStyle = accent;
+      ctx.beginPath();
+      for (const c of reachableCells(grid, lim.from ?? mover, lim.budget, diagonal, width, height)) {
+        if (grid.type === 'square') { const p = cellCenter(grid, c); ctx.rect(p.x - grid.size / 2 + px, p.y - grid.size / 2 + px, grid.size - 2 * px, grid.size - 2 * px); continue; }
+        const [first, ...rest] = hexCorners(grid, c);
+        ctx.moveTo(first.x, first.y);
+        for (const p of rest) ctx.lineTo(p.x, p.y);
+        ctx.closePath();
+      }
+      ctx.fill();
+      ctx.restore();
+    }
     const dragged = new Set(drag?.ids ?? []);
     const primary = drag && tokens.find((t) => t.id === drag.id);
     const dx = drag && primary ? drag.ghost.x - primary.x : 0, dy = drag && primary ? drag.ghost.y - primary.y : 0;

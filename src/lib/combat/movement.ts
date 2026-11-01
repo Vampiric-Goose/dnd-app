@@ -1,6 +1,6 @@
 // Pure (no Svelte/Vite/DOM): the movement budget (spec 1). Combat.movement holds each combatant's turn origin (where its token stood
 // when its turn's movement began) and Dashes taken this turn; movement used = grid distance origin → token. combat.ts drops an entry where its own turn starts.
-import { feetBetween, snap, type Pt } from '../map/grid.ts';
+import { cellAt, cellDistance, cellsIn, feetBetween, snap, type Cell, type Pt } from '../map/grid.ts';
 import type { Combat, Combatant, Grid, Movement, Size } from '../types.ts';
 
 /** 2014 conditions that set speed to 0. */
@@ -31,6 +31,15 @@ export const budgetFeet = (speed: number, m: Movement | undefined): number => {
 /** The budget less the movement used (token at `at` on grid `g`; without them none is counted as used). */
 export const remainingFeet = (speed: number, m: Movement | undefined, at?: Pt, g?: Grid, diagonal: '5-5-5' | '5-10-5' = '5-5-5'): number =>
   Math.max(0, budgetFeet(speed, m) - usedFeet(m, at, g, diagonal));
+
+/** The cells within `feet` of `origin`'s cell by the grid's distance rule, inside the w × h scene: the squares a token can reach (the highlight). */
+export function reachableCells(g: Grid, origin: Pt, feet: number, diagonal: '5-5-5' | '5-10-5', w: number, h: number): Cell[] {
+  if (!(feet > 0)) return [];
+  const reach = (feet / g.feet + 1) * g.size, o = cellAt(g, origin);
+  const x0 = Math.max(0, origin.x - reach), y0 = Math.max(0, origin.y - reach), x1 = Math.min(w, origin.x + reach), y1 = Math.min(h, origin.y + reach);
+  if (x0 >= x1 || y0 >= y1) return [];
+  return cellsIn(g, x0, y0, x1, y1).filter((c) => cellDistance(g, o, c, diagonal) * g.feet <= feet);
+}
 
 /** A monster token's linked combatant, or a character's. */
 export const combatantForToken = (c: Combat, t: { characterId?: string; combatantId?: string }): Combatant | undefined =>
