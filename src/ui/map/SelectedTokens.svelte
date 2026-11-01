@@ -69,10 +69,12 @@
           {#each SIZES as s}<option value={s}>{SIZE_NAMES[s]}</option>{/each}
         </select>
       </label>
-      <label class="field">Portrait
-        <input type="file" accept="image/*" onchange={(e) => { const f = (e.currentTarget as HTMLInputElement).files?.[0]; if (f) onportrait(t.id, f); }} />
-      </label>
-      {#if t.portrait}<button type="button" aria-label="Remove {t.name}'s portrait" onclick={() => onpatch(t.id, { portrait: undefined })}>Remove portrait</button>{/if}
+      <div class="row portrait">
+        <label class="field">Portrait
+          <input type="file" accept="image/*" onchange={(e) => { const f = (e.currentTarget as HTMLInputElement).files?.[0]; if (f) onportrait(t.id, f); }} />
+        </label>
+        {#if t.portrait}<button type="button" class="x" aria-label="Remove {t.name}'s portrait" title="Remove portrait" onclick={() => onpatch(t.id, { portrait: undefined })}>✕</button>{/if}
+      </div>
     </Drawer>
 
     <div class="row actions">
@@ -158,6 +160,27 @@
 
   .field input[type='file'] {
     max-width: 100%;
+  }
+
+  .portrait {
+    align-items: flex-end;
+    flex-wrap: nowrap;
+  }
+
+  .portrait .field {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .x {
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    min-width: 2rem;
+  }
+
+  .x:hover {
+    color: var(--danger);
   }
 
   .names {
