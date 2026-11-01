@@ -53,6 +53,7 @@
     ['packs', 'Packs', () => import('./ui/pages/Packs.svelte')],
     ['settings', 'CampaignSettings', () => import('./ui/pages/CampaignSettings.svelte')],
     ['about', 'About', () => import('./ui/pages/About.svelte')],
+    ['join', 'Join', () => import('./ui/pages/Join.svelte')], // no code yet: the page asks for one
     ['join/:code', 'Join', () => import('./ui/pages/Join.svelte')],
     ['map', 'Map', () => import('./ui/pages/Map.svelte')], // stage 5; `?scene=<id>` picks the scene
   ];

@@ -42,3 +42,11 @@ export const newNode = (): string => uid().replace(/-/g, '').slice(0, 8);
 
 /** R6: a new hosted (dm) or joined (player) campaign sync record. */
 export const newCampaignSync = (role: CampaignSync['role'], code: string): CampaignSync => ({ role, code, node: newNode() });
+
+/** A join code from what a player typed or pasted: the code itself (any case, spaces or dashes), or a link ending in join/CODE. */
+export function codeFrom(text: string): string {
+  const t = text.trim().toUpperCase();
+  const m = /JOIN\/([A-Z0-9]+)\s*$/.exec(t);
+  const c = (m ? m[1] : t).replace(/[\s-]/g, '');
+  return /^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{12}$/.test(c) ? c : '';
+}

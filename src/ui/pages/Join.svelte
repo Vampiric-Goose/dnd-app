@@ -1,13 +1,18 @@
 <script lang="ts">
   import { navigate } from '../../lib/router.svelte.ts';
   import { app, setCampaign } from '../../lib/store.svelte.ts';
+  import { codeFrom } from '../../lib/sync/code.ts';
   import { join, leaveJoin, session } from '../../lib/sync/session.svelte.ts';
   import RetryNow from '../sync/RetryNow.svelte';
 
-  let { params }: { params: { code: string } } = $props();
+  let { params }: { params: { code?: string } } = $props();
 
-  const code = $derived((params.code ?? '').toUpperCase()); // params can briefly be the next route's while leaving
-  const valid = $derived(/^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{12}$/.test(code));
+  // No code in the link: the player types the code or pastes the whole link.
+  let typed = $state('');
+  const typedCode = $derived(codeFrom(typed));
+
+  const code = $derived(codeFrom(params.code ?? '')); // params can briefly be the next route's while leaving
+  const valid = $derived(code !== '');
   // already joined with this code on this device: just open it (the session reconnects)
   const joined = $derived(app.campaigns.find((c) => c.sync?.role === 'player' && c.sync.code === code));
 
@@ -43,7 +48,16 @@
 
 <h1>Join a campaign</h1>
 
-{#if !valid}
+{#if !params.code}
+  <form onsubmit={(e) => { e.preventDefault(); if (typedCode) navigate(`join/${typedCode}`); }}>
+    <div class="field">
+      <label for="join-code">Join code or link from your DM</label>
+      <input id="join-code" bind:value={typed} autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="ABCD EFGH JKMN" aria-invalid={typed && !typedCode ? 'true' : undefined} />
+    </div>
+    {#if typed && !typedCode}<p class="muted">A join code has 12 letters and digits.</p>{/if}
+    <button class="primary" type="submit" disabled={!typedCode}>Continue</button>
+  </form>
+{:else if !valid}
   <p role="alert" class="error">This join link is not complete. A join code has 12 letters and digits; ask your DM for the link again.</p>
 {:else if !app.ready}
   <p class="muted">Loading…</p>

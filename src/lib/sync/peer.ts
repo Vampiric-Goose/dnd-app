@@ -6,7 +6,7 @@ import { Peer, type DataConnection, type PeerOptions } from 'peerjs';
 import { frames, unframer, type Link, type Listener, type Transport } from './link.ts';
 import { MAX_CHUNK, MAX_MESSAGE } from './protocol.ts';
 
-const OPTIONS: PeerOptions = { config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] } };
+const OPTIONS: PeerOptions = { config: { iceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] }] } };
 const CONNECT = { reliable: true, serialization: 'json' } as const;
 /** The largest data channel message an honest peer sends (PeerJS's JSON-channel limit). A bigger one is refused unread. */
 const MAX_FRAME_TEXT = 16_300;
@@ -17,6 +17,8 @@ const DIAL_TIMEOUT = 20_000;
 /** What the user is told when PeerJS fails. */
 /** S5-R1: the public signaling server may refuse (429) after many retries; the session's backoff stretches to 5 minutes. */
 const SERVER_DOWN = "Can't reach the sync server (it may be busy).";
+/** The DM was found through the server, but no direct path opened between the two networks (no relay server is used). */
+const NO_PATH = 'Found your DM, but your two networks could not connect directly. Mobile data and some school or work networks block this; try the same Wi-Fi as your DM, or another network.';
 
 function why(e: unknown): string {
   switch ((e as { type?: string })?.type) {
@@ -125,10 +127,18 @@ export const transport: Transport = {
         peer.destroy();
         reject(new Error(why(e)));
       };
-      const timer = setTimeout(() => fail(new Error('Could not connect to the host in time.')), DIAL_TIMEOUT);
+      // Which step stalled decides the message: the server, the DM's answer, or the direct path between the networks.
+      let step: 'server' | 'dm' | 'path' = 'server';
+      const timer = setTimeout(() => fail(new Error(step === 'server' ? SERVER_DOWN : step === 'path' ? NO_PATH : 'Your DM did not answer. Check that they are hosting.')), DIAL_TIMEOUT);
       peer.on('error', fail);
       peer.on('open', () => {
+        step = 'dm';
         const conn = peer.connect(peerId, CONNECT);
+        const pc = conn.peerConnection;
+        if (pc) pc.addEventListener('iceconnectionstatechange', () => {
+          if (pc.iceConnectionState === 'checking') step = 'path';
+          if (pc.iceConnectionState === 'failed') fail(new Error(NO_PATH));
+        });
         const link = wrap(conn);
         link.onClose(() => { fail(new Error('The connection closed.')); setTimeout(() => peer.destroy(), FLUSH_WAIT); });
         conn.on('open', () => {
