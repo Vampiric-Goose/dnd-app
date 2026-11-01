@@ -1,5 +1,5 @@
 # The dnd-app sync relay: a Cloudflare Worker with one Durable Object per campaign room. Deploy: `npx wrangler deploy` from this folder.
-name = "dnd-relay"
+name = "dndnd"
 main = "src/index.ts"
 compatibility_date = "2025-09-01"
 

@@ -10,7 +10,7 @@ import { sealFor, type Seal } from './seal.ts';
 const MAX_SEALED = Math.ceil((MAX_MESSAGE * 3 * 4) / 3) + 64;
 const DIAL_TIMEOUT = 15_000;
 /** The deployed relay (relay/, `npx wrangler deploy`). Empty: the app falls back to direct PeerJS connections. */
-export const RELAY_URL = '';
+export const RELAY_URL = 'wss://dndnd.firelordsam.workers.dev';
 const SERVER_DOWN = "Can't reach the sync server (it may be busy).";
 
 export type Socket = Pick<WebSocket, 'send' | 'close' | 'readyState' | 'bufferedAmount'> & {
