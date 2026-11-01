@@ -6,7 +6,7 @@ import type { ContentIndex } from '../content/index.ts';
 import { idSource, is2024Source, restorablePack } from '../content/sources.ts';
 import type { RollEntry } from '../rolls.svelte.ts';
 import { toBase64 } from '../base64.ts';
-import { addDash, budgetApplies, combatantForToken, recordMove } from '../combat/movement.ts';
+import { addDash, budgetApplies, combatantForToken, PLAYER_DASHES, recordMove } from '../combat/movement.ts';
 import { moveTokens } from '../map/scene.ts';
 import { ActionBoard, actionProblem, actionsForPlayers, expiry, type ActionRequest, type DeclaredAction, type PlayerAction } from '../map/actions.ts';
 import type { Campaign, CampaignSync, Character, Combat, Pack, PackMeta, Scene } from '../types.ts';
@@ -283,7 +283,7 @@ export class Host {
     }
   }
 
-  /** Only the owner's (else a violation), on their turn as players see it while a budget applies, checked on the fresh combat; else ignored. */
+  /** Only the owner's (else a violation), on their turn as players see it while a budget applies, at most PLAYER_DASHES a turn, checked on the fresh combat; else ignored. */
   async #dash(c: Conn, pid: string, id: string): Promise<void> {
     const camp = await this.#deps.loadCampaign();
     const ch = await this.#deps.loadCharacter(id);
@@ -291,7 +291,7 @@ export class Host {
     const chars = (await this.#deps.loadCharacters()).filter((x) => x.campaignId === camp.id);
     await this.#deps.updateCombat?.((k) => {
       const x = budgetApplies(k, camp.settings) && currentActor(trackerForPlayers(k, chars, camp.settings)) === id ? combatantForToken(k, { characterId: id }) : undefined;
-      return x ? addDash(k, x.id) : k;
+      return x ? addDash(k, x.id, PLAYER_DASHES) : k; // one a turn from the player's button; a second is ignored quietly
     });
   }
 

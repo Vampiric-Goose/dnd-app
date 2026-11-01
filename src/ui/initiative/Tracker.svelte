@@ -1,7 +1,7 @@
 <script lang="ts">
   import { addCombatants, addMonsters, lairCombatant, MAX_COMBATANTS, pcCombatant, prev, rollInit, setInit } from '../../lib/combat/combat.ts';
   import { deleteEncounter, endCombat, saveFight, saveFightAs, turn, updateCombat } from '../../lib/combat/store.ts';
-  import { budgetApplies, dashRun, effectiveSpeed, remainingFeet, resetMovement, undoDash } from '../../lib/combat/movement.ts';
+  import { budgetApplies, dashRun, effectiveSpeed, MAX_DASHES, remainingFeet, resetMovement, undoDash } from '../../lib/combat/movement.ts';
   import type { ContentIndex } from '../../lib/content/index.ts';
   import { db } from '../../lib/db.ts';
   import { computeSheet } from '../../lib/rules/sheet.ts';
@@ -170,7 +170,7 @@
       {/if}
       <div class="acts">
         {#if mover}
-          <button type="button" onclick={() => { const { ids } = mover; void edit((c) => dashRun(c, ids)); }}>Dash</button>
+          <button type="button" disabled={mover.dashes >= MAX_DASHES} title={mover.dashes >= MAX_DASHES ? `At most ${MAX_DASHES} Dashes a turn` : undefined} onclick={() => { const { ids } = mover; void edit((c) => dashRun(c, ids)); }}>Dash</button>
         {/if}
         {#if round === 0}
           <button type="button" class="primary" disabled={!list.length} onclick={() => run(() => turn(cid, 'start'))}>Start</button>

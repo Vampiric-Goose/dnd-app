@@ -10,7 +10,7 @@
   import { currentActor } from '../../lib/sync/project.ts';
   import { sceneForPlayers, type PlayerScene } from '../../lib/sync/scene.ts';
   import { clearDeclared, declareAction, sendDash, sendMove, session } from '../../lib/sync/session.svelte.ts';
-  import { effectiveSpeed, remainingFeet } from '../../lib/combat/movement.ts';
+  import { effectiveSpeed, PLAYER_DASHES, remainingFeet } from '../../lib/combat/movement.ts';
   import type { Campaign, Character } from '../../lib/types.ts';
   import MapCanvas from './MapCanvas.svelte';
   import Drawer from '../kit/Drawer.svelte';
@@ -143,7 +143,7 @@
       {#if turnBudget && actor}
         <div class="turn">
           <p class="status" role="status" aria-live="polite">Your turn: <span class="num">{turnBudget.left}</span> ft left{turnBudget.dashes ? ` · Dashed ×${turnBudget.dashes}` : ''}.</p>
-          <button type="button" aria-label="Dash" disabled={!!dashUnder && dashUnder === session.tracker} onclick={dash}>Dash</button>
+          <button type="button" aria-label="Dash" disabled={turnBudget.dashes >= PLAYER_DASHES || (!!dashUnder && dashUnder === session.tracker)} onclick={dash}>Dash</button>
         </div>
       {:else}
         <p class="status" role="status" aria-live="polite">{status}</p>

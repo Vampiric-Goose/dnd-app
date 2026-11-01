@@ -2,7 +2,7 @@
 import { describe, expect, test } from 'vitest';
 import { currentRun, newCombat, next, prev, removeStep, start } from '../../src/lib/combat/combat.ts';
 import {
-  addDash, budgetApplies, clampMove, combatantForToken, dashRun, effectiveSpeed, recordMove, remainingFeet, resetMovement, undoDash,
+  addDash, budgetApplies, clampMove, combatantForToken, dashRun, effectiveSpeed, MAX_DASHES, PLAYER_DASHES, recordMove, remainingFeet, resetMovement, undoDash,
 } from '../../src/lib/combat/movement.ts';
 import { cellAt, cellCenter, feetBetween, snap } from '../../src/lib/map/grid.ts';
 import type { Combat, Combatant, Grid } from '../../src/lib/types.ts';
@@ -67,6 +67,18 @@ describe('Dash on a grouped monster turn (the turn bar Dashes the whole run)', (
     const d = dashRun(c, currentRun(c));
     expect(d.movement).toEqual({ g1: mv(0, 1), g2: mv(0, 1) });
     expect(remainingFeet(30, d.movement!.g2)).toBe(60);
+  });
+});
+
+describe('Dash limits', () => {
+  test('addDash stops at MAX_DASHES (3), or at the cap passed (a player: PLAYER_DASHES, 1)', () => {
+    expect([PLAYER_DASHES, MAX_DASHES]).toEqual([1, 3]);
+    let c = fight();
+    for (let i = 0; i < 5; i++) c = addDash(c, 'B');
+    expect(c.movement!.B.dashes).toBe(3);
+    const one = addDash(fight(), 'B', PLAYER_DASHES);
+    expect(addDash(one, 'B', PLAYER_DASHES)).toBe(one);
+    expect(addDash(one, 'B').movement!.B.dashes).toBe(2); // the DM may add more
   });
 });
 

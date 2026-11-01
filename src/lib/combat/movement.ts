@@ -29,7 +29,12 @@ const withEntry = (c: Combat, id: string, m: Movement): Combat => ({ ...c, movem
 export const recordMove = (c: Combat, combatantId: string, feet: number): Combat =>
   feet > 0 ? withEntry(c, combatantId, { ...entry(c, combatantId), feet: entry(c, combatantId).feet + feet }) : c;
 
-export const addDash = (c: Combat, combatantId: string): Combat => withEntry(c, combatantId, { ...entry(c, combatantId), dashes: entry(c, combatantId).dashes + 1 });
+/** Dashes a turn: a player's own Dash button gives one; the DM may add more (Cunning Action, Action Surge) up to MAX_DASHES in all. */
+export const PLAYER_DASHES = 1, MAX_DASHES = 3;
+
+/** One more Dash, unless the combatant already has `max` this turn (then `c`). */
+export const addDash = (c: Combat, combatantId: string, max = MAX_DASHES): Combat =>
+  entry(c, combatantId).dashes >= max ? c : withEntry(c, combatantId, { ...entry(c, combatantId), dashes: entry(c, combatantId).dashes + 1 });
 
 /** The DM's turn-bar Dash: one for every combatant of the current run (a grouped monster turn moves as one, each token on its own budget). */
 export const dashRun = (c: Combat, ids: Iterable<string>): Combat => { for (const id of ids) c = addDash(c, id); return c; };

@@ -145,6 +145,21 @@ describe('engine', () => {
     expect(d.errors.length).toBe(1);
   });
 
+  test('a player gets one Dash a turn: a crafted second dash is ignored quietly (no violation)', async () => {
+    const { d, host, a } = await joined();
+    const owner = rawLink();
+    host.accept(owner.link);
+    owner.deliver({ t: 'hello', code: CODE, playerId: 'A1' });
+    await settle(host);
+    a.guest.sendDash('thorin');
+    await settle(host, a.guest);
+    owner.deliver({ t: 'dash', characterId: 'thorin' });
+    owner.deliver({ t: 'dash', characterId: 'thorin' });
+    await settle(host);
+    expect(d.combat!.movement!['pc:thorin'].dashes).toBe(1);
+    expect(d.errors).toEqual([]);
+  });
+
   test('Review Focus 1: the tracker carries the player\'s own movement, never a monster\'s; a reconnect gets it in its first tracker', async () => {
     const c = fight({ movement: { 'pc:thorin': mv(20, 1), g1: mv(15) } });
     const v = trackerForPlayers(c, [thorin()], settings(), undefined, 'A1')!;
