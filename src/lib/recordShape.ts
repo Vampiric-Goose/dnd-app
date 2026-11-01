@@ -84,5 +84,21 @@ export function encounterProblem(r: unknown): string | undefined {
   return i < 0 ? undefined : `has a damaged monster line (${i + 1})`;
 }
 
+const SIZES = ['T', 'S', 'M', 'L', 'H', 'G'];
+const between = (v: unknown, lo: number, hi: number) => finite(v) && (v as number) >= lo && (v as number) <= hi;
+/** Stage 5: a battle map scene: its sides, grid and tokens within what the map page and the players' view rely on. */
+export function sceneProblem(r: unknown): string | undefined {
+  if (!isRec(r) || typeof r.id !== 'string' || typeof r.campaignId !== 'string' || typeof r.name !== 'string') return 'is incomplete';
+  for (const k of ['width', 'height']) if (!Number.isInteger(r[k]) || !between(r[k], 1, 4096)) return `has a bad ${k}`;
+  const g = r.grid;
+  if (!isRec(g) || !['square', 'hex-flat', 'hex-pointy'].includes(g.type as string) || !between(g.size, 10, 500) || !finite(g.offsetX) || !finite(g.offsetY)
+    || typeof g.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(g.color) || !between(g.opacity, 0, 1) || !between(g.feet, 1, 100)) return 'has a damaged grid';
+  if (!Array.isArray(r.tokens) || r.tokens.length > 200) return 'has a damaged token list';
+  const i = r.tokens.findIndex((t) => !isRec(t) || typeof t.id !== 'string' || typeof t.name !== 'string' || !finite(t.x) || !finite(t.y)
+    || !SIZES.includes(t.size as string) || typeof t.color !== 'string');
+  if (i >= 0) return `has a damaged token (${i + 1})`;
+  if (r.fog !== undefined && typeof r.fog !== 'string') return 'has damaged fog';
+}
+
 /** A campaign, with its loot entries checked like a character's inventory. */
 export const campaignProblem = (r: unknown): string | undefined => problem(r, SHAPES.campaign) ?? entriesProblem((r as Rec).loot as unknown[], 'loot');

@@ -14,7 +14,7 @@ test('backup round-trip incl. blobs', async () => {
   await db.campaigns.put(camp('c1')); await db.characters.put(char('a', 'c1'));
   const file = await exportBackup({ includePacks: true });
   await resetDb();
-  expect(await importBackup(file)).toEqual({ campaigns: 1, characters: 1, items: 0, monsters: 0, encounters: 0, packs: 0 });
+  expect(await importBackup(file)).toEqual({ campaigns: 1, characters: 1, items: 0, monsters: 0, encounters: 0, scenes: 0, packs: 0 });
   expect(new Uint8Array(await (await db.blobs.get(hash))!.arrayBuffer())).toEqual(new Uint8Array([1, 2, 3]));
 });
 
@@ -40,7 +40,7 @@ test('damaged backups are rejected with a readable message and write nothing', a
   for (const [bad, message] of cases) await expect(importBackup(backup(bad))).rejects.toThrow(message);
   expect(await db.campaigns.list()).toEqual([]);
   expect(await db.characters.list()).toEqual([]);
-  expect(await importBackup(backup(good))).toEqual({ campaigns: 1, characters: 1, items: 0, monsters: 0, encounters: 0, packs: 0 }); // control
+  expect(await importBackup(backup(good))).toEqual({ campaigns: 1, characters: 1, items: 0, monsters: 0, encounters: 0, scenes: 0, packs: 0 }); // control
 });
 
 test('corrupt blobs are rejected', async () => {
@@ -144,7 +144,7 @@ test('R57: reading a backup writes nothing and counts the newer records it would
   await db.characters.put({ ...char('a', 'c1'), name: 'Newer' }); // edited after the backup
   await db.characters.put(char('extra'));
   const plan = await readBackup(file);
-  expect(plan.counts).toEqual({ campaigns: 1, characters: 1, items: 0, monsters: 0, encounters: 0, packs: 0 });
+  expect(plan.counts).toEqual({ campaigns: 1, characters: 1, items: 0, monsters: 0, encounters: 0, scenes: 0, packs: 0 });
   expect(plan.newer).toBe(1); // a (c1 was not touched since)
   expect(plan.replaced).toBe(2); // c1 and a
   expect((await db.characters.get('a'))!.name).toBe('Newer'); // nothing written yet
