@@ -141,12 +141,12 @@ export async function addPreparedToFight(cid: string, e: Encounter, lookup: (id:
 }
 
 /**
- * W5: the scene a fight is on: the shown one, else `prefer` (when it still exists), else the most recently updated. The DM's map needs no
- * "Show to players", so a fight run on an unshown scene still saves and resumes with it.
+ * W5: the scene a fight is on: `prefer` (the encounter's saved scene, when it still exists), else the shown one, else the most recently
+ * updated. The DM's map needs no "Show to players", so a fight run on an unshown scene still saves and resumes with it.
  */
 export async function fightScene(cid: string, prefer?: string): Promise<Scene | undefined> {
   const scenes = await db.scenes.list(cid);
-  return scenes.find((s) => s.shown) ?? scenes.find((s) => s.id === prefer) ?? scenes.sort((a, b) => b.updatedAt - a.updatedAt)[0];
+  return scenes.find((s) => s.id === prefer) ?? scenes.find((s) => s.shown) ?? scenes.sort((a, b) => b.updatedAt - a.updatedAt)[0];
 }
 
 /** Saves the live fight (and its scene's tokens and fog, see fightScene) as a new encounter, and links the fight to it. */

@@ -190,6 +190,23 @@ describe('store flows', () => {
     expect((await resumeFight('c1', saved(), lookup)).place).toEqual({ placed: 4 });
     expect(await onScene(cave.id)).toEqual(['a', 'b', 'g1', 'g2']);
     expect(await onScene(arena.id)).toEqual([]);
+    // review 1: the hidden PC (pc:b) stays hidden on a scene players now see
+    const hidden = Object.fromEntries((await db.scenes.get(cave.id))!.tokens.map((t) => [t.characterId ?? t.combatantId, !!t.hidden]));
+    expect(hidden).toEqual({ a: false, b: true, g1: false, g2: false });
+  });
+
+  test('W5 review 2: Save encounter keeps the saved scene when another one is shown for exploration', async () => {
+    const a = newScene('c1', 'A'), b = newScene('c1', 'B');
+    await db.scenes.put(a);
+    await db.scenes.put(b);
+    await db.scenes.show('c1', a.id);
+    const e = saved(a);
+    await db.encounters.put(e);
+    await resumeFight('c1', e, lookup);
+    await db.scenes.show('c1', b.id);
+    expect((await saveFight('c1'))?.fight?.map?.sceneId).toBe(a.id);
+    await db.scenes.delete(a.id); // gone: the shown scene then
+    expect((await saveFight('c1'))?.fight?.map?.sceneId).toBe(b.id);
   });
 
   test('W5: resume places only the combatants that have no token on the saved scene', async () => {
