@@ -101,6 +101,9 @@
   const actions = $derived(base ? actionsForPlayers(session.actions as DeclaredAction[], base) : []);
   const arrows = $derived(view ? arrowsOn(actions, view.id, view.tokens, (a) => joined && a.by === me, (by) => (by === 'dm' ? strong : tokenColor(by))) : []);
   const myArrow = $derived(joined && actions.some((a) => a.by === me));
+  /** The arrow picked on the map (phones have no Delete key: the panel offers a button while it is the player's own). */
+  let picked: string | undefined = $state();
+  const pickedOwn = $derived(arrows.find((a) => a.id === picked)?.clearable);
   const ondeclare = $derived(joined && session.status === 'online' ? (d: { from: Pt; fromToken?: string; to: Pt; toToken?: string }) => {
     if (!base) return;
     const own = d.fromToken !== undefined && !!mine(tokenOf(d.fromToken)?.characterId);
@@ -134,6 +137,7 @@
         {arrows}
         {ondeclare}
         onclear={() => clearDeclared()}
+        bind:arrow={picked}
       />
     {/key}
     {#snippet panel()}
@@ -148,7 +152,12 @@
       {:else}
         <p class="status" role="status" aria-live="polite">{status}</p>
       {/if}
-      {#if myArrow}<button type="button" class="clear-arrow" onclick={() => clearDeclared()}>Clear arrow</button>{/if}
+      {#if myArrow}
+        <div class="arrow-btns">
+          {#if pickedOwn}<button type="button" class="del-arrow" onclick={() => { clearDeclared(); picked = undefined; }}>Delete arrow</button>{/if}
+          <button type="button" onclick={() => clearDeclared()}>Clear arrow</button>
+        </div>
+      {/if}
       {#if owned.length}
         <div class="caption">Your tokens</div>
         <ul class="plain tokens">{#each owned as t (t.id)}{@render row(t)}{/each}</ul>
@@ -199,8 +208,15 @@
     margin: 0.25rem 0 0.75rem;
   }
 
-  .clear-arrow {
+  .arrow-btns {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
     margin: -0.5rem 0 0.9rem;
+  }
+
+  .del-arrow {
+    min-height: 44px;
   }
 
   .tokens li {
