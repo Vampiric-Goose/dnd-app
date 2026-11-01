@@ -32,5 +32,14 @@
 {/if}
 
 <!-- EntityDetail shows traits or text, not both (N12). -->
-{#if race}<div class="card"><EntityDetail entity={race} {index} /></div>{/if}
-{#if subrace}<div class="card"><EntityDetail entity={subrace} {index} /></div>{/if}
+{#if race}<div class="detail"><EntityDetail entity={race} {index} /></div>{/if}
+{#if subrace}<div class="detail"><EntityDetail entity={subrace} {index} /></div>{/if}
+
+<style>
+  /* The picked entry: a hairline-ruled block, not a boxed card. */
+  .detail {
+    margin: 0.75rem 0;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--line);
+  }
+</style>

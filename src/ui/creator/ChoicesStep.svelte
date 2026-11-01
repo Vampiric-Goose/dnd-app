@@ -39,19 +39,23 @@
 {/each}
 
 <style>
-  /* Each level is its own band: a thick rule and a heading, so choices from different levels never run together. */
+  /* Each level is its own band: a rule and an accent caption, so choices from different levels never run together. */
   .level {
-    margin-top: 2rem;
+    margin-top: 1.75rem;
     padding-top: 0.5rem;
-    border-top: 4px solid var(--accent);
+    border-top: 1px solid var(--line-strong);
   }
 
   .level:first-of-type {
-    margin-top: 1rem;
+    margin-top: 0.5rem;
   }
 
   h3 {
     margin: 0 0 0.25rem;
     color: var(--accent);
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
   }
 </style>

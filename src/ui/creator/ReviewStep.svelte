@@ -16,7 +16,7 @@
   const skills = $derived(Object.entries(sheet.skills).filter(([, s]) => s.proficient).map(([k, s]) => `${titleCase(k)} ${signed(s.bonus)}${s.expertise ? ' (expertise)' : ''}`));
 </script>
 
-<section class="card" aria-label="Character summary">
+<section class="summary" aria-label="Character summary">
   <h3>{c.name || 'Unnamed'}</h3>
   <p>{[name(c.build.subraceId) || name(c.build.raceId), classes, name(c.build.backgroundId)].filter(Boolean).join(' · ')}</p>
   <dl class="stats">
@@ -64,11 +64,21 @@
   }
 
   .stats div {
-    border: 1px solid var(--border);
-    border-radius: 0.35rem;
+    border: 1px solid var(--line-strong);
+    border-radius: 4px;
     padding: 0.25rem 0.5rem;
   }
 
-  dt { font-size: 0.8rem; color: var(--muted); }
-  dd { margin: 0; font-weight: 600; }
+  .summary {
+    padding: 0.25rem 0 0.5rem;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .summary h3 {
+    margin: 0 0 0.2rem;
+    font-size: 1.2rem;
+  }
+
+  dt { color: var(--label); font-size: 0.72rem; letter-spacing: 0.13em; text-transform: uppercase; }
+  dd { margin: 0; color: var(--text-strong); font-family: var(--mono); font-variant-numeric: tabular-nums; font-weight: 600; }
 </style>

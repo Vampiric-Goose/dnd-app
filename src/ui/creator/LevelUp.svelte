@@ -10,7 +10,9 @@
   import type { Character } from '../../lib/types.ts';
   import FilterSelect from '../FilterSelect.svelte';
   import ChoicesStep from './ChoicesStep.svelte';
-  import { byName, entityOption, message } from './labels.ts';
+  import Stat from '../kit/Stat.svelte';
+  import Workspace from '../kit/Workspace.svelte';
+  import { byName, entityOption, message, signed } from './labels.ts';
   import SpellsStep from './SpellsStep.svelte';
 
   let { params }: { params: { id: string } } = $props();
@@ -95,45 +97,241 @@
       saving = false;
     }
   }
+
+  // Layout only: a compact stepper (choices and spells open once a level is added) and the live summary panel.
+  const steps = [['level', 'Add a level'], ['choices', 'New choices'], ['spells', 'Spells']] as const;
+  let step: (typeof steps)[number][0] = $state('level');
+  $effect(() => { if (!added) step = 'level'; }); // Start over: back to the first step
+  let summaryOpen = $state(false);
 </script>
 
-<h1>Level up{c ? `: ${c.name}` : ''}</h1>
-{#if error}<p role="alert" class="error">{error}</p>{/if}
+<Workspace panelLabel="Summary" open={summaryOpen} onclose={() => (summaryOpen = false)}>
+  <header class="head">
+    <h1>Level up{c ? `: ${c.name}` : ''}</h1>
+    {#if app.viewer === 'dm' && c && sheet}<button type="button" class="summary-btn" aria-expanded={summaryOpen} onclick={() => (summaryOpen = true)}>Summary</button>{/if}
+  </header>
+  {#if error}<p role="alert" class="error">{error}</p>{/if}
 
-{#if app.viewer !== 'dm'}
-  <p class="muted">Levelling up is done in DM view.</p>
-{:else if c && index && sheet && oldSheet}
-  <p>Level {base?.build.levels.length} → <strong>{c.build.levels.length}</strong>. Max HP {oldSheet.maxHp} → <strong>{sheet.maxHp}</strong>.</p>
+  {#if app.viewer !== 'dm'}
+    <p class="muted">Levelling up is done in DM view.</p>
+  {:else if c && index && sheet && oldSheet}
+    <p>Level <span class="num">{base?.build.levels.length}</span> → <strong class="num">{c.build.levels.length}</strong>. Max HP <span class="num">{oldSheet.maxHp}</span> → <strong class="num">{sheet.maxHp}</strong>.</p>
 
-  <section class="card">
-    <h2>Add a level</h2>
-    <FilterSelect id="lu-class" label="Class" options={classOptions} value={classId} onchange={(id) => (classId = id)} />
-    <p class="muted">Hit points: {settings.hpMethod === 'roll' ? 'rolled when you add the level (logged in the dice tray)' : 'the average for the hit die'}, plus your Constitution modifier.</p>
-    {#each preview?.problems ?? [] as p}
-      <p role="alert" class:error={p.blocking} class:muted={!p.blocking}>{p.blocking ? '' : 'Warning (rule overrides are on): '}{p.message}</p>
-    {/each}
-    <p class="row">
-      <button class="primary" disabled={!classId || blocked || c.build.levels.length >= 20} onclick={addOne}>Add a level</button>
-      {#if added}<button onclick={startOver}>Start over</button>{/if}
+    <nav aria-label="Level up steps">
+      <ol class="stepper">
+        {#each steps as [id, label], i (id)}
+          <li>
+            <button type="button" aria-current={step === id ? 'step' : undefined} disabled={id !== 'level' && !added} onclick={() => (step = id)}>
+              <span class="n num" aria-hidden="true">{i + 1}</span> {label}
+            </button>
+          </li>
+        {/each}
+      </ol>
+    </nav>
+
+    {#if step === 'level'}
+      <section class="stage" aria-labelledby="lu-add-h">
+        <h2 id="lu-add-h">Add a level</h2>
+        <FilterSelect id="lu-class" label="Class" options={classOptions} value={classId} onchange={(id) => (classId = id)} />
+        <p class="muted">Hit points: {settings.hpMethod === 'roll' ? 'rolled when you add the level (logged in the dice tray)' : 'the average for the hit die'}, plus your Constitution modifier.</p>
+        {#each preview?.problems ?? [] as p}
+          <p role="alert" class:error={p.blocking} class:muted={!p.blocking}>{p.blocking ? '' : 'Warning (rule overrides are on): '}{p.message}</p>
+        {/each}
+        <p class="row">
+          <button class="primary" disabled={!classId || blocked || c.build.levels.length >= 20} onclick={addOne}>Add a level</button>
+          {#if added}<button onclick={startOver}>Start over</button>{/if}
+        </p>
+        {#if notes.length}<ul class="notes">{#each notes as n}<li>{n}</li>{/each}</ul>{/if}
+      </section>
+    {:else if step === 'choices'}
+      <section class="stage" aria-labelledby="lu-ch-h">
+        <h2 id="lu-ch-h">New choices</h2>
+        <ChoicesStep bind:c {index} {settings} {sheet} {problems} fromLevel={(base?.build.levels.length ?? 0) + 1} />
+      </section>
+    {:else}
+      <section class="stage" aria-labelledby="lu-sp-h">
+        <h2 id="lu-sp-h">Spells</h2>
+        <SpellsStep bind:c {index} {settings} />
+      </section>
+    {/if}
+
+    {#if problems.length}
+      <h2 class="caption probs-h">Problems</h2>
+      <ul class="probs">{#each problems as p}<li class:error={p.blocking} class:muted={!p.blocking}>{p.blocking ? '' : 'Warning: '}{p.message}</li>{/each}</ul>
+    {/if}
+    <p class="row footer">
+      <button class="primary" disabled={!added || blocking || saving} onclick={save}>Save</button>
+      <a href="#/characters">Cancel</a>
+      {#if added && step !== 'spells'}
+        {@const next = steps[steps.findIndex(([id]) => id === step) + 1]}
+        <button type="button" class="next" onclick={() => (step = next[0])}>Next: {next[1]}<span class="ga" aria-hidden="true">▶</span></button>
+      {/if}
     </p>
-    {#if notes.length}<ul>{#each notes as n}<li>{n}</li>{/each}</ul>{/if}
-  </section>
-
-  {#if added}
-    <h2>New choices</h2>
-    <ChoicesStep bind:c {index} {settings} {sheet} {problems} fromLevel={(base?.build.levels.length ?? 0) + 1} />
-    <h2>Spells</h2>
-    <SpellsStep bind:c {index} {settings} />
+  {:else if !error}
+    <p class="muted">Loading…</p>
   {/if}
 
-  {#if problems.length}
-    <h2>Problems</h2>
-    <ul>{#each problems as p}<li class:error={p.blocking} class:muted={!p.blocking}>{p.blocking ? '' : 'Warning: '}{p.message}</li>{/each}</ul>
-  {/if}
-  <p class="row">
-    <button class="primary" disabled={!added || blocking || saving} onclick={save}>Save</button>
-    <a href="#/characters">Cancel</a>
-  </p>
-{:else if !error}
-  <p class="muted">Loading…</p>
-{/if}
+  {#snippet panel()}
+    {#if c && sheet && oldSheet}
+      <h2 class="pname">{c.name || 'Unnamed'}</h2>
+      <div class="pstats">
+        <Stat label="Level" value="{base?.build.levels.length ?? 0} → {c.build.levels.length}" />
+        <Stat label="Max HP" value="{oldSheet.maxHp} → {sheet.maxHp}" />
+      </div>
+      <div class="pstats">
+        <Stat label="AC" value={sheet.ac} size="sm" />
+        <Stat label="Prof" value={signed(sheet.prof)} size="sm" />
+        <Stat label="Init" value={signed(sheet.initiative)} size="sm" />
+      </div>
+      <h3 class="caption ph">Added on this page</h3>
+      {#if notes.length}
+        <ul class="plain pnotes">{#each notes as n}<li>{n}</li>{/each}</ul>
+      {:else}
+        <p class="muted">Nothing yet. Pick a class and add a level.</p>
+      {/if}
+      {#if problems.length}
+        <p class="sub" class:error={blocking} class:muted={!blocking}><span class="num">{problems.length}</span> {problems.length === 1 ? 'problem' : 'problems'}{blocking ? ': fix them to save' : ' (warnings)'}</p>
+      {/if}
+    {:else}
+      <p class="muted">Loading…</p>
+    {/if}
+  {/snippet}
+</Workspace>
+
+<style>
+  .head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.9rem 0 0.2rem;
+  }
+
+  h1 {
+    margin: 0;
+  }
+
+  .summary-btn {
+    display: none;
+  }
+
+  .stepper {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0;
+    list-style: none;
+    margin: 0.5rem 0 0;
+    padding: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .stepper button {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--muted);
+    box-shadow: inset 0 -2px transparent;
+  }
+
+  .stepper button:hover:not(:disabled) {
+    background: transparent;
+    color: var(--text);
+  }
+
+  .stepper button[aria-current='step'] {
+    color: var(--text-strong);
+    box-shadow: inset 0 -2px var(--accent);
+  }
+
+  .n {
+    color: var(--label);
+    font-size: 0.8rem;
+  }
+
+  [aria-current='step'] .n {
+    color: var(--accent);
+  }
+
+  .stage {
+    max-width: 60rem;
+  }
+
+  .stage > h2 {
+    margin: 0.9rem 0 0.5rem;
+    font-size: 1.2rem;
+  }
+
+  .notes {
+    padding-left: 1.2rem;
+  }
+
+  .probs-h {
+    margin: 1.5rem 0 0.25rem;
+  }
+
+  .probs {
+    margin: 0;
+    padding-left: 1.2rem;
+  }
+
+  .footer {
+    margin-top: 1.25rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--line);
+  }
+
+  .ga {
+    margin-left: 0.4rem;
+  }
+
+  .next {
+    margin-left: auto;
+  }
+
+  .pname {
+    margin: 0 0 0.6rem;
+    font-size: 1.3rem;
+  }
+
+  .pstats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.4rem;
+    margin-bottom: 0.7rem;
+  }
+
+  .ph {
+    margin: 0.6rem 0 0.3rem;
+    padding-top: 0.6rem;
+    border-top: 1px solid var(--line);
+  }
+
+  .pnotes li {
+    padding: 0.25rem 0;
+    border-bottom: 1px solid var(--line);
+    font-size: 0.9rem;
+  }
+
+  .sub {
+    margin: 0.6rem 0 0;
+  }
+
+  @media (max-width: 767px) {
+    .summary-btn {
+      display: inline-flex;
+      align-items: center;
+    }
+
+    .stepper {
+      flex-wrap: nowrap;
+      overflow-x: auto;
+    }
+
+    .stepper button {
+      white-space: nowrap;
+    }
+  }
+</style>

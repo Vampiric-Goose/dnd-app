@@ -46,7 +46,7 @@
 
   {#if equip.mode === 'pack'}
     {#each sources as s (s.id)}
-      <section class="card">
+      <section class="src">
         <h3>{s.name}</h3>
         {#if s.eq.text.length}<RichText text={s.eq.text} />{/if}
         {#each s.eq.choices as group, g}
@@ -99,7 +99,8 @@
 
 <style>
   fieldset { border: 0; padding: 0; margin: 0.5rem 0; }
-  legend { font-weight: 600; }
-  .group { border-top: 1px solid var(--border); padding-top: 0.5rem; }
-  input[type='number'] { width: 5rem; }
+  .group { border-top: 1px solid var(--line); padding-top: 0.5rem; }
+  .src { margin: 1rem 0; padding: 0.25rem 0 0.25rem 0.75rem; border-left: 2px solid var(--line-strong); }
+  .src h3 { margin: 0 0 0.3rem; }
+  input[type='number'] { width: 5rem; font-family: var(--mono); }
 </style>

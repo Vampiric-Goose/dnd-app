@@ -13,4 +13,13 @@
 
 <FilterSelect id="background" label="Background" options={backgrounds.map(entityOption)} value={bg?.id ?? c.build.backgroundId} onchange={(id) => (c.build.backgroundId = id)} />
 <!-- EntityDetail shows the feature or the text, not both (N12). -->
-{#if bg}<div class="card"><EntityDetail entity={bg} {index} /></div>{/if}
+{#if bg}<div class="detail"><EntityDetail entity={bg} {index} /></div>{/if}
+
+<style>
+  /* The picked entry: a hairline-ruled block, not a boxed card. */
+  .detail {
+    margin: 0.75rem 0;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--line);
+  }
+</style>

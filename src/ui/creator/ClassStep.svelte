@@ -6,6 +6,7 @@
   import type { CampaignSettings, Character } from '../../lib/types.ts';
   import EntityDetail from '../EntityDetail.svelte';
   import FilterSelect from '../FilterSelect.svelte';
+  import Drawer from '../kit/Drawer.svelte';
   import { byName, entityOption } from './labels.ts';
 
   let { c = $bindable(), hpRolls = $bindable(), index, settings }: { c: Character; hpRolls: Record<string, number>; index: ContentIndex; settings: CampaignSettings } = $props();
@@ -62,8 +63,16 @@
 {#each problems as p}<p class:error={p.blocking} class:muted={!p.blocking} role="alert">{p.message}</p>{/each}
 
 {#if cls}
-  <details class="card">
-    <summary>About the {cls.name}</summary>
-    <EntityDetail entity={cls} {index} />
-  </details>
+  <div class="about">
+    <Drawer title="About the {cls.name}">
+      <EntityDetail entity={cls} {index} />
+    </Drawer>
+  </div>
 {/if}
+
+<style>
+  .about {
+    margin-top: 0.75rem;
+    border-bottom: 1px solid var(--line);
+  }
+</style>

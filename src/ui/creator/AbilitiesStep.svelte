@@ -117,11 +117,12 @@
 
 <style>
   fieldset { border: 0; padding: 0; margin: 0; }
-  legend { font-weight: 600; }
   .scroll { overflow-x: auto; }
-  table { border-collapse: collapse; }
-  th, td { padding: 0.25rem 0.5rem; text-align: left; border-bottom: 1px solid var(--border); }
+  table { width: auto; min-width: min(100%, 28rem); }
+  th, td { vertical-align: middle; }
+  tbody th { color: var(--text); font-size: 1rem; letter-spacing: 0; text-transform: none; font-weight: 400; }
+  td:nth-child(n + 3) { font-family: var(--mono); color: var(--text-strong); }
   .nowrap { flex-wrap: nowrap; }
-  .num { min-width: 1.5rem; text-align: center; }
-  input[type='number'] { width: 5rem; }
+  .num { min-width: 1.5rem; text-align: center; color: var(--text-strong); }
+  input[type='number'] { width: 5rem; font-family: var(--mono); }
 </style>

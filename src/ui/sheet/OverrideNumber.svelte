@@ -53,21 +53,35 @@
 </span>
 
 <style>
+  /* The value's size comes from the parent (--ov-size): header stats are large, skill rows small. */
   .ov {
     display: inline-flex;
     flex-wrap: wrap;
     align-items: center;
     gap: 0.25rem;
+    font-size: var(--ov-size, 1rem);
+  }
+
+  .val,
+  .num,
+  input {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    color: var(--text-strong);
   }
 
   .val {
-    font-size: 1.1rem;
-    padding: 0 0.3rem;
+    line-height: 1.2;
   }
 
+  /* A roll button reads as the number itself, with a hairline box that lights up on hover. */
   .num {
-    min-width: 3rem;
-    font-weight: 700;
+    min-width: 2.6em;
+    min-height: 0;
+    padding: 0.1em 0.4em;
+    font-size: 1em;
+    line-height: 1.25;
   }
 
   .over {
@@ -75,21 +89,32 @@
   }
 
   .badge {
-    padding: 0 0.35rem;
-    border-radius: 0.35rem;
-    background: var(--accent);
-    color: var(--bg);
-    font-size: 0.8rem;
+    padding: 0 0.3rem;
+    border: 1px solid var(--accent);
+    border-radius: 3px;
+    color: var(--accent);
+    font-size: 0.75rem;
+    line-height: 1.4;
   }
 
   .mini {
-    min-height: 2rem;
+    min-height: 1.9rem;
     padding: 0.1rem 0.5rem;
-    font-size: 0.85rem;
+    font-size: 0.8rem;
   }
 
   input {
-    width: 5rem;
-    min-height: 2rem;
+    width: 4.5em;
+    min-height: 0;
+    padding: 0.1em 0.35em;
+    font-size: 1em;
+  }
+
+  @media (max-width: 767px) {
+    .num,
+    input,
+    .mini {
+      min-height: 44px;
+    }
   }
 </style>

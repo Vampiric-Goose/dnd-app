@@ -85,20 +85,8 @@
 </form>
 
 <style>
-  fieldset {
-    border: 1px solid var(--border);
-    border-radius: 0.35rem;
-    margin: 0.75rem 0;
-  }
-
-  textarea {
-    font: inherit;
-    color: inherit;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 0.35rem;
-    padding: 0.4rem 0.7rem;
-    max-width: 100%;
-    box-sizing: border-box;
+  /* Fieldset, inputs and textarea use the global control style; the form stays a readable width in a wide drawer. */
+  form {
+    max-width: 36rem;
   }
 </style>

@@ -165,14 +165,23 @@
 </fieldset>
 
 <style>
+  /* One choice = a hairline group with its name as the legend (not a boxed card). */
   .choice {
-    padding-bottom: 0.5rem;
+    margin: 0.75rem 0;
+    padding: 0.5rem 0 0.5rem 0.75rem;
+    background: transparent;
+    border: 0;
+    border-left: 2px solid var(--line-strong);
+    border-radius: 0;
   }
 
   legend {
-    font-size: 1.1rem;
-    font-weight: 700;
-    padding: 0 0.25rem;
+    padding: 0;
+    color: var(--text-strong);
+    font-size: 1rem;
+    font-weight: 600;
+    letter-spacing: 0;
+    text-transform: none;
   }
 
   .meta {
@@ -184,10 +193,11 @@
   }
 
   .pick {
-    padding: 0 0.5rem;
+    padding: 0 0.45rem;
     border: 1px solid var(--accent);
-    border-radius: 1rem;
+    border-radius: 3px;
     color: var(--accent);
+    font-size: 0.85rem;
   }
 
   .small {
@@ -204,15 +214,24 @@
 
   .opt {
     min-width: 0;
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 0.5rem;
+    background: transparent;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
   }
 
+  .opt:hover {
+    border-color: var(--line-strong);
+  }
+
+  /* Picked: the selected style (raised + accent bar). */
   .opt:has(input:checked) {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 1px var(--accent);
-    background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+    border-color: var(--line-strong);
+    box-shadow: inset 2px 0 var(--accent);
+    background: var(--raised);
+  }
+
+  .opt:has(input:checked) strong {
+    color: var(--text-strong);
   }
 
   .opt:has(input:focus-visible) {
