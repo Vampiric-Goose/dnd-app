@@ -3,8 +3,10 @@
 import { applyDamage, applyHealing, rollDeathSave } from '../character/rest.ts';
 import { db, DeletedError } from '../db.ts';
 import { computeSheet } from '../rules/sheet.ts';
-import type { CampaignSettings, Character, Combat, Combatant, Duration } from '../types.ts';
+import type { CampaignSettings, Character, Combat, Combatant, Duration, Encounter } from '../types.ts';
+import { uid } from '../uid.ts';
 import { concentrationDc, initOk, monsterHp, newCombat, next, patchCombatant, removeStep, setInit, start, type Expired, type HpOp, type Step } from './combat.ts';
+import { restoreCombat, restoreScene, snapshotFight } from './encounters.ts';
 
 // One operation at a time (per tab): two quick hits each read the character after the other's write, so both land.
 let queue: Promise<unknown> = Promise.resolve();
@@ -126,7 +128,53 @@ export const setCondition = (cid: string, combatantId: string, name: string, on:
   }) }));
 });
 
-export const deathSave = (cid: string, combatantId: string, d20: number): Promise<void> => serial(async () => {
+/** Saves the live fight (and the shown scene's tokens and fog) as a new encounter, and links the fight to it. */
+export const saveFightAs = (cid: string, name: string): Promise<Encounter> => serial(async () => {
+  const c = await db.combat.get(cid);
+  if (!c) throw new Error('There is no fight to save.');
+  const e: Encounter = { id: uid(), campaignId: cid, name, monsters: [], fight: snapshotFight(c, await db.scenes.shown(cid)), updatedAt: Date.now() };
+  await db.encounters.put(e);
+  await update(cid, (x) => ({ ...x, encounterId: e.id }));
+  return e;
+});
+
+/** Overwrites the linked encounter with the live fight; undefined when the fight is not linked (or its encounter is gone). */
+export const saveFight = (cid: string): Promise<Encounter | undefined> => serial(async () => {
+  const c = await db.combat.get(cid);
+  const had = c?.encounterId ? await db.encounters.get(c.encounterId) : undefined;
+  if (!c || !had) return undefined;
+  const e: Encounter = { ...had, fight: snapshotFight(c, await db.scenes.shown(cid)), updatedAt: Date.now() };
+  await db.encounters.put(e);
+  return e;
+});
+
+/** The encounter's saved fight replaces the live one; its map comes back on its scene (shown) unless that scene was deleted. */
+export const resumeFight = (cid: string, e: Encounter): Promise<{ dropped: string[]; sceneMissing: boolean }> => serial(async () => {
+  const f = e.fight;
+  if (!f) throw new Error('That encounter holds no saved fight.');
+  const chars = await db.characters.list(cid);
+  const { combat, dropped } = restoreCombat(f, e.id, chars, cid);
+  await db.combat.update(cid, () => combat);
+  let sceneMissing = false;
+  if (f.map) {
+    const ids = new Set(chars.map((c) => c.id));
+    if (await db.scenes.update(f.map.sceneId, (s) => restoreScene(s, f, ids))) await db.scenes.show(cid, f.map.sceneId);
+    else sceneMissing = true;
+  }
+  return { dropped, sceneMissing };
+});
+
+/** Deletes the encounter; a live fight linked to it is unlinked and goes on. */
+export const deleteEncounter = (cid: string, id: string): Promise<void> => serial(async () => {
+  await db.encounters.delete(id);
+  await db.combat.update(cid, (c) => {
+    if (c?.encounterId !== id) return c;
+    const { encounterId: _, ...rest } = c;
+    return { ...rest, updatedAt: Date.now() };
+  });
+});
+
+export const deathSave =(cid: string, combatantId: string, d20: number): Promise<void> => serial(async () => {
   const { x } = await combatant(cid, combatantId);
   if (x.kind === 'pc' && x.characterId && !(await editCharacter(x.characterId, (c) => rollDeathSave(c, d20)))) throw new Error(GONE);
 });

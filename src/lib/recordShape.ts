@@ -3,6 +3,8 @@ import { effectOk } from './character/customEffect.ts';
 import { soundItem } from './items/homebrew.ts'; // homebrew imports isRec from here: a cycle, safe because both sides only call at run time
 import type { ItemDef } from './types.ts';
 
+const MAX_COMBATANTS = 200; // = combat.ts MAX_COMBATANTS, not imported: combat.ts loads lazily and this file does not
+
 export type Rec = Record<string, unknown>;
 export const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
 
@@ -76,12 +78,24 @@ export function characterListProblem(r: unknown): string | undefined {
   if (!isRec(c.embedded)) return 'has no embedded';
 }
 
-/** Stage 4: a prepared encounter: string ids and name, at most 50 lines of `{ monsterId: string, name?: string, count: integer 1–99 }`. */
+/**
+ * Stage 4: a prepared encounter: string ids and name, at most 50 lines of `{ monsterId: string, name?: string, count: integer 1–99 }`.
+ * A saved fight (`fight`, optional): a combat of at most MAX_COMBATANTS combatants with ids, a round ≥ 0, and map tokens as a scene's.
+ */
 export function encounterProblem(r: unknown): string | undefined {
   if (!isRec(r) || typeof r.id !== 'string' || typeof r.campaignId !== 'string' || typeof r.name !== 'string') return 'is incomplete';
   if (!Array.isArray(r.monsters) || r.monsters.length > 50) return 'has a damaged monster list';
   const i = r.monsters.findIndex((l) => !isRec(l) || typeof l.monsterId !== 'string' || (l.name !== undefined && typeof l.name !== 'string') || !Number.isInteger(l.count) || (l.count as number) < 1 || (l.count as number) > 99);
-  return i < 0 ? undefined : `has a damaged monster line (${i + 1})`;
+  if (i >= 0) return `has a damaged monster line (${i + 1})`;
+  const f = r.fight;
+  if (f === undefined) return;
+  const c = isRec(f) ? f.combat : undefined;
+  if (!isRec(f) || !isRec(c) || !Array.isArray(c.combatants) || c.combatants.length > MAX_COMBATANTS || c.combatants.some((x) => !isRec(x) || typeof x.id !== 'string')
+    || !Number.isInteger(c.round) || (c.round as number) < 0) return 'has a damaged saved fight';
+  if (f.map === undefined) return;
+  if (!isRec(f.map) || typeof f.map.sceneId !== 'string' || (f.map.fog !== undefined && typeof f.map.fog !== 'string')) return 'has a damaged saved map';
+  const t = tokensProblem(f.map.tokens);
+  if (t) return `has a saved map that ${t}`;
 }
 
 const SIZES = ['T', 'S', 'M', 'L', 'H', 'G'];
@@ -96,13 +110,19 @@ export function sceneProblem(r: unknown): string | undefined {
   const g = r.grid;
   if (!isRec(g) || !['square', 'hex-flat', 'hex-pointy'].includes(g.type as string) || !between(g.size, 10, 500) || !finite(g.offsetX) || !finite(g.offsetY)
     || typeof g.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(g.color) || !between(g.opacity, 0, 1) || !between(g.feet, 1, 100)) return 'has a damaged grid';
-  if (!Array.isArray(r.tokens) || r.tokens.length > 200) return 'has a damaged token list';
-  const i = r.tokens.findIndex((t) => !isRec(t) || typeof t.id !== 'string' || typeof t.name !== 'string' || !finite(t.x) || !finite(t.y)
+  const t = tokensProblem(r.tokens);
+  if (t) return t;
+  if (r.fog !== undefined && typeof r.fog !== 'string') return 'has damaged fog';
+}
+
+/** A scene's token list (also a saved fight's map): at most 200 tokens, each with the fields the map relies on. */
+export function tokensProblem(tokens: unknown): string | undefined {
+  if (!Array.isArray(tokens) || tokens.length > 200) return 'has a damaged token list';
+  const i = tokens.findIndex((t) => !isRec(t) || typeof t.id !== 'string' || typeof t.name !== 'string' || !finite(t.x) || !finite(t.y)
     || !SIZES.includes(t.size as string) || typeof t.color !== 'string' || t.name.length > 100 // M4: the optional fields' types too
     || !opt(t.portrait, 'string') || !opt(t.characterId, 'string') || !opt(t.monsterId, 'string') || !opt(t.combatantId, 'string') || !opt(t.hidden, 'boolean')
     || (t.hp !== undefined && !finite(t.hp)) || (t.maxHp !== undefined && !finite(t.maxHp)));
   if (i >= 0) return `has a damaged token (${i + 1})`;
-  if (r.fog !== undefined && typeof r.fog !== 'string') return 'has damaged fog';
 }
 
 /** A campaign, with its loot entries checked like a character's inventory. */
