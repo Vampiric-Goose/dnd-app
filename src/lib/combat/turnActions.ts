@@ -1,0 +1,86 @@
+// Pure (no Svelte/Vite/DOM): everything a creature can do on its turn, each with what it costs (turn panel spec). Ids are stable on
+// every device, so a player's "use" names the action and the DM's device rebuilds the same list to check it.
+import { spellList } from '../character/play.ts';
+import { getKind } from '../character/choices.ts';
+import { richToPlain } from '../content/richtext.ts';
+import type { Attack, Character, MonsterDef, RichText, Sheet } from '../types.ts';
+import type { Cost } from './economy.ts';
+
+export interface TurnAction {
+  id: string; name: string; cost: Cost;
+  group: 'attack' | 'standard' | 'spell' | 'resource' | 'feature' | 'monster';
+  text?: RichText; attack?: Attack;
+  spell?: { id: string; level: number; concentration: boolean };
+  resource?: string; uses?: { left: number; max: number };
+  /** What using it gives beyond the pip: another Action (Action Surge) or a Dash's movement. */
+  grants?: 'action' | 'dash';
+}
+
+/** The cost a feature's text states: "as a bonus action" / "use a bonus action", "as an action" / "use your action", a reaction; else none. */
+export function costOfText(text: string): Cost {
+  const t = text.toLowerCase();
+  if (/bonus action/.test(t)) return 'bonus';
+  if (/\breaction\b/.test(t)) return 'reaction';
+  if (/\bas an action\b|\buse (?:your|an) action\b|\btake an action\b/.test(t)) return 'action';
+  return 'none';
+}
+
+/** A spell's casting time as a cost; anything longer than an action (a minute, an hour) is not offered in a turn. */
+export function castingCost(castingTime: string): Cost | undefined {
+  const t = castingTime.toLowerCase().trim();
+  return /^1 bonus action/.test(t) ? 'bonus' : /^1 reaction/.test(t) ? 'reaction' : /^1 action/.test(t) ? 'action' : undefined;
+}
+
+/** Attacks one Attack action allows: 1, or Extra Attack's 2, "(2)" 3, "(3)" 4. */
+export function attacksPerAction(features: { name: string }[]): number {
+  let n = 1;
+  for (const f of features) {
+    const m = /^Extra Attack(?: \((\d)\))?$/.exec(f.name.trim());
+    if (m) n = Math.max(n, 1 + (m[1] ? Number(m[1]) : 1));
+  }
+  return n;
+}
+
+/** Two-weapon fighting: no positive ability modifier on the off-hand's damage (PHB p.195). */
+export const offhandDamage = (damage: string): string => damage.replace(/\+\d+$/, '');
+
+const STANDARD = ['Dash', 'Disengage', 'Dodge', 'Help', 'Hide', 'Ready', 'Search', 'Use an Object'];
+const id = (name: string) => name.toLowerCase().replace(/\s+/g, '-');
+const lightMelee = (a: Attack) => a.properties.includes('light') && !a.properties.includes('ammunition');
+
+/** A character's actions: attacks (the first is the primary card), off-hand, standard actions, Cunning Action, castable spells, resources. */
+export function pcActions(c: Character, sheet: Sheet, features: { name: string; text: RichText }[]): TurnAction[] {
+  const out: TurnAction[] = sheet.attacks.map((a) => ({ id: `attack:${a.entryId}`, name: a.name, cost: 'action', group: 'attack', attack: a }));
+  const light = sheet.attacks.filter(lightMelee);
+  if (light.length >= 2) for (const a of light) out.push({ id: `offhand:${a.entryId}`, name: `Off-hand: ${a.name}`, cost: 'bonus', group: 'attack', attack: { ...a, damage: offhandDamage(a.damage) } });
+  for (const name of STANDARD) out.push({ id: `std:${id(name)}`, name, cost: 'action', group: 'standard', ...(name === 'Dash' && { grants: 'dash' as const }) });
+  const names = new Set(features.map((f) => f.name));
+  if (names.has('Cunning Action')) for (const name of ['Dash', 'Disengage', 'Hide']) out.push({ id: `cunning:${id(name)}`, name: `Cunning Action: ${name}`, cost: 'bonus', group: 'feature', ...(name === 'Dash' && { grants: 'dash' as const }) });
+  const seen = new Set<string>();
+  for (const sc of sheet.spellcasting) {
+    const knownCaster = getKind((k) => c.embedded[k], sc.classId, 'class')?.spellcasting?.preparation === 'known';
+    for (const { spell, prepared } of spellList(c, sc.classId)) {
+      const cost = castingCost(spell.castingTime);
+      if (!cost || seen.has(spell.id) || !(spell.level === 0 || prepared || knownCaster)) continue;
+      seen.add(spell.id);
+      out.push({ id: `spell:${spell.id}`, name: spell.name, cost, group: 'spell', text: spell.text, spell: { id: spell.id, level: spell.level, concentration: spell.concentration } });
+    }
+  }
+  for (const r of sheet.resources) {
+    const f = features.find((x) => x.name === r.name), surge = r.name === 'Action Surge';
+    out.push({
+      id: `res:${r.name}`, name: r.name, cost: surge ? 'none' : f ? costOfText(richToPlain(f.text)) : 'none', group: 'resource', resource: r.name,
+      uses: { left: Math.max(0, r.max - (c.state.resourcesUsed[r.name] ?? 0)), max: r.max }, ...(f && { text: f.text }), ...(surge && { grants: 'action' as const }),
+    });
+  }
+  return out;
+}
+
+export const primaryAction = (list: TurnAction[]): TurnAction | undefined => list.find((a) => a.group === 'attack');
+
+/** A monster's actions from its stat block: actions, bonus actions, reactions, and traits that say they take one (Nimble Escape). */
+export function monsterActions(m: MonsterDef): TurnAction[] {
+  const of = (list: MonsterDef['actions'], cost: Cost, key: string) => list.map((t, i): TurnAction => ({ id: `mon:${key}:${i}`, name: t.name, cost, group: 'monster', text: t.text }));
+  const traits = m.traits.flatMap((t, i): TurnAction[] => { const cost = costOfText(richToPlain(t.text)); return cost === 'none' ? [] : [{ id: `mon:trait:${i}`, name: t.name, cost, group: 'monster', text: t.text }]; });
+  return [...of(m.actions, 'action', 'action'), ...of(m.bonusActions, 'bonus', 'bonus'), ...traits, ...of(m.reactions, 'reaction', 'reaction')];
+}
