@@ -13,6 +13,10 @@ const hasWindow = typeof window !== 'undefined'; // node tests import parseHash
 /** Pages that moved: the old first segment and where it lives now. */
 const MOVED: Record<string, string> = { loot: '#/items?tab=unassigned' };
 
+/** True when `viewer` may not open the page `segment`: players can't look up monsters' stats or items' descriptions (R2). */
+export const dmOnly = (viewer: 'dm' | 'player', segment: string): boolean =>
+  viewer === 'player' && (segment === 'compendium' || segment === 'items' || segment === 'monsters');
+
 /** The hash to show instead of `hash` when its page moved (the old Loot page is now Items > Unassigned), else undefined. */
 export const redirected = (hash: string): string | undefined => {
   const [first] = parseHash(hash).path;

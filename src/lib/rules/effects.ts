@@ -1,4 +1,4 @@
-import { enumerateChoices, getKind, walkLevels } from '../character/choices.ts';
+import { enumerateChoices, getKind, raceParts, walkLevels } from '../character/choices.ts';
 import type { LevelStep, Lookup, PendingChoice } from '../character/choices.ts';
 import { playerItem } from '../items/playerView.ts';
 import type { CampaignSettings, Character, Effect, InventoryEntry, ItemDef } from '../types.ts';
@@ -26,7 +26,8 @@ export function gather(c: Character, opts: SheetOpts, lookup: Lookup = id => c.e
   const add = (source: string, list: Effect[] | undefined, classId?: string) =>
     list?.forEach(effect => effects.push({ effect, source, ...(classId && { classId }) }));
 
-  for (const r of [getKind(lookup, c.build.raceId, 'race'), getKind(lookup, c.build.subraceId, 'subrace')]) {
+  const { race, sub } = raceParts(c, lookup);
+  for (const r of [race, sub]) {
     if (!r) continue;
     add(r.name, r.effects);
     for (const t of r.traits) add(t.name, t.effects);

@@ -47,7 +47,11 @@ export interface EquipmentOption { label: string; items: { itemId?: string; cate
 export interface StartingEquipment { text: RichText; choices: EquipmentOption[][]; gold?: string }
 interface Base { id: string; name: string; source: string; aliases?: string[]; text: RichText; effects?: Effect[]; choices?: Choice[]; srd?: boolean }
 export interface RaceDef extends Base { kind: 'race'; size: Size; speed: Speeds; abilityBonuses: Partial<Scores>; proficiencies: Proficiencies; darkvision?: number; resist?: string[]; traits: Trait[] }
-export interface SubraceDef extends Base { kind: 'subrace'; raceId: string; speed?: Speeds; abilityBonuses: Partial<Scores>; proficiencies: Proficiencies; darkvision?: number; resist?: string[]; traits: Trait[] }
+export interface SubraceDef extends Base { kind: 'subrace'; raceId: string; speed?: Speeds; abilityBonuses: Partial<Scores>; proficiencies: Proficiencies; darkvision?: number; resist?: string[]; traits: Trait[];
+  /** Race fields this subrace replaces instead of adding to (5etools `overwrite`): ability bonuses and choices, or a proficiency list and its choices. */
+  overwrite?: ('ability' | keyof Proficiencies)[];
+  /** Race traits this subrace's traits replace, by name (5etools entry `data.overwrite`). */
+  overwriteTraits?: string[] }
 export interface ClassDef extends Base { kind: 'class'; hitDie: number; sidekick?: boolean /* R11: a 5etools sidekick class (DM only) */; saves: Ability[]; proficiencies: Proficiencies; skillChoice: { count: number; from: Skill[] | 'any' }; multiclassPrereq?: MulticlassPrereq; multiclassProficiencies: Proficiencies; multiclassSkillChoice?: { count: number; from: Skill[] | 'any' }; startingEquipment: StartingEquipment; subclassLevel: number; subclassTitle: string; asiLevels: number[]; features: FeatureRef[]; spellcasting?: Spellcasting; table: { label: string; values: (number | string)[] }[]; optionalFeatureProgression: { name: string; featureTypes: string[]; counts: number[] }[] }
 export interface SubclassDef extends Base { kind: 'subclass'; classId: string; shortName: string; features: FeatureRef[]; spellcasting?: Spellcasting; alwaysPrepared?: { level: number; spells: string[] }[]; optionalFeatureProgression?: { name: string; featureTypes: string[]; counts: number[] }[] }
 export interface FeatureDef extends Base { kind: 'feature'; level: number; classId: string; subclassId?: string; optional?: boolean }

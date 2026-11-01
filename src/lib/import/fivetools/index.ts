@@ -261,8 +261,15 @@ export async function import5etools(
     const g = r.legendaryGroup, k = key === 'monster' && g ? rawKey('legendaryGroup', String(g.name), String(g.source)) : undefined;
     if (k && !groups.has(k)) groups.set(k, await side('legendaryGroup', g, m => warnings.push(`${file}: ${label}: ${m}`)));
   }
+  const rawRaces = new Map<string, Raw | undefined>();
+  for (const { key, r } of live) if (key === 'race' && r.name !== undefined && r.source) rawRaces.set(rawKey('race', r.name, r.source), r);
+  for (const { key, r } of live) {
+    const k = key === 'subrace' && r.name !== undefined && r.raceName ? rawKey('race', r.raceName, r.raceSource ?? r.source) : undefined;
+    if (k && !rawRaces.has(k)) rawRaces.set(k, await stored(k).catch(() => undefined));
+  }
   const conv: Ctx = {
     index,
+    rawRace: (name, source) => rawRaces.get(rawKey('race', name, source)),
     listed: source => { const v = classifySource(source, allDeclared); return v === 'official' || v === 'homebrew'; },
     ref: (kind, name, source) => refs.get(refKey(kind, name, source)) ?? index.find(kind, name, source)?.id
       ?? (isCore(source) ? index.find(kind, name, 'SRD')?.id : undefined) ?? entityId(kind, name, source),
@@ -312,7 +319,8 @@ export async function import5etools(
 
   // 5. Magic variants against every base item in the batch or the index.
   const inBatch = new Set(bases.map(b => b.def.id));
-  for (const d of index.all('item')) if (!d.magic && !inBatch.has(d.id)) bases.push({ view: viewOf(d), def: d });
+  // A stored item made from a base (an earlier import's "Adamantine Longsword", rarity "unknown" so not magic) is no base itself.
+  for (const d of index.all('item')) if (!d.magic && !d.baseItemId && !inBatch.has(d.id)) bases.push({ view: viewOf(d), def: d });
   for (const { key, r, file, label } of live) {
     if (key !== 'magicvariant' || !r.requires) continue; // ponytail: generic variants ("+1 Weapon") aren't items themselves
     try {

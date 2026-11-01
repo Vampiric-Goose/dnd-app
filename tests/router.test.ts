@@ -1,5 +1,13 @@
 import { expect, test } from 'vitest';
-import { guardedHash, leaveGuard, parseHash, redirected } from '../src/lib/router.svelte.ts';
+import { dmOnly, guardedHash, leaveGuard, parseHash, redirected } from '../src/lib/router.svelte.ts';
+
+test('players get no Compendium, Items or Monsters (links or pages); the DM keeps everything', () => {
+  for (const page of ['compendium', 'items', 'monsters']) {
+    expect(dmOnly('player', page)).toBe(true);
+    expect(dmOnly('dm', page)).toBe(false);
+  }
+  for (const page of ['', 'characters', 'combat', 'map', 'packs', 'settings', 'about', 'join']) expect(dmOnly('player', page)).toBe(false);
+});
 
 test('the old Loot address moves to Items > Unassigned; nothing else is redirected', () => {
   expect(redirected('#/loot')).toBe('#/items?tab=unassigned');

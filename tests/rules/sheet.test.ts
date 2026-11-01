@@ -2,7 +2,10 @@ import { expect, test } from 'vitest';
 import { computeSheet } from '../../src/lib/rules/sheet.ts';
 import { DEFAULT_SETTINGS } from '../../src/lib/settings.ts';
 import type { PlayerView } from '../../src/lib/types.ts';
-import { mkChar } from '../fixtures/content.ts';
+import { enumerateChoices } from '../../src/lib/character/choices.ts';
+import { featureList } from '../../src/lib/character/play.ts';
+import type { Character, SubraceDef } from '../../src/lib/types.ts';
+import { halfElf, human, mkChar } from '../fixtures/content.ts';
 
 const S = DEFAULT_SETTINGS, dm = { settings: S, viewer: 'dm' as const };
 test('hill dwarf fighter 1', () => {
@@ -83,4 +86,37 @@ test('robust to missing content; encumbrance; resources', () => {
   expect(monk5.resources.find(r => r.name === 'Ki')).toEqual({ name: 'Ki', max: 5, recharge: 'short' });
   const bard5 = computeSheet(mkChar({ race: 'human', base: { cha: 15 }, levels: Array(5).fill('bard') }), dm);
   expect(bard5.resources.find(r => r.name === 'Bardic Inspiration')).toEqual({ name: 'Bardic Inspiration', max: 3, recharge: 'short' });
+});
+
+// A 5etools subrace with `overwrite` replaces the race's fields instead of adding to them.
+const sub = (o: Partial<SubraceDef> & Pick<SubraceDef, 'id' | 'raceId'>): SubraceDef =>
+  ({ kind: 'subrace', name: o.id, source: 'OTH', text: [], abilityBonuses: {}, proficiencies: { armor: [], weapons: [], tools: [], skills: [], languages: [] }, traits: [], ...o });
+const withSub = (c: Character, s: SubraceDef, abilities?: Record<string, number>): Character => {
+  c.build.subraceId = s.id;
+  c.embedded[s.id] = s;
+  const p = enumerateChoices(c, id => c.embedded[id], S).find(p => p.sourceId === s.id && p.choice.type === 'ability');
+  if (p && abilities) c.build.choices[p.key] = { type: 'abilities', abilities };
+  return c;
+};
+test('subrace overwrite: Variant Human replaces the +1 to every score with +1 to two', () => {
+  const vh = sub({ id: 'subrace:variant-human@OTH', raceId: human.id, overwrite: ['ability'], choices: [{ type: 'ability', count: 2, amount: 1, from: ['str', 'dex', 'con', 'int', 'wis', 'cha'] }] });
+  const s = computeSheet(withSub(mkChar({ race: 'human', base: {}, levels: ['fighter'] }), vh, { str: 1, dex: 1 }), dm);
+  expect([s.scores.str, s.scores.dex, s.scores.con, s.scores.wis]).toEqual([11, 11, 10, 10]);
+  // Without overwrite the subrace adds to the race (Hill Dwarf: Dwarf's +2 Con and its own +1 Wis).
+  const hd = computeSheet(mkChar({ race: 'dwarf', subrace: 'hill-dwarf', base: {}, levels: ['fighter'] }), dm);
+  expect([hd.scores.con, hd.scores.wis]).toEqual([12, 11]);
+});
+test('subrace overwrite: race ability and skill choices drop, other race choices keep their keys; overwritten traits drop', () => {
+  const elf = { ...halfElf, choices: [...halfElf.choices!, { type: 'skill' as const, count: 2, from: 'any' as const }, { type: 'language' as const, count: 1 }], traits: [{ name: 'Skill Versatility', text: [] }, { name: 'Fey Ancestry', text: [] }] };
+  const drow = sub({ id: 'subrace:drow-descent@OTH', raceId: elf.id, abilityBonuses: { dex: 2 }, overwrite: ['ability', 'skills'], overwriteTraits: ['Skill Versatility'],
+    proficiencies: { armor: [], weapons: [], tools: [], skills: ['perception'], languages: [] }, traits: [{ name: 'Drow Magic', text: [] }] });
+  const c = mkChar({ race: 'half-elf', base: {}, levels: ['fighter'] });
+  c.embedded[elf.id] = elf;
+  withSub(c, drow);
+  const race = enumerateChoices(c, id => c.embedded[id], S).filter(p => p.sourceId === elf.id).map(p => p.key);
+  expect(race).toEqual([`0|${elf.id}|2`]); // the language choice keeps index 2
+  const s = computeSheet(c, dm);
+  expect([s.scores.cha, s.scores.dex, s.skills.perception.proficient]).toEqual([10, 12, true]);
+  expect(featureList(c, S).map(f => f.name)).toEqual(expect.arrayContaining(['Fey Ancestry', 'Drow Magic']));
+  expect(featureList(c, S).map(f => f.name)).not.toContain('Skill Versatility');
 });

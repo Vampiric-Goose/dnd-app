@@ -17,6 +17,8 @@ export interface Ctx {
   spellClasses(name: string, source: string): ClassRef[];
   /** A legendary group (lair actions, regional effects), `_copy` resolved; undefined when it is missing or from a refused source. */
   legendaryGroup?(name: string, source: string): Raw | undefined;
+  /** A subrace's parent race as 5etools wrote it (batch first, then stored); undefined when neither has it. */
+  rawRace?(name: string, source: string): Raw | undefined;
   /** A problem that drops part of an entity, not the entity. */
   warn?(msg: string): void;
 }

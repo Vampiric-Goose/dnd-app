@@ -1,0 +1,50 @@
+{
+  "race": [
+    {
+      "name": "Testhuman", "source": "TST", "size": ["M"], "speed": 30,
+      "languageProficiencies": [{ "common": true, "anyStandard": 1 }],
+      "entries": [
+        { "type": "entries", "name": "Age", "entries": ["Humans live less than a century."] },
+        { "type": "entries", "name": "Languages", "entries": ["You speak Common and one extra language."] }
+      ]
+    },
+    {
+      "name": "Testelf", "source": "TST", "size": ["M"], "speed": 30,
+      "ability": [{ "cha": 2, "choose": { "from": ["str", "dex", "con", "int", "wis"], "count": 2 } }],
+      "skillProficiencies": [{ "any": 2 }],
+      "languageProficiencies": [{ "common": true, "elvish": true, "anyStandard": 1 }],
+      "entries": [{ "type": "entries", "name": "Skill Versatility", "entries": ["You gain two skills."] }]
+    }
+  ],
+  "subrace": [
+    { "source": "TST", "raceName": "Testhuman", "raceSource": "TST", "ability": [{ "str": 1, "dex": 1, "con": 1, "int": 1, "wis": 1, "cha": 1 }] },
+    {
+      "name": "Variant", "source": "TST", "raceName": "Testhuman", "raceSource": "TST",
+      "ability": [{ "choose": { "from": ["str", "dex", "con", "int", "wis", "cha"], "count": 2 } }],
+      "feats": [{ "any": 1 }], "skillProficiencies": [{ "any": 1 }],
+      "entries": [
+        { "type": "entries", "name": "Skills", "entries": ["You gain proficiency in one skill of your choice."] },
+        { "type": "entries", "name": "Feat", "entries": ["You gain one feat of your choice."] }
+      ]
+    },
+    {
+      "name": "Variant; Mark of Testing", "source": "TST", "raceName": "Testhuman", "raceSource": "TST",
+      "ability": [{ "con": 1, "wis": 2 }],
+      "languageProficiencies": [{ "common": true, "goblin": true }],
+      "entries": [{ "type": "entries", "name": "Mark Tongue", "entries": ["You speak Common and Goblin."], "data": { "overwrite": "Languages" } }],
+      "overwrite": { "languageProficiencies": true, "traitTags": true }
+    },
+    {
+      "name": "Variant; Testdrow Descent", "source": "TST", "raceName": "Testelf", "raceSource": "TST",
+      "ability": [{ "dex": 2 }],
+      "skillProficiencies": [{ "perception": true }],
+      "speed": 35,
+      "entries": [{ "type": "entries", "name": "Drow Magic", "entries": ["You know dancing lights."], "data": { "overwrite": "Skill Versatility" } }],
+      "overwrite": { "ability": true, "skillProficiencies": true }
+    },
+    {
+      "name": "Wood", "source": "TST", "raceName": "Testelf", "raceSource": "TST",
+      "ability": [{ "wis": 1 }]
+    }
+  ]
+}
