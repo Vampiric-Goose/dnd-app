@@ -7,7 +7,8 @@
   let { params: _params }: { params: Record<string, string> } = $props();
 </script>
 
-<h1>Map</h1>
+<!-- With a campaign the canvas takes the whole workspace, so the heading is for screen readers only. -->
+<h1 class:sr-only={!!app.campaign}>Map</h1>
 {#if !app.campaign}
   <p class="muted">Open a campaign to use the map.</p>
 {:else if app.campaign.sync?.role === 'player' || app.viewer === 'player'}

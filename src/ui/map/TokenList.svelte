@@ -1,78 +1,82 @@
 <script lang="ts">
-  // The scene's tokens as a list: the keyboard and screen-reader way to edit them (the canvas is pointer-only).
-  import { SIZE_NAMES } from '../../lib/monsters/library.ts';
-  import type { Size, Token } from '../../lib/types.ts';
+  // The scene's tokens as a list (the panel's Tokens tab): the keyboard and screen-reader way to pick them (the canvas is pointer-only).
+  // A row selects its token; Shift or Ctrl adds it to the selection. The Selected tab edits what is picked.
+  import type { Token } from '../../lib/types.ts';
 
-  let { tokens, selected, onselect, onpatch, onremove, onportrait }: {
-    tokens: Token[]; selected: string[];
-    onselect: (ids: string[]) => void; onpatch: (id: string, patch: Partial<Token>) => void;
-    onremove: (ids: string[]) => void; onportrait: (id: string, file: File) => void;
+  let { tokens, selected, onselect }: {
+    tokens: (Token & { conditions?: string[] })[]; selected: string[]; onselect: (ids: string[]) => void;
   } = $props();
 
-  const SIZES = Object.keys(SIZE_NAMES) as Size[];
-  const value = (e: Event) => (e.currentTarget as HTMLInputElement).value;
-  const hp = (e: Event) => { const v = value(e).trim(); const n = Math.round(Number(v)); return v === '' || !Number.isFinite(n) ? undefined : Math.max(0, Math.min(9999, n)); };
-  // Selected tokens first, so the one tapped on the map is at hand.
-  const rows = $derived([...tokens].sort((a, b) => Number(selected.includes(b.id)) - Number(selected.includes(a.id))));
+  const pick = (id: string, e: MouseEvent) =>
+    onselect(e.shiftKey || e.ctrlKey || e.metaKey ? (selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]) : [id]);
 </script>
 
-{#if selected.length}
-  <div class="row">
-    <span>{selected.length} selected</span>
-    <button type="button" class="danger" onclick={() => onremove(selected)}>Remove selected</button>
-    <button type="button" onclick={() => onselect([])}>Clear selection</button>
-  </div>
-{/if}
 {#if !tokens.length}<p class="muted">No tokens yet.</p>{/if}
-<ul class="plain">
-  {#each rows as t (t.id)}
-    <li class="card token" class:on={selected.includes(t.id)}>
-      <div class="row">
-        <label class="name">Name
-          <input maxlength="100" value={t.name} onchange={(e) => { const n = value(e).trim().slice(0, 100); if (n) onpatch(t.id, { name: n }); }} />
-        </label>
-        <label>Size
-          <select value={t.size} onchange={(e) => onpatch(t.id, { size: value(e) as Size })}>
-            {#each SIZES as s}<option value={s}>{SIZE_NAMES[s]}</option>{/each}
-          </select>
-        </label>
-      </div>
-      <div class="row">
-        <label class="check"><input type="checkbox" checked={!!t.hidden} onchange={(e) => onpatch(t.id, { hidden: (e.currentTarget as HTMLInputElement).checked || undefined })} /> Hidden from players</label>
-        {#if t.monsterId}
-          <label class="small">HP <input type="number" min="0" value={t.hp ?? ''} onchange={(e) => onpatch(t.id, { hp: hp(e) })} /></label>
-          <label class="small">Max HP <input type="number" min="0" value={t.maxHp ?? ''} onchange={(e) => onpatch(t.id, { maxHp: hp(e) })} /></label>
-        {/if}
-      </div>
-      <div class="row">
-        <label class="small">Portrait <input type="file" accept="image/*" onchange={(e) => { const f = (e.currentTarget as HTMLInputElement).files?.[0]; if (f) onportrait(t.id, f); }} /></label>
-        <button type="button" onclick={() => onselect([t.id])} aria-label="Select {t.name}">Select</button>
-        <button type="button" class="danger" onclick={() => onremove([t.id])} aria-label="Remove {t.name}">Remove</button>
-      </div>
+<ul class="plain list" aria-label="Tokens">
+  {#each tokens as t (t.id)}
+    <li>
+      <button type="button" class:on={selected.includes(t.id)} aria-pressed={selected.includes(t.id)} onclick={(e) => pick(t.id, e)}>
+        <span class="dot" style:background={t.color} aria-hidden="true"></span>
+        <span class="name"><span class="sr-only">Select </span>{t.name}</span>
+        {#if t.hidden}<span class="tag">hidden</span>{/if}
+        {#if t.hp !== undefined}<span class="num hp">{t.hp}{#if t.maxHp}<span class="muted">&nbsp;/ {t.maxHp}</span>{/if}</span>{/if}
+      </button>
     </li>
   {/each}
 </ul>
 
 <style>
-  .token.on {
-    outline: 2px solid var(--accent);
+  .list {
+    margin: 0 -1rem; /* rows run to the panel edges, as selected rows do everywhere */
   }
 
-  label {
-    font-size: 0.85rem;
+  .list li + li {
+    border-top: 1px solid var(--line);
+  }
+
+  button {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    width: 100%;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    padding: 0.45rem 1rem;
+    text-align: left;
+  }
+
+  /* the pressed state uses the selected-row style, not the global pressed-button one */
+  button.on,
+  button[aria-pressed='true'] {
+    background: var(--raised);
+    box-shadow: inset 2px 0 var(--accent);
+    color: var(--text-strong);
+    border: 0;
+  }
+
+  .dot {
+    flex: none;
+    width: 0.8rem;
+    height: 0.8rem;
+    border-radius: 50%;
+    box-shadow: 0 0 0 1px var(--line-strong);
   }
 
   .name {
-    flex: 1 1 10rem;
-    display: flex;
-    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
-  .small input[type='number'] {
-    width: 4.5rem;
+  .tag {
+    color: var(--muted);
+    font-size: 0.8rem;
   }
 
-  .small input[type='file'] {
-    max-width: 12rem;
+  .hp {
+    color: var(--text-strong);
   }
 </style>

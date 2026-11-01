@@ -1,12 +1,12 @@
 <script module lang="ts">
   import type { Token } from '../../lib/types.ts';
-  export type CanvasToken = Pick<Token, 'id' | 'name' | 'x' | 'y' | 'size' | 'color' | 'portrait' | 'hidden'> & { hp?: number; maxHp?: number; conditions?: string[]; health?: string };
+  export type CanvasToken = Pick<Token, 'id' | 'name' | 'x' | 'y' | 'size' | 'color' | 'portrait' | 'hidden'> & { monsterId?: string; hp?: number; maxHp?: number; conditions?: string[]; health?: string };
 </script>
 
 <script lang="ts">
   // The battle map canvas, shared by the DM's map and (Task B2) the players' map. Draws only on change: schedule() sets a dirty flag and
   // asks for one frame. Pan, wheel zoom, pinch, drag with a snapped ghost, tap and box select, and a ruler.
-  import { untrack } from 'svelte';
+  import { untrack, type Snippet } from 'svelte';
   import { db } from '../../lib/db.ts';
   import { decodeFog, FOG_CELL, fogSize, newFog, paintBrush, paintRect, type FogEdit } from '../../lib/map/fog.ts';
   import { cellCenter, cellsIn, feetBetween, hexCorners, snap, type Cell, type Pt } from '../../lib/map/grid.ts';
@@ -17,11 +17,12 @@
 
   // fog: drawn only when set (the caller passes it only with the Fog of war setting on); black for players, a shade for the DM.
   // onfog: the DM's fog tools, shown only when it is set; one call per stroke, rectangle or Reveal all / Hide all.
-  let { width, height, image, grid, tokens, dm, diagonal, selected, canDrag, speedOf, onselect, onmove, rev = 0, fog, fogStyle = dm ? 'shade' : 'black', onfog }: {
+  // corner: extra controls floated top-right, beside the tool switcher (the DM's scene picker).
+  let { width, height, image, grid, tokens, dm, diagonal, selected, canDrag, speedOf, onselect, onmove, rev = 0, fog, fogStyle = dm ? 'shade' : 'black', onfog, corner }: {
     width: number; height: number; image?: string; grid: Grid; tokens: CanvasToken[]; dm: boolean; diagonal: '5-5-5' | '5-10-5'; selected: string[];
     canDrag: (id: string) => boolean; speedOf?: (id: string) => number | undefined;
     onselect: (ids: string[]) => void; onmove: (ids: string[], primary: string, to: Pt) => void; rev?: number;
-    fog?: string; fogStyle?: 'black' | 'shade'; onfog?: (e: FogEdit) => void;
+    fog?: string; fogStyle?: 'black' | 'shade'; onfog?: (e: FogEdit) => void; corner?: Snippet;
   } = $props();
 
   let tool: 'select' | 'box' | 'ruler' | 'fog' | 'template' = $state('select');
@@ -172,33 +173,49 @@
     return () => { ro.disconnect(); canvas.removeEventListener('wheel', wheel); };
   });
 
-  const css = (name: string, fallback: string) => getComputedStyle(canvas).getPropertyValue(name).trim() || fallback;
+  /** The theme tokens the canvas draws with, read once per frame (the fallbacks are the spec's values). */
+  function palette() {
+    const cs = getComputedStyle(canvas), v = (name: string, fallback: string) => cs.getPropertyValue(name).trim() || fallback;
+    return {
+      accent: v('--accent', '#2dd4bf'), danger: v('--danger', '#e5484d'), ground: v('--panel', '#0c1719'), rail: v('--rail', '#070d0e'),
+      line: v('--line-strong', '#1d3a3a'), muted: v('--muted', '#7d9d99'), strong: v('--text-strong', '#eafffb'),
+    };
+  }
+  /** Whether a #rrggbb colour (what the grid colour input stores) is light. */
+  const isLight = (hex: string) => { const n = parseInt(hex.slice(1, 7), 16); return (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255 > 0.5; };
 
   function draw() {
     dirty = false;
     const ctx = canvas?.getContext('2d');
     if (!ctx || !vw) return;
-    const accent = css('--accent', '#8a5200');
+    const pal = palette(), accent = pal.accent;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, vw, vh);
     ctx.setTransform(dpr * view.scale, 0, 0, dpr * view.scale, dpr * view.x, dpr * view.y);
     const px = 1 / view.scale; // one screen pixel in scene units
 
-    // background
+    // background: the map image, or a dark ground with a hairline edge for a blank scene
     const bg = image ? bitmap(image) : undefined;
     if (bg) ctx.drawImage(bg, 0, 0, width, height);
-    else { ctx.fillStyle = '#e9e4d8'; ctx.fillRect(0, 0, width, height); }
+    else {
+      ctx.fillStyle = pal.ground;
+      ctx.fillRect(0, 0, width, height);
+      ctx.strokeStyle = pal.line;
+      ctx.lineWidth = px;
+      ctx.strokeRect(0, 0, width, height);
+    }
 
     // grid: only the visible cells, and not at all when a cell is under 6 screen px
     if (grid.size * view.scale >= 6 && grid.opacity > 0) {
       const tl = toWorld(view, { x: 0, y: 0 }), br = toWorld(view, { x: vw, y: vh });
       const x0 = Math.max(0, tl.x), y0 = Math.max(0, tl.y), x1 = Math.min(width, br.x), y1 = Math.min(height, br.y);
+      const light = isLight(grid.color);
       ctx.save();
       ctx.beginPath();
       ctx.rect(0, 0, width, height);
       ctx.clip();
       ctx.globalAlpha = grid.opacity;
-      ctx.strokeStyle = grid.color;
+      ctx.strokeStyle = bg || light ? grid.color : pal.muted; // a dark grid colour (the default black) would vanish on the dark ground
       ctx.lineWidth = px;
       ctx.beginPath();
       if (grid.type === 'square') {
@@ -212,6 +229,14 @@
           for (const p of rest) ctx.lineTo(p.x, p.y);
           ctx.closePath();
         }
+      }
+      if (bg) { // over map art: a faint halo in the opposite tone keeps the lines readable on light and dark images alike
+        ctx.save();
+        ctx.globalAlpha = grid.opacity * 0.5;
+        ctx.strokeStyle = light ? pal.rail : pal.strong;
+        ctx.lineWidth = 3 * px;
+        ctx.stroke();
+        ctx.restore();
       }
       ctx.stroke();
       ctx.restore();
@@ -239,14 +264,14 @@
       } else {
         ctx.fillStyle = t.color;
         ctx.fill();
-        ctx.fillStyle = '#ffffff';
+        ctx.fillStyle = pal.strong;
         ctx.font = `600 ${r * 0.75}px system-ui, sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(initials(t.name), p.x, p.y, r * 1.8);
       }
       ctx.lineWidth = 2 * px;
-      ctx.strokeStyle = '#1c1a17';
+      ctx.strokeStyle = pal.rail;
       if (t.hidden) ctx.setLineDash([5 * px, 4 * px]);
       ctx.stroke();
       ctx.restore();
@@ -266,16 +291,19 @@
         const p = at(t), r = radius(grid, t.size);
         if (t.hp !== undefined && t.maxHp) {
           const w = 2 * r, h = 6 * px, k = Math.max(0, Math.min(1, t.hp / t.maxHp));
-          ctx.fillStyle = '#222222';
+          ctx.fillStyle = pal.rail;
           ctx.fillRect(p.x - r, p.y + r + 2 * px, w, h);
-          ctx.fillStyle = k > 0.5 ? '#2e9e44' : k > 0.25 ? '#d4a017' : '#c0392b';
+          ctx.fillStyle = t.monsterId ? pal.danger : accent; // as the kit's Bar: red for monsters, teal for the rest
           ctx.fillRect(p.x - r, p.y + r + 2 * px, w * k, h);
         }
         (t.conditions ?? []).forEach((c, i) => {
           const s = 16 * px, bx = p.x - r + i * (s + 2 * px), by = p.y - r - s - 2 * px;
-          ctx.fillStyle = '#5b2a86';
+          ctx.fillStyle = pal.rail;
           ctx.fillRect(bx, by, s, s);
-          ctx.fillStyle = '#ffffff';
+          ctx.lineWidth = px;
+          ctx.strokeStyle = accent;
+          ctx.strokeRect(bx, by, s, s);
+          ctx.fillStyle = pal.strong;
           ctx.font = `600 ${10 * px}px system-ui, sans-serif`;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
@@ -301,14 +329,15 @@
       ctx.beginPath();
       ctx.arc(brushAt.x, brushAt.y, brush, 0, Math.PI * 2);
       ctx.lineWidth = 2 * px;
-      ctx.strokeStyle = reveal ? '#ffffff' : '#000000';
+      ctx.strokeStyle = reveal ? pal.strong : pal.rail;
       ctx.stroke();
     }
 
     // the template: affected cells tinted, and the aim
     if (template) {
       ctx.save();
-      ctx.fillStyle = 'rgba(230, 110, 20, 0.35)';
+      ctx.globalAlpha = 0.3;
+      ctx.fillStyle = accent;
       ctx.beginPath();
       for (const c of tplCells) {
         if (grid.type === 'square') { const p = cellCenter(grid, c); ctx.rect(p.x - grid.size / 2, p.y - grid.size / 2, grid.size, grid.size); continue; }
@@ -318,7 +347,8 @@
         ctx.closePath();
       }
       ctx.fill();
-      ctx.strokeStyle = 'rgb(200, 80, 0)';
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = accent;
       ctx.lineWidth = 2 * px;
       ctx.beginPath();
       ctx.arc(template.origin.x, template.origin.y, 4 * px, 0, Math.PI * 2);
@@ -331,10 +361,12 @@
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     if (mode.k === 'box' || mode.k === 'fogRect') {
       const a = toScreen(view, mode.a), b = toScreen(view, mode.b);
-      ctx.fillStyle = 'rgba(80, 140, 220, 0.15)';
-      ctx.strokeStyle = 'rgb(80, 140, 220)';
+      ctx.fillStyle = accent;
+      ctx.strokeStyle = accent;
       ctx.lineWidth = 1;
+      ctx.globalAlpha = 0.15;
       ctx.fillRect(a.x, a.y, b.x - a.x, b.y - a.y);
+      ctx.globalAlpha = 1;
       ctx.strokeRect(a.x, a.y, b.x - a.x, b.y - a.y);
     }
     if (ruler) {
@@ -347,26 +379,31 @@
       ctx.lineTo(b.x, b.y);
       ctx.stroke();
       ctx.setLineDash([]);
-      label(ctx, `${feetBetween(grid, ruler.a, ruler.b, diagonal)} ft`, b);
+      label(ctx, pal, `${feetBetween(grid, ruler.a, ruler.b, diagonal)} ft`, b);
     }
     if (drag && primary) {
       const feet = feetBetween(grid, primary, drag.ghost, diagonal), speed = speedOf?.(drag.id);
       // M5: the drop would be refused (any moved token would leave the scene)
       const off = tokens.some((t) => (t.id === drag.id || drag.ids.includes(t.id)) && !(t.x + dx >= 0 && t.x + dx <= width && t.y + dy >= 0 && t.y + dy <= height));
       const text = speed !== undefined && feet > speed ? `${feet} ft · past speed ${speed} ft` : `${feet} ft`;
-      label(ctx, off ? `${text} · off the map` : text, toScreen(view, drag.ghost));
+      label(ctx, pal, off ? `${text} · off the map` : text, toScreen(view, drag.ghost));
     }
   }
 
-  function label(ctx: CanvasRenderingContext2D, text: string, at: Pt) {
-    ctx.font = '600 14px system-ui, sans-serif';
+  function label(ctx: CanvasRenderingContext2D, pal: ReturnType<typeof palette>, text: string, at: Pt) {
+    ctx.font = '600 14px ui-monospace, Consolas, monospace';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     const w = ctx.measureText(text).width + 12;
     const x = Math.min(Math.max(4, at.x + 14), vw - w - 4), y = Math.max(14, at.y - 22);
-    ctx.fillStyle = 'rgba(20, 20, 20, 0.85)';
+    ctx.globalAlpha = 0.92;
+    ctx.fillStyle = pal.rail;
     ctx.fillRect(x, y - 12, w, 24);
-    ctx.fillStyle = '#ffffff';
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = pal.line;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x + 0.5, y - 11.5, w - 1, 23);
+    ctx.fillStyle = pal.strong;
     ctx.fillText(text, x + 6, y);
   }
 
@@ -497,39 +534,6 @@
 </script>
 
 <div class="map">
-  <div class="tools" role="toolbar" aria-label="Map tools">
-    <button type="button" aria-pressed={tool === 'select'} onclick={() => (tool = 'select')}>Select</button>
-    <button type="button" aria-pressed={tool === 'box'} onclick={() => (tool = 'box')}>Box select</button>
-    <button type="button" aria-pressed={tool === 'ruler'} onclick={() => (tool = 'ruler')}>Ruler</button>
-    <button type="button" onclick={() => zoomBy(1.25)}>Zoom in</button>
-    <button type="button" onclick={() => zoomBy(0.8)}>Zoom out</button>
-    <button type="button" onclick={fitView}>Fit</button>
-    {#if onfog}<button type="button" aria-pressed={tool === 'fog'} onclick={() => (tool = 'fog')}>Fog</button>{/if}
-    <button type="button" aria-pressed={tool === 'template'} onclick={() => (tool = 'template')}>Template</button>
-  </div>
-  {#if tool === 'fog' && onfog}
-    <div class="tools" role="group" aria-label="Fog">
-      <button type="button" aria-pressed={fogTool === 'brush'} onclick={() => (fogTool = 'brush')}>Brush</button>
-      <button type="button" aria-pressed={fogTool === 'rect'} onclick={() => (fogTool = 'rect')}>Rectangle</button>
-      {#if fogTool === 'brush'}<label class="opt">Brush size <input type="range" min="16" max="256" step="8" bind:value={brush} /></label>{/if}
-      <button type="button" aria-pressed={reveal} onclick={() => (reveal = true)}>Reveal</button>
-      <button type="button" aria-pressed={!reveal} onclick={() => (reveal = false)}>Hide</button>
-      <button type="button" onclick={() => confirm('Reveal the whole scene to players?') && onfog({ k: 'all', reveal: true })}>Reveal all</button>
-      <button type="button" onclick={() => confirm('Hide the whole scene under fog?') && onfog({ k: 'all', reveal: false })}>Hide all</button>
-    </div>
-  {/if}
-  {#if tool === 'template' || template}
-    <div class="tools" role="group" aria-label="Template">
-      <label class="opt">Shape
-        <select bind:value={shape}>{#each SHAPES as [v, name] (v)}<option value={v}>{name}</option>{/each}</select>
-      </label>
-      <label class="opt">Size (ft) <input class="ft" type="number" min="1" max="1000" bind:value={tplFeet} /></label>
-      {#if shape === 'line'}<label class="opt">Width (ft) <input class="ft" type="number" min="1" max="100" bind:value={lineWidth} /></label>{/if}
-      {#if template}<button type="button" onclick={() => (tplAt = undefined)}>Clear template</button>{/if}
-    </div>
-    {#if template}<p class="inside" role="status">Inside: {insideNames.length ? insideNames.join(', ') : 'none'}</p>
-    {:else}<p class="inside muted">Drag on the map from the origin toward the aim.</p>{/if}
-  {/if}
   <div class="frame" bind:this={wrap}>
     <canvas
       bind:this={canvas}
@@ -541,26 +545,173 @@
       onpointerleave={() => { if (hover || brushAt) { hover = brushAt = undefined; schedule(); } }}
     ></canvas>
   </div>
+
+  <!-- Floating controls: the tool switcher (and the caller's corner controls), then the active tool's options strip. -->
+  <div class="float">
+    <div class="top">
+      <div class="seg tools" role="toolbar" aria-label="Map tools">
+        <button type="button" aria-pressed={tool === 'select' || tool === 'box'} onclick={() => (tool = 'select')}>Select</button>
+        <button type="button" aria-pressed={tool === 'ruler'} onclick={() => (tool = 'ruler')}>Ruler</button>
+        <button type="button" aria-pressed={tool === 'template'} onclick={() => (tool = 'template')}>Template</button>
+        {#if onfog}<button type="button" aria-pressed={tool === 'fog'} onclick={() => (tool = 'fog')}>Fog</button>{/if}
+      </div>
+      {#if corner}<div class="corner">{@render corner()}</div>{/if}
+    </div>
+
+    {#if tool === 'select' || tool === 'box'}
+      <div class="strip" role="group" aria-label="Select">
+        <button type="button" aria-pressed={tool === 'box'} onclick={() => (tool = tool === 'box' ? 'select' : 'box')}>Box select</button>
+        <span class="hint">{tool === 'box' ? 'Drag on empty map · Shift adds' : 'Tap a token · Shift-click adds'}</span>
+      </div>
+    {:else if tool === 'ruler'}
+      <div class="strip"><span class="hint">Drag to measure · tap again to clear</span></div>
+    {:else if tool === 'fog' && onfog}
+      <div class="strip" role="group" aria-label="Fog">
+        <span class="seg">
+          <button type="button" aria-pressed={fogTool === 'brush'} onclick={() => (fogTool = 'brush')}>Brush</button>
+          <button type="button" aria-pressed={fogTool === 'rect'} onclick={() => (fogTool = 'rect')}>Rectangle</button>
+        </span>
+        {#if fogTool === 'brush'}<label class="opt">Brush size <input type="range" min="16" max="256" step="8" bind:value={brush} /></label>{/if}
+        <span class="seg">
+          <button type="button" aria-pressed={reveal} onclick={() => (reveal = true)}>Reveal</button>
+          <button type="button" aria-pressed={!reveal} onclick={() => (reveal = false)}>Hide</button>
+        </span>
+        <button type="button" onclick={() => confirm('Reveal the whole scene to players?') && onfog({ k: 'all', reveal: true })}>Reveal all</button>
+        <button type="button" onclick={() => confirm('Hide the whole scene under fog?') && onfog({ k: 'all', reveal: false })}>Hide all</button>
+      </div>
+    {/if}
+    {#if tool === 'template' || template}
+      <div class="strip" role="group" aria-label="Template">
+        {#if tool === 'template'}
+          <label class="opt">Shape
+            <select bind:value={shape}>{#each SHAPES as [v, name] (v)}<option value={v}>{name}</option>{/each}</select>
+          </label>
+          <label class="opt">Size (ft) <input class="ft num" type="number" min="1" max="1000" bind:value={tplFeet} /></label>
+          {#if shape === 'line'}<label class="opt">Width (ft) <input class="ft num" type="number" min="1" max="100" bind:value={lineWidth} /></label>{/if}
+        {/if}
+        {#if template}
+          <span class="inside" role="status">Inside: {insideNames.length ? insideNames.join(', ') : 'none'}</span>
+          <button type="button" onclick={() => (tplAt = undefined)}>Clear template</button>
+        {:else}<span class="hint">Drag on the map from the origin toward the aim.</span>{/if}
+      </div>
+    {/if}
+  </div>
+
+  <div class="seg zoom" role="group" aria-label="Zoom">
+    <button type="button" aria-label="Zoom out" onclick={() => zoomBy(0.8)}>−</button>
+    <button type="button" onclick={fitView}>Fit</button>
+    <button type="button" aria-label="Zoom in" onclick={() => zoomBy(1.25)}>+</button>
+  </div>
 </div>
 
 <style>
-  .tools {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.25rem;
-    margin-bottom: 0.25rem;
+  /* The canvas fills its container (the Workspace's `fill` main); every control floats on it. */
+  .map {
+    position: relative;
+    height: 100%;
+    min-height: 260px;
+    overflow: hidden;
   }
 
-  .tools button {
-    padding: 0.35rem 0.55rem;
-    font-size: 0.85rem;
+  .frame {
+    position: absolute;
+    inset: 0;
+    background: var(--rail);
+    overflow: hidden;
+  }
+
+  .float {
+    position: absolute;
+    top: 0.5rem;
+    left: 0.5rem;
+    right: 0.5rem;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.4rem;
+    pointer-events: none; /* only the controls themselves catch the pointer */
+  }
+
+  .float > *,
+  .top > * {
+    pointer-events: auto;
+  }
+
+  .top {
+    align-self: stretch;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 0.4rem;
+    pointer-events: none;
+  }
+
+  .corner {
+    margin-left: auto;
+  }
+
+  /* Segmented control on a near-opaque rail ground, as in the mockup */
+  .seg {
+    display: inline-flex;
+    background: color-mix(in srgb, var(--rail) 92%, transparent);
+    border: 1px solid var(--line-strong);
+    border-radius: 7px;
+    overflow: hidden;
+  }
+
+  .seg button {
+    border: 0;
+    border-radius: 0;
+    border-right: 1px solid var(--line);
+    background: transparent;
+    padding: 0.3rem 0.75rem;
+    min-height: 2.1rem;
+  }
+
+  .seg button:last-child {
+    border-right: 0;
+  }
+
+  .seg button[aria-pressed='true'] {
+    background: var(--accent);
+    color: var(--on-accent);
+    font-weight: 600;
+  }
+
+  .strip {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem 0.6rem;
+    max-width: 100%;
+    box-sizing: border-box;
+    padding: 0.3rem 0.5rem;
+    background: color-mix(in srgb, var(--rail) 92%, transparent);
+    border: 1px solid var(--line-strong);
+    border-radius: 7px;
+    font-size: 0.9rem;
+  }
+
+  .strip > button {
+    padding: 0.2rem 0.6rem;
+    min-height: 1.9rem;
+  }
+
+  .strip .seg button {
+    min-height: 1.9rem;
+    padding: 0.2rem 0.6rem;
+  }
+
+  .hint {
+    color: var(--muted);
   }
 
   .opt {
     display: inline-flex;
     align-items: center;
-    gap: 0.25rem;
-    font-size: 0.85rem;
+    gap: 0.35rem;
+    color: var(--muted);
   }
 
   .opt input[type='range'] {
@@ -572,22 +723,47 @@
   }
 
   .inside {
-    margin: 0 0 0.25rem;
-    font-size: 0.85rem;
+    color: var(--text-strong);
   }
 
-  .tools button[aria-pressed='true'] {
-    outline: 2px solid var(--accent);
-    color: var(--accent);
+  .zoom {
+    position: absolute;
+    right: 0.5rem;
+    bottom: 0.5rem;
   }
 
-  .frame {
-    position: relative;
-    height: min(65vh, 720px);
-    min-height: 260px;
-    border: 1px solid var(--border);
-    background: #5a5650;
-    overflow: hidden;
+  .zoom button {
+    min-width: 2.4rem;
+    font-family: var(--mono);
+  }
+
+  /* Phones: 44 px targets come from app.css; the zoom stands on the right edge, clear of the Dice button and the sheet */
+  @media (max-width: 767px) {
+    .seg button,
+    .strip > button,
+    .strip .seg button {
+      min-height: 44px;
+    }
+
+    .seg button {
+      padding: 0.3rem 0.65rem;
+    }
+
+    .zoom {
+      flex-direction: column;
+      bottom: auto;
+      top: 50%;
+      transform: translateY(-50%);
+    }
+
+    .zoom button {
+      border-right: 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .zoom button:last-child {
+      border-bottom: 0;
+    }
   }
 
   canvas {

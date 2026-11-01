@@ -10,6 +10,8 @@
   import { sendMove, session } from '../../lib/sync/session.svelte.ts';
   import type { Campaign, Character } from '../../lib/types.ts';
   import MapCanvas from './MapCanvas.svelte';
+  import Drawer from '../kit/Drawer.svelte';
+  import Workspace from '../kit/Workspace.svelte';
 
   let { campaign }: { campaign: Campaign } = $props();
 
@@ -68,69 +70,94 @@
   };
 </script>
 
-{#if error}<p role="alert" class="error">{error}</p>{/if}
 {#if !view}
+  {#if error}<p role="alert" class="error">{error}</p>{/if}
   <p class="muted">The DM isn't showing a map right now.</p>
 {:else}
-  <p class="scene-name"><strong>{view.name}</strong>{#if !joined} <span class="muted">(Player view: read-only)</span>{/if}</p>
-  <p class="muted" role="status" aria-live="polite">{status}</p>
-  {#key view.id}
-    <MapCanvas
-      width={view.width}
-      height={view.height}
-      image={view.image}
-      grid={view.grid}
-      tokens={view.tokens}
-      fog={view.fog}
-      dm={false}
-      diagonal={settings.diagonal}
-      {selected}
-      {canDrag}
-      {speedOf}
-      onselect={(ids) => (selected = ids)}
-      {onmove}
-      rev={session.rev}
-    />
-  {/key}
-  {#if view.tokens.length}
-    <details>
-      <summary>Tokens ({view.tokens.length})</summary>
-      <ul class="tokens">
-        {#each view.tokens as t (t.id)}
-          <li><span class="dot" style:background={t.color}></span>{t.name}{#if t.health} · {t.health}{/if}{#if t.conditions.length} · {t.conditions.join(', ')}{/if}</li>
-        {/each}
-      </ul>
-    </details>
-  {/if}
+  <!-- The same canvas as the DM's; the panel (a sheet on phones, always up) holds the player's own tokens and the turn status. -->
+  <Workspace fill panelLabel="Scene and tokens" open={true}>
+    {#key view.id}
+      <MapCanvas
+        width={view.width}
+        height={view.height}
+        image={view.image}
+        grid={view.grid}
+        tokens={view.tokens}
+        fog={view.fog}
+        dm={false}
+        diagonal={settings.diagonal}
+        {selected}
+        {canDrag}
+        {speedOf}
+        onselect={(ids) => (selected = ids)}
+        {onmove}
+        rev={session.rev}
+      />
+    {/key}
+    {#snippet panel()}
+      {#if error}<p role="alert" class="error">{error}</p>{/if}
+      <h2 class="scene-name">{view.name}</h2>
+      {#if !joined}<p class="muted note">Player view: read-only</p>{/if}
+      <p class="status" role="status" aria-live="polite">{status}</p>
+      {#if owned.length}
+        <div class="caption">Your tokens</div>
+        <ul class="plain tokens">{#each owned as t (t.id)}{@render row(t)}{/each}</ul>
+      {/if}
+      {#if view.tokens.length}
+        <Drawer title="Tokens ({view.tokens.length})">
+          <ul class="plain tokens">{#each view.tokens as t (t.id)}{@render row(t)}{/each}</ul>
+        </Drawer>
+      {/if}
+    {/snippet}
+  </Workspace>
 {/if}
+
+{#snippet row(t: { id: string; name: string; color: string; health?: string; conditions: string[] })}
+  <li><span class="dot" style:background={t.color} aria-hidden="true"></span><span class="nm">{t.name}</span>{#if t.health}<span class="muted"> · {t.health}</span>{/if}{#if t.conditions.length}<span class="muted"> · {t.conditions.join(', ')}</span>{/if}</li>
+{/snippet}
 
 <style>
   .scene-name {
-    margin: 0.25rem 0;
+    margin: 0 0 0.2rem;
+    font-size: 1.2rem;
+    color: var(--text-strong);
+  }
+
+  .note {
+    margin: 0 0 0.5rem;
+    font-size: 0.9rem;
+  }
+
+  .status {
+    margin: 0.4rem 0 0.9rem;
+    color: var(--text-strong);
   }
 
   .tokens {
-    list-style: none;
-    padding: 0;
-    margin: 0.25rem 0;
+    margin: 0.25rem 0 0.75rem;
   }
 
   .tokens li {
-    padding: 0.15rem 0;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    padding: 0.3rem 0;
+  }
+
+  .tokens li + li {
+    border-top: 1px solid var(--line);
+  }
+
+  .nm {
+    color: var(--text-strong);
   }
 
   .dot {
-    display: inline-block;
+    flex: none;
     width: 0.75rem;
     height: 0.75rem;
     border-radius: 50%;
-    margin-right: 0.4rem;
-    vertical-align: middle;
-  }
-
-  summary {
-    cursor: pointer;
-    font-weight: 600;
-    padding: 0.25rem 0;
+    margin-right: 0.5rem;
+    box-shadow: 0 0 0 1px var(--line-strong);
   }
 </style>

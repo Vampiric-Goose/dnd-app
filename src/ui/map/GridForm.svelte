@@ -39,13 +39,15 @@
 <style>
   .grid-form {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
-    gap: 0.5rem;
+    grid-template-columns: repeat(auto-fill, minmax(8rem, 1fr));
+    gap: 0.6rem 0.75rem;
   }
 
   label {
     display: flex;
     flex-direction: column;
+    gap: 0.2rem;
+    color: var(--muted);
     font-size: 0.85rem;
   }
 
@@ -53,5 +55,9 @@
   select {
     width: 100%;
     box-sizing: border-box;
+  }
+
+  input[type='number'] {
+    font-family: var(--mono);
   }
 </style>
