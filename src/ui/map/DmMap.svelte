@@ -20,6 +20,7 @@
   import { session } from '../../lib/sync/session.svelte.ts';
   import type { Campaign, Character, Combat, MonsterDef, RaceDef, Scene, Sheet, Size, Token } from '../../lib/types.ts';
   import GridForm from './GridForm.svelte';
+  import { detectSquareGrid } from '../../lib/map/detectGrid.ts';
   import MapCanvas from './MapCanvas.svelte';
   import TokenList from './TokenList.svelte';
   import MonsterSearch from '../initiative/MonsterSearch.svelte';
@@ -111,6 +112,27 @@
     if (!scene) return;
     await db.scenes.show(cid, on ? scene.id : undefined);
     await reload();
+  });
+
+  /** Lines the scene's grid up with a square grid printed on its image (official maps often have one). */
+  const detectGrid = () => run(async () => {
+    const blob = scene?.image ? await db.blobs.get(scene.image) : undefined;
+    if (!scene || !blob) return;
+    const bmp = await createImageBitmap(blob);
+    // ponytail: detection runs on at most 2048 px per side (a few hundred ms on a phone); results scale back to scene pixels.
+    const k = Math.min(1, 2048 / Math.max(bmp.width, bmp.height)), w = Math.round(bmp.width * k), h = Math.round(bmp.height * k);
+    const ctx = Object.assign(document.createElement('canvas'), { width: w, height: h }).getContext('2d', { willReadFrequently: true })!;
+    ctx.drawImage(bmp, 0, 0, w, h);
+    bmp.close();
+    const rgba = ctx.getImageData(0, 0, w, h).data, gray = new Float32Array(w * h);
+    for (let i = 0; i < gray.length; i++) gray[i] = 0.299 * rgba[i * 4] + 0.587 * rgba[i * 4 + 1] + 0.114 * rgba[i * 4 + 2];
+    const g = detectSquareGrid(gray, w, h);
+    if (!g) { notice = 'No printed grid found on this image. Set the cell size and offsets by hand.'; return; }
+    const f = scene.width / w, size = Math.round(g.size * f * 100) / 100;
+    if (size < 10 || size > 500) { notice = 'The printed grid is too fine or too coarse to use. Set it by hand.'; return; }
+    await editScene(scene.id, (s) => regrid(s, { type: 'square', size, offsetX: Math.round(g.offsetX * f * 10) / 10, offsetY: Math.round(g.offsetY * f * 10) / 10 }));
+    await reload();
+    notice = g.confidence < 10 ? `Grid set to ${size} px cells. The match is weak: check that it lines up with the printed grid.` : `Grid set to ${size} px cells to match the printed grid.`;
   });
 
   // --- tokens ---
@@ -258,6 +280,7 @@
       <label>Scene name <input maxlength="100" value={scene.name} onchange={(e) => rename((e.currentTarget as HTMLInputElement).value)} /></label>
       <button type="button" class="danger" disabled={busy} onclick={remove}>Delete scene</button>
     </div>
+    {#if scene.image}<button type="button" disabled={busy} onclick={detectGrid}>Detect grid from the image</button>{/if}
     <GridForm grid={scene.grid} onchange={(p) => edit((s) => regrid(s, p))} />
   </details>
 
