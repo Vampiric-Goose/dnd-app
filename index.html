@@ -10,6 +10,19 @@
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <title>dnd-app</title>
+    <script>
+      // A cached page from before a deploy names app scripts that no longer exist: reload past the cache, at most once per 30 s.
+      addEventListener('error', function (e) {
+        var t = e.target;
+        if (!t || t.tagName !== 'SCRIPT' || !/\/assets\//.test(t.src || '')) return;
+        try {
+          var last = Number(sessionStorage.getItem('stale-reload') || 0);
+          if (Date.now() - last < 30000) return;
+          sessionStorage.setItem('stale-reload', String(Date.now()));
+        } catch (_) { return; }
+        location.replace(location.pathname + '?r=' + Date.now() + location.hash);
+      }, true);
+    </script>
   </head>
   <body>
     <div id="app"></div>
