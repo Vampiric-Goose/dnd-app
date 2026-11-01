@@ -8,7 +8,10 @@
   import { encodeFog, newFog, paintFog, type FogEdit } from '../../lib/map/fog.ts';
   import { snap, type Pt } from '../../lib/map/grid.ts';
   import { addTokens, liveHp, MAX_SIDE, MAX_TOKENS, moveTokens, newScene, patchToken, removeTokens, type NewToken } from '../../lib/map/scene.ts';
-  import { editScene, tokenForCharacter, tokenForMonster } from '../../lib/map/store.ts';
+  import { addTokensToCombat, editScene, tokenForCharacter, tokenForMonster } from '../../lib/map/store.ts';
+  import { patchCombatant } from '../../lib/combat/combat.ts';
+  import { updateCombat } from '../../lib/combat/store.ts';
+  import { toast } from '../../lib/toast.svelte.ts';
   import { filterMonsters } from '../../lib/monsters/library.ts';
   import { soundMonster } from '../../lib/monsters/homebrew.ts';
   import { router } from '../../lib/router.svelte.ts';
@@ -141,7 +144,30 @@
     void add(names.map((name) => tokenForMonster(m, name, settings.monsterHp)));
   };
 
-  const patch = (id: string, p: Partial<Token>) => edit((s) => {
+  /** A linked token's HP lives on its combatant while the fight holds it (one authority); the rest of the patch goes to the token. */
+  const patch = async (id: string, p: Partial<Token>) => {
+    const t = scene?.tokens.find((x) => x.id === id), cId = t?.combatantId;
+    if (cId && combat?.combatants.some((x) => x.id === cId) && ('hp' in p || 'maxHp' in p)) {
+      const { hp, maxHp, ...rest } = p;
+      await run(async () => {
+        await updateCombat(cid, (c) => patchCombatant(c, cId, { ...('hp' in p && { hp }), ...('maxHp' in p && { maxHp }) }));
+        await reload();
+      });
+      if (!Object.keys(rest).length) return;
+      p = rest;
+    }
+    return patchScene(id, p);
+  };
+  const addToCombat = () => run(async () => {
+    if (!scene) return;
+    const { missing } = await addTokensToCombat(cid, scene.id, selected, {
+      chars, sheetOf: (c) => sheets.get(c.id) ?? computeSheet(c, { settings, viewer: 'dm' }), lookup: (id) => monsterById.get(id), settings,
+    });
+    await reload();
+    if (missing.length) toast(`Not in this campaign any more, so left out: ${missing.join(', ')}.`, true);
+    else toast('Added to combat.');
+  });
+  const patchScene = (id: string, p: Partial<Token>) => edit((s) => {
     const t = s.tokens.find((x) => x.id === id);
     if (!t) return s;
     return patchToken(s, id, p.size ? { ...p, ...snap(s.grid, t, p.size) } : p); // a new size re-snaps (Large sits on a vertex)
@@ -221,6 +247,12 @@
       onfog={settings.fog ? onfog : undefined}
     />
   {/key}
+  {#if selected.length}
+    <div class="row">
+      <span>{selected.length} selected</span>
+      <button type="button" disabled={busy} onclick={addToCombat}>Add to combat</button>
+    </div>
+  {/if}
 
   <details>
     <summary>Scene and grid</summary>
@@ -254,7 +286,7 @@
       <label>Count <input class="count" type="number" min="1" max="20" bind:value={count} /></label>
       <button type="button" disabled={busy || !matches.length} onclick={addMonster}>Add monster token</button>
     </div>
-    <TokenList tokens={scene.tokens} {selected} onselect={(ids) => (selected = ids)} onpatch={patch} onremove={removeIds} onportrait={portrait} />
+    <TokenList tokens={scene.tokens.map((t) => (t.combatantId ? { ...t, ...liveHp(t, combat) } : t))} {selected} onselect={(ids) => (selected = ids)} onpatch={patch} onremove={removeIds} onportrait={portrait} />
   </details>
 {/if}
 

@@ -96,6 +96,20 @@ export function tokensInRect(s: Scene, a: Pt, b: Pt, dm: boolean): string[] {
   return s.tokens.filter((t) => (dm || !t.hidden) && t.x >= x0 && t.x <= x1 && t.y >= y0 && t.y <= y1).map((t) => t.id);
 }
 
+/** Linked tokens take their combatant's hp/maxHp; a link to a combatant no longer in the fight is dropped (the token keeps its hp). */
+export function tokensFromCombat(s: Scene, c: Combat | undefined): Scene {
+  let changed = false;
+  const tokens = s.tokens.map((t) => {
+    if (t.combatantId === undefined) return t;
+    const x = c?.combatants.find((y) => y.id === t.combatantId);
+    if (!x) { changed = true; const { combatantId: _, ...rest } = t; return rest; }
+    if ((x.hp ?? t.hp) === t.hp && (x.maxHp ?? t.maxHp) === t.maxHp) return t;
+    changed = true;
+    return { ...t, ...(x.hp !== undefined && { hp: x.hp }), ...(x.maxHp !== undefined && { maxHp: x.maxHp }) };
+  });
+  return changed ? { ...s, tokens } : s;
+}
+
 /** A linked live combatant's HP and conditions win; else the token's own. */
 export function liveHp(t: Token, combat: Combat | undefined): { hp?: number; maxHp?: number; conditions: string[] } {
   const x = t.combatantId === undefined ? undefined : combat?.combatants.find((c) => c.id === t.combatantId);

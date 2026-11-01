@@ -51,7 +51,14 @@
   // Review Focus 5: monsters deleted or in a disabled pack are left out and named; the rest join the fight.
   async function start(e: Encounter) {
     const { picks, missing } = encounterPicks(e, (id) => monById.get(id));
-    if (picks.length) await act(() => updateCombat(campaign.id, (c) => addMonsters(c, picks, campaign.settings.monsterHp)));
+    if (picks.length) await act(async () => {
+      let before = new Set<string>();
+      const after = await updateCombat(campaign.id, (c) => { before = new Set(c.combatants.map((x) => x.id)); return addMonsters(c, picks, campaign.settings.monsterHp); });
+      const added = after.combatants.filter((x) => !before.has(x.id)), cid = campaign.id;
+      // Stage 5: the new monsters get tokens on the current scene (the map chunk loads only here).
+      void import('../../lib/map/store.ts').then((m) => m.placeCombatants(cid, added, (id) => monById.get(id)))
+        .then((n) => { if (n === 0 && added.length) toast('No scene to place tokens on.'); }, (e) => toast(`Tokens not placed: ${e instanceof Error ? e.message : e}`, true));
+    });
     if (missing.length) {
       const names = missing.map((id) => lineName(e.monsters.find((l) => l.monsterId === id) ?? { monsterId: id, count: 1 }));
       toast(`Not in this campaign any more, so left out: ${names.join(', ')}.`, true);
