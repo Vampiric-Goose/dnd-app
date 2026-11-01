@@ -134,6 +134,7 @@ export interface Combatant {
   conditions?: string[];                 // monsters only (a PC's are character.state.conditions)
   durations?: Record<string, Duration>;  // condition name → when it ends (PCs too)
   concentrating?: boolean; legendary?: { max: number; used: number }; reactionUsed?: boolean; notes?: string;
+  economy?: { used: number; extra: number; bonus: boolean; attacks: number }; // this turn: Actions used, extra Actions, Bonus action, attacks in the Attack action (absent: fresh)
 }
 /** The live fight of a campaign. `combatants` is the order; round 0 = setup; `turn` = the current combatant's id. */
 export interface Combat { campaignId: string; combatants: Combatant[]; round: number; turn?: string; groupMonsters: boolean; updatedAt: number;

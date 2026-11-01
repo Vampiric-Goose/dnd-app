@@ -24,7 +24,7 @@ export function restoreCombat(f: SavedFight, encounterId: string, characters: Ch
   const c = structuredClone(f.combat), alive = new Set(characters.map((x) => x.id)), dropped: string[] = [];
   const gone = new Set(c.combatants.filter((x) => x.kind === 'pc' && !(x.characterId && alive.has(x.characterId))).map((x) => { dropped.push(x.name); return x.id; }));
   const untimed = (x: Combatant): Combatant => {
-    if (x.kind === 'pc') { const { durations: _d, concentrating: _c, reactionUsed: _r, ...rest } = x; return rest; }
+    if (x.kind === 'pc') { const { durations: _d, concentrating: _c, reactionUsed: _r, economy: _e, ...rest } = x; return rest; }
     // as removeStep: a timer counted on a dropped combatant becomes untimed (the condition stays)
     return x.durations ? { ...x, durations: Object.fromEntries(Object.entries(x.durations).filter(([, d]) => !gone.has(d.of))) } : x;
   };

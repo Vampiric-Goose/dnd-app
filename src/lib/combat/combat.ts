@@ -196,7 +196,7 @@ function tick(cs: Combatant[], run: Set<string>, at: Duration['at'], expired: Ex
 
 function startTurn(cs: Combatant[], r: [number, number], expired: Expired[]): Combatant[] {
   const run = idsOf(cs, r);
-  const reset = cs.map((x) => (run.has(x.id) ? { ...x, reactionUsed: false, ...(x.legendary && { legendary: { ...x.legendary, used: 0 } }) } : x));
+  const reset = cs.map((x) => { if (!run.has(x.id)) return x; const { economy: _e, ...y } = x; return { ...y, reactionUsed: false, ...(x.legendary && { legendary: { ...x.legendary, used: 0 } }) }; });
   return tick(reset, run, 'start', expired);
 }
 
