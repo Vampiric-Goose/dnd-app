@@ -165,7 +165,10 @@ describe('engine', () => {
     connect(host, b.guest, downB);
     await settle(host, a.guest, b.guest);
     expect(downB.map((m) => JSON.parse(m).t).filter((t) => t !== 'chars').slice(0, 2)).toEqual(['welcome', 'tracker']);
-    expect(b.views.at(-1)).toEqual(a.views.at(-1));
+    // the same view, except Thorin's pips, which only his owner (A1) gets (turn panel)
+    const noEcon = (v: TrackerView | undefined) => v && { ...v, rows: v.rows.map(({ econ: _e, ...r }) => r) };
+    expect(b.views.at(-1)!.rows.some((r) => r.econ)).toBe(false);
+    expect(noEcon(b.views.at(-1))).toEqual(noEcon(a.views.at(-1)));
 
     // the DM damages Thorin: the next view has the new hp; a character not in the fight sends no tracker
     d.edit({ ...d.char('thorin')!, state: { ...d.char('thorin')!.state, hp: 9 } });

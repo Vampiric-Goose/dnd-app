@@ -27,7 +27,8 @@ export type GuestMsg =
   | { t: 'initiative'; characterId: string; total: number /* stage 4: the player's own roll, an integer INIT_MIN–INIT_MAX */ }
   | { t: 'move'; sceneId: string; tokenId: string; x: number; y: number /* stage 5: the player's own token, scene px */ }
   | { t: 'blobWant'; hashes: string[] /* stage 5: images of the current scene it lacks */ }
-  | { t: 'dash'; characterId: string /* the player's own character Dashes on its turn (honour system) */ }
+  | { t: 'use'; characterId: string; action: string; slot?: number; dropConcentration?: true /* turn panel: the player's own character does something (a TurnAction id) */ }
+  | { t: 'endTurn'; characterId: string /* the player's own character ends its turn */ }
   | { t: 'action'; action: ActionRequest /* declared action: the player's arrow (replaces their last) */ }
   | { t: 'clearAction' /* the player's arrow goes */ }
   | { t: 'drag'; sceneId: string; tokenId: string; x: number; y: number /* live drag preview of the player's own token (never stored) */ }
@@ -53,6 +54,7 @@ export type HostMsg =
   | { t: 'actions'; actions: PlayerAction[] /* declared actions players may see (actionsForPlayers) */ }
   | { t: 'drag'; tokenId: string; x: number; y: number /* someone drags a token this player sees (a preview, never stored) */ }
   | { t: 'dragEnd'; tokenId: string }
+  | { t: 'useRefused'; reason: string /* turn panel: a use the DM's device turned down (nothing was spent) */ }
   | { t: 'bye'; reason: string };
 
 /** Serialized length (UTF-16 units, close enough to bytes for a limit). */
@@ -114,8 +116,13 @@ export function parseGuestMessage(raw: unknown): GuestMsg | { error: string } {
       const h = raw.hashes;
       return Array.isArray(h) && h.length >= 1 && h.length <= 201 && h.every((x) => typeof x === 'string' && HASH.test(x)) ? { t: 'blobWant', hashes: h as string[] } : { error: 'bad blobWant' };
     }
-    case 'dash':
-      return str(raw.characterId, 100) ? { t: 'dash', characterId: raw.characterId } : { error: 'bad dash' };
+    case 'use': {
+      const { characterId, action, slot } = raw;
+      return str(characterId, 100) && str(action, 200) && (slot === undefined || (Number.isInteger(slot) && (slot as number) >= 1 && (slot as number) <= 9))
+        ? { t: 'use', characterId, action, ...(slot !== undefined && { slot: slot as number }), ...(raw.dropConcentration === true && { dropConcentration: true as const }) } : { error: 'bad use' };
+    }
+    case 'endTurn':
+      return str(raw.characterId, 100) ? { t: 'endTurn', characterId: raw.characterId } : { error: 'bad endTurn' };
     case 'action': {
       const action = cleanActionRequest(raw.action);
       return action ? { t: 'action', action } : { error: 'bad action' };

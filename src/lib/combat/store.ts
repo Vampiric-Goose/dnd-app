@@ -20,7 +20,7 @@ const update = async (cid: string, fn: (c: Combat) => Combat): Promise<Combat> =
   (await db.combat.update(cid, (c) => ({ ...fn(c ?? newCombat(cid)), updatedAt: Date.now() })))!;
 
 /** Reads the character fresh, changes it, saves it (stamped). False when it is gone (missing or deleted in its campaign). */
-async function editCharacter(id: string, fn: (c: Character) => Character): Promise<boolean> {
+export async function editCharacter(id: string, fn: (c: Character) => Character): Promise<boolean> {
   const c = await db.characters.get(id);
   if (!c) return false;
   const out = fn(c);

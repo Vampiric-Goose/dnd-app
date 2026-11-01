@@ -1,3 +1,4 @@
+import { next } from '../../src/lib/combat/combat.ts';
 // In-memory devices for the sync engine tests: each one stores like the db does (R2 putSynced, R4 kept sync, stamped user edits,
 // delete tombstones), so a test can run a DM and several players in one process.
 import type { RollEntry } from '../../src/lib/rolls.svelte.ts';
@@ -88,6 +89,8 @@ export class Device {
       loadPack: async (id) => clone(this.packs.get(id)),
       loadCombat: async () => clone(this.combat),
       updateCombat: async (fn) => (this.combat ? clone(this.combat = clone(fn(clone(this.combat)))) : undefined),
+      endTurn: async () => { if (this.combat) this.combat = next(this.combat).combat; },
+      editCharacter: async (id, fn) => { const c = this.char(id); if (c) this.edit(fn(c)); return !!c; },
       ...(this.map && {
         loadScene: async () => (this.scene?.shown ? clone(this.scene) : undefined),
         updateScene: async (id: string, fn: (s: Scene) => Scene) => {

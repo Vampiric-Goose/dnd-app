@@ -54,9 +54,14 @@ test('moveCost: the distance from the turn origin and the budget; none without a
   expect(moveProblem(scene(), { sceneId: 's1', ...m }, 'A1', [grappled], fight(), settings())).toEqual({ error: 'too far', violation: false });
 });
 
-test('the parse: dash', () => {
-  expect(parseGuestMessage({ t: 'dash', characterId: 'thorin', extra: 1 })).toEqual({ t: 'dash', characterId: 'thorin' });
-  for (const characterId of [undefined, 5, 'x'.repeat(101)]) expect(parseGuestMessage({ t: 'dash', characterId })).toEqual({ error: 'bad dash' });
+test('the parse: use and endTurn; the old dash message is gone', () => {
+  expect(parseGuestMessage({ t: 'dash', characterId: 'thorin' })).toEqual({ error: 'unknown message' });
+  expect(parseGuestMessage({ t: 'use', characterId: 'thorin', action: 'std:dash', extra: 1 })).toEqual({ t: 'use', characterId: 'thorin', action: 'std:dash' });
+  expect(parseGuestMessage({ t: 'use', characterId: 'thorin', action: 'spell:x', slot: 3, dropConcentration: true })).toEqual({ t: 'use', characterId: 'thorin', action: 'spell:x', slot: 3, dropConcentration: true });
+  for (const slot of [0, 10, 1.5, '2']) expect(parseGuestMessage({ t: 'use', characterId: 'thorin', action: 'a', slot })).toEqual({ error: 'bad use' });
+  expect(parseGuestMessage({ t: 'use', characterId: 5, action: 'a' })).toEqual({ error: 'bad use' });
+  expect(parseGuestMessage({ t: 'endTurn', characterId: 'thorin' })).toEqual({ t: 'endTurn', characterId: 'thorin' });
+  expect(parseGuestMessage({ t: 'endTurn' })).toEqual({ error: 'bad endTurn' });
 });
 
 describe('engine', () => {
@@ -127,11 +132,12 @@ describe('engine', () => {
     expect(d.errors).toEqual([]);
   });
 
-  test('Dash: the owner on their turn doubles the budget; a non-owner is a violation; off-turn is ignored', async () => {
+  test('Dash (the standard action): the owner on their turn spends the Action and doubles the budget; a non-owner is a violation; off-turn is refused', async () => {
     const { d, host, a, move } = await joined();
-    a.guest.sendDash('thorin');
+    a.guest.sendUse('thorin', 'std:dash');
     await settle(host, a.guest);
     expect(d.combat!.movement).toEqual({ 'pc:thorin': { dashes: 1 } });
+    expect(d.combat!.combatants.find((x) => x.id === 'pc:thorin')!.economy).toMatchObject({ used: 1 });
     await move(9); // 45 ft of 60
     expect(at(d)).toEqual(cell(9));
 
@@ -139,31 +145,94 @@ describe('engine', () => {
     host.accept(evil.link);
     evil.deliver({ t: 'hello', code: CODE, playerId: 'A2' });
     await settle(host);
-    evil.deliver({ t: 'dash', characterId: 'thorin' });
+    evil.deliver({ t: 'use', characterId: 'thorin', action: 'std:dash' });
     await settle(host);
     expect(d.errors.map(String)).toEqual([expect.stringMatching(/not their character/)]);
     expect(d.combat!.movement!['pc:thorin'].dashes).toBe(1);
 
     d.combat = fight({ turn: 'g1', movement: { 'pc:thorin': mv(9, 1) } });
-    a.guest.sendDash('thorin');
+    a.guest.sendUse('thorin', 'std:dash');
     await settle(host, a.guest);
     expect(d.combat.movement).toEqual({ 'pc:thorin': mv(9, 1) });
     expect(d.errors.length).toBe(1);
   });
 
-  test('a player gets one Dash a turn: a crafted second dash is ignored quietly (no violation)', async () => {
-    const { d, host, a } = await joined();
+  test('a second Dash with no Action left is refused with a reason, quietly (no violation), and spends nothing', async () => {
+    const { d, host } = await joined();
     const owner = rawLink();
     host.accept(owner.link);
     owner.deliver({ t: 'hello', code: CODE, playerId: 'A1' });
     await settle(host);
-    a.guest.sendDash('thorin');
-    await settle(host, a.guest);
-    owner.deliver({ t: 'dash', characterId: 'thorin' });
-    owner.deliver({ t: 'dash', characterId: 'thorin' });
+    owner.deliver({ t: 'use', characterId: 'thorin', action: 'std:dash' });
+    owner.deliver({ t: 'use', characterId: 'thorin', action: 'std:dash' });
     await settle(host);
     expect(d.combat!.movement!['pc:thorin'].dashes).toBe(1);
+    expect((owner.got as { t: string }[]).filter((m) => m.t === 'useRefused')).toEqual([{ t: 'useRefused', reason: 'no Action left' }]);
     expect(d.errors).toEqual([]);
+  });
+
+  // Turn panel, Task 3: players use actions and end their own turn through the DM's device.
+  test('use: an attack spends the Action; a second is refused with a reason and spends nothing (RF1)', async () => {
+    const { d, host, a } = await joined();
+    const refused: string[] = [];
+    a.guest.sendUse('thorin', 'attack:unarmed');
+    await settle(host, a.guest);
+    expect(d.combat!.combatants.find((x) => x.id === 'pc:thorin')!.economy).toMatchObject({ used: 1, attacks: 1 });
+    const owner = rawLink();
+    host.accept(owner.link);
+    owner.deliver({ t: 'hello', code: CODE, playerId: 'A1' });
+    await settle(host);
+    owner.deliver({ t: 'use', characterId: 'thorin', action: 'attack:unarmed' });
+    await settle(host);
+    for (const m of owner.got as { t: string; reason?: string }[]) if (m.t === 'useRefused') refused.push(m.reason!);
+    expect(refused).toEqual(['no Action left']);
+    expect(d.combat!.combatants.find((x) => x.id === 'pc:thorin')!.economy).toMatchObject({ used: 1 });
+    expect(d.errors).toEqual([]);
+  });
+
+  test('use: a resource spends its pip and a use on the character; with none left it is refused', async () => {
+    const { d, host, a } = await joined();
+    a.guest.sendUse('thorin', 'res:Second Wind');
+    await settle(host, a.guest);
+    expect(d.char('thorin')!.state.resourcesUsed['Second Wind']).toBe(1); // its pip follows its text (the fixture's names none; the SRD's a bonus action)
+    d.combat = fight(); // a fresh turn, but the use is gone until a rest
+    a.guest.sendUse('thorin', 'res:Second Wind');
+    await settle(host, a.guest);
+    expect(d.char('thorin')!.state.resourcesUsed['Second Wind']).toBe(1);
+  });
+
+  test('off its turn an action is refused (RF3); an unknown action is refused', async () => {
+    const { d, host } = await joined(fight({ turn: 'g1' }));
+    const owner = rawLink();
+    host.accept(owner.link);
+    owner.deliver({ t: 'hello', code: CODE, playerId: 'A1' });
+    await settle(host);
+    owner.deliver({ t: 'use', characterId: 'thorin', action: 'std:dodge' });
+    owner.deliver({ t: 'use', characterId: 'thorin', action: 'spell:nope' });
+    await settle(host);
+    expect((owner.got as { t: string; reason?: string }[]).filter((m) => m.t === 'useRefused').map((m) => m.reason)).toEqual(['not your turn', 'that action is not available']);
+    expect(d.combat!.combatants.find((x) => x.id === 'pc:thorin')!.economy).toBeUndefined();
+  });
+
+  test('endTurn: ignored off-turn; on their turn it passes the turn and expires durations like Next (RF5)', async () => {
+    const poisoned = fight({ combatants: [...fight().combatants.slice(0, 2), cb({ id: 'g1', kind: 'monster', name: 'Goblin 1', init: 12, conditions: ['Poisoned'], durations: { Poisoned: { rounds: 1, at: 'end', of: 'pc:thorin' } } })] });
+    const { d, host, a } = await joined({ ...poisoned, turn: 'g1' });
+    a.guest.sendEndTurn('thorin');
+    await settle(host, a.guest);
+    expect(d.combat!.turn).toBe('g1');
+    d.combat = poisoned;
+    a.guest.sendEndTurn('thorin');
+    await settle(host, a.guest);
+    expect(d.combat.turn).toBe('x1');
+    expect(d.combat.combatants.find((x) => x.id === 'g1')!.conditions).toEqual([]);
+    expect(d.errors).toEqual([]);
+  });
+
+  test('pips reach only their owner: another player gets no econ for Thorin', () => {
+    const c = fight({ combatants: fight().combatants.map((x) => (x.id === 'pc:thorin' ? { ...x, economy: { used: 1, extra: 0, bonus: false, attacks: 1 } } : x)) });
+    expect(trackerForPlayers(c, [thorin()], settings(), undefined, 'A1')!.rows[0].econ).toMatchObject({ used: 1, attacks: 1, perAction: 1, reaction: false });
+    expect(trackerForPlayers(c, [thorin()], settings(), undefined, 'A2')!.rows[0].econ).toBeUndefined();
+    expect(cleanTracker(JSON.parse(JSON.stringify(trackerForPlayers(c, [thorin()], settings(), undefined, 'A1'))))!.rows[0].econ).toMatchObject({ used: 1 });
   });
 
   test('Review Focus 1: the tracker carries the player\'s own movement, never a monster\'s; a reconnect gets it in its first tracker', async () => {

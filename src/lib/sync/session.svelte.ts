@@ -177,6 +177,8 @@ function hostDeps(r: Run, cid: string): HostDeps {
     loadPack: (id) => db.packs.get(id),
     loadCombat: () => db.combat.get(cid),
     updateCombat: (fn) => db.combat.update(cid, (c) => c && fn(c)).then((c) => (changed(r), c)), // the DM's tracker re-reads (session.rev)
+    endTurn: () => import('../combat/store.ts').then((m) => m.turn(cid, 'next')).then(() => changed(r)),
+    editCharacter: (id, fn) => import('../combat/store.ts').then((m) => m.editCharacter(id, fn)).then((ok) => (changed(r), ok)),
     loadScene: () => db.scenes.shown(cid),
     updateScene: (id, fn) => db.scenes.update(id, fn, { network: true }).then((s) => (changed(r), s)),
     loadBlob: async (hash) => { const b = await db.blobs.get(hash); return b && { type: b.type, data: await b.arrayBuffer() }; },
@@ -345,6 +347,7 @@ function guestDeps(r: Run): Omit<GuestDeps, 'code' | 'playerId' | 'name' | 'camp
     onStatus: (s, reason) => guestStatus(r, s, reason),
     onPacks: (p) => { if (live(r)) session.packs = p; },
     onRoster: (x) => { if (live(r)) session.roster = x; },
+    onRefused: (reason) => { if (live(r)) void import('../toast.svelte.ts').then((m) => m.toast(`Not done: ${reason}.`, true)); },
     onTracker: (t) => { if (live(r)) session.tracker = t; },
     onScene: (s) => { if (live(r)) session.scene = s; },
     onActions: (list) => { if (live(r)) session.actions = list; },
@@ -400,9 +403,12 @@ export function sendDrag(sceneId: string, tokenId: string, at?: Pt): void {
   if (!at || wait <= 0) out(); else dragWait = setTimeout(out, wait);
 }
 
-/** The player's own character Dashes on its turn (the guest checks owner and that it is online; the DM checks the turn). */
-export function sendDash(characterId: string): void {
-  run?.guest?.sendDash(characterId);
+/** Turn panel: the player's own character uses an action, or ends its turn (the guest checks owner and online; the DM checks the rest). */
+export function sendUse(characterId: string, action: string, slot?: number, dropConcentration?: boolean): void {
+  run?.guest?.sendUse(characterId, action, slot, dropConcentration);
+}
+export function sendEndTurn(characterId: string): void {
+  run?.guest?.sendEndTurn(characterId);
 }
 
 /** Stage 4: the player's own initiative roll, sent to the DM (the guest checks owner, range and that it is online). */

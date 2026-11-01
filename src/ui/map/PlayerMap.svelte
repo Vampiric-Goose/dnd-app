@@ -9,7 +9,7 @@
   import { computeSheet } from '../../lib/rules/sheet.ts';
   import { currentActor } from '../../lib/sync/project.ts';
   import { sceneForPlayers, type PlayerScene } from '../../lib/sync/scene.ts';
-  import { clearDeclared, declareAction, sendDash, sendDrag, sendMove, session } from '../../lib/sync/session.svelte.ts';
+  import { clearDeclared, declareAction, sendDrag, sendUse, sendMove, session } from '../../lib/sync/session.svelte.ts';
   import { budgetFeet, effectiveSpeed, originOf, PLAYER_DASHES, remainingFeet } from '../../lib/combat/movement.ts';
   import type { Campaign, Character } from '../../lib/types.ts';
   import MapCanvas from './MapCanvas.svelte';
@@ -69,7 +69,7 @@
   let dashTimer: ReturnType<typeof setTimeout> | undefined;
   function dash() {
     dashUnder = session.tracker;
-    sendDash(actor!);
+    sendUse(actor!, 'std:dash');
     clearTimeout(dashTimer);
     dashTimer = setTimeout(() => (dashUnder = undefined), 3000);
   }

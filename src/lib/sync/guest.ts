@@ -65,6 +65,8 @@ export interface GuestDeps {
   saveBlob?(type: string, data: Uint8Array): Promise<void>;
   /** Declared actions the DM sent (cleanActions). */
   onActions?(list: PlayerAction[]): void;
+  /** Turn panel: the DM's device turned down a use (nothing was spent). */
+  onRefused?(reason: string): void;
   onError?(e: unknown): void;
   now?(): number;
 }
@@ -124,7 +126,9 @@ export function cleanTracker(v: unknown): TrackerView | undefined {
       ...(fin(r.hp) && { hp: r.hp as number }), ...(fin(r.maxHp) && { maxHp: r.maxHp as number }),
       ...(typeof r.health === 'string' && HEALTH.includes(r.health) && { health: r.health as HealthStatus }),
       ...(isRec(r.moved) && fin(r.moved.dashes) && (r.moved.dashes as number) >= 0 && { moved: { dashes: r.moved.dashes as number,
-        ...(isRec(r.moved.from) && fin(r.moved.from.x) && fin(r.moved.from.y) && { from: { x: r.moved.from.x as number, y: r.moved.from.y as number } }) } })}];
+        ...(isRec(r.moved.from) && fin(r.moved.from.x) && fin(r.moved.from.y) && { from: { x: r.moved.from.x as number, y: r.moved.from.y as number } }) } }),
+      ...(isRec(r.econ) && [r.econ.used, r.econ.extra, r.econ.attacks, r.econ.perAction].every((v) => fin(v) && (v as number) >= 0 && (v as number) <= 20)
+        && { econ: { used: r.econ.used as number, extra: r.econ.extra as number, attacks: r.econ.attacks as number, perAction: r.econ.perAction as number, bonus: r.econ.bonus === true, reaction: r.econ.reaction === true } })}];
   })).slice(0, MAX_ROWS);
   const current = rows.some((r) => r.id === v.current) ? v.current as string : undefined;
   return { round: v.round as number, ...(current !== undefined && { current }), rows };
@@ -218,12 +222,16 @@ export class Guest {
     });
   }
 
-  /** The player's own character Dashes, sent only while online. The DM checks the turn. */
-  sendDash(characterId: string): void {
+  /** Turn panel: the player's own character uses an action (or ends its turn), sent only while online. The DM's device checks it. */
+  sendUse(characterId: string, action: string, slot?: number, dropConcentration?: boolean): void {
+    this.#own(characterId, () => this.#send({ t: 'use', characterId, action, ...(slot !== undefined && { slot }), ...(dropConcentration && { dropConcentration: true as const }) }));
+  }
+  sendEndTurn(characterId: string): void { this.#own(characterId, () => this.#send({ t: 'endTurn', characterId })); }
+  #own(characterId: string, send: () => void): void {
     void this.#task(async () => {
       if (this.#status !== 'online') return;
       const c = await this.#deps.loadCharacter(characterId);
-      if (c && c.campaignId === this.#campaignId && c.ownerId === this.#playerId) this.#send({ t: 'dash', characterId });
+      if (c && c.campaignId === this.#campaignId && c.ownerId === this.#playerId) send();
     });
   }
 
@@ -325,6 +333,7 @@ export class Guest {
       case 'scene': return this.#onScene(m.scene === null ? undefined : cleanScene(m.scene));
       case 'blobChunk': return this.#blobChunk(m);
       case 'actions': return this.#deps.onActions?.(cleanActions(m.actions));
+      case 'useRefused': return this.#deps.onRefused?.(typeof m.reason === 'string' ? m.reason.slice(0, 200) : 'refused');
       case 'drag': if (s(m.tokenId, 100) && fin(m.x) && fin(m.y)) this.#deps.onDrag?.({ tokenId: m.tokenId, at: { x: m.x as number, y: m.y as number } }); return;
       case 'dragEnd': if (s(m.tokenId, 100)) this.#deps.onDrag?.({ tokenId: m.tokenId }); return;
     }
