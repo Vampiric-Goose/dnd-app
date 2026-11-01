@@ -72,6 +72,7 @@
       <label class="field">Portrait
         <input type="file" accept="image/*" onchange={(e) => { const f = (e.currentTarget as HTMLInputElement).files?.[0]; if (f) onportrait(t.id, f); }} />
       </label>
+      {#if t.portrait}<button type="button" aria-label="Remove {t.name}'s portrait" onclick={() => onpatch(t.id, { portrait: undefined })}>Remove portrait</button>{/if}
     </Drawer>
 
     <div class="row actions">
