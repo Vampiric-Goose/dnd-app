@@ -12,7 +12,7 @@
   import Bar from '../kit/Bar.svelte';
   import RichText from '../RichText.svelte';
   import { rollD20, rollTo } from '../sheet/roll.ts';
-  import type { Snippet } from 'svelte';
+  import { untrack, type Snippet } from 'svelte';
 
   type Pip = 'action' | 'bonus' | 'reaction' | 'extra';
   let {
@@ -31,7 +31,8 @@
     /** A use is on its way: its buttons stay off. */
     busy?: boolean;
     dm?: boolean; canEnd: boolean; endLabel?: string;
-    onuse: (a: TurnAction, slot?: number) => void; onend: () => void;
+    /** false: not sent (offline), so nothing rolls. */
+    onuse: (a: TurnAction, slot?: number) => boolean | void; onend: () => void;
     /** DM: set or clear a pip; 'extra' adds an Action (Haste). */
     onpip?: (pip: Pip, used: boolean) => void;
     /** DM: show another creature from the strip. */
@@ -56,11 +57,13 @@
 
   let dialog: HTMLDialogElement | undefined = $state();
   let crit = $state(false);
+  $effect(() => { void self; untrack(() => { slotFor = {}; crit = false; }); }); // another creature: its own slot picks, no carried crit
+  /** The slot picked for it while still free, else the lowest free one. */
+  const slotOf = (a: TurnAction) => (freeSlots(a).includes(slotFor[a.id]) ? slotFor[a.id] : freeSlots(a)[0]);
 
   function use(a: TurnAction): boolean {
     if (a.spell?.concentration && concentrating && !confirm('Casting this ends your concentration on the current spell. Go on?')) return false;
-    onuse(a, a.spell && a.spell.level > 0 ? slotFor[a.id] ?? freeSlots(a)[0] : undefined);
-    return true;
+    return onuse(a, a.spell && a.spell.level > 0 ? slotOf(a) : undefined) !== false;
   }
   function attack(a: TurnAction) {
     if (!use(a)) return;
@@ -71,7 +74,7 @@
     rollTo(label, expr, { crit, shareAs: 'Damage' });
     crit = false;
   }
-  const effect = (c: string) => CONDITION_TEXT[titleCase(c)] ?? '';
+  const condEffect = (c: string) => CONDITION_TEXT[titleCase(c)] ?? '';
 </script>
 
 <section class="turn" aria-label="Turn: {name}">
@@ -100,15 +103,18 @@
     </div>
   {/if}
   {#if conditions.length}
-    <ul class="plain conds">{#each conditions as c}<li><strong>{titleCase(c)}</strong>{#if effect(c)}: {effect(c)}{/if}</li>{/each}</ul>
+    <ul class="plain conds">{#each conditions as c}<li><strong>{titleCase(c)}</strong>{#if condEffect(c)}: {condEffect(c)}{/if}</li>{/each}</ul>
   {/if}
   {#if moveLeft !== undefined}<p class="move"><span class="num">{moveLeft}</span> ft of movement left</p>{/if}
 
-  <div class="pips" class:blocked aria-label="Action economy">
+  <div class="pips" class:blocked role="group" aria-label="Action economy">
     {#each { length: 1 + e.extra } as _, i}{@render pip('action', i < e.used, 1 + e.extra > 1 ? `Action ${i + 1}` : 'Action')}{/each}
     {@render pip('bonus', e.bonus, 'Bonus')}
     {@render pip('reaction', !!x.reactionUsed, 'Reaction')}
-    {#if dm && onpip}<button type="button" class="add" aria-label="Add an Action (Haste and the like)" onclick={() => onpip('extra', true)}>+</button>{/if}
+    {#if dm && onpip}
+      <button type="button" class="add" aria-label="Add an Action (Haste and the like)" onclick={() => onpip('extra', true)}>+</button>
+      {#if e.extra > 0}<button type="button" class="add" aria-label="Take back an extra Action" onclick={() => onpip('extra', false)}>−</button>{/if}
+    {/if}
   </div>
   {#if blocked}<p class="muted small">No actions or reactions: {conditions.filter((c) => /incapacitated|stunned|paralyzed|petrified|unconscious/i.test(c)).join(', ')}.</p>{/if}
 
@@ -121,6 +127,7 @@
 </section>
 
 <dialog bind:this={dialog} class="actions" aria-labelledby="actions-title" onclick={(ev) => { if (ev.target === dialog) dialog?.close(); }}>
+  <div class="body">
   <div class="head">
     <h2 id="actions-title">{name}: actions</h2>
     <button type="button" aria-label="Close" onclick={() => dialog?.close()}>✕</button>
@@ -133,6 +140,7 @@
       <ul class="plain list">{#each list as a (a.id)}<li>{@render entry(a, true, shared)}</li>{/each}</ul>
     {/if}
   {/each}
+  </div>
 </dialog>
 
 {#snippet who(r: { name: string; init?: number })}
@@ -165,7 +173,7 @@
     {:else}
       {#each parts as p}{#if 'expr' in p}<button type="button" aria-label="Roll {a.name} {p.hit ? 'attack' : 'damage'}, {p.t}" onclick={() => rollTo(`${name}: ${a.name} ${p.hit ? 'attack' : 'damage'}`, p.expr!, { public: false })}>{p.t}</button>{/if}{/each}
       {#if a.spell && a.spell.level > 0 && freeSlots(a).length > 1}
-        <select aria-label="{a.name} slot level" value={slotFor[a.id] ?? freeSlots(a)[0]} onchange={(ev) => (slotFor[a.id] = Number((ev.currentTarget as HTMLSelectElement).value))}>
+        <select aria-label="{a.name} slot level" value={slotOf(a)} onchange={(ev) => (slotFor[a.id] = Number((ev.currentTarget as HTMLSelectElement).value))}>
           {#each freeSlots(a) as l}<option value={l}>Level {l}</option>{/each}
         </select>
       {/if}
@@ -204,8 +212,8 @@
     display: inline-flex;
     align-items: center;
     gap: 0.3rem;
-    min-height: 2rem;
-    padding: 0.15rem 0.5rem;
+    min-height: 44px;
+    padding: 0.15rem 0.6rem;
     border: 1px solid var(--line);
     border-radius: 999px;
     font-size: 0.9rem;
@@ -338,6 +346,10 @@
   }
 
   .check {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    min-height: 44px;
     margin: 0;
   }
 
@@ -346,6 +358,10 @@
     width: min(34rem, calc(100vw - 2rem));
     max-height: min(80vh, 46rem);
     overflow: auto;
+    padding: 0;
+  }
+
+  .body {
     padding: 0.75rem 1rem 1rem;
   }
 
@@ -355,7 +371,7 @@
     justify-content: space-between;
     gap: 0.5rem;
     position: sticky;
-    top: -0.75rem;
+    top: 0;
     margin: -0.75rem -1rem 0;
     padding: 0.75rem 1rem 0.4rem;
     background: var(--panel);

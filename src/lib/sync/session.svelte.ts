@@ -404,8 +404,8 @@ export function sendDrag(sceneId: string, tokenId: string, at?: Pt): void {
 }
 
 /** Turn panel: the player's own character uses an action, or ends its turn (the guest checks owner and online; the DM checks the rest). */
-export function sendUse(characterId: string, action: string, slot?: number, dropConcentration?: boolean): void {
-  run?.guest?.sendUse(characterId, action, slot, dropConcentration);
+export function sendUse(characterId: string, action: string, slot?: number): void {
+  run?.guest?.sendUse(characterId, action, slot);
 }
 export function sendEndTurn(characterId: string): void {
   run?.guest?.sendEndTurn(characterId);

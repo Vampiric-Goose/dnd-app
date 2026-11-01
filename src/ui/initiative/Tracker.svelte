@@ -1,7 +1,7 @@
 <script lang="ts">
   import { addCombatants, addMonsters, lairCombatant, MAX_COMBATANTS, pcCombatant, prev, rollInit, setInit } from '../../lib/combat/combat.ts';
   import { deleteEncounter, endCombat, saveFight, saveFightAs, turn, updateCombat } from '../../lib/combat/store.ts';
-  import { budgetApplies, budgetFeet, combatantForToken, dashRun, effectiveSpeed, MAX_DASHES, resetMovement, undoDash, usedFeet } from '../../lib/combat/movement.ts';
+  import { budgetApplies, budgetFeet, combatantForToken, effectiveSpeed, resetMovement, usedFeet } from '../../lib/combat/movement.ts';
   import type { ContentIndex } from '../../lib/content/index.ts';
   import { db } from '../../lib/db.ts';
   import { session } from '../../lib/sync/session.svelte.ts';
@@ -62,7 +62,7 @@
     for (const s of scenes) { const t = s.tokens.find((t) => combatantForToken(c, t)?.id === id); if (t) return { at: { x: t.x, y: t.y }, grid: s.grid }; }
   };
   // Movement budget (spec 1): the current run (a grouped monster turn is several, each on its own budget). The readout is its first
-  // combatant's; Dash, Undo Dash and Reset movement apply to every member, so each grouped token gets the Dash.
+  // combatant's; Reset movement applies to every member. A Dash is an action now, taken from the map's Turn panel.
   const mover = $derived.by(() => {
     const r = currentRun(combat);
     if (!r || !combat || !budgetApplies(combat, settings)) return undefined;
@@ -75,12 +75,6 @@
     const m = c.movement?.[run[0].id];
     return { run, ids: run.map((x) => x.id), left: Math.max(0, budgetFeet(run[0].speed, m) - run[0].used), dashes: m?.dashes ?? 0 };
   });
-  /** Undo Dash for the whole run, only when every member can (their Dash counts stay together). */
-  const undoRun = (c: Combat, run: { id: string; speed: number; used: number }[]): Combat => {
-    let out = c;
-    for (const { id, speed, used } of run) { const n = undoDash(out, id, speed, used); if (n === out) return c; out = n; }
-    return out;
-  };
   const resetRun = (c: Combat, ids: string[]): Combat => ids.reduce(resetMovement, c);
   const status = $derived(round === 0 ? 'Setup' : `Round ${round}${turnName ? ` · ${turnName}'s turn` : ''}`);
 
@@ -164,7 +158,6 @@
     { label: 'Encounters', onselect: () => { tab = 'encounters'; sheet = true; } },
     ...(mover && combat ? [
       { separator: true } as const,
-      { label: 'Undo Dash', disabled: undoRun(combat, mover.run) === combat, onselect: () => { const { run } = mover; void edit((c) => undoRun(c, run)); } },
       { label: 'Reset movement', disabled: resetRun(combat, mover.ids) === combat, onselect: () => { const { ids } = mover; void edit((c) => resetRun(c, ids)); } },
     ] : []),
     ...(combat ? [{ separator: true } as const, { label: 'Save as encounter…', onselect: () => void saveAs() }] : []),
@@ -185,9 +178,6 @@
         <span class="left num">{mover.left} ft left{mover.dashes ? ` · Dashed ×${mover.dashes}` : ''}</span>
       {/if}
       <div class="acts">
-        {#if mover}
-          <button type="button" disabled={mover.dashes >= MAX_DASHES} title={mover.dashes >= MAX_DASHES ? `At most ${MAX_DASHES} Dashes a turn` : undefined} onclick={() => { const { ids } = mover; void edit((c) => dashRun(c, ids)); }}>Dash</button>
-        {/if}
         {#if round === 0}
           <button type="button" class="primary" disabled={!list.length} onclick={() => run(() => turn(cid, 'start'))}>Start</button>
         {:else}

@@ -48,21 +48,12 @@ export const recordMove = (c: Combat, combatantId: string, from: Pt): Combat =>
   originOf(c.movement?.[combatantId]) || !Number.isFinite(from.x) || !Number.isFinite(from.y) ? c
     : withEntry(c, combatantId, { ...entry(c, combatantId), from: { x: from.x, y: from.y } });
 
-/** Dashes a turn: a player's own Dash button gives one; the DM may add more (Cunning Action, Action Surge) up to MAX_DASHES in all. */
-export const PLAYER_DASHES = 1, MAX_DASHES = 3;
+/** Dashes a turn at most (an Action, Action Surge's and Cunning Action's bonus action), each a "use" from the Turn panel. */
+export const MAX_DASHES = 3;
 
-/** One more Dash, unless the combatant already has `max` this turn (then `c`). */
-export const addDash = (c: Combat, combatantId: string, max = MAX_DASHES): Combat =>
-  entry(c, combatantId).dashes >= max ? c : withEntry(c, combatantId, { ...entry(c, combatantId), dashes: entry(c, combatantId).dashes + 1 });
-
-/** The DM's turn-bar Dash: one for every combatant of the current run (a grouped monster turn moves as one, each token on its own budget). */
-export const dashRun = (c: Combat, ids: Iterable<string>): Combat => { for (const id of ids) c = addDash(c, id); return c; };
-
-/** Takes back a mistaken Dash, only while its extra movement is unused (`used`: usedFeet now); otherwise returns `c`. */
-export function undoDash(c: Combat, combatantId: string, speed: number, used: number): Combat {
-  const m = c.movement?.[combatantId] && entry(c, combatantId);
-  return m && m.dashes >= 1 && used <= speed * m.dashes ? withEntry(c, combatantId, { ...m, dashes: m.dashes - 1 }) : c;
-}
+/** One more Dash, unless the combatant already has MAX_DASHES this turn (then `c`). */
+export const addDash = (c: Combat, combatantId: string): Combat =>
+  entry(c, combatantId).dashes >= MAX_DASHES ? c : withEntry(c, combatantId, { ...entry(c, combatantId), dashes: entry(c, combatantId).dashes + 1 });
 
 /** The DM's Reset movement (P2): no origin (the token's next move starts a fresh one), no Dashes. */
 export const resetMovement = (c: Combat, combatantId: string): Combat =>

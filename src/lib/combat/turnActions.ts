@@ -28,6 +28,16 @@ export function costOfText(text: string): Cost {
   return 'none';
 }
 
+/** A monster trait's cost, only when the trait says it is taken as one ("as a bonus action", "uses its reaction"): a trait that merely
+ * mentions reactions (a Marilith's Reactive) is no action. */
+export function traitCost(text: string): Cost {
+  const t = text.toLowerCase();
+  if (/\bas a bonus action\b/.test(t)) return 'bonus';
+  if (/\b(?:as a|uses? its|use its) reaction\b/.test(t)) return 'reaction';
+  if (/\bas an action\b/.test(t)) return 'action';
+  return 'none';
+}
+
 /** A spell's casting time as a cost; anything longer than an action (a minute, an hour) is not offered in a turn. */
 export function castingCost(castingTime: string): Cost | undefined {
   const t = castingTime.toLowerCase().trim();
@@ -84,7 +94,7 @@ export const primaryAction = (list: TurnAction[]): TurnAction | undefined => lis
 /** A monster's actions from its stat block: actions, bonus actions, reactions, and traits that say they take one (Nimble Escape). */
 export function monsterActions(m: MonsterDef): TurnAction[] {
   const of = (list: MonsterDef['actions'], cost: Cost, key: string) => list.map((t, i): TurnAction => ({ id: `mon:${key}:${i}`, name: t.name, cost, group: 'monster', text: t.text }));
-  const traits = m.traits.flatMap((t, i): TurnAction[] => { const cost = costOfText(richToPlain(t.text)); return cost === 'none' ? [] : [{ id: `mon:trait:${i}`, name: t.name, cost, group: 'monster', text: t.text }]; });
+  const traits = m.traits.flatMap((t, i): TurnAction[] => { const cost = traitCost(richToPlain(t.text)); return cost === 'none' ? [] : [{ id: `mon:trait:${i}`, name: t.name, cost, group: 'monster', text: t.text }]; });
   const legendary = m.legendary.map((t, i): TurnAction => ({ id: `mon:legendary:${i}`, name: t.name, cost: 'none', group: 'monster', text: t.text,
     legendary: Number(/costs (\d) actions/i.exec(t.name)?.[1] ?? 1) }));
   return [...of(m.actions, 'action', 'action'), ...of(m.bonusActions, 'bonus', 'bonus'), ...traits, ...of(m.reactions, 'reaction', 'reaction'), ...legendary];
@@ -96,6 +106,9 @@ export const attackOf = (a: TurnAction, perAction: number) => (a.group === 'atta
 /** Why the creature can't use it now (its pip, a use left, legendary uses), or undefined. Slots are `payment`'s check. */
 export function problemOf(x: Combatant, a: TurnAction, conditions: readonly string[], onTurn: boolean, perAction = 1): string | undefined {
   if (a.uses && a.uses.left < 1) return `no ${a.name} left`;
+  if (a.grants === 'action' && !onTurn) return 'not your turn';
+  if (a.grants === 'action' && x.economy?.surged) return 'once a turn';
+  if (a.id.startsWith('offhand:') && !x.economy?.light) return 'attack with a light melee weapon first';
   if (a.legendary === undefined) return useProblem(x, a.cost, conditions, onTurn, attackOf(a, perAction));
   if (onTurn) return "only at the end of another creature's turn";
   const block = conditions.find((c) => BLOCKING.includes(c.toLowerCase()));
@@ -127,7 +140,8 @@ export function payment(a: TurnAction, sheet: Sheet, c: Character, slot?: number
 /** The fight after the use (check problemOf first): its pip, an extra Action, concentration, a Dash's movement, legendary uses. */
 export function applyUse(k: Combat, x: Combatant, a: TurnAction, perAction = 1): Combat {
   let y = spend(x, a.cost, attackOf(a, perAction));
-  if (a.grants === 'action') y = grantAction(y);
+  if (attackOf(a, perAction) && lightMelee(a.attack!) && y.economy) y = { ...y, economy: { ...y.economy, light: true } };
+  if (a.grants === 'action') { y = grantAction(y); y = { ...y, economy: { ...y.economy!, surged: true } }; }
   if (a.spell?.concentration) y = { ...y, concentrating: true };
   if (a.legendary && y.legendary) y = { ...y, legendary: { ...y.legendary, used: y.legendary.used + a.legendary } };
   const next = { ...k, combatants: k.combatants.map((z) => (z.id === x.id ? y : z)) };

@@ -53,6 +53,17 @@ describe('snapshot and restore', () => {
     expect(combat.combatants.find((x) => x.id === 'pc:b')?.hidden).toBe(true);
   });
 
+  test('the turn passing on from a dropped character starts fresh for its new holder: pips, Reaction, legendary uses', () => {
+    const f = fight();
+    f.combatants = f.combatants.map((x) => (x.id === 'g2' ? { ...x, economy: { used: 1, extra: 0, bonus: true, attacks: 1 }, reactionUsed: true, legendary: { max: 3, used: 2 } } : x));
+    const { combat } = restoreCombat(snapshotFight(f, undefined), 'e1', [], 'c1');
+    const g2 = combat.combatants.find((x) => x.id === 'g2')!;
+    expect(combat.turn).toBe('g2');
+    expect(g2.economy).toBeUndefined();
+    expect(g2.reactionUsed).toBe(false);
+    expect(g2.legendary).toEqual({ max: 3, used: 0 });
+  });
+
   test('a deleted character is dropped and named; holding the turn, it passes to the next combatant', () => {
     const { combat, dropped } = restoreCombat(snapshotFight(fight(), undefined), 'e1', [char('b', 'c1')], 'c1');
     expect(dropped).toEqual(['a']);

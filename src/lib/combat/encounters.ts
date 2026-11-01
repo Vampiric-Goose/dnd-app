@@ -1,7 +1,7 @@
 // Pure (no Svelte/Vite/DOM): a fight saved into an encounter, and back. Lazy: only combat/store.ts imports it.
 import type { Character, Combat, Combatant, SavedFight, Scene } from '../types.ts';
 import { uid } from '../uid.ts';
-import { currentRun } from './combat.ts';
+import { currentRun, freshTurn } from './combat.ts';
 import { resetMovement } from './movement.ts';
 
 /** A deep copy of the fight (without its link or identity) and, when a scene is given, that scene's tokens and fog. */
@@ -39,7 +39,9 @@ export function restoreCombat(f: SavedFight, encounterId: string, characters: Ch
   // the passed turn has started (nothing ticked): mark it, so Previous then Next does not start it again (M1)
   const done = turn !== c.turn && turn !== undefined ? [...(c.done ?? []), `${round}:s:${turn}`] : c.done;
   let combat: Combat = { ...c, combatants: cs, turn, round, done, encounterId, campaignId, updatedAt: Date.now(), fightId: uid() };
-  for (const id of [...gone, ...(turn !== c.turn ? currentRun(combat) : [])]) combat = resetMovement(combat, id);
+  const passed = turn !== c.turn ? currentRun(combat) : new Set<string>(); // its new holder starts its turn: fresh pips, Reaction, legendary uses
+  if (passed.size) combat = { ...combat, combatants: combat.combatants.map((x) => (passed.has(x.id) ? freshTurn(x) : x)) };
+  for (const id of [...gone, ...passed]) combat = resetMovement(combat, id);
   return { combat, dropped };
 }
 

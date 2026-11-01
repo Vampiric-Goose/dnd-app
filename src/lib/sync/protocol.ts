@@ -27,7 +27,7 @@ export type GuestMsg =
   | { t: 'initiative'; characterId: string; total: number /* stage 4: the player's own roll, an integer INIT_MIN–INIT_MAX */ }
   | { t: 'move'; sceneId: string; tokenId: string; x: number; y: number /* stage 5: the player's own token, scene px */ }
   | { t: 'blobWant'; hashes: string[] /* stage 5: images of the current scene it lacks */ }
-  | { t: 'use'; characterId: string; action: string; slot?: number; dropConcentration?: true /* turn panel: the player's own character does something (a TurnAction id) */ }
+  | { t: 'use'; characterId: string; action: string; slot?: number /* turn panel: the player's own character does something (a TurnAction id) */ }
   | { t: 'endTurn'; characterId: string /* the player's own character ends its turn */ }
   | { t: 'action'; action: ActionRequest /* declared action: the player's arrow (replaces their last) */ }
   | { t: 'clearAction' /* the player's arrow goes */ }
@@ -119,7 +119,7 @@ export function parseGuestMessage(raw: unknown): GuestMsg | { error: string } {
     case 'use': {
       const { characterId, action, slot } = raw;
       return str(characterId, 100) && str(action, 200) && (slot === undefined || (Number.isInteger(slot) && (slot as number) >= 1 && (slot as number) <= 9))
-        ? { t: 'use', characterId, action, ...(slot !== undefined && { slot: slot as number }), ...(raw.dropConcentration === true && { dropConcentration: true as const }) } : { error: 'bad use' };
+        ? { t: 'use', characterId, action, ...(slot !== undefined && { slot: slot as number }) } : { error: 'bad use' };
     }
     case 'endTurn':
       return str(raw.characterId, 100) ? { t: 'endTurn', characterId: raw.characterId } : { error: 'bad endTurn' };

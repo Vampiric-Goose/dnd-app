@@ -36,8 +36,8 @@ export const actionsLeft = (x: Combatant): number => { const e = econ(x); return
  * `attack`: an attack, which continues an Attack action that has attacks left without needing another Action.
  */
 export function useProblem(x: Combatant, cost: Cost, conditions: readonly string[], onTurn: boolean, attack?: { perAction: number }): string | undefined {
+  if (cost === 'none') return undefined; // no pip: also off its turn (Indomitable on an enemy's turn)
   if (cost !== 'reaction' && !onTurn) return 'not your turn';
-  if (cost === 'none') return undefined;
   const block = conditions.find((c) => BLOCKING.includes(c.toLowerCase()));
   if (block) return block;
   const e = econ(x);
@@ -59,6 +59,12 @@ export function spend(x: Combatant, cost: Cost, attack?: { perAction: number }):
 
 /** One more Action this turn (Action Surge, Haste). Never a Bonus action. */
 export const grantAction = (x: Combatant): Combatant => ({ ...x, economy: { ...econ(x), extra: econ(x).extra + 1 } });
+
+/** The DM's fix for an extra Action given by mistake: one fewer (never below the turn's own one). */
+export function dropAction(x: Combatant): Combatant {
+  const e = econ(x), extra = Math.max(0, e.extra - 1);
+  return { ...x, economy: { ...e, extra, used: Math.min(e.used, 1 + extra) } };
+}
 
 /** The DM's fix: mark a pip used or unused (an Action: one more or one fewer used, within the Actions this turn has). */
 export function setPip(x: Combatant, pip: 'action' | 'bonus' | 'reaction', used: boolean): Combatant {

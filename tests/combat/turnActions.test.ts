@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import { describe, expect, test } from 'vitest';
-import { applyUse, attacksPerAction, castingCost, costOfText, monsterActions, offhandDamage, payment, pcActions, primaryAction, problemOf, slotsLeft, spendOn, type TurnAction } from '../../src/lib/combat/turnActions.ts';
+import { applyUse, attacksPerAction, castingCost, costOfText, traitCost, monsterActions, offhandDamage, payment, pcActions, primaryAction, problemOf, slotsLeft, spendOn, type TurnAction } from '../../src/lib/combat/turnActions.ts';
 import type { Attack, Character, Combat, Combatant, MonsterDef, Pack, Sheet, SpellDef } from '../../src/lib/types.ts';
 
 const srd: Pack = JSON.parse(fs.readFileSync('src/data/srd.json', 'utf8'));
@@ -107,6 +107,31 @@ describe('using an action', () => {
     const k = applyUse(fight(cb()), cb(), dash);
     expect(k.combatants[0].economy?.bonus).toBe(true);
     expect(k.movement?.x?.dashes).toBe(1);
+  });
+
+  test('two-weapon fighting: the off-hand attack only after an Attack action with a light melee weapon', () => {
+    const list = pcActions(character(), sheet({ attacks: [atk('Shortsword', { properties: ['finesse', 'light'], damage: '1d6+3' }), atk('Dagger', { properties: ['finesse', 'light', 'thrown'], damage: '1d4+3' }), atk('Longsword')] }), []);
+    const by = (id: string) => list.find((a) => a.id === id)!;
+    expect(problemOf(cb(), by('offhand:Shortsword'), [], true)).toMatch(/light melee weapon first/);
+    const afterLong = applyUse(fight(cb()), cb(), by('attack:Longsword')).combatants[0];
+    expect(problemOf(afterLong, by('offhand:Dagger'), [], true)).toMatch(/light melee weapon first/);
+    const afterShort = applyUse(fight(cb()), cb(), by('attack:Shortsword')).combatants[0];
+    expect(problemOf(afterShort, by('offhand:Dagger'), [], true)).toBeUndefined();
+  });
+
+  test('Action Surge: once a turn, only on its own turn; other no-cost uses work off-turn', () => {
+    const surge = { id: 'res:Action Surge', name: 'Action Surge', cost: 'none', group: 'resource', grants: 'action', uses: { left: 2, max: 2 } } as TurnAction;
+    const indomitable = { id: 'res:Indomitable', name: 'Indomitable', cost: 'none', group: 'resource', uses: { left: 1, max: 1 } } as TurnAction;
+    expect(problemOf(cb(), surge, [], false)).toBe('not your turn');
+    const after = applyUse(fight(cb()), cb(), surge).combatants[0];
+    expect(problemOf(after, surge, [], true)).toBe('once a turn');
+    expect(problemOf(cb(), indomitable, [], false)).toBeUndefined();
+  });
+
+  test('monster traits: only one taken as an action counts (Nimble Escape yes, Reactive no)', () => {
+    expect(traitCost('The goblin can take the Disengage or Hide action as a bonus action on each of its turns.')).toBe('bonus');
+    expect(traitCost('The marilith can take one reaction on every turn in a combat.')).toBe('none');
+    expect(traitCost('When a creature hits it, the knight uses its reaction to add 2 to its AC.')).toBe('reaction');
   });
 
   test('payment: slot levels at or above the spell, free ones only; spendOn pays a slot and a use', () => {

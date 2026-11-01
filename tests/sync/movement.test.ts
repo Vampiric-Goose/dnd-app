@@ -57,7 +57,7 @@ test('moveCost: the distance from the turn origin and the budget; none without a
 test('the parse: use and endTurn; the old dash message is gone', () => {
   expect(parseGuestMessage({ t: 'dash', characterId: 'thorin' })).toEqual({ error: 'unknown message' });
   expect(parseGuestMessage({ t: 'use', characterId: 'thorin', action: 'std:dash', extra: 1 })).toEqual({ t: 'use', characterId: 'thorin', action: 'std:dash' });
-  expect(parseGuestMessage({ t: 'use', characterId: 'thorin', action: 'spell:x', slot: 3, dropConcentration: true })).toEqual({ t: 'use', characterId: 'thorin', action: 'spell:x', slot: 3, dropConcentration: true });
+  expect(parseGuestMessage({ t: 'use', characterId: 'thorin', action: 'spell:x', slot: 3 })).toEqual({ t: 'use', characterId: 'thorin', action: 'spell:x', slot: 3 });
   for (const slot of [0, 10, 1.5, '2']) expect(parseGuestMessage({ t: 'use', characterId: 'thorin', action: 'a', slot })).toEqual({ error: 'bad use' });
   expect(parseGuestMessage({ t: 'use', characterId: 5, action: 'a' })).toEqual({ error: 'bad use' });
   expect(parseGuestMessage({ t: 'endTurn', characterId: 'thorin' })).toEqual({ t: 'endTurn', characterId: 'thorin' });

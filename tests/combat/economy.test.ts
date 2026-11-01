@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { addCombatants, newCombat, next, prev, start } from '../../src/lib/combat/combat.ts';
-import { actionsLeft, BLOCKING, CONDITION_TEXT, grantAction, setPip, spend, useProblem } from '../../src/lib/combat/economy.ts';
+import { actionsLeft, BLOCKING, CONDITION_TEXT, dropAction, grantAction, setPip, spend, useProblem } from '../../src/lib/combat/economy.ts';
 import { CONDITIONS } from '../../src/lib/rules/constants.ts';
 import type { Combatant } from '../../src/lib/types.ts';
 
@@ -49,7 +49,7 @@ describe('turn economy', () => {
     expect(useProblem(x, 'bonus', [], false)).toBe('not your turn');
     expect(useProblem(x, 'reaction', [], false)).toBeUndefined();
     expect(useProblem(spend(x, 'reaction'), 'reaction', [], false)).toBe('no Reaction left');
-    expect(useProblem(x, 'none', [], false)).toBe('not your turn');
+    expect(useProblem(x, 'none', [], false)).toBeUndefined(); // no pip (Indomitable on an enemy's turn)
   });
 
   test('blocking conditions stop all three; Prone does not (RF4)', () => {
@@ -74,6 +74,14 @@ describe('turn economy', () => {
     expect(actionsLeft(x)).toBe(1);
     expect(setPip(cb('a'), 'bonus', true).economy?.bonus).toBe(true);
     expect(setPip(cb('a'), 'reaction', true).reactionUsed).toBe(true);
+  });
+
+  test('the DM takes back an extra Action given by mistake, never the turn own one', () => {
+    let x = spend(spend(grantAction(cb('a')), 'action'), 'action');
+    expect(actionsLeft(x)).toBe(0);
+    x = dropAction(x);
+    expect(x.economy).toMatchObject({ extra: 0, used: 1 });
+    expect(dropAction(dropAction(cb('a'))).economy).toMatchObject({ extra: 0, used: 0 });
   });
 
   test('pips reset where the creature own turn starts, once (Next, Previous, Next)', () => {

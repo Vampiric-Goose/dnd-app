@@ -194,9 +194,15 @@ function tick(cs: Combatant[], run: Set<string>, at: Duration['at'], expired: Ex
   });
 }
 
+/** Where its own turn starts: fresh pips and Reaction, legendary uses back. */
+export const freshTurn = (x: Combatant): Combatant => {
+  const { economy: _e, ...y } = x;
+  return { ...y, reactionUsed: false, ...(x.legendary && { legendary: { ...x.legendary, used: 0 } }) };
+};
+
 function startTurn(cs: Combatant[], r: [number, number], expired: Expired[]): Combatant[] {
   const run = idsOf(cs, r);
-  const reset = cs.map((x) => { if (!run.has(x.id)) return x; const { economy: _e, ...y } = x; return { ...y, reactionUsed: false, ...(x.legendary && { legendary: { ...x.legendary, used: 0 } }) }; });
+  const reset = cs.map((x) => (run.has(x.id) ? freshTurn(x) : x));
   return tick(reset, run, 'start', expired);
 }
 

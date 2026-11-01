@@ -353,7 +353,9 @@ export class Host {
       return applyUse(k, x, a, per);
     });
     if (why) return refuse(why);
-    if (level !== undefined || a.resource) await this.#deps.editCharacter!(ch.id, (x) => spendOn(x, level, a.resource, pact));
+    if ((level !== undefined || a.resource) && !(await this.#deps.editCharacter!(ch.id, (x) => spendOn(x, level, a.resource, pact)).catch(() => false))) {
+      refuse('the character could not be updated, so nothing was paid');
+    }
   }
 
   /** Turn panel: the player's own character (else a violation) ends its turn, only while it really holds the turn (not a hidden creature's after it); else ignored. */

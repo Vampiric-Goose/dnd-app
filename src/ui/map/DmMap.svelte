@@ -13,7 +13,7 @@
   import { currentRun, patchCombatant } from '../../lib/combat/combat.ts';
   import { budgetApplies, budgetFeet, combatantForToken, effectiveSpeed, originOf, recordMove } from '../../lib/combat/movement.ts';
   import { editCharacter, turn, updateCombat } from '../../lib/combat/store.ts';
-  import { grantAction, setPip } from '../../lib/combat/economy.ts';
+  import { dropAction, grantAction, setPip } from '../../lib/combat/economy.ts';
   import { applyUse, attacksPerAction, monsterActions, payment, pcActions, problemOf, slotsLeft, spendOn, type TurnAction } from '../../lib/combat/turnActions.ts';
   import { featureList } from '../../lib/character/play.ts';
   import TurnPanel from '../turn/TurnPanel.svelte';
@@ -325,7 +325,7 @@
   });
   const onpip = (pip: 'action' | 'bonus' | 'reaction' | 'extra', used: boolean) => run(async () => {
     const id = view?.x.id;
-    await updateCombat(cid, (k) => ({ ...k, combatants: k.combatants.map((z) => (z.id !== id ? z : pip === 'extra' ? grantAction(z) : setPip(z, pip, used))) }));
+    await updateCombat(cid, (k) => ({ ...k, combatants: k.combatants.map((z) => (z.id !== id ? z : pip === 'extra' ? (used ? grantAction(z) : dropAction(z)) : setPip(z, pip, used))) }));
     await reload();
   });
   const nextTurn = () => run(async () => { await turn(cid, 'next'); await reload(); });
@@ -425,7 +425,7 @@
           <TurnPanel dm name={view.name} order={combat.combatants} self={view.x.id} current={combat.turn} round={combat.round}
             hp={view.hp} maxHp={view.maxHp} tempHp={view.tempHp} tone={view.ch ? 'accent' : 'danger'} conditions={view.conditions}
             x={view.x} perAction={view.perAction} onTurn={turnIds.has(view.x.id)} actions={view.actions} slots={view.slots}
-            concentrating={!!view.x.concentrating} {busy} canEnd={!busy} endLabel="Next turn ▶" onuse={useAction} onend={nextTurn} {onpip}
+            concentrating={!!view.x.concentrating} {busy} canEnd={!busy} endLabel="Next turn ▶" onuse={(a, slot) => void useAction(a, slot)} onend={nextTurn} {onpip}
             onstrip={(id) => (viewId = id)}>
             {#snippet top()}
               {#if runList.length > 1}

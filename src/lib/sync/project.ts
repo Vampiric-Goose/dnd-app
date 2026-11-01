@@ -55,7 +55,7 @@ export interface TrackerRow { id: string; name: string; characterId?: string; in
   moved?: Movement /* a player character's turn origin and Dashes, while a budget applies */;
   econ?: TurnEcon /* the viewer's own character's pips this turn, in a running fight */ }
 /** Turn panel: Actions used and extra, the Bonus action, attacks in the Attack action, the Reaction, attacks one Attack action allows. */
-export interface TurnEcon { used: number; extra: number; bonus: boolean; attacks: number; reaction: boolean; perAction: number; /** concentrating */ conc: boolean }
+export interface TurnEcon { used: number; extra: number; bonus: boolean; attacks: number; light?: boolean; surged?: boolean; reaction: boolean; perAction: number; /** concentrating */ conc: boolean }
 export interface TrackerView { round: number; current?: string; rows: TrackerRow[] }
 
 /**
