@@ -4,6 +4,8 @@
   import { app } from '../../lib/store.svelte.ts';
   import type { Campaign, Character } from '../../lib/types.ts';
   import { message } from '../creator/labels.ts';
+  import Tabs from '../kit/Tabs.svelte';
+  import Workspace from '../kit/Workspace.svelte';
   import AllItems from './AllItems.svelte';
   import { loadPool, type Pool } from './pool.ts';
   import Unassigned from './Unassigned.svelte';
@@ -37,31 +39,27 @@
 
   // Unassigned is the DM's: a player never sees the tab, and its address shows All items.
   const tab = $derived(router.query.get('tab') === 'unassigned' && app.viewer === 'dm' ? 'unassigned' : 'all');
-  const tabs = $derived([{ id: 'all', label: 'All items' }, ...(app.viewer === 'dm' ? [{ id: 'unassigned', label: 'Unassigned' }] : [])]);
+  const tabs = $derived([{ id: 'all', label: 'All items' }, ...(app.viewer === 'dm' ? [{ id: 'unassigned', label: 'Unassigned', count: campaign.loot.length }] : [])]);
   const go = (id: string) => { location.hash = id === 'all' ? '#/items' : `#/items?tab=${id}`; };
 </script>
 
-<h1>Items</h1>
-<p class="muted">SRD, pack and homebrew items for <strong>{campaign.name}</strong>. The Compendium has the read-only reference for everything else.</p>
+<!-- The tab strip starts each view's header row; the view adds its own action at the right end. -->
+{#snippet tabStrip()}
+  {#if tabs.length > 1}
+    <Tabs label="Items view" {tabs} value={tab} onchange={go} />
+  {:else}
+    <span class="caption">All items</span>
+  {/if}
+{/snippet}
 
-{#if tabs.length > 1}
-  <div class="row tabs" role="group" aria-label="Items view">
-    {#each tabs as t (t.id)}
-      <button type="button" aria-pressed={tab === t.id} class:primary={tab === t.id} onclick={() => go(t.id)}>{t.label}</button>
-    {/each}
-  </div>
-{/if}
-
+<h1 class="sr-only">Items</h1>
 {#if tab === 'unassigned'}
-  <Unassigned {campaign} {pool} {chars} {error} />
+  <Unassigned {campaign} {pool} {chars} {error} tabs={tabStrip} />
 {:else if pool}
-  <AllItems {campaign} {pool} {chars} reload={() => load(campaign.id)} />
-{:else if error}
-  <p role="alert" class="error">{error}</p>
+  <AllItems {campaign} {pool} {chars} reload={() => load(campaign.id)} tabs={tabStrip} />
 {:else}
-  <p class="muted">Loading items…</p>
+  <Workspace>
+    {@render tabStrip()}
+    {#if error}<p role="alert" class="error">{error}</p>{:else}<p class="muted">Loading items…</p>{/if}
+  </Workspace>
 {/if}
-
-<style>
-  .tabs { margin-bottom: 0.5rem; }
-</style>

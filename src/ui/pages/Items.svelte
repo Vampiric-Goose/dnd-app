@@ -49,7 +49,7 @@
         <p class="muted">Loading…</p>
       {:then initial}
         {#if params.id === 'new' && router.query.has('pasted') && pasted.item?.notes.length}
-          <div class="card" role="note">
+          <div class="note" role="note">
             <strong>Read from pasted text.</strong> Check these before saving:
             <ul>{#each pasted.item.notes as n}<li>{n}</li>{/each}</ul>
           </div>
@@ -65,3 +65,18 @@
 {:else}
   <ItemsHome {campaign} />
 {/if}
+
+<style>
+  .note {
+    margin: 0.5rem 0;
+    padding: 0.4rem 0.75rem;
+    border-left: 2px solid var(--accent);
+    background: var(--panel);
+    max-width: 64rem;
+    box-sizing: border-box;
+  }
+
+  .note ul {
+    margin: 0.25rem 0 0;
+  }
+</style>

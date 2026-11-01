@@ -14,6 +14,8 @@
   import { entityOption, message } from '../creator/labels.ts';
   import { download, downloadPdf, fileName } from '../download.ts';
   import FilterSelect from '../FilterSelect.svelte';
+  import Drawer from '../kit/Drawer.svelte';
+  import Menu from '../kit/Menu.svelte';
   import EffectsEditor from './EffectsEditor.svelte';
   import PlayerViewEditor from './PlayerViewEditor.svelte';
 
@@ -265,7 +267,8 @@
   async function askDelete() {
     confirmingDelete = true;
     await tick();
-    delBtn?.focus();
+    setTimeout(() => delBtn?.focus()); // after the menu's close has handed focus back to its trigger
+
   }
 
   async function remove() {
@@ -281,15 +284,41 @@
 
 <svelte:window onbeforeunload={(e) => { if (dirty) e.preventDefault(); }} />
 
-<p><a href="#/items">Back to items</a></p>
-<h1>{isNew && !saved ? 'New item' : draft.name || 'Item'}</h1>
+<div class="editor">
+  <header class="bar">
+    <a class="back" href="#/items"><span aria-hidden="true">←&nbsp;</span>Back to items</a>
+    <div class="titlerow">
+      <h1>{isNew && !saved ? 'New item' : draft.name || 'Item'}</h1>
+      {#if dirty}<span class="muted unsaved">Unsaved changes</span>{/if}
+      <span class="acts">
+        <button type="button" class="primary" disabled={saving} onclick={save}>Save item</button>
+        {#if saved}
+          <Menu label="⋯" ariaLabel="More item actions" caret={false} align="end" items={[
+            { label: 'Duplicate', disabled: saving, onselect: duplicate },
+            { label: 'Export JSON', onselect: exportJson },
+            { label: 'Export PDF', onselect: exportPdf },
+            { separator: true },
+            { label: 'Delete', danger: true, onselect: askDelete },
+          ]} />
+        {/if}
+      </span>
+    </div>
+    {#if error}<p role="alert" class="error">{error}</p>{/if}
+    {#if notice && !dirty}<p role="status">{notice}</p>{/if}
+    {#if confirmingDelete}
+      <div role="alertdialog" aria-label="Confirm delete" aria-describedby="it-del-msg" class="row confirm">
+        <p id="it-del-msg">Delete “{draft.name}”? This cannot be undone.</p>
+        <button type="button" class="danger" bind:this={delBtn} onclick={remove}>Delete item</button>
+        <button type="button" onclick={() => (confirmingDelete = false)}>Keep it</button>
+      </div>
+    {/if}
+  </header>
 
-<div class="card">
-  <div class="field">
-    <label for="it-name">Name</label>
-    <input id="it-name" type="text" autocomplete="off" bind:value={draft.name} />
-  </div>
-  <div class="row">
+  <section class="basics" aria-label="Basics">
+    <div class="field wide">
+      <label for="it-name">Name</label>
+      <input id="it-name" type="text" autocomplete="off" bind:value={draft.name} />
+    </div>
     <div class="field">
       <label for="it-type">Type</label>
       <select id="it-type" bind:value={draft.type}>{#each TYPES as t (t)}<option value={t}>{t}</option>{/each}</select>
@@ -315,141 +344,207 @@
         <input id="it-attune-by" type="text" autocomplete="off" placeholder="a wizard" value={String(draft.attunement).replace(/^by\s?/, '')} oninput={(e) => setAttune('by', e.currentTarget.value)} />
       </div>
     {/if}
-  </div>
-  <div class="row">
-    <label class="check"><input type="checkbox" bind:checked={draft.magic} /> Magic item</label>
-    <label class="check"><input type="checkbox" checked={!!draft.consumable} onchange={(e) => (e.currentTarget.checked ? (draft.consumable = true) : delete draft.consumable)} /> Consumable</label>
-  </div>
-  <div class="row">
     <div class="field">
       <label for="it-weight">Weight (lb)</label>
-      <input id="it-weight" type="text" inputmode="decimal" autocomplete="off" bind:value={weightDraft} />
+      <input id="it-weight" class="num" type="text" inputmode="decimal" autocomplete="off" bind:value={weightDraft} />
     </div>
     <div class="field">
       <label for="it-cost">Cost (gp)</label>
-      <input id="it-cost" type="text" inputmode="decimal" autocomplete="off" bind:value={costDraft} />
+      <input id="it-cost" class="num" type="text" inputmode="decimal" autocomplete="off" bind:value={costDraft} />
     </div>
-  </div>
-</div>
-
-<h2>Description</h2>
-<div class="card">
-  <div class="field">
-    <label for="it-text">Description</label>
-    <textarea id="it-text" rows="6" value={textDraft} oninput={(e) => typed(e.currentTarget, 'text')}></textarea>
-    <span class="muted">Blank line between paragraphs, "- " for list items, "| a | b |" for table rows, "## Heading" for a heading, **bold** and *italic*, ||secret|| to hide words from players until revealed.</span>
-  </div>
-  <div class="field">
-    <label for="it-curse">Curse (optional)</label>
-    <textarea id="it-curse" rows="3" value={curseDraft} oninput={(e) => typed(e.currentTarget, 'curse')}></textarea>
-  </div>
-</div>
-
-<h2>Base item</h2>
-<div class="card">
-  <FilterSelect id="it-base" label="Copy weapon or armor stats from" options={bases.map(entityOption)} value={draft.baseItemId ?? ''} onchange={pickBase} placeholder="None" />
-  {#if baseName}<p class="muted">Based on {baseName}. Its weapon or armor stats, weight and cost were copied; change them below.</p>{/if}
-
-  <label class="check"><input type="checkbox" checked={!!draft.weapon} onchange={(e) => setWeapon(e.currentTarget.checked)} /> Weapon stats</label>
-  {#if draft.weapon}
-    <div class="row">
-      <div class="field">
-        <label for="w-cat">Category</label>
-        <select id="w-cat" bind:value={draft.weapon.category}><option value="simple">simple</option><option value="martial">martial</option></select>
-      </div>
-      <label class="check"><input type="checkbox" bind:checked={draft.weapon.ranged} /> Ranged</label>
-      <div class="field"><label for="w-dmg">Damage</label><input id="w-dmg" type="text" autocomplete="off" bind:value={draft.weapon.damage} /></div>
-      <div class="field"><label for="w-type">Damage type</label><input id="w-type" type="text" autocomplete="off" bind:value={draft.weapon.damageType} /></div>
-      <div class="field">
-        <label for="w-vers">Versatile damage</label>
-        <input id="w-vers" type="text" autocomplete="off" value={draft.weapon.versatile ?? ''} oninput={(e) => (e.currentTarget.value ? (draft.weapon!.versatile = e.currentTarget.value) : delete draft.weapon!.versatile)} />
-      </div>
+    <div class="checks">
+      <label class="check"><input type="checkbox" bind:checked={draft.magic} /> Magic item</label>
+      <label class="check"><input type="checkbox" checked={!!draft.consumable} onchange={(e) => (e.currentTarget.checked ? (draft.consumable = true) : delete draft.consumable)} /> Consumable</label>
     </div>
-    <div class="row">
-      <div class="field">
-        <label for="w-props">Properties (comma separated)</label>
-        <input id="w-props" type="text" autocomplete="off" value={draft.weapon.properties.join(', ')} oninput={(e) => (draft.weapon!.properties = e.currentTarget.value.split(',').map((s) => s.trim()).filter(Boolean))} />
-      </div>
-      <div class="field"><label for="w-r1">Range (ft)</label><input id="w-r1" type="text" inputmode="numeric" autocomplete="off" bind:value={rangeNear} /></div>
-      <div class="field"><label for="w-r2">Long range (ft)</label><input id="w-r2" type="text" inputmode="numeric" autocomplete="off" bind:value={rangeFar} /></div>
+  </section>
+
+  <Drawer title="Description" open>
+    {#snippet summary()}{textDraft.trim().split('\n')[0] || 'Empty'}{curseDraft.trim() ? ' · curse' : ''}{/snippet}
+    <div class="field">
+      <label for="it-text">Description</label>
+      <textarea id="it-text" rows="6" value={textDraft} oninput={(e) => typed(e.currentTarget, 'text')}></textarea>
+      <span class="muted hint">Blank line between paragraphs, "- " for list items, "| a | b |" for table rows, "## Heading" for a heading, **bold** and *italic*, ||secret|| to hide words from players until revealed.</span>
     </div>
-  {/if}
-
-  <label class="check"><input type="checkbox" checked={!!draft.armor} onchange={(e) => setArmor(e.currentTarget.checked)} /> Armor stats</label>
-  {#if draft.armor}
-    <div class="row">
-      <div class="field">
-        <label for="a-cat">Category</label>
-        <select id="a-cat" bind:value={draft.armor.category}>{#each ['light', 'medium', 'heavy', 'shield'] as c (c)}<option value={c}>{c}</option>{/each}</select>
-      </div>
-      <div class="field"><label for="a-ac">Armor class</label><input id="a-ac" type="text" inputmode="numeric" autocomplete="off" bind:value={acDraft} /></div>
-      <div class="field"><label for="a-dex">Dex bonus cap (blank: none)</label><input id="a-dex" type="text" inputmode="numeric" autocomplete="off" value={draft.armor.dexCap ?? ''} oninput={(e) => { const v = num(e.currentTarget.value); if (v === undefined) delete draft.armor!.dexCap; else draft.armor!.dexCap = v; }} /></div>
-      <div class="field"><label for="a-str">Strength needed</label><input id="a-str" type="text" inputmode="numeric" autocomplete="off" value={draft.armor.strReq ?? ''} oninput={(e) => { const v = num(e.currentTarget.value); if (v === undefined) delete draft.armor!.strReq; else draft.armor!.strReq = v; }} /></div>
-      <label class="check"><input type="checkbox" checked={!!draft.armor.stealthDisadvantage} onchange={(e) => (e.currentTarget.checked ? (draft.armor!.stealthDisadvantage = true) : delete draft.armor!.stealthDisadvantage)} /> Stealth disadvantage</label>
+    <div class="field">
+      <label for="it-curse">Curse (optional)</label>
+      <textarea id="it-curse" rows="3" value={curseDraft} oninput={(e) => typed(e.currentTarget, 'curse')}></textarea>
     </div>
-  {/if}
-</div>
+  </Drawer>
 
-<h2>Bonuses, charges and effects</h2>
-<div class="card">
-  <h3>Bonuses</h3>
-  <div class="row">
-    {#each BONUSES as [k, label] (k)}
-      <div class="field"><label for="b-{k}">{label}</label><input id="b-{k}" type="text" inputmode="numeric" autocomplete="off" value={draft.bonuses?.[k] ?? ''} oninput={(e) => setBonus(k, e.currentTarget.value)} /></div>
-    {/each}
-  </div>
+  <Drawer title="Base item">
+    {#snippet summary()}{[baseName && `Based on ${baseName}`, draft.weapon && 'weapon stats', draft.armor && 'armor stats'].filter(Boolean).join(' · ') || 'None'}{/snippet}
+    <FilterSelect id="it-base" label="Copy weapon or armor stats from" options={bases.map(entityOption)} value={draft.baseItemId ?? ''} onchange={pickBase} placeholder="None" />
+    {#if baseName}<p class="muted">Based on {baseName}. Its weapon or armor stats, weight and cost were copied; change them below.</p>{/if}
 
-  <h3>Charges</h3>
-  <label class="check"><input type="checkbox" checked={!!draft.charges} onchange={(e) => setCharges(e.currentTarget.checked)} /> Has charges</label>
-  {#if draft.charges}
-    <div class="row">
-      <div class="field"><label for="c-max">Maximum charges</label><input id="c-max" type="text" inputmode="numeric" autocomplete="off" bind:value={maxDraft} /></div>
-      <div class="field">
-        <label for="c-rec">Recharges on</label>
-        <select id="c-rec" bind:value={draft.charges.recharge}>{#each RECHARGES as r (r)}<option value={r}>{r}</option>{/each}</select>
+    <label class="check"><input type="checkbox" checked={!!draft.weapon} onchange={(e) => setWeapon(e.currentTarget.checked)} /> Weapon stats</label>
+    {#if draft.weapon}
+      <div class="grid">
+        <div class="field">
+          <label for="w-cat">Category</label>
+          <select id="w-cat" bind:value={draft.weapon.category}><option value="simple">simple</option><option value="martial">martial</option></select>
+        </div>
+        <label class="check"><input type="checkbox" bind:checked={draft.weapon.ranged} /> Ranged</label>
+        <div class="field"><label for="w-dmg">Damage</label><input id="w-dmg" class="num" type="text" autocomplete="off" bind:value={draft.weapon.damage} /></div>
+        <div class="field"><label for="w-type">Damage type</label><input id="w-type" type="text" autocomplete="off" bind:value={draft.weapon.damageType} /></div>
+        <div class="field">
+          <label for="w-vers">Versatile damage</label>
+          <input id="w-vers" class="num" type="text" autocomplete="off" value={draft.weapon.versatile ?? ''} oninput={(e) => (e.currentTarget.value ? (draft.weapon!.versatile = e.currentTarget.value) : delete draft.weapon!.versatile)} />
+        </div>
+        <div class="field wide">
+          <label for="w-props">Properties (comma separated)</label>
+          <input id="w-props" type="text" autocomplete="off" value={draft.weapon.properties.join(', ')} oninput={(e) => (draft.weapon!.properties = e.currentTarget.value.split(',').map((s) => s.trim()).filter(Boolean))} />
+        </div>
+        <div class="field"><label for="w-r1">Range (ft)</label><input id="w-r1" class="num" type="text" inputmode="numeric" autocomplete="off" bind:value={rangeNear} /></div>
+        <div class="field"><label for="w-r2">Long range (ft)</label><input id="w-r2" class="num" type="text" inputmode="numeric" autocomplete="off" bind:value={rangeFar} /></div>
       </div>
-      <div class="field"><label for="c-amt">Recharge amount (e.g. 1d6+1; blank: all)</label><input id="c-amt" type="text" autocomplete="off" value={draft.charges.rechargeAmount ?? ''} oninput={(e) => setRechargeAmount(e.currentTarget.value)} /></div>
+    {/if}
+
+    <label class="check"><input type="checkbox" checked={!!draft.armor} onchange={(e) => setArmor(e.currentTarget.checked)} /> Armor stats</label>
+    {#if draft.armor}
+      <div class="grid">
+        <div class="field">
+          <label for="a-cat">Category</label>
+          <select id="a-cat" bind:value={draft.armor.category}>{#each ['light', 'medium', 'heavy', 'shield'] as c (c)}<option value={c}>{c}</option>{/each}</select>
+        </div>
+        <div class="field"><label for="a-ac">Armor class</label><input id="a-ac" class="num" type="text" inputmode="numeric" autocomplete="off" bind:value={acDraft} /></div>
+        <div class="field"><label for="a-dex">Dex bonus cap (blank: none)</label><input id="a-dex" class="num" type="text" inputmode="numeric" autocomplete="off" value={draft.armor.dexCap ?? ''} oninput={(e) => { const v = num(e.currentTarget.value); if (v === undefined) delete draft.armor!.dexCap; else draft.armor!.dexCap = v; }} /></div>
+        <div class="field"><label for="a-str">Strength needed</label><input id="a-str" class="num" type="text" inputmode="numeric" autocomplete="off" value={draft.armor.strReq ?? ''} oninput={(e) => { const v = num(e.currentTarget.value); if (v === undefined) delete draft.armor!.strReq; else draft.armor!.strReq = v; }} /></div>
+        <label class="check"><input type="checkbox" checked={!!draft.armor.stealthDisadvantage} onchange={(e) => (e.currentTarget.checked ? (draft.armor!.stealthDisadvantage = true) : delete draft.armor!.stealthDisadvantage)} /> Stealth disadvantage</label>
+      </div>
+    {/if}
+  </Drawer>
+
+  <Drawer title="Bonuses, charges and effects">
+    {#snippet summary()}<span class="num">{Object.keys(draft.bonuses ?? {}).length}</span> bonuses · {draft.charges ? `${maxDraft || '?'} charges` : 'no charges'} · <span class="num">{draft.effects?.length ?? 0}</span> effects{/snippet}
+    <h3 class="caption">Bonuses</h3>
+    <div class="grid">
+      {#each BONUSES as [k, label] (k)}
+        <div class="field"><label for="b-{k}">{label}</label><input id="b-{k}" class="num" type="text" inputmode="numeric" autocomplete="off" value={draft.bonuses?.[k] ?? ''} oninput={(e) => setBonus(k, e.currentTarget.value)} /></div>
+      {/each}
     </div>
-  {/if}
 
-  <EffectsEditor effects={draft.effects ?? []} onchange={(es) => (es.length ? (draft.effects = es) : delete draft.effects)} />
-</div>
+    <h3 class="caption">Charges</h3>
+    <label class="check"><input type="checkbox" checked={!!draft.charges} onchange={(e) => setCharges(e.currentTarget.checked)} /> Has charges</label>
+    {#if draft.charges}
+      <div class="grid">
+        <div class="field"><label for="c-max">Maximum charges</label><input id="c-max" class="num" type="text" inputmode="numeric" autocomplete="off" bind:value={maxDraft} /></div>
+        <div class="field">
+          <label for="c-rec">Recharges on</label>
+          <select id="c-rec" bind:value={draft.charges.recharge}>{#each RECHARGES as r (r)}<option value={r}>{r}</option>{/each}</select>
+        </div>
+        <div class="field"><label for="c-amt">Recharge amount (e.g. 1d6+1; blank: all)</label><input id="c-amt" class="num" type="text" autocomplete="off" value={draft.charges.rechargeAmount ?? ''} oninput={(e) => setRechargeAmount(e.currentTarget.value)} /></div>
+      </div>
+    {/if}
 
-<h2>Default player view</h2>
-<div class="card">
-  <p class="muted">What players see of this item in the compendium and when you give it to them, until you reveal more.</p>
-  <PlayerViewEditor item={assembled} view={draft.defaultView} onchange={setView} onseq={bump} />
-</div>
+    <EffectsEditor effects={draft.effects ?? []} onchange={(es) => (es.length ? (draft.effects = es) : delete draft.effects)} />
+  </Drawer>
 
-{#if error}<p role="alert" class="error">{error}</p>{/if}
-{#if notice && !dirty}<p role="status">{notice}</p>{/if}
-<div class="row">
-  <button type="button" class="primary" disabled={saving} onclick={save}>Save item</button>
-  {#if saved}
-    <button type="button" disabled={saving} onclick={duplicate}>Duplicate</button>
-    <button type="button" onclick={exportJson}>Export JSON</button>
-    <button type="button" onclick={exportPdf}>Export PDF</button>
-    <button type="button" class="danger" onclick={askDelete}>Delete</button>
-  {/if}
-  {#if dirty}<span class="muted">Unsaved changes</span>{/if}
+  <Drawer title="Default player view">
+    {#snippet summary()}{draft.defaultView?.name ? `Cover name “${draft.defaultView.name}”` : draft.defaultView?.hidden.length ? `${draft.defaultView.hidden.length} hidden` : 'No cover name'}{/snippet}
+    <p class="muted">What players see of this item in the compendium and when you give it to them, until you reveal more.</p>
+    <PlayerViewEditor item={assembled} view={draft.defaultView} onchange={setView} onseq={bump} />
+  </Drawer>
 </div>
-{#if confirmingDelete}
-  <div role="alertdialog" aria-label="Confirm delete" aria-describedby="it-del-msg" class="row">
-    <p id="it-del-msg">Delete “{draft.name}”? This cannot be undone.</p>
-    <button type="button" class="danger" bind:this={delBtn} onclick={remove}>Delete item</button>
-    <button type="button" onclick={() => (confirmingDelete = false)}>Keep it</button>
-  </div>
-{/if}
 
 <style>
+  .editor {
+    max-width: 64rem;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .bar {
+    position: sticky;
+    top: var(--topbar-h);
+    z-index: 5;
+    background: var(--bg);
+    padding: 0.25rem 0 0.5rem;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .back {
+    font-size: 0.875rem;
+  }
+
+  .titlerow {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 0.75rem;
+  }
+
+  h1 {
+    flex: 1 1 12rem;
+    min-width: 0;
+    margin: 0.2rem 0 0;
+    overflow-wrap: anywhere;
+  }
+
+  .acts {
+    display: inline-flex;
+    gap: 0.4rem;
+  }
+
+  .bar p {
+    margin: 0.4rem 0 0;
+  }
+
+  .confirm p {
+    margin: 0;
+  }
+
+  .basics,
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+    gap: 0 0.75rem;
+    align-items: end;
+  }
+
+  .basics {
+    padding: 0.25rem 0 0.75rem;
+  }
+
+  .basics .field,
+  .grid .field {
+    margin: 0.5rem 0;
+  }
+
+  .wide {
+    grid-column: span 2;
+  }
+
+  .checks {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 1.25rem;
+    grid-column: 1 / -1;
+  }
+
+  .grid .check {
+    margin: 0.5rem 0;
+    align-self: center;
+  }
+
+  h3.caption {
+    margin: 0.75rem 0 0;
+  }
+
   textarea {
-    font: inherit;
-    color: inherit;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 0.35rem;
-    padding: 0.4rem 0.7rem;
     max-width: 100%;
     box-sizing: border-box;
+  }
+
+  .hint {
+    font-size: 0.8rem;
+  }
+
+  @media (max-width: 767px) {
+    .bar {
+      top: 0;
+    }
+
+    .wide {
+      grid-column: 1 / -1;
+    }
   }
 </style>
