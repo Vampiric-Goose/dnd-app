@@ -11,6 +11,7 @@ import type { Guest, GuestDeps, GuestStatus, PackProgress } from './guest.ts';
 import type { Host, HostDeps } from './host.ts';
 import type { Listener, Transport } from './link.ts';
 import type { RosterEntry, TrackerView } from './project.ts';
+import type { Preview } from './protocol.ts';
 import type { PlayerScene } from './scene.ts';
 import type { Pt } from '../map/grid.ts';
 import type { ActionBoard, ActionRequest, DeclaredAction, PlayerAction } from '../map/actions.ts';
@@ -43,6 +44,8 @@ export const session = $state({
   retryAt: undefined as number | undefined,
   /** Declared actions on the map: all of them on the DM's device, the visible ones (as the DM sent them) on a player's. */
   actions: [] as (DeclaredAction | PlayerAction)[],
+  /** Live drag previews from others (token id → where it is being dragged), dropped on dragEnd or after DRAG_TTL without updates. Never stored. */
+  drags: {} as Record<string, Pt>,
 });
 
 /** S5-R1: reconnect delays 2 s, 5 s, 15 s, 30 s, 2 min, then every 5 min (a busy public sync server refuses rapid retries). */
@@ -90,7 +93,7 @@ export function stopSession(): void {
     r.listener?.close();
   }
   session.confirm?.answer(false);
-  Object.assign(session, { role: undefined, campaignId: undefined, status: 'off', reason: '', online: {}, roster: [], tracker: undefined, scene: undefined, packs: undefined, welcomed: false, confirm: undefined, retryAt: undefined, actions: local?.board.list() ?? [] });
+  Object.assign(session, { role: undefined, campaignId: undefined, status: 'off', reason: '', online: {}, roster: [], tracker: undefined, scene: undefined, packs: undefined, welcomed: false, confirm: undefined, retryAt: undefined, actions: local?.board.list() ?? [], drags: {} });
 }
 
 function begin(role: Run['role'], code: string, campaignId?: string): Run {
@@ -178,6 +181,7 @@ function hostDeps(r: Run, cid: string): HostDeps {
     updateScene: (id, fn) => db.scenes.update(id, fn, { network: true }).then((s) => (changed(r), s)),
     loadBlob: async (hash) => { const b = await db.blobs.get(hash); return b && { type: b.type, data: await b.arrayBuffer() }; },
     onActions: (list) => { if (live(r)) session.actions = list; },
+    onDrag: (p) => { if (live(r)) preview(p); },
     // Dynamic, so the combat store (and the engine) stay out of the first load. applyInitiative checks the fit and reports 'combat'.
     onInitiative: (id, n) => void import('../combat/store.ts').then((m) => m.applyInitiative(cid, id, n)).then(() => changed(r), (e) => console.warn(e)),
     addRoll: (e, from) => void db.characters.list(cid).then((cs) => {
@@ -344,6 +348,7 @@ function guestDeps(r: Run): Omit<GuestDeps, 'code' | 'playerId' | 'name' | 'camp
     onTracker: (t) => { if (live(r)) session.tracker = t; },
     onScene: (s) => { if (live(r)) session.scene = s; },
     onActions: (list) => { if (live(r)) session.actions = list; },
+    onDrag: (p) => { if (live(r)) preview(p); },
     hasBlob: (hash) => db.blobs.has(hash),
     saveBlob: (type, d) => save(db.blobs.put(new Blob([d as Uint8Array<ArrayBuffer>], { type }))),
     onRoll: (e, from) => { if (live(r)) addRemoteRoll(e, who(from, session.roster.filter((x) => x.ownerId === from).map((x) => x.name))); },
@@ -368,6 +373,31 @@ onLocalChange((kind, id) => {
 /** Stage 5: the player's own token, dropped at `to` (the guest checks owner and that it is online; the DM checks the turn). */
 export function sendMove(sceneId: string, tokenId: string, to: Pt): void {
   run?.guest?.sendMove(sceneId, tokenId, to);
+}
+
+// ---- Live drag previews (never stored) ----
+
+/** A preview with no update for this long is dropped (a lost dragEnd, a dropped link). */
+export const DRAG_TTL = 2000;
+const dragTimers = new Map<string, ReturnType<typeof setTimeout>>();
+function preview(p: Preview): void {
+  clearTimeout(dragTimers.get(p.tokenId));
+  const { [p.tokenId]: _, ...rest } = session.drags;
+  if (!p.at) { dragTimers.delete(p.tokenId); session.drags = rest; return; }
+  session.drags = { ...rest, [p.tokenId]: p.at };
+  dragTimers.set(p.tokenId, setTimeout(() => preview({ tokenId: p.tokenId }), DRAG_TTL));
+}
+
+/** At most 10 previews a second from this device (the latest position goes out once the wait is over); the end goes at once. */
+let dragSent = 0, dragWait: ReturnType<typeof setTimeout> | undefined;
+/** This device drags a token on `sceneId` (`at` undefined: the drag ended): who can see it watches it move. Player: their own token; DM: any (the host shows it to players who see it). */
+export function sendDrag(sceneId: string, tokenId: string, at?: Pt): void {
+  const r = run;
+  if (!r) return;
+  const out = () => { dragSent = Date.now(); r.guest?.sendDrag(sceneId, tokenId, at); void r.host?.dmDrag(sceneId, { tokenId, ...(at && { at }) }).catch((e) => console.warn(e)); };
+  clearTimeout(dragWait);
+  const wait = dragSent + 100 - Date.now();
+  if (!at || wait <= 0) out(); else dragWait = setTimeout(out, wait);
 }
 
 /** The player's own character Dashes on its turn (the guest checks owner and that it is online; the DM checks the turn). */

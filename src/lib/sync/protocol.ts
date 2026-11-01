@@ -29,9 +29,13 @@ export type GuestMsg =
   | { t: 'blobWant'; hashes: string[] /* stage 5: images of the current scene it lacks */ }
   | { t: 'dash'; characterId: string /* the player's own character Dashes on its turn (honour system) */ }
   | { t: 'action'; action: ActionRequest /* declared action: the player's arrow (replaces their last) */ }
-  | { t: 'clearAction' /* the player's arrow goes */ };
+  | { t: 'clearAction' /* the player's arrow goes */ }
+  | { t: 'drag'; sceneId: string; tokenId: string; x: number; y: number /* live drag preview of the player's own token (never stored) */ }
+  | { t: 'dragEnd'; sceneId: string; tokenId: string /* that drag ended */ };
 
 export interface PackOffer { id: string; hash: string; size: number }
+/** A live drag preview: the token at `at`, or (no `at`) the drag ended. Never stored. */
+export interface Preview { tokenId: string; at?: { x: number; y: number } }
 
 export type HostMsg =
   | { t: 'welcome'; playerId: string; campaign: CampaignForPlayers; roster: RosterEntry[]; packs: PackOffer[] }
@@ -47,6 +51,8 @@ export type HostMsg =
   | { t: 'scene'; scene: PlayerScene | null /* stage 5: sceneForPlayers; null = no scene shown */ }
   | { t: 'blobChunk'; hash: string; type: string; size: number; seq: number; total: number; data: string /* base64 */ }
   | { t: 'actions'; actions: PlayerAction[] /* declared actions players may see (actionsForPlayers) */ }
+  | { t: 'drag'; tokenId: string; x: number; y: number /* someone drags a token this player sees (a preview, never stored) */ }
+  | { t: 'dragEnd'; tokenId: string }
   | { t: 'bye'; reason: string };
 
 /** Serialized length (UTF-16 units, close enough to bytes for a limit). */
@@ -115,6 +121,13 @@ export function parseGuestMessage(raw: unknown): GuestMsg | { error: string } {
       return action ? { t: 'action', action } : { error: 'bad action' };
     }
     case 'clearAction': return { t: 'clearAction' };
+    case 'drag': {
+      const { sceneId, tokenId, x, y } = raw;
+      const at = (v: unknown): v is number => num(v) && v >= 0 && v <= MAX_SIDE;
+      return str(sceneId, 100) && str(tokenId, 100) && at(x) && at(y) ? { t: 'drag', sceneId, tokenId, x, y } : { error: 'bad drag' };
+    }
+    case 'dragEnd':
+      return str(raw.sceneId, 100) && str(raw.tokenId, 100) ? { t: 'dragEnd', sceneId: raw.sceneId, tokenId: raw.tokenId } : { error: 'bad dragEnd' };
     default:
       return { error: 'unknown message' };
   }

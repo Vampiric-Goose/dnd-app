@@ -120,11 +120,11 @@ describe('restore: fight identity and movement', () => {
   test('the passed turn counts as started: Previous then Next keeps the new holder movement (no second reset)', () => {
     const { combat } = restoreCombat(snapshotFight(fight(), undefined), 'e1', [char('b', 'c1')], 'c1');
     expect(combat.turn).toBe('pc:b');
-    const back = prev(recordMove(combat, 'pc:b', 15));
+    const back = prev(recordMove(combat, 'pc:b', { x: 5, y: 5 }));
     expect(back.turn).toBe('g1');
     const again = next(back).combat;
     expect(again.turn).toBe('pc:b');
-    expect(again.movement?.['pc:b']).toEqual({ feet: 15, dashes: 0 });
+    expect(again.movement?.['pc:b']).toEqual({ from: { x: 5, y: 5 }, dashes: 0 });
   });
 });
 

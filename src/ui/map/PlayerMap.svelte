@@ -9,8 +9,8 @@
   import { computeSheet } from '../../lib/rules/sheet.ts';
   import { currentActor } from '../../lib/sync/project.ts';
   import { sceneForPlayers, type PlayerScene } from '../../lib/sync/scene.ts';
-  import { clearDeclared, declareAction, sendDash, sendMove, session } from '../../lib/sync/session.svelte.ts';
-  import { effectiveSpeed, remainingFeet } from '../../lib/combat/movement.ts';
+  import { clearDeclared, declareAction, sendDash, sendDrag, sendMove, session } from '../../lib/sync/session.svelte.ts';
+  import { budgetFeet, effectiveSpeed, originOf, PLAYER_DASHES, remainingFeet } from '../../lib/combat/movement.ts';
   import type { Campaign, Character } from '../../lib/types.ts';
   import MapCanvas from './MapCanvas.svelte';
   import Drawer from '../kit/Drawer.svelte';
@@ -52,14 +52,16 @@
   const owned = $derived(view?.tokens.filter((t) => mine(t.characterId)) ?? []);
   const myTurn = $derived(owned.some((t) => t.characterId === actor));
   const status = $derived(!owned.length ? '' : unsent && session.status !== 'online' ? "You're offline: that move wasn't sent." : settings.freeMovement ? 'Free movement is on.' : myTurn ? 'Your turn: drag your token.' : 'Wait for your turn to move.');
-  // Movement budget (spec 1): the tracker carries each player character's movement this turn while one applies.
+  // Movement budget (spec 1): the tracker carries each player character's turn origin and Dashes while one applies; used = distance
+  // from that origin to where the token stands (moving back gives movement back).
   const budget = $derived(!!session.tracker && session.tracker.round >= 1 && !settings.freeMovement);
   const budgetOf = (characterId: string | undefined) => {
     const c = mine(characterId), row = c && session.tracker?.rows.find((r) => r.characterId === c.id);
-    if (!budget || !c || !row) return undefined;
+    if (!budget || !c || !row || !view) return undefined;
     try {
       const speed = effectiveSpeed(computeSheet(c, { settings, viewer: 'player' }).speed.walk, c.state.conditions, c.state.exhaustion);
-      return { left: remainingFeet(speed, row.moved), dashes: row.moved?.dashes ?? 0 };
+      const at = view.tokens.find((t) => t.characterId === c.id);
+      return { left: remainingFeet(speed, row.moved, at, view.grid, settings.diagonal), from: originOf(row.moved), budget: budgetFeet(speed, row.moved), dashes: row.moved?.dashes ?? 0 };
     } catch { return undefined; }
   };
   /** The tracker a Dash was sent under: the button stays off until the next tracker arrives or 3 s pass (a double tap sends one Dash). */
@@ -73,7 +75,7 @@
   }
   $effect(() => () => clearTimeout(dashTimer));
   const turnBudget = $derived(myTurn && !(unsent && session.status !== 'online') ? budgetOf(actor) : undefined);
-  const limitOf = (id: string) => { const b = budgetOf(tokenOf(id)?.characterId); return b && { left: b.left, clamp: true }; };
+  const limitOf = (id: string) => { const b = budgetOf(tokenOf(id)?.characterId); return b && { from: b.from, budget: b.budget, clamp: true }; };
 
   const tokenOf = (id: string) => view?.tokens.find((t) => t.id === id);
   const canDrag = (id: string) => {
@@ -93,6 +95,9 @@
     pending = { of: base, id: primary, at: snap(base.grid, to, t.size) };
     sendMove(base.id, primary, to);
   };
+
+  // Live drag previews from others (the DM, other players): the token drawn where it is being dragged.
+  const dragged = $derived(view ? view.tokens.map((t) => (session.drags[t.id] ? { ...t, ...session.drags[t.id] } : t)) : []);
 
   // Declared actions: only what players may see (on the DM's device in Player view the list holds everything); a player clears their
   // own, points from their own token or a point, and only while online (as moves).
@@ -123,7 +128,7 @@
         height={view.height}
         image={view.image}
         grid={view.grid}
-        tokens={view.tokens}
+        tokens={dragged}
         fog={view.fog}
         dm={false}
         diagonal={settings.diagonal}
@@ -138,6 +143,7 @@
         {ondeclare}
         onclear={() => clearDeclared()}
         bind:arrow={picked}
+        ondrag={(id, at) => { if (joined && base && (at ? canDrag(id) : !!mine(tokenOf(id)?.characterId))) sendDrag(base.id, id, at); }}
       />
     {/key}
     {#snippet panel()}
@@ -147,7 +153,7 @@
       {#if turnBudget && actor}
         <div class="turn">
           <p class="status" role="status" aria-live="polite">Your turn: <span class="num">{turnBudget.left}</span> ft left{turnBudget.dashes ? ` · Dashed ×${turnBudget.dashes}` : ''}.</p>
-          <button type="button" aria-label="Dash" disabled={!!dashUnder && dashUnder === session.tracker} onclick={dash}>Dash</button>
+          <button type="button" aria-label="Dash" disabled={turnBudget.dashes >= PLAYER_DASHES || (!!dashUnder && dashUnder === session.tracker)} onclick={dash}>Dash</button>
         </div>
       {:else}
         <p class="status" role="status" aria-live="polite">{status}</p>

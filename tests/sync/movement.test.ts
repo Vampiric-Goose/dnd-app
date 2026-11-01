@@ -36,18 +36,21 @@ const fight = (o: Partial<Combat> = {}): Combat => ({
   ],
   ...o,
 });
-const mv = (feet: number, dashes = 0) => ({ feet, dashes });
+/** An entry whose turn origin is cell (q, r). */
+const mv = (q: number, dashes = 0, r = 0) => ({ from: cell(q, r), dashes });
 
-test('moveCost: the grid distance and what is left; none without a budget', () => {
+test('moveCost: the distance from the turn origin and the budget; none without a budget', () => {
   const m = { tokenId: 't-thorin', ...cell(4, 1) };
-  expect(moveCost(scene(), m, thorin(), fight({ movement: { 'pc:thorin': mv(5) } }), settings())).toEqual({ combatantId: 'pc:thorin', feet: 20, left: 25 });
+  expect(moveCost(scene(), m, thorin(), fight(), settings())).toEqual({ combatantId: 'pc:thorin', feet: 20, budget: 30 }); // no origin yet: from the token
+  expect(moveCost(scene(), m, thorin(), fight({ movement: { 'pc:thorin': mv(1) } }), settings())).toEqual({ combatantId: 'pc:thorin', feet: 15, budget: 30 }); // from the origin
+  expect(moveCost(scene(), m, thorin(), fight({ movement: { 'pc:thorin': { feet: 25, dashes: 1 } as never } }), settings())).toEqual({ combatantId: 'pc:thorin', feet: 20, budget: 60 }); // an old entry
   expect(moveCost(scene(), m, thorin(), fight(), settings({ freeMovement: true }))).toBeUndefined();
   expect(moveCost(scene(), m, thorin(), fight({ round: 0 }), settings())).toBeUndefined();
   expect(moveCost(scene(), m, thorin(), undefined, settings())).toBeUndefined();
   expect(moveCost(scene(), m, thorin(), fight({ combatants: [] }), settings())).toBeUndefined();
   const grappled = thorin();
   grappled.state.conditions = ['Grappled'];
-  expect(moveCost(scene(), m, grappled, fight(), settings())!.left).toBe(0);
+  expect(moveCost(scene(), m, grappled, fight(), settings())!.budget).toBe(0);
   expect(moveProblem(scene(), { sceneId: 's1', ...m }, 'A1', [grappled], fight(), settings())).toEqual({ error: 'too far', violation: false });
 });
 
@@ -82,19 +85,22 @@ describe('engine', () => {
     return { d, host, a, down, move };
   }
 
-  test('a move within budget lands and is recorded; past it is refused, re-sent, and no violation', async () => {
+  test('the first move sets the turn origin; a drop past the budget from it is refused, re-sent, no violation; moving back refunds', async () => {
     const { d, down, move } = await joined();
     await move(4, 1);
     expect(at(d)).toEqual(cell(4, 1));
-    expect(d.combat!.movement).toEqual({ 'pc:thorin': mv(20) });
+    expect(d.combat!.movement).toEqual({ 'pc:thorin': mv(0) }); // where Thorin stood before the move
     const before = JSON.stringify(d.scene), n = scenes(down);
-    await move(7, 1); // 15 ft, 10 left
+    await move(7, 1); // 35 ft from the origin
     expect(JSON.stringify(d.scene)).toBe(before);
     expect(scenes(down)).toBe(n + 1);
-    expect(d.combat!.movement).toEqual({ 'pc:thorin': mv(20) });
-    await move(4, 3); // exactly the 10 ft left
-    expect(at(d)).toEqual(cell(4, 3));
-    expect(d.combat!.movement).toEqual({ 'pc:thorin': mv(30) });
+    await move(6, 3); // exactly 30 ft from the origin
+    expect(at(d)).toEqual(cell(6, 3));
+    await move(1); // a slip taken back: 5 ft from the origin
+    expect(at(d)).toEqual(cell(1));
+    await move(0, 6); // so 30 ft the other way is fine
+    expect(at(d)).toEqual(cell(0, 6));
+    expect(d.combat!.movement).toEqual({ 'pc:thorin': mv(0) });
     expect(d.errors).toEqual([]);
   });
 
@@ -110,14 +116,14 @@ describe('engine', () => {
   });
 
   test('a hidden turn after the PC keeps their leftover feet, and a move within them is accepted', async () => {
-    const hiddenTurn = next(fight({ movement: { 'pc:thorin': mv(20) } })).combat;
+    const hiddenTurn = next(fight({ movement: { 'pc:thorin': mv(4) } })).combat; // Thorin stands 20 ft from his turn origin
     expect(hiddenTurn.turn).toBe('x1');
     const { d, move } = await joined(hiddenTurn);
-    await move(2);
-    expect(at(d)).toEqual(cell(2));
-    expect(d.combat!.movement!['pc:thorin']).toEqual(mv(30));
-    await move(3); // nothing left: refused like any stale move
-    expect(at(d)).toEqual(cell(2));
+    await move(0, 6); // 30 ft from the origin
+    expect(at(d)).toEqual(cell(0, 6));
+    expect(d.combat!.movement!['pc:thorin']).toEqual(mv(4));
+    await move(0, 7); // 35 ft: refused like any stale move
+    expect(at(d)).toEqual(cell(0, 6));
     expect(d.errors).toEqual([]);
   });
 
@@ -125,7 +131,7 @@ describe('engine', () => {
     const { d, host, a, move } = await joined();
     a.guest.sendDash('thorin');
     await settle(host, a.guest);
-    expect(d.combat!.movement).toEqual({ 'pc:thorin': mv(0, 1) });
+    expect(d.combat!.movement).toEqual({ 'pc:thorin': { dashes: 1 } });
     await move(9); // 45 ft of 60
     expect(at(d)).toEqual(cell(9));
 
@@ -138,17 +144,32 @@ describe('engine', () => {
     expect(d.errors.map(String)).toEqual([expect.stringMatching(/not their character/)]);
     expect(d.combat!.movement!['pc:thorin'].dashes).toBe(1);
 
-    d.combat = fight({ turn: 'g1', movement: { 'pc:thorin': mv(45, 1) } });
+    d.combat = fight({ turn: 'g1', movement: { 'pc:thorin': mv(9, 1) } });
     a.guest.sendDash('thorin');
     await settle(host, a.guest);
-    expect(d.combat.movement).toEqual({ 'pc:thorin': mv(45, 1) });
+    expect(d.combat.movement).toEqual({ 'pc:thorin': mv(9, 1) });
     expect(d.errors.length).toBe(1);
   });
 
+  test('a player gets one Dash a turn: a crafted second dash is ignored quietly (no violation)', async () => {
+    const { d, host, a } = await joined();
+    const owner = rawLink();
+    host.accept(owner.link);
+    owner.deliver({ t: 'hello', code: CODE, playerId: 'A1' });
+    await settle(host);
+    a.guest.sendDash('thorin');
+    await settle(host, a.guest);
+    owner.deliver({ t: 'dash', characterId: 'thorin' });
+    owner.deliver({ t: 'dash', characterId: 'thorin' });
+    await settle(host);
+    expect(d.combat!.movement!['pc:thorin'].dashes).toBe(1);
+    expect(d.errors).toEqual([]);
+  });
+
   test('Review Focus 1: the tracker carries the player\'s own movement, never a monster\'s; a reconnect gets it in its first tracker', async () => {
-    const c = fight({ movement: { 'pc:thorin': mv(20, 1), g1: mv(15) } });
+    const c = fight({ movement: { 'pc:thorin': mv(2, 1), g1: mv(3) } });
     const v = trackerForPlayers(c, [thorin()], settings(), undefined, 'A1')!;
-    expect(v.rows.find((r) => r.characterId === 'thorin')!.moved).toEqual(mv(20, 1));
+    expect(v.rows.find((r) => r.characterId === 'thorin')!.moved).toEqual(mv(2, 1));
     expect(v.rows.filter((r) => r.moved).length).toBe(1);
     expect(trackerForPlayers(c, [thorin()], settings({ freeMovement: true }), undefined, 'A1')!.rows.some((r) => r.moved)).toBe(false);
     for (const viewer of ['A2', undefined]) expect(trackerForPlayers(c, [thorin()], settings(), undefined, viewer)!.rows.some((r) => r.moved)).toBe(false);
@@ -158,7 +179,7 @@ describe('engine', () => {
     const again = player('A1'), down: string[] = [];
     connect(host, again.guest, down);
     await settle(host, again.guest);
-    expect(again.trackers[0]!.rows.find((r) => r.characterId === 'thorin')!.moved).toEqual(mv(20));
+    expect(again.trackers[0]!.rows.find((r) => r.characterId === 'thorin')!.moved).toEqual(mv(0));
     const sent = JSON.parse(down.find((m) => JSON.parse(m).t === 'tracker')!).tracker as TrackerView;
     expect(sent.rows.filter((r) => r.moved).map((r) => r.characterId)).toEqual(['thorin']);
   });
@@ -172,7 +193,7 @@ describe('engine', () => {
     host.trackerChanged(); // the session's db change hook does this
     await settle(host, a.guest, b.guest);
     const thorinRow = (t: TrackerView | undefined) => t!.rows.find((r) => r.characterId === 'thorin')!;
-    expect(thorinRow(a.trackers.at(-1)).moved).toEqual(mv(20));
+    expect(thorinRow(a.trackers.at(-1)).moved).toEqual(mv(0));
     expect(thorinRow(b.trackers.at(-1))).toBeDefined();
     expect(thorinRow(b.trackers.at(-1)).moved).toBeUndefined();
     expect(downB.some((m) => m.includes('moved'))).toBe(false);
@@ -181,7 +202,8 @@ describe('engine', () => {
   test('cleanTracker keeps a well-formed moved only', () => {
     const row = { id: 'pc:thorin', name: 'Thorin', characterId: 'thorin' };
     expect(cleanTracker({ round: 1, rows: [{ ...row, moved: mv(10, 1) }] })!.rows[0].moved).toEqual(mv(10, 1));
-    expect(cleanTracker({ round: 1, rows: [{ ...row, moved: { feet: 5, dashes: 0, x: 1 } }] })!.rows[0].moved).toEqual(mv(5));
-    for (const moved of [{ feet: '5', dashes: 0 }, { feet: 5 }, 'x', { feet: -5, dashes: 0 }]) expect(cleanTracker({ round: 1, rows: [{ ...row, moved }] })!.rows[0].moved).toBeUndefined();
+    expect(cleanTracker({ round: 1, rows: [{ ...row, moved: { ...mv(5), feet: 5, x: 1 } }] })!.rows[0].moved).toEqual(mv(5));
+    expect(cleanTracker({ round: 1, rows: [{ ...row, moved: { from: { x: 'a', y: 1 }, dashes: 1 } }] })!.rows[0].moved).toEqual({ dashes: 1 }); // a bad origin: none
+    for (const moved of [{ from: cell(1), dashes: '0' }, { from: cell(1) }, 'x', { dashes: -1 }]) expect(cleanTracker({ round: 1, rows: [{ ...row, moved }] })!.rows[0].moved).toBeUndefined();
   });
 });

@@ -14,7 +14,7 @@ import { MAX_AHEAD } from './hlc.ts';
 import type { Link } from './link.ts';
 import { canon, latestClock, mergeCharacter, type Synced } from './merge.ts';
 import type { CampaignForPlayers, HealthStatus, RosterEntry, TrackerRow, TrackerView } from './project.ts';
-import { BLOB_CHUNK, cleanRoll, HLC, IMAGE_TYPES, INIT_MAX, INIT_MIN, MAX_BLOB, MAX_MESSAGE, MAX_PACK, PLAYER_ID, size, type GuestMsg, type PackOffer } from './protocol.ts';
+import { BLOB_CHUNK, cleanRoll, HLC, IMAGE_TYPES, INIT_MAX, INIT_MIN, MAX_BLOB, MAX_MESSAGE, MAX_PACK, PLAYER_ID, size, type GuestMsg, type PackOffer, type Preview } from './protocol.ts';
 import { cleanScene, sceneBlobs, type PlayerScene } from './scene.ts';
 
 export type GuestStatus = 'connecting' | 'online' | 'offline' | 'rejected';
@@ -58,6 +58,8 @@ export interface GuestDeps {
   onTracker?(t: TrackerView | undefined): void;
   /** Stage 5: the shown scene as the DM sent it (cleanScene); undefined = none shown. */
   onScene?(s: PlayerScene | undefined): void;
+  /** A live drag preview of a token this player sees (never stored). */
+  onDrag?(p: Preview): void;
   /** Stage 5: images (db.blobs.has, and db.blobs.put of bytes whose hash was checked). */
   hasBlob?(hash: string): Promise<boolean>;
   saveBlob?(type: string, data: Uint8Array): Promise<void>;
@@ -121,8 +123,8 @@ export function cleanTracker(v: unknown): TrackerView | undefined {
     return [{ id: r.id, name: r.name, ...(s(r.characterId, 100) && { characterId: r.characterId }), ...(fin(r.init) && { init: r.init as number }),
       ...(fin(r.hp) && { hp: r.hp as number }), ...(fin(r.maxHp) && { maxHp: r.maxHp as number }),
       ...(typeof r.health === 'string' && HEALTH.includes(r.health) && { health: r.health as HealthStatus }),
-      ...(isRec(r.moved) && fin(r.moved.feet) && fin(r.moved.dashes) && (r.moved.feet as number) >= 0 && (r.moved.dashes as number) >= 0
-        && { moved: { feet: r.moved.feet as number, dashes: r.moved.dashes as number } })}];
+      ...(isRec(r.moved) && fin(r.moved.dashes) && (r.moved.dashes as number) >= 0 && { moved: { dashes: r.moved.dashes as number,
+        ...(isRec(r.moved.from) && fin(r.moved.from.x) && fin(r.moved.from.y) && { from: { x: r.moved.from.x as number, y: r.moved.from.y as number } }) } })}];
   })).slice(0, MAX_ROWS);
   const current = rows.some((r) => r.id === v.current) ? v.current as string : undefined;
   return { round: v.round as number, ...(current !== undefined && { current }), rows };
@@ -238,6 +240,14 @@ export class Guest {
     });
   }
 
+  /** A live drag preview of the player's own token (`at` undefined: the drag ended), sent only while online. The DM checks it like a move. */
+  sendDrag(sceneId: string, tokenId: string, at?: Pt): void {
+    const s = this.#scene;
+    if (this.#status !== 'online' || s?.id !== sceneId) return;
+    if (!at) return this.#send({ t: 'dragEnd', sceneId, tokenId });
+    if (Number.isFinite(at.x) && Number.isFinite(at.y)) this.#send({ t: 'drag', sceneId, tokenId, x: Math.min(Math.max(at.x, 0), s.width), y: Math.min(Math.max(at.y, 0), s.height) });
+  }
+
   /** Declared actions: the player's arrow (it replaces their last), sent only while online. The DM checks the source and visibility. */
   sendAction(r: ActionRequest): void {
     const action = cleanActionRequest(r);
@@ -315,6 +325,8 @@ export class Guest {
       case 'scene': return this.#onScene(m.scene === null ? undefined : cleanScene(m.scene));
       case 'blobChunk': return this.#blobChunk(m);
       case 'actions': return this.#deps.onActions?.(cleanActions(m.actions));
+      case 'drag': if (s(m.tokenId, 100) && fin(m.x) && fin(m.y)) this.#deps.onDrag?.({ tokenId: m.tokenId, at: { x: m.x as number, y: m.y as number } }); return;
+      case 'dragEnd': if (s(m.tokenId, 100)) this.#deps.onDrag?.({ tokenId: m.tokenId }); return;
     }
   }
 

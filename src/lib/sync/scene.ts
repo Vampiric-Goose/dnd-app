@@ -1,7 +1,7 @@
 // Pure (no Svelte/Vite/DOM). Stage 5: the battle map scene as players get it (an allowlist, spec 3.6), the check on a player's token
 // move, and the guest's rebuild of what a host sent. Lazy: only host.ts and guest.ts import it.
 import { applyFog, cleanFog, decodeFog, isRevealed } from '../map/fog.ts';
-import { budgetApplies, combatantForToken, effectiveSpeed, remainingFeet } from '../combat/movement.ts';
+import { budgetApplies, budgetFeet, combatantForToken, effectiveSpeed, originOf } from '../combat/movement.ts';
 import { feetBetween, snap } from '../map/grid.ts';
 import { liveHp } from '../map/scene.ts';
 import { isRec, sceneProblem } from '../recordShape.ts';
@@ -48,13 +48,19 @@ export function sceneForPlayers(s: Scene | undefined, characters: Character[], c
 const fogged = (s: Scene, p: { x: number; y: number }, settings: CampaignSettings) =>
   settings.fog && !isRevealed(s.fog === undefined ? undefined : decodeFog(s.fog, s.width, s.height), s.width, s.height, p);
 
+/** Players may see a live drag preview of the token: it is on the shown scene, not hidden, and neither it nor the preview point is fogged (sceneForPlayers' rules). */
+export function previewVisible(s: Scene | undefined, tokenId: string, at: { x: number; y: number } | undefined, settings: CampaignSettings): boolean {
+  const t = s?.shown ? s.tokens.find((x) => x.id === tokenId) : undefined;
+  return !!t && !t.hidden && !fogged(s!, t, settings) && (!at || !fogged(s!, at, settings));
+}
+
 /** The blobs a player may ask for: the scene image and visible portraits, each once. */
 export const sceneBlobs = (v: PlayerScene | undefined): string[] =>
   v ? [...new Set([v.image, ...v.tokens.map((t) => t.portrait)])].filter((h): h is string => typeof h === 'string' && HASH.test(h)) : [];
 
-/** Why a player's move is refused (undefined = allowed). `violation` only for a crafted one; the rest can come from a stale view. */
+/** Why a player's move (or, `budget` false, drag preview) is refused (undefined = allowed). `violation` only for a crafted one; the rest can come from a stale view. */
 export function moveProblem(s: Scene | undefined, m: { sceneId: string; tokenId: string; x: number; y: number }, playerId: string,
-  characters: Character[], combat: Combat | undefined, settings: CampaignSettings): { error: string; violation: boolean } | undefined {
+  characters: Character[], combat: Combat | undefined, settings: CampaignSettings, budget = true): { error: string; violation: boolean } | undefined {
   if (!s?.shown || s.id !== m.sceneId) return { error: 'not the shown scene', violation: false };
   const t = s.tokens.find((x) => x.id === m.tokenId);
   if (!t || t.hidden || fogged(s, t, settings)) return { error: 'no such token', violation: false }; // it may have just been hidden or fogged
@@ -65,21 +71,23 @@ export function moveProblem(s: Scene | undefined, m: { sceneId: string; tokenId:
   if (!settings.freeMovement && currentActor(trackerForPlayers(combat, characters, settings)) !== ch.id) return { error: 'not your turn', violation: false };
   const p = snap(s.grid, m, t.size);
   if (!(p.x >= 0 && p.x <= s.width && p.y >= 0 && p.y <= s.height)) return { error: 'off the map', violation: false };
-  const cost = moveCost(s, m, ch, combat, settings);
-  if (cost && cost.feet > cost.left) return { error: 'too far', violation: false }; // spec 1: the player's screen snaps back
+  const cost = budget ? moveCost(s, m, ch, combat, settings) : undefined; // a drag preview (budget false) needs no budget check
+  if (cost && cost.feet > cost.budget) return { error: 'too far', violation: false }; // spec 1: the player's screen snaps back
 }
 
 /**
- * A player character's move under the movement budget: its combatant, the feet it costs (token centre to the snapped drop) and the feet
- * it has left. Undefined when no budget applies or the character has no combatant. Speed is the player view's (no hidden item bonus).
+ * A player character's move under the movement budget: its combatant, how far the snapped drop is from the turn's origin (the token
+ * itself before its first move this turn) and the budget. Undefined when no budget applies or the character has no combatant. Speed is
+ * the player view's (no hidden item bonus).
  */
 export function moveCost(s: Scene, m: { tokenId: string; x: number; y: number }, ch: Character, combat: Combat | undefined,
-  settings: CampaignSettings): { combatantId: string; feet: number; left: number } | undefined {
+  settings: CampaignSettings): { combatantId: string; feet: number; budget: number } | undefined {
   const t = s.tokens.find((x) => x.id === m.tokenId);
   const x = t && budgetApplies(combat, settings) ? combatantForToken(combat!, { characterId: ch.id }) : undefined;
   if (!t || !x) return undefined;
   const speed = effectiveSpeed(computeSheet(ch, { settings, viewer: 'player' }).speed.walk, ch.state.conditions, ch.state.exhaustion);
-  return { combatantId: x.id, feet: feetBetween(s.grid, t, snap(s.grid, m, t.size), settings.diagonal), left: remainingFeet(speed, combat!.movement?.[x.id]) };
+  const mv = combat!.movement?.[x.id];
+  return { combatantId: x.id, feet: feetBetween(s.grid, originOf(mv) ?? t, snap(s.grid, m, t.size), settings.diagonal), budget: budgetFeet(speed, mv) };
 }
 
 const HEALTH: readonly string[] = ['Unhurt', 'Hurt', 'Bloodied', 'Down'] satisfies HealthStatus[];
