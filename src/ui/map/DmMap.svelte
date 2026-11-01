@@ -302,6 +302,7 @@
         {arrows}
         ondeclare={scene.shown ? ondeclare : undefined}
         onclear={(id) => clearDeclared(id)}
+        ondelete={removeIds}
       />
     {/key}
     <button type="button" class="sheet-btn" onclick={() => (sheet = true)}>Tokens and scene</button>

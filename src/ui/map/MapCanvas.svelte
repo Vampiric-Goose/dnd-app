@@ -23,12 +23,14 @@
   // limitOf: a token's movement budget this turn (feet left); with `clamp` the drag ghost stops at it, without, the label turns red past it.
   // arrows: declared actions to draw; ondeclare: a right-drag (touch: long-press then drag) drew one (unset = no arrow gesture);
   // onclear: the ✕ on a clearable arrow's head was tapped.
-  let { width, height, image, grid, tokens, dm, diagonal, selected, canDrag, speedOf, limitOf, onselect, onmove, rev = 0, fog, fogStyle = dm ? 'shade' : 'black', onfog, corner, arrows = [], ondeclare, onclear }: {
+  // ondelete: Delete / Backspace with tokens selected (unset = the key does nothing, as for players).
+  let { width, height, image, grid, tokens, dm, diagonal, selected, canDrag, speedOf, limitOf, onselect, onmove, rev = 0, fog, fogStyle = dm ? 'shade' : 'black', onfog, corner, arrows = [], ondeclare, onclear, ondelete }: {
     width: number; height: number; image?: string; grid: Grid; tokens: CanvasToken[]; dm: boolean; diagonal: '5-5-5' | '5-10-5'; selected: string[];
     canDrag: (id: string) => boolean; speedOf?: (id: string) => number | undefined; limitOf?: (id: string) => { left: number; clamp: boolean } | undefined;
     onselect: (ids: string[]) => void; onmove: (ids: string[], primary: string, to: Pt) => void; rev?: number;
     fog?: string; fogStyle?: 'black' | 'shade'; onfog?: (e: FogEdit) => void; corner?: Snippet;
     arrows?: Arrow[]; ondeclare?: (d: { from: Pt; fromToken?: string; to: Pt; toToken?: string }) => void; onclear?: (id: string) => void;
+    ondelete?: (ids: string[]) => void;
   } = $props();
 
   let tool: 'select' | 'box' | 'ruler' | 'fog' | 'template' = $state('select');
@@ -626,11 +628,21 @@
     schedule();
   }
 
+  /** Delete / Backspace, unless the focus is somewhere that types. */
+  function key(e: KeyboardEvent) {
+    if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+    const el = e.target as HTMLElement | null;
+    if (el?.isContentEditable || el?.matches?.('input, textarea, select')) return;
+    if (ondelete && selected.length) { e.preventDefault(); ondelete([...selected]); }
+  }
+
   function zoomBy(f: number) {
     view = zoomAt(view, { x: vw / 2, y: vh / 2 }, f);
     schedule();
   }
 </script>
+
+<svelte:window onkeydown={key} />
 
 <div class="map">
   <div class="frame" bind:this={wrap}>
