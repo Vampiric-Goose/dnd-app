@@ -3,6 +3,7 @@ import { rollDice } from '../dice.ts';
 import { abilityMod } from '../rules/constants.ts';
 import type { Character, Combat, Combatant, Duration, Encounter, MonsterDef, Sheet } from '../types.ts';
 import { uid } from '../uid.ts';
+import { resetMovement } from './movement.ts';
 
 export const MAX_COMBATANTS = 200;
 /** An initiative total is an integer in this range (the one source; the sync protocol imports it). */
@@ -166,6 +167,13 @@ function runAt(cs: Combatant[], i: number): [number, number] {
   return [a, b];
 }
 const idsOf = (cs: Combatant[], [a, b]: [number, number]) => new Set(cs.slice(a, b + 1).map((x) => x.id));
+/** The ids acting on the current turn (a grouped run is several); empty in setup or with no turn. */
+export function currentRun(c: Combat): Set<string> {
+  const i = c.combatants.findIndex((x) => x.id === c.turn);
+  return c.round === 0 || i < 0 ? new Set() : idsOf(c.combatants, runAt(c.combatants, i));
+}
+/** Drops the movement entries of `ids` (their own turn starts, or they left the fight). */
+const dropMoves = (c: Combat, ids: Iterable<string>): Combat => { for (const id of ids) c = resetMovement(c, id); return c; };
 
 /** Ticks the durations triggered at `at` of the combatants in `run`; an ended one goes (with a monster's condition) and is listed. */
 function tick(cs: Combatant[], run: Set<string>, at: Duration['at'], expired: Expired[]): Combatant[] {
@@ -202,7 +210,8 @@ function pass(c: Combat, cs: Combatant[], j: number, expired: Expired[]): Combat
   const round = wrap ? c.round + 1 : c.round, turn = cs[at].id, key = `${round}:s:${turn}`;
   const done = (c.done ?? []).filter((k) => parseInt(k, 10) >= round - 1);
   const fresh = !done.includes(key);
-  return { ...c, combatants: fresh ? startTurn(cs, runAt(cs, at), expired) : cs, round, turn, done: fresh ? [...done, key] : done };
+  if (!fresh) return { ...c, combatants: cs, round, turn, done };
+  return dropMoves({ ...c, combatants: startTurn(cs, runAt(cs, at), expired), round, turn, done: [...done, key] }, idsOf(cs, runAt(cs, at)));
 }
 
 /** Round 1, the first combatant's turn (with its start-of-turn effects). Sorts first, unless the DM reordered by hand (S4-R2). */
@@ -210,7 +219,7 @@ export function start(c: Combat): Step {
   const cs = c.reordered ? c.combatants : sortCombatants(c.combatants);
   if (!cs.length) return { combat: { ...c, combatants: cs }, expired: [] };
   const expired: Expired[] = [];
-  return { combat: { ...c, combatants: startTurn(cs, runAt(cs, 0), expired), round: 1, turn: cs[0].id, done: [`1:s:${cs[0].id}`] }, expired };
+  return { combat: dropMoves({ ...c, combatants: startTurn(cs, runAt(cs, 0), expired), round: 1, turn: cs[0].id, done: [`1:s:${cs[0].id}`] }, idsOf(cs, runAt(cs, 0))), expired };
 }
 
 /** Ends the current turn (its end-of-turn durations tick, once: M1), then starts the next (wrapping to a new round). */
@@ -244,6 +253,7 @@ export function prev(c: Combat): Combat {
 export function removeStep(c: Combat, id: string): Step {
   const i = c.combatants.findIndex((x) => x.id === id);
   if (i < 0) return { combat: c, expired: [] };
+  c = resetMovement(c, id);
   const untimed = (x: Combatant): Combatant => (x.durations && Object.values(x.durations).some((d) => d.of === id)
     ? { ...x, durations: Object.fromEntries(Object.entries(x.durations).filter(([, d]) => d.of !== id)) } : x);
   const cs = c.combatants.filter((x) => x.id !== id).map(untimed);

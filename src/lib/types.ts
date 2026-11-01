@@ -134,7 +134,11 @@ export interface Combatant {
 /** The live fight of a campaign. `combatants` is the order; round 0 = setup; `turn` = the current combatant's id. */
 export interface Combat { campaignId: string; combatants: Combatant[]; round: number; turn?: string; groupMonsters: boolean; updatedAt: number;
   /** S4-R2: the DM reordered by hand since the last Sort or add, so Start keeps the order. */ reordered?: boolean;
-  /** M1: turn boundaries already applied (`round:e|s:turnId`), so Previous then Next never ticks one twice. */ done?: string[] }
+  /** M1: turn boundaries already applied (`round:e|s:turnId`), so Previous then Next never ticks one twice. */ done?: string[];
+  /** Combatant id → its movement this turn (dropped where its own turn starts). */ movement?: Record<string, Movement>;
+  /** The saved encounter this fight was resumed from (Group C). */ encounterId?: string }
+/** Map ↔ combat: feet used and Dashes taken on the current turn. */
+export interface Movement { feet: number; dashes: number }
 /** A prepared encounter (at most 50 lines, each count 1–99). */
 export interface Encounter { id: string; campaignId: string; name: string; monsters: { monsterId: string; name?: string /* when prepared, to name it once it is gone */; count: number }[]; updatedAt: number }
 export interface Attack { entryId: string; name: string; toHit: number; damage: string; damageType: string; versatile?: string; properties: string[] }
