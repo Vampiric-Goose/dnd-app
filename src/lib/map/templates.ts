@@ -1,4 +1,5 @@
 // Pure area templates (PHB p.204), by the cell-centre test spec 3.8 allows: a cell is affected when its centre is inside the shape.
+// The map puts a template's origin on the centre of the cell under the pointer (as a Medium token), so areas measure from there.
 import type { Grid, Token } from '../types.ts';
 import { cellCenter, cellsIn, footprint, type Cell, type Pt } from './grid.ts';
 
@@ -14,10 +15,12 @@ export function inTemplate(t: Template, g: Grid, p: Pt): boolean {
   if (t.shape === 'sphere' || t.shape === 'cylinder') return Math.hypot(vx, vy) <= L + EPS;
   const ax = t.aim.x - t.origin.x, ay = t.aim.y - t.origin.y, n = Math.hypot(ax, ay);
   const [ux, uy] = n ? [ax / n, ay / n] : [1, 0]; // aim on the origin: +x
-  const along = vx * ux + vy * uy, d = Math.abs(vx * uy - vy * ux);
-  if (t.shape === 'cone') return along > EPS && along <= L + EPS && d <= along / 2 + EPS;
+  const along = vx * ux + vy * uy, s = vx * uy - vy * ux;
+  if (t.shape === 'cone') return along > EPS && along <= L + EPS && Math.abs(s) <= along / 2 + EPS;
   const half = t.shape === 'cube' ? L / 2 : ((t.width ?? 5) * ppf) / 2;
-  return along >= -EPS && along <= L + EPS && d <= half + EPS;
+  // The origin is a cell centre (the map snaps it there): its own cell is not in a cube or line (PHB p.204), and one side edge is open,
+  // so an edge running through a row of centres doesn't add that row (a 10 ft cube covers 2 × 2 cells, not 2 × 3).
+  return along > EPS && along <= L + EPS && s > -half + EPS && s <= half + EPS;
 }
 
 /** Cells inside the scene (w × h) whose centre is inside the template. */

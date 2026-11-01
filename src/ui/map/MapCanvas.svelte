@@ -22,14 +22,18 @@
   // corner: extra controls floated top-right, beside the tool switcher (the DM's scene picker).
   // limitOf: a token's movement budget this turn (feet left); with `clamp` the drag ghost stops at it, without, the label turns red past it.
   // arrows: declared actions to draw; ondeclare: a right-drag (touch: long-press then drag) drew one (unset = no arrow gesture);
-  // onclear: the ✕ on a clearable arrow's head was tapped.
-  let { width, height, image, grid, tokens, dm, diagonal, selected, canDrag, speedOf, limitOf, onselect, onmove, rev = 0, fog, fogStyle = dm ? 'shade' : 'black', onfog, corner, arrows = [], ondeclare, onclear }: {
+  // arrow (bindable): the arrow picked with the Select tool (a tap on its line or head); onclear: Delete / Backspace with a clearable one picked.
+  // ondelete: Delete / Backspace with tokens selected (unset = the key does nothing, as for players).
+  let { width, height, image, grid, tokens, dm, diagonal, selected, canDrag, speedOf, limitOf, onselect, onmove, rev = 0, fog, fogStyle = dm ? 'shade' : 'black', onfog, corner, arrows = [], ondeclare, onclear, ondelete, arrow = $bindable() }: {
     width: number; height: number; image?: string; grid: Grid; tokens: CanvasToken[]; dm: boolean; diagonal: '5-5-5' | '5-10-5'; selected: string[];
     canDrag: (id: string) => boolean; speedOf?: (id: string) => number | undefined; limitOf?: (id: string) => { left: number; clamp: boolean } | undefined;
     onselect: (ids: string[]) => void; onmove: (ids: string[], primary: string, to: Pt) => void; rev?: number;
     fog?: string; fogStyle?: 'black' | 'shade'; onfog?: (e: FogEdit) => void; corner?: Snippet;
     arrows?: Arrow[]; ondeclare?: (d: { from: Pt; fromToken?: string; to: Pt; toToken?: string }) => void; onclear?: (id: string) => void;
+    ondelete?: (ids: string[]) => void; arrow?: string;
   } = $props();
+  // One selection at a time: picking tokens drops the arrow; an arrow that went (cleared, turn ended) is no longer picked.
+  $effect(() => { if (selected.length || (arrow !== undefined && !arrows.some((a) => a.id === arrow))) untrack(() => (arrow = undefined)); });
 
   let tool: 'select' | 'box' | 'ruler' | 'fog' | 'template' = $state('select');
   $effect(() => { if (!onfog && tool === 'fog') tool = 'select'; });
@@ -61,7 +65,7 @@
   const pointers = new Map<number, Pt>();
   type Mode =
     | { k: 'none' }
-    | { k: 'pan'; from: Pt; view0: View; moved: boolean; shift: boolean }
+    | { k: 'pan'; from: Pt; view0: View; moved: boolean; shift: boolean; arrow?: string /* pressed on this arrow: a tap picks it */ }
     | { k: 'press'; from: Pt; id: string; grab: Pt; shift: boolean }
     | { k: 'drag'; id: string; ids: string[]; grab: Pt; ghost: Pt }
     | { k: 'box'; a: Pt; b: Pt; shift: boolean }
@@ -144,7 +148,7 @@
   }
 
   // Redraw on any prop change; refit when the scene's sides or image change; reload images when rev bumps.
-  $effect(() => { void [width, height, image, grid, tokens, selected, dm, arrows]; untrack(schedule); });
+  $effect(() => { void [width, height, image, grid, tokens, selected, dm, arrows, arrow]; untrack(schedule); });
   let fitKey = '';
   $effect(() => {
     const k = `${width}x${height}:${image ?? ''}`;
@@ -343,10 +347,11 @@
     }
 
     // declared actions: above tokens (and fog: they only join visible things), below the template and the ruler
-    for (const a of arrows) drawArrow(ctx, pal, a, px);
+    for (const a of arrows) if (a.id !== arrow) drawArrow(ctx, a, px);
+    for (const a of arrows) if (a.id === arrow) drawArrow(ctx, a, px, true); // the picked one on top
     if (mode.k === 'arrow') {
       const m = mode, t = tokenAt(scene(), m.b, dm);
-      drawArrow(ctx, pal, { id: '', from: m.a, to: t ?? m.b, color: pal.strong, ...(t && { target: t.id }), clearable: false }, px);
+      drawArrow(ctx, { id: '', from: m.a, to: t ?? m.b, color: pal.strong, ...(t && { target: t.id }), clearable: false }, px);
     }
 
     // the template: affected cells tinted, and the aim
@@ -406,60 +411,60 @@
     }
   }
 
-  /** Where an arrow's head ends (at the ring of a target token) and where its ✕ disc sits, in scene units. */
+  const HEAD = 16; // the head's length in screen px (its half-width is 7)
+
+  /** Where an arrow's head ends (just short of a target token's edge, so the token stays visible), in scene units. */
   function arrowGeometry(a: Arrow, px: number) {
     const t = a.target === undefined ? undefined : tokens.find((x) => x.id === a.target);
     const dx = a.to.x - a.from.x, dy = a.to.y - a.from.y, len = Math.hypot(dx, dy);
-    const ux = len ? dx / len : 1, uy = len ? dy / len : 0, ring = t ? radius(grid, t.size) + 5 * px : 0;
-    const tip = { x: a.to.x - ux * ring, y: a.to.y - uy * ring };
-    return { ux, uy, ring, tip, len: len - ring, disc: { x: tip.x - ux * 22 * px, y: tip.y - uy * 22 * px } };
+    const ux = len ? dx / len : 1, uy = len ? dy / len : 0, gap = t ? radius(grid, t.size) + 3 * px : 0;
+    return { ux, uy, tip: { x: a.to.x - ux * gap, y: a.to.y - uy * gap }, len: len - gap };
   }
 
-  function drawArrow(ctx: CanvasRenderingContext2D, pal: ReturnType<typeof palette>, a: Arrow, px: number) {
-    const g = arrowGeometry(a, px), head = 12 * px;
+  /** A 4 px line and a filled head in the arrow's colour; picked: opaque, over a wider faint stroke of the same colour. */
+  function drawArrow(ctx: CanvasRenderingContext2D, a: Arrow, px: number, picked = false) {
+    const g = arrowGeometry(a, px), head = HEAD * px;
+    if (g.len <= head) return;
+    const base = { x: g.tip.x - g.ux * head, y: g.tip.y - g.uy * head }, w = 7 * px;
     ctx.save();
-    ctx.globalAlpha = 0.85;
     ctx.lineCap = 'round';
-    if (g.ring) { ctx.beginPath(); ctx.arc(a.to.x, a.to.y, g.ring, 0, Math.PI * 2); ctx.lineWidth = 2 * px; ctx.strokeStyle = a.color; ctx.stroke(); }
-    if (g.len > head) {
-      const base = { x: g.tip.x - g.ux * head, y: g.tip.y - g.uy * head };
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = ctx.fillStyle = a.color;
+    if (picked) {
+      ctx.globalAlpha = 0.35;
       ctx.beginPath();
       ctx.moveTo(a.from.x, a.from.y);
-      ctx.lineTo(base.x, base.y);
-      ctx.strokeStyle = pal.rail; // a dark halo keeps it readable on busy map art
-      ctx.lineWidth = 5 * px;
+      ctx.lineTo(g.tip.x, g.tip.y);
+      ctx.lineWidth = 12 * px;
       ctx.stroke();
-      ctx.strokeStyle = a.color;
-      ctx.lineWidth = 2.5 * px;
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(g.tip.x, g.tip.y);
-      ctx.lineTo(base.x - g.uy * 5 * px, base.y + g.ux * 5 * px);
-      ctx.lineTo(base.x + g.uy * 5 * px, base.y - g.ux * 5 * px);
-      ctx.closePath();
-      ctx.fillStyle = a.color;
-      ctx.fill();
-      ctx.lineWidth = 1.5 * px;
-      ctx.strokeStyle = pal.rail;
-      ctx.stroke();
-      if (a.clearable) {
-        const c = g.disc, r = 8 * px, k = 3.5 * px;
-        ctx.globalAlpha = 1;
-        ctx.beginPath();
-        ctx.arc(c.x, c.y, r, 0, Math.PI * 2);
-        ctx.fillStyle = pal.rail;
-        ctx.fill();
-        ctx.lineWidth = 1.5 * px;
-        ctx.strokeStyle = a.color;
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(c.x - k, c.y - k); ctx.lineTo(c.x + k, c.y + k);
-        ctx.moveTo(c.x + k, c.y - k); ctx.lineTo(c.x - k, c.y + k);
-        ctx.strokeStyle = pal.strong;
-        ctx.stroke();
-      }
     }
+    ctx.globalAlpha = picked ? 1 : 0.85;
+    ctx.beginPath();
+    ctx.moveTo(a.from.x, a.from.y);
+    ctx.lineTo(base.x, base.y);
+    ctx.lineWidth = 4 * px;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(g.tip.x, g.tip.y);
+    ctx.lineTo(base.x - g.uy * w, base.y + g.ux * w);
+    ctx.lineTo(base.x + g.uy * w, base.y - g.ux * w);
+    ctx.closePath();
+    ctx.fill();
     ctx.restore();
+  }
+
+  /** The arrow whose line or head passes within `reach` (scene units) of p, the nearest one. */
+  function arrowAt(p: Pt, px: number, reach: number): Arrow | undefined {
+    let best: Arrow | undefined, bestD = reach;
+    for (const a of arrows) {
+      const g = arrowGeometry(a, px);
+      if (g.len <= HEAD * px) continue; // not drawn
+      // distance to the axis from→tip, less the head's half-width (7 px) along the head
+      const k = Math.max(0, Math.min(g.len, (p.x - a.from.x) * g.ux + (p.y - a.from.y) * g.uy));
+      const d = Math.hypot(a.from.x + g.ux * k - p.x, a.from.y + g.uy * k - p.y) - (k > g.len - HEAD * px ? 7 * px : 0);
+      if (d <= bestD) { best = a; bestD = d; }
+    }
+    return best;
   }
 
   /** Arrow mode from scene point `a`, with the token under it (the same visibility as a tap) as the source. */
@@ -506,10 +511,6 @@
     if (pointers.size > 2) return;
     const w = toWorld(view, p), shift = e.shiftKey || e.ctrlKey || e.metaKey;
     if (e.button === 2) { mode = { k: 'none' }; if (ondeclare) startArrow(w); return; } // the right button points, in any tool
-    // ✕ discs (Select tool only: a ruler or fog stroke starting near one is not a clear): a 44 px target on touch, but a token under the finger wins unless the press is on the disc itself
-    const px = 1 / view.scale, reach = (e.pointerType === 'mouse' || tokenAt(scene(), w, dm) ? 10 : 22) * px;
-    const x = onclear && (tool === 'select' || tool === 'box') && arrows.find((a) => { if (!a.clearable) return false; const g = arrowGeometry(a, px); return g.len > 12 * px && Math.hypot(g.disc.x - w.x, g.disc.y - w.y) <= reach; });
-    if (x) { mode = { k: 'none' }; onclear!(x.id); return; }
     if (ruler) { ruler = undefined; schedule(); } // the next tap clears the ruler
     if (tool === 'ruler') { ruler = { a: w, b: w }; mode = { k: 'ruler' }; return; }
     if (tool === 'fog') {
@@ -518,8 +519,8 @@
       schedule();
       return;
     }
-    if (tool === 'template') { // the origin on a grid intersection (a hex centre on hex grids)
-      const o = snap(grid, w, 'L');
+    if (tool === 'template') { // the origin on the centre of the cell under the pointer, as a Medium token stands (square and hex)
+      const o = snap(grid, w, 'M');
       tplAt = { origin: o, aim: { x: o.x + 1, y: o.y } };
       mode = { k: 'template' };
       return;
@@ -527,7 +528,8 @@
     const hit = tool === 'select' ? tokenAt(scene(), w, dm) : undefined;
     if (hit) mode = { k: 'press', from: p, id: hit.id, grab: { x: w.x - hit.x, y: w.y - hit.y }, shift };
     else if (tool === 'box' || (e.shiftKey && e.pointerType === 'mouse')) mode = { k: 'box', a: w, b: w, shift };
-    else mode = { k: 'pan', from: p, view0: view, moved: false, shift };
+    // Select tool, no token under the pointer (a token wins): a press on an arrow's line or head picks it if it stays a tap
+    else mode = { k: 'pan', from: p, view0: view, moved: false, shift, arrow: tool === 'select' ? arrowAt(w, 1 / view.scale, (e.pointerType === 'mouse' ? 8 : 16) / view.scale)?.id : undefined };
     // Touch: held still for 500 ms, the press or pan becomes an arrow from where it started (a second finger cancels it: a pinch)
     const m0 = mode;
     if (ondeclare && e.pointerType !== 'mouse') hold = setTimeout(() => {
@@ -622,8 +624,21 @@
     } else if (m.k === 'box') {
       const ids = tokensInRect(scene(), m.a, m.b, dm);
       onselect(m.shift ? [...new Set([...selected, ...ids])] : ids);
-    } else if (m.k === 'pan' && !m.moved && !m.shift && selected.length) onselect([]);
+    } else if (m.k === 'pan' && !m.moved && !m.shift) { // a tap on empty map (or an arrow): tokens drop, the arrow is picked or dropped
+      if (selected.length) onselect([]);
+      arrow = m.arrow;
+    }
     schedule();
+  }
+
+  /** Delete / Backspace, unless the focus is somewhere that types. */
+  function key(e: KeyboardEvent) {
+    if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+    const el = e.target as HTMLElement | null;
+    if (el?.isContentEditable || el?.matches?.('input, textarea, select')) return;
+    const a = arrow === undefined ? undefined : arrows.find((x) => x.id === arrow);
+    if (a) { e.preventDefault(); if (a.clearable && onclear) { onclear(a.id); arrow = undefined; } return; }
+    if (ondelete && selected.length) { e.preventDefault(); ondelete([...selected]); }
   }
 
   function zoomBy(f: number) {
@@ -631,6 +646,8 @@
     schedule();
   }
 </script>
+
+<svelte:window onkeydown={key} />
 
 <div class="map">
   <div class="frame" bind:this={wrap}>

@@ -271,7 +271,9 @@
   // another scene ends them). The DM's no-token arrow is --text-strong.
   const strong = getComputedStyle(document.documentElement).getPropertyValue('--text-strong').trim() || '#eafffb';
   const arrows = $derived(scene ? arrowsOn(session.actions, scene.id, scene.tokens, () => true, (by) => (by === 'dm' ? strong : tokenColor(by))) : []);
-  const ondeclare = (d: { from: Pt; fromToken?: string; to: Pt; toToken?: string }) => {
+  /** The arrow picked on the map: a Delete arrow button under the scene bar (phones have no Delete key). */
+  let picked: string | undefined = $state();
+  const ondeclare = (d:{ from: Pt; fromToken?: string; to: Pt; toToken?: string }) => {
     if (scene) void declareAction({ sceneId: scene.id, from: d.fromToken ? { tokenId: d.fromToken } : d.from, to: d.toToken ? { tokenId: d.toToken } : d.to, kind: 'intent' });
   };
   const GRID_NAMES = { square: 'Square', 'hex-flat': 'Hex (flat)', 'hex-pointy': 'Hex (pointy)' } as const;
@@ -302,6 +304,8 @@
         {arrows}
         ondeclare={scene.shown ? ondeclare : undefined}
         onclear={(id) => clearDeclared(id)}
+        ondelete={removeIds}
+        bind:arrow={picked}
       />
     {/key}
     <button type="button" class="sheet-btn" onclick={() => (sheet = true)}>Tokens and scene</button>
@@ -349,6 +353,7 @@
         <button type="button" class="primary" disabled={busy} onclick={() => show(true)}>Show to players</button>
       {/if}
     </div>
+    {#if picked !== undefined}<button type="button" class="del-arrow" onclick={() => { clearDeclared(picked); picked = undefined; }}>Delete arrow</button>{/if}
   {/if}
 {/snippet}
 
@@ -456,6 +461,13 @@
     max-width: 12rem;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  .del-arrow {
+    display: block;
+    margin: 0.4rem 0 0 auto;
+    min-height: 44px;
+    background: color-mix(in srgb, var(--rail) 92%, transparent);
   }
 
   .shown {
