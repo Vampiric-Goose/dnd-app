@@ -33,18 +33,23 @@ describe('the basic rules a character always has', () => {
     expect(visible(esc, ['Grappled'])).toBe(true);
   });
 
-  test('Swap weapon: free once a turn, then it takes an Action; it equips the pick in place of the first equipped weapon', () => {
-    const swap = by('free:swap');
-    expect(swap.cost).toBe('none');
-    expect(swap.options).toEqual([{ id: 'axe', name: 'Battleaxe' }]);
-    let k = applyUse(fight(cb()), cb(), swap);
+  test('Draw and Stow: one object interaction each, the first free, the next an Action; drawing needs a free hand', () => {
+    // bow and sword in hand: both hands full, so Draw is offered but blocked until something is stowed
+    const draw = by('free:draw'), stow = by('free:stow');
+    expect(draw).toMatchObject({ cost: 'none', blocked: 'no free hand: stow a weapon first' });
+    expect(stow.options).toEqual([{ id: 'bow', name: 'Longbow' }, { id: 'sword', name: 'Longsword' }]);
+    let k = applyUse(fight(cb()), cb(), stow);
     const x = k.combatants[0];
     expect(x.economy?.object).toBe(true);
-    expect(problemOf({ ...x, economy: { ...x.economy!, used: 1 } }, swap, [], true)).toBe('no Action left'); // the 2nd interaction needs the Action
-    k = applyUse(k, x, swap);
+    expect(problemOf({ ...x, economy: { ...x.economy!, used: 1 } }, stow, [], true)).toBe('no Action left'); // the 2nd interaction needs the Action
+    k = applyUse(k, x, stow);
     expect(k.combatants[0].economy?.used).toBe(1);
-    const after = characterEffect(fighter, swap, 'axe');
-    expect(after.inventory.map((e) => [e.id, e.equipped])).toEqual([['bow', false], ['sword', true], ['axe', true]]);
+    const stowed = characterEffect(fighter, stow, 'bow');
+    expect(stowed.inventory.map((e) => [e.id, e.equipped])).toEqual([['bow', false], ['sword', true], ['axe', false]]);
+    const list2 = pcActions(stowed, sheet, []), draw2 = list2.find((a) => a.id === 'free:draw')!;
+    expect(draw2.blocked).toBeUndefined();
+    expect(characterEffect(stowed, draw2, 'axe').inventory.map((e) => e.equipped)).toEqual([false, true, true]);
+    expect(characterEffect(fighter, draw, 'axe')).toBe(fighter); // hands full: nothing drawn
   });
 
   test('Drop prone is free; Stand up is free but costs half the speed; each only when it applies', () => {
@@ -69,7 +74,7 @@ describe('the basic rules a character always has', () => {
     const m = monsterActions(goblin);
     for (const id of ['std:dash', 'std:dodge', 'special:grapple', 'special:shove', 'react:opportunity', 'react:readied', 'free:prone']) expect(m.some((a) => a.id === id)).toBe(true);
     expect(by('special:grapple', m).check).toEqual([{ label: 'Athletics', bonus: -1 }]); // Str 8, no Athletics
-    expect(m.some((a) => a.id === 'free:swap')).toBe(false);
+    expect(m.some((a) => a.id === 'free:draw' || a.id === 'free:stow')).toBe(false);
     const prone = applyUse(fight(cb({ kind: 'monster' })), cb({ kind: 'monster' }), by('free:prone', m));
     expect(prone.combatants[0].conditions).toEqual(['Prone']);
   });

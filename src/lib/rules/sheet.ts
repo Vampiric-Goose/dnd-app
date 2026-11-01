@@ -1,3 +1,4 @@
+import { handsFor } from '../items/hands.ts';
 import { slug } from '../content/ids.ts';
 import { getKind, raceParts } from '../character/choices.ts';
 import { attunedCount, carriedWeight } from '../items/inventory.ts';
@@ -167,6 +168,7 @@ export function computeSheet(c: Character, opts: SheetOpts): Sheet {
   const maDie = typeof maCol === 'string' ? maCol : undefined;
   const sides = (d: string) => Number(/d(\d+)/.exec(d)?.[1] ?? 0);
   const withMa = (d: string) => (maDie && sides(maDie) > sides(d) ? maDie : d);
+  const held = worn.reduce((n, i) => n + handsFor(i.item), 0); // a versatile weapon's two-handed die needs the other hand free (SRD 5.1)
   const attacks: Attack[] = worn.filter(i => i.item.weapon).map(({ entry, item, active: on }) => {
     const w = item.weapon!;
     const names = [item.name, item.baseItemId?.split(':')[1]?.split('@')[0] ?? ''].map(slug);
@@ -179,7 +181,7 @@ export function computeSheet(c: Character, opts: SheetOpts): Sheet {
     return {
       entryId: entry.id, name: item.name, damageType: w.damageType, properties: w.properties,
       toHit: mod + (proficient ? prof : 0) + (on ? (item.bonuses?.attack ?? 0) : 0) + bonus(`attack.${kind}`),
-      damage: die(w.damage), ...(w.versatile && { versatile: die(w.versatile) }), ...(w.ranged && { ranged: true as const }),
+      damage: die(w.damage), ...(w.versatile && held <= 1 && { versatile: die(w.versatile) }), ...(w.ranged && { ranged: true as const }),
     };
   });
   const unarmedMod = ma ? Math.max(mods.str, mods.dex) : mods.str, unarmedDmg = unarmedMod + bonus('damage.melee');

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { equip } from '../../lib/items/hands.ts';
   import { db } from '../../lib/db.ts';
   import { rechargeEntry, refreshEntry } from '../../lib/items/inventory.ts';
   import { ATTUNEMENT_LIMIT } from '../../lib/rules/constants.ts';
@@ -63,7 +64,17 @@
   }
 
   const replace = (id: string, fn: (e: Character['inventory'][number]) => Character['inventory'][number]) =>
-    update((x) => ({ ...x, inventory: x.inventory.map((e) => (e.id === id ? fn(e) : e)) }));
+    update((x) => {
+      const was = x.inventory.find((e) => e.id === id), now = was && fn(was);
+      if (!was || !now) return x;
+      let inventory = x.inventory.map((e) => (e.id === id ? { ...now, equipped: was.equipped } : e));
+      if (now.equipped && !was.equipped) { // two hands, one suit of armor, one shield: what's in the way goes back (hands.ts)
+        const r = equip(inventory, id);
+        inventory = r.inventory;
+        if (r.stowed.length) toast(`Unequipped ${r.stowed.join(', ')} to make room.`);
+      } else inventory = inventory.map((e) => (e.id === id ? now : e));
+      return { ...x, inventory };
+    });
 </script>
 
 <!-- The "Inventory" drawer: coins, carrying, the item actions, then the rows. -->

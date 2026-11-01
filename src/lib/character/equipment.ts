@@ -1,4 +1,5 @@
 import { makeEntry } from '../items/inventory.ts';
+import { equipStarting } from '../items/hands.ts';
 import type { Character, InventoryEntry, ItemDef, StartingEquipment } from '../types.ts';
 import { getKind, type Lookup } from './choices.ts';
 
@@ -16,18 +17,12 @@ export function equipmentSources(c: Character, lookup: Lookup): EquipSource[] {
 
 /**
  * The inventory and gold the picks give. Unpicked groups take their first option, so a new class starts on its own
- * defaults. Gold mode replaces the kit. One suit of armor, a shield and every weapon start equipped.
+ * defaults. Gold mode replaces the kit. One suit of armor, a shield and weapons while hands are free start equipped (hands.ts).
  */
 export function startingInventory(sources: EquipSource[], equip: Equip, item: (id: string) => ItemDef | undefined): { inventory: InventoryEntry[]; gp: number } {
   if (equip.mode === 'gold') return { inventory: [], gp: equip.gold.total ?? 0 };
   const inventory: InventoryEntry[] = [];
-  let armored = false;
-  const add = (def: ItemDef | undefined, quantity: number) => {
-    if (!def) return;
-    const body = !!def.armor && def.armor.category !== 'shield';
-    inventory.push({ ...makeEntry(def, { quantity }), equipped: !!def.weapon || def.armor?.category === 'shield' || (body && !armored) });
-    armored ||= body;
-  };
+  const add = (def: ItemDef | undefined, quantity: number) => { if (def) inventory.push(makeEntry(def, { quantity })); };
   for (const s of sources) s.eq.choices.forEach((group, g) => {
     const o = equip.picks[`${s.id}|${g}`] ?? 0;
     group[o]?.items.forEach((it, i) => {
@@ -35,7 +30,7 @@ export function startingInventory(sources: EquipSource[], equip: Equip, item: (i
       for (let n = 0; n < it.quantity; n++) add(item(equip.cats[`${s.id}|${g}|${o}|${i}|${n}`] ?? ''), 1);
     });
   });
-  return { inventory, gp: 0 };
+  return { inventory: equipStarting(inventory), gp: 0 };
 }
 
 /**

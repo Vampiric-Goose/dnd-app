@@ -14,7 +14,10 @@ test('hill dwarf fighter 1', () => {
   const s = computeSheet(c, dm);
   expect([s.scores.con, s.scores.wis, s.ac, s.maxHp, s.prof, s.initiative, s.speed.walk, s.passivePerception]).toEqual([16, 13, 19, 14, 2, 1, 25, 13]);
   expect([s.saves.str.bonus, s.saves.con.bonus, s.saves.dex.bonus, s.skills.athletics.bonus, s.skills.perception.bonus]).toEqual([4, 5, 1, 4, 3]);
-  expect(s.attacks.find(a => a.name === 'Longsword')).toMatchObject({ toHit: 4, damage: '1d8+2', versatile: '1d10+2', damageType: 'slashing' });
+  expect(s.attacks.find(a => a.name === 'Longsword')).toMatchObject({ toHit: 4, damage: '1d8+2', damageType: 'slashing' });
+  expect(s.attacks.find(a => a.name === 'Longsword')?.versatile).toBeUndefined(); // the shield takes the other hand
+  const free = computeSheet({ ...c, inventory: c.inventory.map((e) => (e.item.armor?.category === 'shield' ? { ...e, equipped: false } : e)) }, dm);
+  expect(free.attacks.find(a => a.name === 'Longsword')?.versatile).toBe('1d10+2');
 });
 test('heavy armor strength', () => {
   const weak = (race: string) => computeSheet(mkChar({ race, base: { str: 11 }, levels: ['fighter'], inventory: [['chain-mail', true]] }), dm).speed.walk; // human 12, dwarf 11: both under 13

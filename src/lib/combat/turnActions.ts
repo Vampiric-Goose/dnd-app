@@ -8,6 +8,7 @@ import { abilityMod } from '../rules/constants.ts';
 import { actionsLeft, BLOCKING, grantAction, spend, useProblem, type Cost } from './economy.ts';
 import { addDash, standUp } from './movement.ts';
 import { readSpell, readSpellcasting, type SpellRead } from './spellText.ts';
+import { HANDS, handsFor, handsHeld } from '../items/hands.ts';
 
 export interface TurnAction {
   id: string; name: string; cost: Cost;
@@ -104,9 +105,14 @@ export function pcActions(c: Character, sheet: Sheet, features: { name: string; 
   const light = sheet.attacks.filter(lightMelee);
   if (light.length >= 2) for (const a of light) out.push({ id: `offhand:${a.entryId}`, name: `Off-hand: ${a.name}`, cost: 'bonus', group: 'attack', attack: { ...a, damage: offhandDamage(a.damage) } });
   out.push(...basics(sheet.skills?.athletics?.bonus ?? 0, sheet.skills?.acrobatics?.bonus ?? 0, sheet.attacks.find((a) => !a.ranged)));
-  const spare = c.inventory?.filter((e) => e.item.weapon && !e.equipped) ?? [];
-  if (spare.length) out.push({ id: 'free:swap', name: 'Swap weapon', cost: 'none', group: 'standard', options: spare.map((e) => ({ id: e.id, name: e.item.name })),
-    text: p('Draw a carried weapon in place of your first equipped one: your free object interaction this turn, after that it takes an Action.') });
+  // Drawing or stowing a weapon is one object interaction: the first each turn is free, another takes an Action (SRD 5.1). Hands as hands.ts.
+  const inv = c.inventory ?? [], free = HANDS - handsHeld(inv);
+  const carried = inv.filter((e) => e.item.weapon && !e.equipped), held = inv.filter((e) => e.item.weapon && e.equipped);
+  const fits = carried.filter((e) => handsFor(e.item) <= free);
+  if (carried.length) out.push({ id: 'free:draw', name: 'Draw a weapon', cost: 'none', group: 'standard', options: (fits.length ? fits : carried).map((e) => ({ id: e.id, name: e.item.name })),
+    ...(!fits.length && { blocked: 'no free hand: stow a weapon first' }), text: p('One object interaction: the first each turn is free, another takes an Action. It needs a free hand (two for a two-handed weapon).') });
+  if (held.length) out.push({ id: 'free:stow', name: 'Stow a weapon', cost: 'none', group: 'standard', options: held.map((e) => ({ id: e.id, name: e.item.name })),
+    text: p('One object interaction: the first each turn is free, another takes an Action.') });
   const names = new Set(features.map((f) => f.name));
   if (names.has('Cunning Action')) for (const name of ['Dash', 'Disengage', 'Hide']) out.push({ id: `cunning:${id(name)}`, name: `Cunning Action: ${name}`, cost: 'bonus', group: 'feature', ...(name === 'Dash' && { grants: 'dash' as const }) });
   const seen = new Set<string>();
@@ -173,19 +179,23 @@ export function visible(a: TurnAction, conditions: readonly string[]): boolean {
 }
 
 /** Its cost now: a second object interaction in a turn takes an Action (SRD 5.1). */
-const costOf = (x: Combatant, a: TurnAction): Cost => (a.id === 'free:swap' && x.economy?.object ? 'action' : a.cost);
+const OBJECT = ['free:draw', 'free:stow'];
+const costOf = (x: Combatant, a: TurnAction): Cost => (OBJECT.includes(a.id) && x.economy?.object ? 'action' : a.cost);
 
 /** It changes the character record (paid for, or a swap or Prone) rather than only the fight. */
-export const editsCharacter = (a: TurnAction, level?: number): boolean => level !== undefined || !!a.resource || ['free:swap', 'free:prone', 'free:stand'].includes(a.id);
+export const editsCharacter = (a: TurnAction, level?: number): boolean => level !== undefined || !!a.resource || ['free:draw', 'free:stow', 'free:prone', 'free:stand'].includes(a.id);
 
-/** The character after the use's own effect: Swap weapon draws `pick` (an unequipped weapon) in place of the first equipped weapon; Prone. */
+/** The character after the use's own effect: drawing `pick` (a carried weapon that fits the free hands), stowing it (a held one); Prone. */
 export function characterEffect(c: Character, a: TurnAction, pick?: string): Character {
   const prone = (on: boolean) => ({ ...c, state: { ...c.state, conditions: [...c.state.conditions.filter((n) => n.toLowerCase() !== 'prone'), ...(on ? ['Prone'] : [])] } });
   if (a.id === 'free:prone') return prone(true);
   if (a.id === 'free:stand') return prone(false);
-  if (a.id !== 'free:swap' || !c.inventory.some((e) => e.id === pick && e.item.weapon && !e.equipped)) return c;
-  const out = c.inventory.find((e) => e.item.weapon && e.equipped)?.id;
-  return { ...c, inventory: c.inventory.map((e) => (e.id === pick ? { ...e, equipped: true } : e.id === out ? { ...e, equipped: false } : e)) };
+  const e = c.inventory.find((x) => x.id === pick && x.item.weapon);
+  if (!e) return c;
+  const set = (on: boolean) => ({ ...c, inventory: c.inventory.map((x) => (x.id === e.id ? { ...x, equipped: on } : x)) });
+  if (a.id === 'free:draw' && !e.equipped && handsHeld(c.inventory) + handsFor(e.item) <= HANDS) return set(true);
+  if (a.id === 'free:stow' && e.equipped) return set(false);
+  return c;
 }
 
 /** An attack that is part of the Attack action (Extra Attack counts it); undefined for anything else. */
@@ -210,7 +220,7 @@ export function problemOf(x: Combatant, a: TurnAction, conditions: readonly stri
   if (a.grants === 'action' && !onTurn) return 'not your turn';
   if (a.grants === 'action' && x.economy?.surged) return 'once a turn';
   if (a.id.startsWith('offhand:') && !x.economy?.light) return 'attack with a light melee weapon first';
-  if (onHasteAction(x, a, perAction) && !(HASTE_OK.has(a.id) || a.id === 'free:swap' || a.id.startsWith('attack:') || (a.group === 'monster' && a.text && /weapon attack/i.test(richToPlain(a.text))))) {
+  if (onHasteAction(x, a, perAction) && !(HASTE_OK.has(a.id) || OBJECT.includes(a.id) || a.id.startsWith('attack:') || (a.group === 'monster' && a.text && /weapon attack/i.test(richToPlain(a.text))))) {
     return 'Hasted: the extra Action is only one weapon attack, Dash, Disengage, Hide or Use an Object';
   }
   if (a.legendary === undefined) return useProblem(x, costOf(x, a), conditions, onTurn, attackOf(a, perAction));
@@ -251,7 +261,7 @@ export function applyUse(k: Combat, x: Combatant, a: TurnAction, perAction = 1, 
   const mark = (e: Partial<NonNullable<Combatant['economy']>>) => ({ ...y, economy: { used: 0, extra: 0, bonus: false, attacks: 0, ...y.economy, ...e } });
   if (haste && attackOf(a, perAction) && y.economy) y = mark({ attacks: perAction }); // one weapon attack only
   if (attackOf(a, perAction) && a.attack && lightMelee(a.attack)) y = mark({ light: true });
-  if (a.id === 'free:swap') y = mark({ object: true });
+  if (OBJECT.includes(a.id)) y = mark({ object: true });
   if (a.id === 'std:ready') y = mark({ readied: true });
   if (a.spell && a.cost === 'bonus') y = mark({ bonusSpell: true });
   if (a.spell && !(a.cost === 'action' && a.spell.level === 0)) y = mark({ leveledSpell: true });
