@@ -6,6 +6,7 @@
   import { primaryAction, problemOf, visible, type TurnAction } from '../../lib/combat/turnActions.ts';
   import { richToPlain } from '../../lib/content/richtext.ts';
   import { rollParts } from '../../lib/monsters/library.ts';
+  import { diceAt, type SpellArea } from '../../lib/combat/spellText.ts';
   import { natD20 } from '../../lib/rolls.svelte.ts';
   import type { Combatant } from '../../lib/types.ts';
   import { signed, titleCase } from '../creator/labels.ts';
@@ -17,7 +18,7 @@
   type Pip = 'action' | 'bonus' | 'reaction';
   let {
     name, order, self, current, round, hp, maxHp, tempHp = 0, tone = 'accent', conditions, moveLeft, x, perAction = 1, onTurn, actions,
-    slots = [], concentrating = false, dm = false, busy = false, canEnd, endLabel = 'End turn', onuse, onend, onpip, onstrip, top,
+    slots = [], concentrating = false, dm = false, busy = false, canEnd, endLabel = 'End turn', onuse, onend, onpip, onstrip, ontemplate, top,
   }: {
     name: string;
     /** The turn order as the viewer sees it; `self` is the creature shown, `current` the one acting. */
@@ -37,6 +38,8 @@
     onpip?: (pip: Pip, used: boolean) => void;
     /** DM: show another creature from the strip. */
     onstrip?: (id: string) => void;
+    /** Place an area spell's template on the map. */
+    ontemplate?: (area: SpellArea) => void;
     top?: Snippet;
   } = $props();
 
@@ -73,7 +76,11 @@
   let slotFor: Record<string, number> = $state({});
   /** Who a spell that needs a target goes to (default: the creature shown). */
   let targetFor: Record<string, string> = $state({});
-  const problem = (a: TurnAction) => problemOf(x, a, conditions, onTurn, perAction) ?? (a.spell && a.spell.level > 0 && !freeSlots(a).length ? 'no slot left' : undefined);
+  /** A character's levelled spell uses a slot it picks; a monster's spends its own slots or per-day uses (a.spend). */
+  const slotted = (a: TurnAction) => !!a.spell && a.spell.level > 0 && !a.spend;
+  const problem = (a: TurnAction) => problemOf(x, a, conditions, onTurn, perAction) ?? (slotted(a) && !freeSlots(a).length ? 'no slot left' : undefined);
+  /** The spell's dice at the slot picked (a monster's: its own level). */
+  const spellDice = (a: TurnAction) => diceAt(a.cast!.read, { slot: slotted(a) ? slotOf(a) : a.spell!.level, level: a.spell!.level, charLevel: a.cast!.charLevel, mod: a.cast!.mod });
   const inAttack = $derived(e.attacks > 0 && e.attacks < perAction);
 
   let dialog: HTMLDialogElement | undefined = $state();
@@ -85,7 +92,7 @@
   function use(a: TurnAction): boolean {
     if (a.spell?.concentration && concentrating && !confirm('Casting this ends your concentration on the current spell. Go on?')) return false;
     const pick = a.target ? targetFor[a.id] ?? self : a.options ? targetFor[a.id] ?? a.options[0].id : undefined;
-    return onuse(a, a.spell && a.spell.level > 0 ? slotOf(a) : undefined, pick) !== false;
+    return onuse(a, slotted(a) ? slotOf(a) : undefined, pick) !== false;
   }
   function attack(a: TurnAction) {
     if (!use(a)) return;
@@ -207,12 +214,26 @@
           {#each order as r (r.id)}<option value={r.id}>{r.name}</option>{/each}
         </select>
       {/if}
-      {#if a.spell && a.spell.level > 0 && freeSlots(a).length > 1}
+      {#if slotted(a) && freeSlots(a).length > 1}
         <select aria-label="{a.name} slot level" value={slotOf(a)} onchange={(ev) => (slotFor[a.id] = Number((ev.currentTarget as HTMLSelectElement).value))}>
           {#each freeSlots(a) as l}<option value={l}>Level {l}</option>{/each}
         </select>
       {/if}
-      <button type="button" class="use" disabled={!!why || busy} onclick={() => use(a)}>{a.spell ? 'Cast' : 'Use'}{#if a.spell && a.spell.level > 0 && freeSlots(a).length === 1} <span class="muted">(level {freeSlots(a)[0]})</span>{/if}</button>
+      {#if a.cast?.read.attack && a.cast.attack !== undefined}
+        <button type="button" disabled={!!why || busy} aria-label="Cast {a.name}: spell attack {signed(a.cast.attack)}" onclick={() => { if (use(a)) rollD20(`${a.name}: spell attack`, a.cast!.attack!, { shareAs: 'Spell attack' }); }}>Spell attack <span class="num">{signed(a.cast.attack)}</span></button>
+      {:else}
+        <button type="button" class="use" disabled={!!why || busy} onclick={() => use(a)}>{a.spell ? 'Cast' : 'Use'}{#if slotted(a) && freeSlots(a).length === 1} <span class="muted">(level {freeSlots(a)[0]})</span>{/if}</button>
+      {/if}
+      {#if a.cast}
+        {@const d = spellDice(a)}
+        {#if a.cast.read.save && a.cast.dc !== undefined}<span class="save">DC <span class="num">{a.cast.dc}</span> {a.cast.read.save} save</span>{/if}
+        {#each d.damage as dmg}
+          {@const [expr, ...type] = dmg.split(' ')}
+          <button type="button" aria-label="Roll {a.name} damage, {dmg}" onclick={() => damage(`${a.name} damage (${type.join(' ')})`, expr)}>{expr} <span class="muted">{type.join(' ')}</span></button>
+        {/each}
+        {#if d.heal}<button type="button" aria-label="Roll {a.name} healing, {d.heal}" onclick={() => rollTo(`${a.name}: healing`, d.heal!, { shareAs: 'Healing' })}>Heal <span class="num">{d.heal}</span></button>{/if}
+        {#if a.cast.read.area && ontemplate}<button type="button" onclick={() => ontemplate(a.cast!.read.area!)}>{a.cast.read.area.feet}-ft {a.cast.read.area.shape} on map</button>{/if}
+      {/if}
     {/if}
   </div>
   {#if why && why !== hide}<p class="why muted small">{why}</p>{/if}
@@ -376,6 +397,12 @@
 
   .why {
     margin: 0;
+  }
+
+  .save {
+    align-self: center;
+    color: var(--text-strong);
+    font-size: 0.9rem;
   }
 
   .small {

@@ -16,6 +16,7 @@
   import type { Campaign, Character, Combatant } from '../../lib/types.ts';
   import MapCanvas from './MapCanvas.svelte';
   import TurnPanel from '../turn/TurnPanel.svelte';
+  import type { SpellArea } from '../../lib/combat/spellText.ts';
   import { toast } from '../../lib/toast.svelte.ts';
   import Drawer from '../kit/Drawer.svelte';
   import Workspace from '../kit/Workspace.svelte';
@@ -82,8 +83,8 @@
     if (!r?.econ || !c) return undefined;
     try {
       const sheet = computeSheet(c, { settings, viewer: 'player' });
-      const { used, extra, bonus, attacks, light, surged, haste, object, readied, reaction } = r.econ;
-      return { r, c, econ: r.econ, sheet, actions: pcActions(c, sheet, featureList(c, settings)), x: { economy: { used, extra, bonus, attacks, light, surged, haste, object, readied }, reactionUsed: reaction } as Combatant };
+      const { reaction, perAction: _p, conc: _c, hasted: _h, ...economy } = r.econ;
+      return { r, c, econ: r.econ, sheet, actions: pcActions(c, sheet, featureList(c, settings)), x: { economy, reactionUsed: reaction } as Combatant };
     } catch { return undefined; }
   });
   /** The tracker a use was sent under: its buttons stay off until the next tracker arrives or 3 s pass (a double tap sends one use). */
@@ -99,6 +100,12 @@
     return true;
   }
   $effect(() => () => clearTimeout(sentTimer));
+  /** An area spell's template on the map (local, as the Template tool), from the caster's cell for Self spells. */
+  let preset: { shape: SpellArea['shape']; feet: number; width?: number; origin?: Pt; n: number } | undefined = $state.raw();
+  const placeTemplate = (area: SpellArea) => {
+    const t = turn && view?.tokens.find((k) => k.characterId === turn!.c.id);
+    preset = { shape: area.shape, feet: area.feet, ...(area.width && { width: area.width }), ...(area.self && t && { origin: { x: t.x, y: t.y } }), n: (preset?.n ?? 0) + 1 };
+  };
   const turnBudget = $derived(myTurn && !(unsent && session.status !== 'online') ? budgetOf(actor) : undefined);
   const limitOf = (id: string) => { const b = budgetOf(tokenOf(id)?.characterId); return b && { from: b.from, budget: b.budget, clamp: true }; };
 
@@ -168,6 +175,7 @@
         {ondeclare}
         onclear={() => clearDeclared()}
         bind:arrow={picked}
+        {preset}
         ondrag={(id, at) => { if (joined && base && (at ? canDrag(id) : !!mine(tokenOf(id)?.characterId))) sendDrag(base.id, id, at); }}
       />
     {/key}
@@ -180,7 +188,7 @@
           hp={turn.c.state.hp} maxHp={turn.sheet.maxHp} tempHp={turn.c.state.tempHp} conditions={[...turn.c.state.conditions, ...(turn.econ.hasted ? ['Hasted'] : [])]}
           moveLeft={turn.c.id === actor ? turnBudget?.left : undefined} x={turn.x} perAction={turn.econ.perAction} onTurn={turn.c.id === actor}
           actions={turn.actions} slots={slotsLeft(turn.sheet, turn.c)} concentrating={turn.econ.conc}
-          busy={!!sentUnder && sentUnder === session.tracker} canEnd={turn.c.id === actor} onuse={useAction} onend={() => { if (!offline()) sendEndTurn(turn!.c.id); }}>
+          busy={!!sentUnder && sentUnder === session.tracker} canEnd={turn.c.id === actor} onuse={useAction} onend={() => { if (!offline()) sendEndTurn(turn!.c.id); }} ontemplate={placeTemplate}>
           {#snippet top()}
             {#if myRows.length > 1}
               <div class="row switch" role="group" aria-label="Your characters">

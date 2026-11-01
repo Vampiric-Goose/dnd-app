@@ -17,6 +17,7 @@
   import { applyUse, attacksPerAction, characterEffect, editsCharacter, monsterActions, payment, pcActions, problemOf, slotsLeft, spendOn, type TurnAction } from '../../lib/combat/turnActions.ts';
   import { featureList } from '../../lib/character/play.ts';
   import TurnPanel from '../turn/TurnPanel.svelte';
+  import type { SpellArea } from '../../lib/combat/spellText.ts';
   import { toast } from '../../lib/toast.svelte.ts';
   import { soundMonster } from '../../lib/monsters/homebrew.ts';
   import { router } from '../../lib/router.svelte.ts';
@@ -289,6 +290,14 @@
   };
   // --- the Turn tab (turn panel spec): follows the acting creature (a grouped run: its first, with a switcher among the group) ---
   const fighting = $derived(!!combat && combat.round >= 1);
+  const spellByName = $derived(new Map((index?.all('spell') ?? []).map((s) => [s.name.toLowerCase(), s])));
+  /** An area spell's template on the map, from the caster's cell when it starts there (range Self). */
+  let preset: { shape: SpellArea['shape']; feet: number; width?: number; origin?: Pt; n: number } | undefined = $state.raw();
+  const placeTemplate = (area: SpellArea) => {
+    const t = combat && view ? scene?.tokens.find((k) => combatantForToken(combat!, k)?.id === view!.x.id) : undefined;
+    preset = { shape: area.shape, feet: area.feet, ...(area.width && { width: area.width }), ...(area.self && t && { origin: { x: t.x, y: t.y } }), n: (preset?.n ?? 0) + 1 };
+    sheet = false; selected = [];
+  };
   /** A map Start combat waiting for the players' initiative rolls. */
   const waiting = $derived(combat && combat.round === 0 && combat.autoStart ? combat.combatants.filter((x) => x.init === undefined) : undefined);
   /** One step: show the scene, everyone on it joins, monsters and the DM's characters roll; round 1 once the players have rolled. */
@@ -317,7 +326,7 @@
         actions: pcActions(ch, sheet, features), perAction: attacksPerAction(features), slots: slotsLeft(sheet, ch) };
     }
     const m = x.monsterId ? monsterById.get(x.monsterId) : undefined;
-    return { x, name: x.name, hp: x.hp, maxHp: x.maxHp, tempHp: x.tempHp, conditions: x.conditions ?? [], actions: m ? monsterActions(m) : [], perAction: 1 };
+    return { x, name: x.name, hp: x.hp, maxHp: x.maxHp, tempHp: x.tempHp, conditions: x.conditions ?? [], actions: m ? monsterActions(m, { spell: (n) => spellByName.get(n), used: x.spellsUsed }) : [], perAction: 1 };
   });
   /** The DM's use: pips and what it pays, no turn checks (the panel greys out what the rules don't allow). */
   const useAction = (a: TurnAction, slot?: number, target?: string) => run(async () => {
@@ -373,6 +382,7 @@
         ondelete={removeIds}
         bind:arrow={picked}
         ondrag={(id, at) => { if (scene?.shown) sendDrag(scene.id, id, at); }}
+        {preset}
       />
     {/key}
     <button type="button" class="sheet-btn" onclick={() => (sheet = true)}>{fighting ? 'Turn and tokens' : 'Tokens and scene'}</button>
@@ -441,7 +451,7 @@
             hp={view.hp} maxHp={view.maxHp} tempHp={view.tempHp} tone={view.ch ? 'accent' : 'danger'} conditions={[...view.conditions, ...(view.x.hasted && !view.x.hasted.ended ? ['Hasted'] : [])]}
             x={view.x} perAction={view.perAction} onTurn={turnIds.has(view.x.id)} actions={view.actions} slots={view.slots}
             concentrating={!!view.x.concentrating} {busy} canEnd={!busy} endLabel="Next turn ▶" onuse={(a, slot, target) => void useAction(a, slot, target)} onend={nextTurn} {onpip}
-            onstrip={(id) => (viewId = id)}>
+            onstrip={(id) => (viewId = id)} ontemplate={placeTemplate}>
             {#snippet top()}
               {#if runList.length > 1}
                 <div class="row switch" role="group" aria-label="This group">

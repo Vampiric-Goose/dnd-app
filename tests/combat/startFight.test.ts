@@ -64,3 +64,12 @@ test('with no players to wait for, round 1 starts at once', async () => {
   expect(r.waiting).toEqual([]);
   expect((await db.combat.get('c1'))!.round).toBe(1);
 });
+
+test('SRD 5.1: becoming incapacitated (here Stunned) ends concentration', async () => {
+  const { setCondition, updateCombat } = await import('../../src/lib/combat/store.ts');
+  await db.campaigns.put(camp('c1'));
+  await updateCombat('c1', (c) => ({ ...c, combatants: [{ id: 'g1', kind: 'monster', name: 'Goblin 1', initMod: 0, dex: 10, tie: 0.5, conSave: 0, init: 10, concentrating: true }] }));
+  const k = await setCondition('c1', 'g1', 'Stunned', true);
+  expect(k.combatants[0]).toMatchObject({ concentrating: false, conditions: ['Stunned'] });
+  expect((await setCondition('c1', 'g1', 'Prone', true)).combatants[0].concentrating).toBe(false);
+});

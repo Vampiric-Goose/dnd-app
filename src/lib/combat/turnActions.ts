@@ -3,10 +3,11 @@
 import { spellList } from '../character/play.ts';
 import { getKind } from '../character/choices.ts';
 import { richToPlain } from '../content/richtext.ts';
-import type { Attack, Character, Combat, Combatant, MonsterDef, RichText, Sheet } from '../types.ts';
+import type { Attack, Character, Combat, Combatant, MonsterDef, RichText, Sheet, SpellDef } from '../types.ts';
 import { abilityMod } from '../rules/constants.ts';
 import { actionsLeft, BLOCKING, grantAction, spend, useProblem, type Cost } from './economy.ts';
 import { addDash, standUp } from './movement.ts';
+import { readSpell, readSpellcasting, type SpellRead } from './spellText.ts';
 
 export interface TurnAction {
   id: string; name: string; cost: Cost;
@@ -26,6 +27,12 @@ export interface TurnAction {
   when?: 'grappled' | 'prone' | 'standing';
   /** Picks it needs (Swap weapon: a carried weapon to draw); the pick goes as the use's target. */
   options?: { id: string; name: string }[];
+  /** A spell's rolls: what its wording says (spellText), the caster's attack bonus and save DC, level and spellcasting modifier. */
+  cast?: { read: SpellRead; attack?: number; dc?: number; charLevel: number; mod: number };
+  /** Why it can't be used at all right now (casting in armor without proficiency). */
+  blocked?: string;
+  /** A monster's spell use it spends ('slot:3', 'day:<spell id>'). */
+  spend?: string;
 }
 
 /** The cost a feature's text states: "as a bonus action" / "use a bonus action", "as an action" / "use your action", a reaction; else none. */
@@ -103,13 +110,18 @@ export function pcActions(c: Character, sheet: Sheet, features: { name: string; 
   const names = new Set(features.map((f) => f.name));
   if (names.has('Cunning Action')) for (const name of ['Dash', 'Disengage', 'Hide']) out.push({ id: `cunning:${id(name)}`, name: `Cunning Action: ${name}`, cost: 'bonus', group: 'feature', ...(name === 'Dash' && { grants: 'dash' as const }) });
   const seen = new Set<string>();
+  // SRD 5.1: casting needs proficiency with the armor worn
+  const armorProfs = new Set(sheet.proficiencies?.armor ?? []);
+  const blocked = c.inventory?.some((e) => e.equipped && e.item.armor && !armorProfs.has(e.item.armor.category)) ? 'not proficient with your armor' : undefined;
   for (const sc of sheet.spellcasting) {
+    const cast = { attack: sc.attack, dc: sc.dc, charLevel: sheet.totalLevel ?? c.build.levels.length, mod: sheet.mods?.[sc.ability] ?? abilityMod(sheet.scores?.[sc.ability] ?? 10) };
     const knownCaster = getKind((k) => c.embedded[k], sc.classId, 'class')?.spellcasting?.preparation === 'known';
     for (const { spell, prepared } of spellList(c, sc.classId)) {
       const cost = castingCost(spell.castingTime);
       if (!cost || seen.has(spell.id) || !(spell.level === 0 || prepared || knownCaster)) continue;
       seen.add(spell.id);
       out.push({ id: `spell:${spell.id}`, name: spell.name, cost, group: 'spell', text: spell.text, spell: { id: spell.id, level: spell.level, concentration: spell.concentration },
+        cast: { ...cast, read: readSpell(spell) }, ...(blocked && { blocked }),
         ...(/\badditional action on each of its turns\b/i.test(richToPlain(spell.text)) && { target: 'haste' as const }) });
     }
   }
@@ -126,13 +138,32 @@ export function pcActions(c: Character, sheet: Sheet, features: { name: string; 
 export const primaryAction = (list: TurnAction[]): TurnAction | undefined => list.find((a) => a.group === 'attack');
 
 /** A monster's actions from its stat block: actions, bonus actions, reactions, and traits that say they take one (Nimble Escape). */
-export function monsterActions(m: MonsterDef): TurnAction[] {
+/**
+ * A monster's actions: its stat block's, its Spellcasting trait's spells (`spell` finds a spell by its lower-case name; `used`: the
+ * combatant's spellsUsed) and the basic ones.
+ */
+export function monsterActions(m: MonsterDef, o: { spell?: (name: string) => SpellDef | undefined; used?: Record<string, number> } = {}): TurnAction[] {
   const of = (list: MonsterDef['actions'], cost: Cost, key: string) => list.map((t, i): TurnAction => ({ id: `mon:${key}:${i}`, name: t.name, cost, group: 'monster', text: t.text }));
   const traits = m.traits.flatMap((t, i): TurnAction[] => { const cost = traitCost(richToPlain(t.text)); return cost === 'none' ? [] : [{ id: `mon:trait:${i}`, name: t.name, cost, group: 'monster', text: t.text }]; });
   const legendary = m.legendary.map((t, i): TurnAction => ({ id: `mon:legendary:${i}`, name: t.name, cost: 'none', group: 'monster', text: t.text,
     legendary: Number(/costs (\d) actions/i.exec(t.name)?.[1] ?? 1) }));
   const basic = basics(m.skills.athletics ?? abilityMod(m.scores.str), m.skills.acrobatics ?? abilityMod(m.scores.dex));
-  return [...of(m.actions, 'action', 'action'), ...of(m.bonusActions, 'bonus', 'bonus'), ...traits, ...of(m.reactions, 'reaction', 'reaction'), ...legendary, ...basic];
+  const spells: TurnAction[] = [], seen = new Set<string>();
+  for (const t of [...m.traits, ...m.actions]) {
+    const book = o.spell && readSpellcasting(t);
+    if (!book) continue;
+    const ability = /spellcasting ability is (\w+)/i.exec(richToPlain(t.text))?.[1]?.slice(0, 3).toLowerCase() as keyof MonsterDef['scores'] | undefined;
+    const base = { attack: book.attack, dc: book.dc, charLevel: book.level ?? 1, mod: ability && m.scores[ability] !== undefined ? abilityMod(m.scores[ability]) : 0 };
+    for (const g of book.groups) for (const name of g.spells) {
+      const s = o.spell!(name), cost = s && castingCost(s.castingTime);
+      if (!s || !cost || seen.has(s.id)) continue;
+      seen.add(s.id);
+      const key = g.slots ? `slot:${g.slots.level}` : g.perDay ? `day:${s.id}` : undefined, max = g.slots?.count ?? g.perDay;
+      spells.push({ id: `mon:spell:${s.id}`, name: s.name, cost, group: 'spell', text: s.text, spell: { id: s.id, level: s.level, concentration: s.concentration },
+        cast: { ...base, read: readSpell(s) }, ...(key && max !== undefined && { spend: key, uses: { left: Math.max(0, max - (o.used?.[key] ?? 0)), max } }) });
+    }
+  }
+  return [...of(m.actions, 'action', 'action'), ...of(m.bonusActions, 'bonus', 'bonus'), ...traits, ...of(m.reactions, 'reaction', 'reaction'), ...legendary, ...spells, ...basic];
 }
 
 /** Whether it applies now (Escape only while grappled, Stand up only while prone, Drop prone only while standing). */
@@ -171,6 +202,10 @@ function onHasteAction(x: Combatant, a: TurnAction, perAction: number): boolean 
 export function problemOf(x: Combatant, a: TurnAction, conditions: readonly string[], onTurn: boolean, perAction = 1): string | undefined {
   if (a.uses && a.uses.left < 1) return `no ${a.name} left`;
   if (!visible(a, conditions)) return 'not now';
+  if (a.blocked) return a.blocked;
+  // SRD 5.1: after a bonus-action spell, no other spell that turn but a cantrip with a casting time of 1 action
+  if (a.spell && onTurn && x.economy?.bonusSpell && !(a.cost === 'action' && a.spell.level === 0)) return 'after a bonus-action spell, only a cantrip that takes an action';
+  if (a.spell && onTurn && a.cost === 'bonus' && x.economy?.leveledSpell) return 'a spell other than an action cantrip was already cast this turn';
   if (a.id === 'react:readied' && !x.economy?.readied) return 'nothing readied';
   if (a.grants === 'action' && !onTurn) return 'not your turn';
   if (a.grants === 'action' && x.economy?.surged) return 'once a turn';
@@ -218,6 +253,9 @@ export function applyUse(k: Combat, x: Combatant, a: TurnAction, perAction = 1, 
   if (attackOf(a, perAction) && a.attack && lightMelee(a.attack)) y = mark({ light: true });
   if (a.id === 'free:swap') y = mark({ object: true });
   if (a.id === 'std:ready') y = mark({ readied: true });
+  if (a.spell && a.cost === 'bonus') y = mark({ bonusSpell: true });
+  if (a.spell && !(a.cost === 'action' && a.spell.level === 0)) y = mark({ leveledSpell: true });
+  if (a.spend) y = { ...y, spellsUsed: { ...y.spellsUsed, [a.spend]: (y.spellsUsed?.[a.spend] ?? 0) + 1 } };
   if (x.kind !== 'pc' && (a.id === 'free:prone' || a.id === 'free:stand')) { // a PC's conditions live on the character (characterEffect)
     y = { ...y, conditions: [...(y.conditions ?? []).filter((n) => n.toLowerCase() !== 'prone'), ...(a.id === 'free:prone' ? ['Prone'] : [])] };
   }

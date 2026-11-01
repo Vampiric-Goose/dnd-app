@@ -26,7 +26,7 @@
   // arrow (bindable): the arrow picked with the Select tool (a tap on its line or head); onclear: Delete / Backspace with a clearable one picked.
   // ondelete: Delete / Backspace with tokens selected (unset = the key does nothing, as for players).
   // ondrag: the dragged token's ghost moved to a new cell (`at` undefined: the drag ended).
-  let { width, height, image, grid, tokens, dm, diagonal, selected, canDrag, speedOf, limitOf, onselect, onmove, rev = 0, fog, fogStyle = dm ? 'shade' : 'black', onfog, corner, arrows = [], ondeclare, onclear, ondelete, arrow = $bindable(), ondrag }: {
+  let { width, height, image, grid, tokens, dm, diagonal, selected, canDrag, speedOf, limitOf, onselect, onmove, rev = 0, fog, fogStyle = dm ? 'shade' : 'black', onfog, corner, arrows = [], ondeclare, onclear, ondelete, arrow = $bindable(), ondrag, preset }: {
     width: number; height: number; image?: string; grid: Grid; tokens: CanvasToken[]; dm: boolean; diagonal: '5-5-5' | '5-10-5'; selected: string[];
     canDrag: (id: string) => boolean; speedOf?: (id: string) => number | undefined; limitOf?: (id: string) => { from?: Pt; budget: number; clamp: boolean } | undefined;
     onselect: (ids: string[]) => void; onmove: (ids: string[], primary: string, to: Pt) => void; rev?: number;
@@ -34,6 +34,8 @@
     arrows?: Arrow[]; ondeclare?: (d: { from: Pt; fromToken?: string; to: Pt; toToken?: string }) => void; onclear?: (id: string) => void;
     ondelete?: (ids: string[]) => void; arrow?: string;
     ondrag?: (id: string, at: Pt | undefined) => void;
+    /** An area spell's template (`n` changes on each request): the Template tool with its shape and size, at `origin` when given. */
+    preset?: { shape: Shape; feet: number; width?: number; origin?: Pt; n: number };
   } = $props();
   // One selection at a time: picking tokens drops the arrow; an arrow that went (cleared, turn ended) is no longer picked.
   $effect(() => { if (selected.length || (arrow !== undefined && !arrows.some((a) => a.id === arrow))) untrack(() => (arrow = undefined)); });
@@ -52,6 +54,14 @@
   let lineWidth = $state(5);
   let tplAt: { origin: Pt; aim: Pt } | undefined = $state.raw();
   const ft = (n: number, lo: number, hi: number, d: number) => (Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : d);
+  $effect(() => {
+    const p = preset;
+    if (!p) return;
+    untrack(() => {
+      tool = 'template'; shape = p.shape; tplFeet = p.feet; if (p.width) lineWidth = p.width;
+      tplAt = p.origin ? { origin: p.origin, aim: { x: p.origin.x + 1, y: p.origin.y } } : undefined;
+    });
+  });
   const template = $derived<Template | undefined>(tplAt && { shape, ...tplAt, feet: ft(tplFeet, 1, 1000, 20), ...(shape === 'line' && { width: ft(lineWidth, 1, 100, 5) }) });
   const inside = $derived(template ? new Set(tokensInTemplate(template, grid, tokens)) : new Set<string>());
   const insideNames = $derived(tokens.filter((t) => inside.has(t.id)).map((t) => t.name));

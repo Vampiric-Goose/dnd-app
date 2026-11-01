@@ -134,8 +134,9 @@ export interface Combatant {
   conditions?: string[];                 // monsters only (a PC's are character.state.conditions)
   durations?: Record<string, Duration>;  // condition name → when it ends (PCs too)
   concentrating?: boolean; legendary?: { max: number; used: number }; reactionUsed?: boolean; notes?: string;
-  economy?: { used: number; extra: number; bonus: boolean; attacks: number; light?: boolean; surged?: boolean; haste?: boolean; object?: boolean; readied?: boolean }; // this turn: Actions used, extra Actions, Bonus action, attacks in the Attack action, attacked with a light melee weapon (two-weapon fighting), Action Surge used, one extra Action is Haste's, the free object interaction used, an action readied (absent: fresh)
-  hasted?: { by: string; round: number; ended?: true }; // the Hasted condition: the caster's combatant id and the round cast; ended: the caster cast another concentration spell
+  economy?: { used: number; extra: number; bonus: boolean; attacks: number; light?: boolean; surged?: boolean; haste?: boolean; object?: boolean; readied?: boolean; bonusSpell?: boolean; leveledSpell?: boolean }; // this turn: Actions used, extra Actions, Bonus action, attacks in the Attack action, attacked with a light melee weapon (two-weapon fighting), Action Surge used, one extra Action is Haste's, the free object interaction used, an action readied, a bonus-action spell cast, a spell other than an action cantrip cast (absent: fresh)
+  hasted?: { by: string; round: number; ended?: true };
+  spellsUsed?: Record<string, number>; // a monster's spell slots ('slot:3') and per-day spells ('day:<spell id>') used this fight // the Hasted condition: the caster's combatant id and the round cast; ended: the caster cast another concentration spell
 }
 /** The live fight of a campaign. `combatants` is the order; round 0 = setup; `turn` = the current combatant's id. */
 export interface Combat { campaignId: string; combatants: Combatant[]; round: number; turn?: string; groupMonsters: boolean; updatedAt: number;

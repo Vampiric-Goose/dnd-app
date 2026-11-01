@@ -7,6 +7,7 @@ import type { CampaignSettings, Character, Combat, Combatant, Duration, Encounte
 import { uid } from '../uid.ts';
 import { addMonsters, concentrationDc, encounterPicks, initOk, monsterHp, newCombat, next, patchCombatant, removeStep, rollInit, setInit, start, type Expired, type HpOp, type Step } from './combat.ts';
 import { restoreCombat, restoreScene, snapshotFight } from './encounters.ts';
+import { BLOCKING } from './economy.ts';
 
 // One operation at a time (per tab): two quick hits each read the character after the other's write, so both land.
 let queue: Promise<unknown> = Promise.resolve();
@@ -132,9 +133,10 @@ export const setCondition = (cid: string, combatantId: string, name: string, on:
     if (y.id !== combatantId) return y;
     const kept = Object.entries(y.durations ?? {}).filter(([n]) => n !== name);
     const durations = Object.fromEntries(on && duration ? [...kept, [name, duration]] : kept);
-    if (y.kind === 'pc') return { ...y, durations };
+    const stop = on && BLOCKING.includes(name.toLowerCase()) ? { concentrating: false } : {}; // SRD 5.1: incapacitated ends concentration
+    if (y.kind === 'pc') return { ...y, durations, ...stop };
     const conditions = (y.conditions ?? []).filter((n) => n !== name);
-    return { ...y, durations, conditions: on ? [...conditions, name] : conditions };
+    return { ...y, durations, conditions: on ? [...conditions, name] : conditions, ...stop };
   }) }));
 });
 
