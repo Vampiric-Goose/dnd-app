@@ -1,0 +1,99 @@
+<style>
+  .dir { margin: 0 0 28px; border-radius: 10px; overflow: hidden; cursor: pointer; outline: 2px solid transparent; transition: outline-color .15s; }
+  .dir.selected { outline-color: #2bb3a3; }
+  .dir .cap { padding: 10px 14px; background: #f3f3f1; color: #222; font: 600 14px system-ui; display: flex; gap: 10px; align-items: baseline; }
+  .dir .cap span { font-weight: 400; color: #555; }
+  .shot { display: grid; grid-template-columns: 170px 1fr 230px; min-height: 360px; font: 13px/1.45 system-ui, sans-serif; }
+  .shot .rail { padding: 14px 12px; display: flex; flex-direction: column; gap: 2px; }
+  .shot .rail b { font-size: 15px; letter-spacing: .02em; margin-bottom: 10px; }
+  .shot .rail a { padding: 6px 8px; border-radius: 6px; text-decoration: none; }
+  .shot main { padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  .shot aside { padding: 16px 14px; display: flex; flex-direction: column; gap: 8px; }
+  .hd { display: flex; align-items: baseline; gap: 12px; }
+  .hd h4 { margin: 0; font-size: 22px; }
+  .stats { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
+  .stat { padding: 8px 6px; text-align: center; }
+  .stat small { display: block; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; }
+  .stat strong { font-size: 20px; }
+  .drawer { padding: 9px 12px; display: flex; justify-content: space-between; }
+  .drawer.open { flex-direction: column; gap: 6px; }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+  /* A: Abyssal instrument */
+  .a { background: #0a1113; color: #cfe3df; }
+  .a .rail { background: #070d0e; border-right: 1px solid #14272a; }
+  .a .rail a { color: #6f8f8b; } .a .rail a.on { color: #e6fffb; background: #0f2a2b; box-shadow: inset 2px 0 #2dd4bf; }
+  .a .hd span { color: #5f8783; }
+  .a .stat { border: 1px solid #16302f; border-radius: 4px; } .a .stat small { color: #5f8783; } .a .stat strong { font-family: ui-monospace, Consolas, monospace; color: #eafffb; }
+  .a .drawer { border-top: 1px solid #14272a; color: #9fbdb8; } .a .drawer em { color: #2dd4bf; font-style: normal; }
+  .a aside { background: #0c1719; border-left: 1px solid #14272a; }
+  .a .hp { height: 6px; background: #13292a; border-radius: 3px; } .a .hp i { display: block; height: 100%; width: 64%; background: #2dd4bf; border-radius: 3px; }
+
+  /* B: Verdigris */
+  .b { background: #15191a; color: #dfe6e2; }
+  .b .rail { background: #101415; } .b .rail b { font-family: Georgia, serif; color: #c9a86a; }
+  .b .rail a { color: #8b9a96; } .b .rail a.on { color: #f1f5f3; background: linear-gradient(90deg, #1f3a36, transparent); }
+  .b .hd h4 { font-family: Georgia, serif; font-weight: 400; } .b .hd span { color: #c9a86a; font-style: italic; font-family: Georgia, serif; }
+  .b .stat { background: #1b2324; border-radius: 10px; border-bottom: 2px solid #3e9c8f; } .b .stat small { color: #87a39c; } .b .stat strong { color: #fff; }
+  .b .drawer { background: #1b2324; border-radius: 8px; color: #b8c6c1; } .b .drawer em { color: #c9a86a; font-style: normal; }
+  .b aside { background: #111617; } .b .hp { height: 6px; background: #263031; border-radius: 3px; } .b .hp i { display: block; height: 100%; width: 64%; background: linear-gradient(90deg, #3e9c8f, #6cc7b8); border-radius: 3px; }
+
+  /* C: Tidewater contours */
+  .c { background: radial-gradient(1200px 400px at 70% -10%, #0f3a3d 0%, #0b1f22 45%, #08161a 100%); color: #d5e7e6; }
+  .c .rail { background: rgba(4, 14, 16, .55); } .c .rail b { color: #7fe0d4; font-weight: 300; letter-spacing: .3em; text-transform: uppercase; font-size: 12px; }
+  .c .rail a { color: #7aa3a1; } .c .rail a.on { color: #fff; border-left: 1px solid #7fe0d4; border-radius: 0; }
+  .c .hd h4 { font-weight: 300; letter-spacing: .04em; } .c .hd span { color: #7aa3a1; }
+  .c .stat { border-left: 1px solid rgba(127, 224, 212, .35); text-align: left; padding-left: 10px; } .c .stat small { color: #7aa3a1; } .c .stat strong { font-weight: 300; font-size: 24px; color: #fff; }
+  .c .drawer { border-bottom: 1px dashed rgba(127, 224, 212, .2); color: #a9c7c5; } .c .drawer em { color: #7fe0d4; font-style: normal; }
+  .c aside { background: rgba(4, 14, 16, .35); } .c .hp { height: 2px; background: rgba(127, 224, 212, .15); } .c .hp i { display: block; height: 100%; width: 64%; background: #7fe0d4; }
+</style>
+
+<h2>Three directions for teal and dark</h2>
+<p class="subtitle">Same character sheet, three personalities. Sections are folded into pull-downs; only the open one shows its detail. Click the one closest to the feel you want (you can mix: "A's layout with B's colors").</p>
+
+<div class="dir" data-choice="a" onclick="toggleSelect(this)">
+  <div class="cap">A · Abyssal instrument <span>near-black, one sharp teal, monospace numbers, hairline rules: a control panel for the table</span></div>
+  <div class="shot a">
+    <div class="rail"><b>DNDND</b><a>Campaigns</a><a class="on">Characters</a><a>Combat</a><a>Map</a><a>Items</a><a>More ▾</a></div>
+    <main>
+      <div class="hd"><h4>Brom</h4><span>Hill Dwarf · Fighter 3 · AC 18 · Speed 25</span></div>
+      <div class="stats"><div class="stat"><small>Str</small><strong>+3</strong></div><div class="stat"><small>Dex</small><strong>+0</strong></div><div class="stat"><small>Con</small><strong>+3</strong></div><div class="stat"><small>Int</small><strong>-1</strong></div><div class="stat"><small>Wis</small><strong>+1</strong></div><div class="stat"><small>Cha</small><strong>+0</strong></div></div>
+      <div class="drawer open"><span><em>▾</em> Attacks</span><span>Longsword +5 · 1d8+3 slashing &nbsp;·&nbsp; Crossbow +2 · 1d8 piercing</span></div>
+      <div class="drawer"><span><em>▸</em> Skills &amp; saves</span><span>Athletics +5 · Perception +3</span></div>
+      <div class="drawer"><span><em>▸</em> Features</span><span>Second Wind · Action Surge</span></div>
+      <div class="drawer"><span><em>▸</em> Inventory</span><span>14 items · 92 lb</span></div>
+    </main>
+    <aside><small>HIT POINTS</small><strong style="font:600 26px ui-monospace,monospace">18 / 28</strong><div class="hp"><i></i></div><small style="margin-top:10px">CONDITIONS</small><span>Poisoned</span><small style="margin-top:10px">LAST ROLL</small><span>Athletics · 17</span></aside>
+  </div>
+</div>
+
+<div class="dir" data-choice="b" onclick="toggleSelect(this)">
+  <div class="cap">B · Verdigris <span>charcoal with oxidized-copper teal and a brass thread; soft panels, a serif for names: arcane but restrained</span></div>
+  <div class="shot b">
+    <div class="rail"><b>DNDND</b><a>Campaigns</a><a class="on">Characters</a><a>Combat</a><a>Map</a><a>Items</a><a>More ▾</a></div>
+    <main>
+      <div class="hd"><h4>Brom</h4><span>Hill Dwarf Fighter, level 3</span></div>
+      <div class="stats"><div class="stat"><small>Str</small><strong>+3</strong></div><div class="stat"><small>Dex</small><strong>+0</strong></div><div class="stat"><small>Con</small><strong>+3</strong></div><div class="stat"><small>Int</small><strong>-1</strong></div><div class="stat"><small>Wis</small><strong>+1</strong></div><div class="stat"><small>Cha</small><strong>+0</strong></div></div>
+      <div class="drawer open"><span><em>▾</em> Attacks</span><span>Longsword +5 · 1d8+3 slashing &nbsp;·&nbsp; Crossbow +2 · 1d8 piercing</span></div>
+      <div class="row2"><div class="drawer"><span><em>▸</em> Skills &amp; saves</span></div><div class="drawer"><span><em>▸</em> Features</span></div></div>
+      <div class="drawer"><span><em>▸</em> Inventory</span><span>14 items · 92 lb</span></div>
+    </main>
+    <aside><small style="color:#87a39c">Hit points</small><strong style="font-size:26px">18 / 28</strong><div class="hp"><i></i></div><small style="margin-top:10px;color:#87a39c">Conditions</small><span>Poisoned</span><small style="margin-top:10px;color:#87a39c">Last roll</small><span>Athletics · 17</span></aside>
+  </div>
+</div>
+
+<div class="dir" data-choice="c" onclick="toggleSelect(this)">
+  <div class="cap">C · Tidewater <span>deep-sea gradient, light thin type, numbers set large with no boxes, dashed contour rules: calm and spacious</span></div>
+  <div class="shot c">
+    <div class="rail"><b>Dndnd</b><a>Campaigns</a><a class="on">Characters</a><a>Combat</a><a>Map</a><a>Items</a><a>More ▾</a></div>
+    <main>
+      <div class="hd"><h4>Brom</h4><span>Hill Dwarf · Fighter 3</span></div>
+      <div class="stats"><div class="stat"><small>Str</small><strong>+3</strong></div><div class="stat"><small>Dex</small><strong>+0</strong></div><div class="stat"><small>Con</small><strong>+3</strong></div><div class="stat"><small>Int</small><strong>-1</strong></div><div class="stat"><small>Wis</small><strong>+1</strong></div><div class="stat"><small>Cha</small><strong>+0</strong></div></div>
+      <div class="drawer open"><span><em>▾</em> Attacks</span><span>Longsword +5 · 1d8+3 slashing &nbsp;·&nbsp; Crossbow +2 · 1d8 piercing</span></div>
+      <div class="drawer"><span><em>▸</em> Skills &amp; saves</span><span>Athletics +5 · Perception +3</span></div>
+      <div class="drawer"><span><em>▸</em> Features</span><span>Second Wind · Action Surge</span></div>
+      <div class="drawer"><span><em>▸</em> Inventory</span><span>14 items · 92 lb</span></div>
+    </main>
+    <aside><small style="color:#7aa3a1;letter-spacing:.2em">HIT POINTS</small><strong style="font:300 30px system-ui">18 / 28</strong><div class="hp"><i></i></div><small style="margin-top:10px;color:#7aa3a1;letter-spacing:.2em">CONDITIONS</small><span>Poisoned</span><small style="margin-top:10px;color:#7aa3a1;letter-spacing:.2em">LAST ROLL</small><span>Athletics · 17</span></aside>
+  </div>
+</div>

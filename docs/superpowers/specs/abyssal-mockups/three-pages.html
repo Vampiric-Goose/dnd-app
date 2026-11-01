@@ -1,0 +1,140 @@
+<style>
+  .pg { margin: 0 0 30px; border-radius: 10px; overflow: hidden; border: 1px solid #ddd; }
+  .pg .cap { padding: 10px 14px; background: #f3f3f1; color: #222; font: 600 14px system-ui; }
+  .pg .cap span { font-weight: 400; color: #555; }
+  .tiers { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; background: #fafafa; border-top: 1px solid #e5e5e5; font: 12.5px/1.45 system-ui; color: #333; }
+  .tiers div { padding: 10px 14px; border-right: 1px solid #eee; } .tiers b { display: block; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: #0e8f80; margin-bottom: 4px; }
+
+  .A { background: #0a1113; color: #cfe3df; font: 12.5px/1.4 system-ui, sans-serif; display: grid; min-height: 380px; }
+  .A .nav { background: #070d0e; border-right: 1px solid #14272a; padding: 12px 8px; display: flex; flex-direction: column; gap: 2px; }
+  .A .nav b { color: #e6fffb; letter-spacing: .08em; margin: 0 6px 10px; } .A .nav a { color: #6f8f8b; padding: 5px 8px; border-radius: 5px; }
+  .A .nav a.on { color: #e6fffb; background: #0f2a2b; box-shadow: inset 2px 0 #2dd4bf; }
+  .A .side { background: #0c1719; border-left: 1px solid #14272a; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .A .lbl { font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: #5f8783; }
+  .A .mono { font-family: ui-monospace, Consolas, monospace; color: #eafffb; }
+  .A .tab { display: flex; gap: 14px; border-bottom: 1px solid #14272a; padding-bottom: 6px; } .A .tab span { color: #6f8f8b; } .A .tab span.on { color: #e6fffb; box-shadow: 0 7px 0 -5px #2dd4bf; }
+  .A .chip { display: inline-block; padding: 1px 7px; border: 1px solid #1d3a3a; border-radius: 99px; color: #9fbdb8; font-size: 11px; }
+  .A .chip.t { border-color: #2dd4bf; color: #2dd4bf; }
+  .A .btn { display: inline-block; padding: 4px 10px; border: 1px solid #1d3a3a; border-radius: 5px; color: #cfe3df; }
+  .A .btn.p { background: #2dd4bf; color: #04201d; border-color: #2dd4bf; font-weight: 600; }
+  .A .dr { border-top: 1px solid #14272a; padding: 6px 0; display: flex; justify-content: space-between; color: #9fbdb8; } .A .dr em { color: #2dd4bf; font-style: normal; }
+  .A .bar { height: 5px; background: #13292a; border-radius: 3px; } .A .bar i { display: block; height: 100%; background: #2dd4bf; border-radius: 3px; } .A .bar i.r { background: #e5484d; }
+
+  /* map */
+  .map { grid-template-columns: 130px 1fr 230px; }
+  .canvas { position: relative; background: #0d1a1c; background-image: linear-gradient(#18302f 1px, transparent 1px), linear-gradient(90deg, #18302f 1px, transparent 1px); background-size: 28px 28px; }
+  .canvas .top { position: absolute; left: 10px; right: 10px; top: 10px; display: flex; justify-content: space-between; }
+  .seg { display: inline-flex; background: rgba(7,13,14,.92); border: 1px solid #1d3a3a; border-radius: 7px; overflow: hidden; }
+  .seg span { padding: 5px 10px; color: #8fb0ab; border-right: 1px solid #14272a; } .seg span.on { color: #04201d; background: #2dd4bf; font-weight: 600; }
+  .ctx { position: absolute; left: 10px; top: 46px; background: rgba(7,13,14,.92); border: 1px solid #1d3a3a; border-radius: 7px; padding: 5px 10px; color: #9fbdb8; }
+  .zoom { position: absolute; right: 10px; bottom: 10px; } .tok { position: absolute; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font: 700 10px system-ui; color: #fff; }
+
+  /* combat */
+  .cmb { grid-template-columns: 130px 1fr 250px; }
+  .cmb main { padding: 10px 14px; display: flex; flex-direction: column; gap: 4px; }
+  .turn { display: flex; align-items: center; gap: 12px; padding: 8px 10px; border: 1px solid #1d3a3a; border-radius: 7px; margin-bottom: 4px; }
+  .rowc { display: grid; grid-template-columns: 34px 1fr 120px 130px; gap: 10px; align-items: center; padding: 6px 8px; border-radius: 6px; }
+  .rowc.cur { background: #0f2a2b; box-shadow: inset 2px 0 #2dd4bf; }
+
+  /* items */
+  .itm { grid-template-columns: 130px 170px 1fr 250px; }
+  .facets { padding: 10px 12px; border-right: 1px solid #14272a; display: flex; flex-direction: column; gap: 4px; }
+  .facets .f { color: #9fbdb8; display: flex; justify-content: space-between; } .facets .f.on { color: #2dd4bf; }
+  .tbl { padding: 10px 14px; min-width: 0; } .tbl .h, .tbl .r { display: grid; grid-template-columns: 1.6fr 1fr .8fr .6fr .6fr; gap: 8px; padding: 5px 6px; }
+  .tbl .h { color: #5f8783; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; border-bottom: 1px solid #14272a; }
+  .tbl .r { border-bottom: 1px solid #0f1f21; color: #b9d2ce; } .tbl .r.sel { background: #0f2a2b; color: #e6fffb; box-shadow: inset 2px 0 #2dd4bf; }
+</style>
+
+<h2>Map, Combat and Items, sorted into three levels</h2>
+<p class="subtitle">Always visible = what you touch every minute. One tap away = appears when you ask for it. Tucked away = setup you do once per scene or session. Below each mockup is where every current control lands.</p>
+
+<div class="pg">
+  <div class="cap">Map <span>the canvas takes all the room; tools float on it; everything about the scene moves to a side panel with tabs</span></div>
+  <div class="A map">
+    <div class="nav"><b>DNDND</b><a>Characters</a><a>Combat</a><a class="on">Map</a><a>Items</a><a>More ▾</a></div>
+    <div class="canvas">
+      <div class="top"><span class="seg"><span class="on">Select</span><span>Ruler</span><span>Template</span><span>Fog</span></span><span class="seg"><span>Cave entrance ▾</span><span style="color:#2dd4bf">● Shown</span></span></div>
+      <div class="ctx">Box select: drag on empty map · Shift adds</div>
+      <div class="tok" style="left:120px;top:140px;background:#3b82c4">B</div><div class="tok" style="left:148px;top:140px;background:#7c4fc4">L</div><div class="tok" style="left:260px;top:200px;background:#c4513b">G1</div><div class="tok" style="left:288px;top:228px;background:#c4513b;outline:2px solid #2dd4bf">G2</div>
+      <div class="zoom"><span class="seg"><span>−</span><span>Fit</span><span>+</span></span></div>
+    </div>
+    <div class="side">
+      <div class="tab"><span class="on">Selected</span><span>Tokens</span><span>Scene</span></div>
+      <div style="display:flex;justify-content:space-between;align-items:baseline"><strong style="font-size:15px">Goblin 2</strong><span class="chip">Small</span></div>
+      <span class="lbl">Hit points</span><div><span class="mono" style="font-size:20px">4</span> <span style="color:#5f8783">/ 7</span></div><div class="bar"><i class="r" style="width:57%"></i></div>
+      <div style="display:flex;gap:6px;margin-top:4px"><span class="btn">− Damage</span><span class="btn">+ Heal</span></div>
+      <div class="dr"><span><em>▸</em> Hidden from players</span><span>off</span></div>
+      <div class="dr"><span><em>▸</em> Portrait &amp; size</span></div>
+      <div style="display:flex;gap:6px;margin-top:auto"><span class="btn p">Add to combat</span><span class="btn">Remove</span></div>
+    </div>
+  </div>
+  <div class="tiers">
+    <div><b>Always visible</b>Map, tool switcher (Select · Ruler · Template · Fog), scene picker with a Shown dot, zoom, the selected token's HP</div>
+    <div><b>One tap away</b>Tool options in a strip under the tools (fog brush/rectangle/size; template shape/size; box select), the Tokens tab with a single “+ Add” menu (party, a character, monsters), Add to combat</div>
+    <div><b>Tucked away</b>Scene tab: grid type, size, offsets, color, opacity, feet, Detect grid, free movement, rename, delete; New scene lives in the scene picker</div>
+  </div>
+</div>
+
+<div class="pg">
+  <div class="cap">Combat <span>a slim row per combatant; clicking a row opens its details in the right panel instead of every row showing every control</span></div>
+  <div class="A cmb">
+    <div class="nav"><b>DNDND</b><a>Characters</a><a class="on">Combat</a><a>Map</a><a>Items</a><a>More ▾</a></div>
+    <main>
+      <div class="turn"><span class="lbl">Round</span><span class="mono" style="font-size:18px">3</span><span style="flex:1">Goblin 2's turn</span><span class="btn">◀ Prev</span><span class="btn p">Next turn ▶</span><span class="btn">⋯</span><span class="btn">+ Add</span></div>
+      <div class="rowc"><span class="mono">19</span><span>Lyra</span><div class="bar"><i style="width:90%"></i></div><span><span class="chip">Blessed</span></span></div>
+      <div class="rowc"><span class="mono">17</span><span>Brom</span><div class="bar"><i style="width:64%"></i></div><span><span class="chip">Poisoned</span></span></div>
+      <div class="rowc cur"><span class="mono">14</span><span>Goblin 2</span><div class="bar"><i class="r" style="width:57%"></i></div><span><span class="chip t">Bloodied</span></span></div>
+      <div class="rowc"><span class="mono">14</span><span>Goblin 1</span><div class="bar"><i class="r" style="width:100%"></i></div><span></span></div>
+      <div class="rowc"><span class="mono">8</span><span>Bugbear</span><div class="bar"><i class="r" style="width:80%"></i></div><span><span class="chip">Concentrating</span></span></div>
+    </main>
+    <div class="side">
+      <div class="tab"><span class="on">Goblin 2</span><span>Encounters</span></div>
+      <div><span class="mono" style="font-size:20px">4</span> <span style="color:#5f8783">/ 7 HP · AC 15</span></div>
+      <div style="display:flex;gap:6px"><span class="btn">− Damage</span><span class="btn">+ Heal</span><span class="btn">Temp</span></div>
+      <div class="dr"><span><em>▸</em> Conditions</span><span>none</span></div>
+      <div class="dr"><span><em>▸</em> Reaction · Legendary</span><span>ready</span></div>
+      <div class="dr"><span><em>▸</em> Stat block</span></div>
+      <div class="dr"><span><em>▸</em> Notes</span></div>
+    </div>
+  </div>
+  <div class="tiers">
+    <div><b>Always visible</b>Round, whose turn, Prev / Next, one row each: initiative, name, HP bar, condition chips</div>
+    <div><b>One tap away</b>Click a row: damage, heal, temp HP, conditions with durations, concentration, death saves, legendary, reaction, stat block, notes. “+ Add”: party, character, monster, lair</div>
+    <div><b>Tucked away</b>“⋯”: Modules, Group identical monsters, Sort, Roll unrolled, End combat. Encounters tab for preparing fights</div>
+  </div>
+</div>
+
+<div class="pg">
+  <div class="cap">Items <span>filters become a narrow column of folding groups with counts; the list becomes a sortable table; the chosen item's actions sit on the right</span></div>
+  <div class="A itm">
+    <div class="nav"><b>DNDND</b><a>Characters</a><a>Combat</a><a>Map</a><a class="on">Items</a><a>More ▾</a></div>
+    <div class="facets">
+      <div class="tab"><span class="on">All</span><span>Unassigned</span></div>
+      <span class="lbl" style="margin-top:6px">Kind</span><span class="f on">Magic <span class="mono">412</span></span><span class="f">Mundane <span class="mono">238</span></span>
+      <span class="lbl" style="margin-top:6px">Rarity ▾</span><span class="f">Uncommon <span class="mono">96</span></span><span class="f on">Rare <span class="mono">88</span></span><span class="f">Very rare <span class="mono">51</span></span>
+      <span class="lbl" style="margin-top:6px">Type ▸</span><span class="lbl">Source ▸</span>
+    </div>
+    <div class="tbl">
+      <div style="display:flex;gap:8px;margin-bottom:8px"><span class="btn" style="flex:1;color:#5f8783">Search 88 rare magic items…</span><span class="btn">+ New item</span></div>
+      <div class="h"><span>Name ▾</span><span>Type</span><span>Rarity</span><span>Attune</span><span>Source</span></div>
+      <div class="r"><span>Amulet of Health</span><span>Wondrous</span><span>Rare</span><span>Yes</span><span>DMG</span></div>
+      <div class="r sel"><span>Flame Tongue</span><span>Weapon</span><span>Rare</span><span>Yes</span><span>DMG</span></div>
+      <div class="r"><span>Necklace of Fireballs</span><span>Wondrous</span><span>Rare</span><span>—</span><span>DMG</span></div>
+      <div class="r"><span>Ring of Protection</span><span>Ring</span><span>Rare</span><span>Yes</span><span>DMG</span></div>
+      <div class="r"><span>Wand of Web</span><span>Wand</span><span>Uncommon</span><span>Yes</span><span>DMG</span></div>
+    </div>
+    <div class="side">
+      <strong style="font-size:15px">Flame Tongue</strong><span style="color:#5f8783">Weapon (any sword) · rare · attunement</span>
+      <div style="display:flex;gap:6px;margin-top:4px"><span class="btn p">Give to…</span><span class="btn">To Unassigned</span></div>
+      <div class="dr"><span><em>▾</em> Description</span></div>
+      <span style="color:#9fbdb8">Bonus action: flames erupt from the blade, +2d6 fire damage on a hit…</span>
+      <div class="dr"><span><em>▸</em> Player view</span><span>“Longsword”</span></div>
+      <div class="dr"><span><em>▸</em> Customize · Export PDF</span></div>
+    </div>
+  </div>
+  <div class="tiers">
+    <div><b>Always visible</b>Search, a sortable table (name, type, rarity, attunement, source), the selected item's name and main actions</div>
+    <div><b>One tap away</b>Filter groups with counts (Kind, Rarity open; Type, Source folded), Give to… / To Unassigned, Description</div>
+    <div><b>Tucked away</b>Player view, Customize, Export PDF, Remove damaged items; Unassigned is a tab, not mixed into the list</div>
+  </div>
+</div>

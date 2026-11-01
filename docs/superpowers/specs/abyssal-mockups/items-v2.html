@@ -1,0 +1,74 @@
+<style>
+  .pg { margin: 0 0 30px; border-radius: 10px; overflow: hidden; border: 1px solid #ddd; cursor: pointer; outline: 2px solid transparent; }
+  .pg.selected { outline-color: #2bb3a3; }
+  .pg .cap { padding: 10px 14px; background: #f3f3f1; color: #222; font: 600 14px system-ui; }
+  .pg .cap span { font-weight: 400; color: #555; }
+  .A { background: #0a1113; color: #cfe3df; font: 12.5px/1.4 system-ui, sans-serif; display: grid; min-height: 360px; }
+  .A .nav { background: #070d0e; border-right: 1px solid #14272a; padding: 12px 8px; display: flex; flex-direction: column; gap: 2px; }
+  .A .nav b { color: #e6fffb; letter-spacing: .08em; margin: 0 6px 10px; } .A .nav a { color: #6f8f8b; padding: 5px 8px; border-radius: 5px; }
+  .A .nav a.on { color: #e6fffb; background: #0f2a2b; box-shadow: inset 2px 0 #2dd4bf; }
+  .A .side { background: #0c1719; border-left: 1px solid #14272a; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .A .lbl { font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: #5f8783; }
+  .A .mono { font-family: ui-monospace, Consolas, monospace; }
+  .A .tab { display: flex; gap: 14px; } .A .tab span { color: #6f8f8b; } .A .tab span.on { color: #e6fffb; box-shadow: 0 7px 0 -5px #2dd4bf; }
+  .A .btn { display: inline-block; padding: 4px 10px; border: 1px solid #1d3a3a; border-radius: 5px; color: #cfe3df; }
+  .A .btn.p { background: #2dd4bf; color: #04201d; border-color: #2dd4bf; font-weight: 600; }
+  .A .dd { display: inline-flex; gap: 6px; align-items: center; padding: 4px 10px; border: 1px solid #1d3a3a; border-radius: 5px; color: #9fbdb8; }
+  .A .dd.on { border-color: #2dd4bf; color: #2dd4bf; }
+  .A .pill { display: inline-flex; gap: 6px; padding: 1px 8px; border-radius: 99px; background: #0f2a2b; color: #a8f0e6; font-size: 11px; }
+  .A .dr { border-top: 1px solid #14272a; padding: 6px 0; display: flex; justify-content: space-between; color: #9fbdb8; } .A .dr em { color: #2dd4bf; font-style: normal; }
+  .main { padding: 10px 14px; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+  .h, .r { display: grid; grid-template-columns: 1.7fr 1fr .9fr .6fr .6fr; gap: 8px; padding: 5px 6px; }
+  .h { color: #5f8783; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; border-bottom: 1px solid #14272a; }
+  .r { border-bottom: 1px solid #0f1f21; color: #b9d2ce; } .r.sel { background: #0f2a2b; color: #e6fffb; box-shadow: inset 2px 0 #2dd4bf; }
+  .menu { position: absolute; background: #0c1719; border: 1px solid #1d3a3a; border-radius: 7px; padding: 6px; width: 170px; box-shadow: 0 10px 24px rgba(0,0,0,.5); z-index: 2; }
+  .menu div { display: flex; justify-content: space-between; padding: 4px 6px; color: #9fbdb8; border-radius: 4px; } .menu div.on { color: #2dd4bf; background: #0f2a2b; }
+  .exp { grid-column: 1 / -1; padding: 8px 6px 10px 14px; background: #0c1719; border-left: 2px solid #2dd4bf; color: #9fbdb8; display: flex; flex-direction: column; gap: 6px; }
+</style>
+
+<h2>Items, with three columns</h2>
+<p class="subtitle">Both keep the navigation on the left. The filter column is gone: filters become pull-downs above the list, and what you've picked shows as removable pills. Click the one you prefer.</p>
+
+<div class="pg" data-choice="detail-panel" onclick="toggleSelect(this)">
+  <div class="cap">A · List + detail panel <span>filters as pull-downs on top; the chosen item opens on the right (the same pattern as Map and Combat)</span></div>
+  <div class="A" style="grid-template-columns:130px 1fr 260px">
+    <div class="nav"><b>DNDND</b><a>Characters</a><a>Combat</a><a>Map</a><a class="on">Items</a><a>More ▾</a></div>
+    <div class="main" style="position:relative">
+      <div style="display:flex;gap:8px;align-items:center"><div class="tab"><span class="on">All items</span><span>Unassigned <span class="mono">3</span></span></div><span style="flex:1"></span><span class="btn">+ New item</span></div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap"><span class="btn" style="flex:1;min-width:140px;color:#5f8783">Search…</span><span class="dd on">Magic ▾</span><span class="dd on">Rare ▾</span><span class="dd">Type ▾</span><span class="dd">Source ▾</span><span class="dd">Sort: Name ▾</span></div>
+      <div class="menu" style="left:250px;top:66px"><div>Any rarity</div><div>Common <span class="mono">120</span></div><div>Uncommon <span class="mono">96</span></div><div class="on">✓ Rare <span class="mono">88</span></div><div>Very rare <span class="mono">51</span></div><div>Legendary <span class="mono">27</span></div></div>
+      <div style="display:flex;gap:6px;align-items:center"><span class="pill">Magic ✕</span><span class="pill">Rare ✕</span><span style="color:#5f8783">88 items · <u>clear</u></span></div>
+      <div class="h"><span>Name</span><span>Type</span><span>Rarity</span><span>Attune</span><span>Source</span></div>
+      <div class="r"><span>Amulet of Health</span><span>Wondrous</span><span>Rare</span><span>Yes</span><span>DMG</span></div>
+      <div class="r sel"><span>Flame Tongue</span><span>Weapon</span><span>Rare</span><span>Yes</span><span>DMG</span></div>
+      <div class="r"><span>Necklace of Fireballs</span><span>Wondrous</span><span>Rare</span><span>—</span><span>DMG</span></div>
+      <div class="r"><span>Ring of Protection</span><span>Ring</span><span>Rare</span><span>Yes</span><span>DMG</span></div>
+    </div>
+    <div class="side">
+      <strong style="font-size:15px">Flame Tongue</strong><span style="color:#5f8783">Weapon (any sword) · rare · attunement</span>
+      <div style="display:flex;gap:6px;margin-top:4px"><span class="btn p">Give to…</span><span class="btn">To Unassigned</span></div>
+      <div class="dr"><span><em>▾</em> Description</span></div>
+      <span style="color:#9fbdb8">Bonus action: flames erupt from the blade, +2d6 fire damage on a hit…</span>
+      <div class="dr"><span><em>▸</em> Player view</span><span>“Longsword”</span></div>
+      <div class="dr"><span><em>▸</em> Customize · Export PDF</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="pg" data-choice="inline" onclick="toggleSelect(this)">
+  <div class="cap">B · Full-width list, details open in place <span>no right panel; the chosen row unfolds under itself with its actions</span></div>
+  <div class="A" style="grid-template-columns:130px 1fr">
+    <div class="nav"><b>DNDND</b><a>Characters</a><a>Combat</a><a>Map</a><a class="on">Items</a><a>More ▾</a></div>
+    <div class="main">
+      <div style="display:flex;gap:8px;align-items:center"><div class="tab"><span class="on">All items</span><span>Unassigned <span class="mono">3</span></span></div><span style="flex:1"></span><span class="btn">+ New item</span></div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap"><span class="btn" style="flex:1;min-width:140px;color:#5f8783">Search…</span><span class="dd on">Magic ▾</span><span class="dd on">Rare ▾</span><span class="dd">Type ▾</span><span class="dd">Source ▾</span><span class="dd">Sort: Name ▾</span></div>
+      <div style="display:flex;gap:6px;align-items:center"><span class="pill">Magic ✕</span><span class="pill">Rare ✕</span><span style="color:#5f8783">88 items · <u>clear</u></span></div>
+      <div class="h"><span>Name</span><span>Type</span><span>Rarity</span><span>Attune</span><span>Source</span></div>
+      <div class="r"><span>Amulet of Health</span><span>Wondrous</span><span>Rare</span><span>Yes</span><span>DMG</span></div>
+      <div class="r sel"><span>Flame Tongue</span><span>Weapon</span><span>Rare</span><span>Yes</span><span>DMG</span>
+        <div class="exp"><span>Bonus action: flames erupt from the blade, +2d6 fire damage on a hit…</span><div style="display:flex;gap:6px"><span class="btn p">Give to…</span><span class="btn">To Unassigned</span><span class="btn">Player view</span><span class="btn">Customize</span><span class="btn">PDF</span></div></div></div>
+      <div class="r"><span>Necklace of Fireballs</span><span>Wondrous</span><span>Rare</span><span>—</span><span>DMG</span></div>
+      <div class="r"><span>Ring of Protection</span><span>Ring</span><span>Rare</span><span>Yes</span><span>DMG</span></div>
+    </div>
+  </div>
+</div>
