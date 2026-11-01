@@ -1,4 +1,4 @@
-import type { RaceDef, Size, SubraceDef } from '../../types.ts';
+import type { Choice, RaceDef, Size, SubraceDef } from '../../types.ts';
 import { ABILITIES, abilities, arr, base, proficiencies, speeds, table, traits, type Ctx, type Raw } from './common.ts';
 
 const SIZES = new Set(['T', 'S', 'M', 'L', 'H', 'G']);
@@ -13,7 +13,10 @@ export const subraceName = (r: Raw): string | undefined =>
 
 function shared(r: Raw, ctx: Ctx) {
   // `lineage` races (VRGR/MPMM) use the custom-lineage rule: +2 to one score and +1 to another
-  const ab = abilities(r.ability ?? (r.lineage ? [{ choose: { weighted: { from: ABILITIES, weights: [2, 1] } } }] : undefined)), pr = proficiencies(r, ctx), choices = [...ab.choices, ...pr.choices];
+  const ab = abilities(r.ability ?? (r.lineage ? [{ choose: { weighted: { from: ABILITIES, weights: [2, 1] } } }] : undefined)), pr = proficiencies(r, ctx);
+  // 5etools `feats: [{ any: n }]` (Variant Human, Custom Lineage): n feats of the character's choice
+  const feats = arr(r.feats).flatMap((f): Choice[] => Array.from({ length: typeof f?.any === 'number' ? f.any : 0 }, () => ({ type: 'feat' as const })));
+  const choices = [...ab.choices, ...pr.choices, ...feats];
   const resist = arr(r.resist).filter(x => typeof x === 'string');
   return {
     abilityBonuses: ab.bonuses, proficiencies: pr.proficiencies, traits: traits(r.entries),

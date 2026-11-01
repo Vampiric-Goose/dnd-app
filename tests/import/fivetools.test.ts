@@ -34,7 +34,7 @@ test('subrace overwrite: explicit (5etools `overwrite`, trait `data.overwrite`) 
   const subs = r.packs.flatMap(p => p.entities).filter(e => e.kind === 'subrace') as SubraceDef[];
   const by = (name: string) => subs.find(s => s.name === name)!;
   expect(subs.map(s => s.name).sort()).toEqual(['Testelf (Variant; Testdrow Descent)', 'Testhuman (Variant; Mark of Testing)', 'Variant Testhuman', 'Wood Testelf']);
-  expect(by('Variant Testhuman')).toMatchObject({ overwrite: ['ability'], choices: [{ type: 'ability', count: 2, amount: 1 }, { type: 'skill', count: 1 }] });
+  expect(by('Variant Testhuman')).toMatchObject({ overwrite: ['ability'], choices: [{ type: 'ability', count: 2, amount: 1 }, { type: 'skill', count: 1 }, { type: 'feat' }] }); // its 5etools `feats: [{ any: 1 }]`
   expect(by('Testhuman (Variant; Mark of Testing)')).toMatchObject({ overwrite: ['ability', 'languages'], overwriteTraits: ['Languages'], abilityBonuses: { con: 1, wis: 2 } });
   expect(by('Testelf (Variant; Testdrow Descent)')).toMatchObject({ overwrite: ['ability', 'skills'], overwriteTraits: ['Skill Versatility'], speed: { walk: 35 } });
   expect(by('Wood Testelf').overwrite).toBeUndefined();
