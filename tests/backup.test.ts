@@ -199,3 +199,18 @@ test('R56: Replace from a Player-view file restores the real item, view and sour
   played2.inventory[2] = { ...played2.inventory[2], chargesUsed: 2 };
   expect(restoreSecrets(played2, shownWand).inventory[2].chargesUsed).toBe(2);
 });
+
+test('a backup holding a saved fight round-trips; an old encounter without one still loads', async () => {
+  const combat = { campaignId: 'c1', combatants: [{ id: 'm', kind: 'monster' as const, name: 'Goblin', initMod: 2, dex: 14, tie: 0.5, conSave: 0, hp: 3 }], round: 2, turn: 'm', groupMonsters: false, updatedAt: 0 };
+  const fight = { combat, map: { sceneId: 's1', tokens: [{ id: 't', name: 'Goblin', x: 10, y: 10, size: 'S' as const, color: '#112233' }], fog: 'f' }, savedAt: 5 };
+  await db.campaigns.put(camp('c1'));
+  await db.encounters.put({ id: 'e1', campaignId: 'c1', name: 'Ambush', monsters: [], fight, updatedAt: 0 });
+  const file = await exportBackup({ campaignId: 'c1', includePacks: false });
+  await resetDb();
+  expect((await importBackup(file)).encounters).toBe(1);
+  expect((await db.encounters.get('e1'))?.fight).toEqual(fight);
+  await resetDb();
+  const old = { id: 'e2', campaignId: 'c1', name: 'Old', monsters: [{ monsterId: 'monster:goblin@SRD', count: 2 }], updatedAt: 0 };
+  expect((await importBackup(backup({ campaigns: [camp('c1')], encounters: [old] }))).encounters).toBe(1);
+  expect((await db.encounters.get('e2'))?.fight).toBeUndefined();
+});

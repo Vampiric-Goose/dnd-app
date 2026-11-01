@@ -1,6 +1,6 @@
 <script lang="ts">
   import { addCombatants, addMonsters, lairCombatant, MAX_COMBATANTS, pcCombatant, prev, rollInit, setInit } from '../../lib/combat/combat.ts';
-  import { endCombat, turn, updateCombat } from '../../lib/combat/store.ts';
+  import { deleteEncounter, endCombat, saveFight, saveFightAs, turn, updateCombat } from '../../lib/combat/store.ts';
   import { addDash, budgetApplies, effectiveSpeed, remainingFeet, resetMovement, undoDash } from '../../lib/combat/movement.ts';
   import type { ContentIndex } from '../../lib/content/index.ts';
   import { db } from '../../lib/db.ts';
@@ -16,6 +16,7 @@
   import CombatantPanel from './CombatantPanel.svelte';
   import CombatantRow from './CombatantRow.svelte';
   import Encounters from './Encounters.svelte';
+  import FightDialog, { type FightAnswer, type FightAsk } from './FightDialog.svelte';
   import MonsterSearch from './MonsterSearch.svelte';
   import { currentRun, reorder, sortAround } from './order.ts';
 
@@ -78,11 +79,29 @@
     return out;
   });
 
-  function end() {
-    if (!confirm('End this combat? The order, monster HP and condition durations are cleared.')) return;
+  // Saved fights: one dialog for naming, "save first?" (Encounters) and End combat on a linked fight.
+  let fightDialog: ReturnType<typeof FightDialog> | undefined = $state();
+  const ask = (k: FightAsk): Promise<FightAnswer> => fightDialog?.ask(k) ?? Promise.resolve(undefined);
+
+  async function saveAs() {
+    const a = await ask('name');
+    if (typeof a === 'object') await run(async () => { const e = await saveFightAs(cid, a.name); toast(`Saved as the encounter “${e.name}”.`); });
+  }
+
+  async function end() {
+    // A linked fight: keep its encounter (saved as it is now) or delete it. A failed save stops here, so the fight is not lost.
+    const linked = combat?.encounterId;
+    let then: (() => Promise<unknown>) | undefined;
+    if (linked) {
+      const a = await ask('end');
+      if (a === 'keep') then = () => saveFight(cid);
+      else if (a === 'delete') then = () => deleteEncounter(cid, linked);
+      else return;
+    } else if (!confirm('End this combat? The order, monster HP and condition durations are cleared.')) return;
     void run(async () => {
       // Stage 5: the fight's monster HP stays on the map's linked tokens. A failure there must not keep the fight going.
       try { await (await import('../../lib/map/store.ts')).endCombatWriteBack(cid); } catch (e) { console.warn(e); toast('The map tokens kept their old HP.', true); }
+      await then?.();
       await endCombat(cid);
     });
   }
@@ -119,7 +138,9 @@
       { label: 'Undo Dash', disabled: undoDash(combat, mover.id, mover.speed) === combat, onselect: () => { const { id, speed } = mover; void edit((c) => undoDash(c, id, speed)); } },
       { label: 'Reset movement', disabled: resetMovement(combat, mover.id) === combat, onselect: () => { const { id } = mover; void edit((c) => resetMovement(c, id)); } },
     ] : []),
-    ...(combat ? [{ separator: true } as const, { label: 'End combat', danger: true, onselect: end }] : []),
+    ...(combat ? [{ separator: true } as const, { label: 'Save as encounter…', onselect: () => void saveAs() }] : []),
+    ...(combat?.encounterId ? [{ label: 'Save encounter', onselect: () => void run(async () => { if (await saveFight(cid)) toast('Encounter saved.'); }) }] : []),
+    ...(combat ? [{ separator: true } as const, { label: 'End combat', danger: true, onselect: () => void end() }] : []),
   ]);
 </script>
 
@@ -196,7 +217,7 @@
     <Tabs label="Combat panel" tabs={[{ id: 'combatant', label: sel?.name ?? 'Combatant' }, { id: 'encounters', label: 'Encounters', count: encounters.length }]} bind:value={tab}>
       {#snippet panel(id)}
         {#if id === 'encounters'}
-          <Encounters {campaign} {encounters} {pool} {reload} />
+          <Encounters {campaign} {combat} {encounters} {pool} {reload} {ask} />
         {:else if sel}
           {#key sel.id}
             <CombatantPanel x={sel} i={list.indexOf(sel)} count={list.length} combatants={list} current={current.has(sel.id)}
@@ -210,6 +231,7 @@
     </Tabs>
   {/snippet}
 </Workspace>
+<FightDialog bind:this={fightDialog} />
 
 <style>
   .turnbar {
