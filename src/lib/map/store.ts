@@ -73,7 +73,7 @@ export async function placeCombatants(cid: string, added: Combatant[], lookup: (
     const linked = new Set(s.tokens.map((t) => t.combatantId)), chars = new Set(s.tokens.map((t) => t.characterId));
     const list: NewToken[] = added.flatMap((x): NewToken[] => {
       // ponytail: PC tokens are Medium (a Small PC takes the same one square in 2014); the DM map's Add uses the race's size
-      if (x.kind === 'pc') return x.characterId && !chars.has(x.characterId) ? [{ name: x.name, size: 'M', characterId: x.characterId }] : [];
+      if (x.kind === 'pc') return x.characterId && !chars.has(x.characterId) ? [{ name: x.name, size: 'M', characterId: x.characterId, ...(x.hidden && { hidden: true }) }] : [];
       return x.kind !== 'monster' || linked.has(x.id) ? [] : [{
         name: x.name, size: (x.monsterId && lookup(x.monsterId)?.size[0]) || 'M', combatantId: x.id,
         ...(x.monsterId && { monsterId: x.monsterId }), ...(x.hp !== undefined && { hp: x.hp }), ...(x.maxHp !== undefined && { maxHp: x.maxHp }), ...(x.hidden && { hidden: true }),
