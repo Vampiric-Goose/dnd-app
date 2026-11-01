@@ -40,3 +40,31 @@ test('two light weapons fit two hands; nothing is stowed when it fits', () => {
   expect(equip(inv, 'd')).toMatchObject({ stowed: [] });
   expect(on(equip(inv, 'd').inventory)).toEqual(['s', 'd']);
 });
+
+test('a stack of two handaxes: each equip takes one into its own row, so both can be held; unequipping puts it back on the stack', async () => {
+  const { unequip, equipStarting } = await import('../../src/lib/items/hands.ts');
+  const axes = { ...e('ax', w('Handaxe', ['light', 'thrown'])), quantity: 2 };
+  let inv = equip([axes], 'ax').inventory;
+  expect(inv.map((x) => [x.item.name, x.quantity, x.equipped])).toEqual([['Handaxe', 1, false], ['Handaxe', 1, true]]);
+  inv = equip(inv, 'ax').inventory; // the rest of the stack
+  expect(inv.map((x) => [x.quantity, x.equipped])).toEqual([[1, true], [1, true]]);
+  expect(handsHeld(inv)).toBe(2);
+  const back = unequip(inv, inv[1].id);
+  expect(back.map((x) => [x.quantity, x.equipped])).toEqual([[1, true], [1, false]]); // nothing carried to merge with yet
+  const both = unequip(unequip(inv, inv[1].id), 'ax');
+  expect(both.map((x) => [x.item.name, x.quantity, x.equipped])).toEqual([['Handaxe', 2, false]]);
+  // a starting kit holds both
+  expect(equipStarting([axes]).map((x) => [x.quantity, x.equipped])).toEqual([[1, true], [1, true]]);
+  // with a greataxe as well, the greataxe (first weapon) takes both hands
+  const kit = equipStarting([e('ga', w('Greataxe', ['two-handed'])), axes]);
+  expect(kit.filter((x) => x.equipped).map((x) => x.item.name)).toEqual(['Greataxe']);
+});
+
+test('two handaxes held: one Handaxe attack and one off-hand Handaxe in the turn panel', async () => {
+  const { pcActions } = await import('../../src/lib/combat/turnActions.ts');
+  const ax = (entryId: string) => ({ entryId, name: 'Handaxe', toHit: 5, damage: '1d6+3', damageType: 'slashing', properties: ['light', 'thrown'] });
+  const list = pcActions({ build: { levels: [], subclasses: {}, spells: {} }, embedded: {}, state: { resourcesUsed: {}, slotsUsed: [], conditions: [] }, inventory: [] } as never,
+    { attacks: [ax('a1'), ax('a2')], resources: [], spellcasting: [], slots: [] } as never, []);
+  expect(list.filter((a) => a.name === 'Handaxe').length).toBe(1);
+  expect(list.filter((a) => a.name === 'Off-hand: Handaxe').map((a) => a.attack?.damage)).toEqual(['1d6']);
+});

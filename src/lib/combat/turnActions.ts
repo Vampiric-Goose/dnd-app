@@ -8,7 +8,7 @@ import { abilityMod } from '../rules/constants.ts';
 import { actionsLeft, BLOCKING, grantAction, spend, useProblem, type Cost } from './economy.ts';
 import { addDash, standUp } from './movement.ts';
 import { readSpell, readSpellcasting, type SpellRead } from './spellText.ts';
-import { HANDS, handsFor, handsHeld } from '../items/hands.ts';
+import { equip, HANDS, handsFor, handsHeld, unequip } from '../items/hands.ts';
 
 export interface TurnAction {
   id: string; name: string; cost: Cost;
@@ -101,9 +101,11 @@ const lightMelee = (a: Attack) => a.properties.includes('light') && !a.propertie
 
 /** A character's actions: attacks (the first is the primary card), off-hand, standard actions, Cunning Action, castable spells, resources. */
 export function pcActions(c: Character, sheet: Sheet, features: { name: string; text: RichText }[]): TurnAction[] {
-  const out: TurnAction[] = sheet.attacks.map((a) => ({ id: `attack:${a.entryId}`, name: a.name, cost: 'action', group: 'attack', attack: a }));
+  // identical weapons held (two handaxes) are listed once; two light ones still allow the off-hand attack
+  const once = (l: Attack[]) => l.filter((a, i) => l.findIndex((b) => b.name === a.name && b.toHit === a.toHit && b.damage === a.damage) === i);
+  const out: TurnAction[] = once(sheet.attacks).map((a) => ({ id: `attack:${a.entryId}`, name: a.name, cost: 'action', group: 'attack', attack: a }));
   const light = sheet.attacks.filter(lightMelee);
-  if (light.length >= 2) for (const a of light) out.push({ id: `offhand:${a.entryId}`, name: `Off-hand: ${a.name}`, cost: 'bonus', group: 'attack', attack: { ...a, damage: offhandDamage(a.damage) } });
+  if (light.length >= 2) for (const a of once(light)) out.push({ id: `offhand:${a.entryId}`, name: `Off-hand: ${a.name}`, cost: 'bonus', group: 'attack', attack: { ...a, damage: offhandDamage(a.damage) } });
   out.push(...basics(sheet.skills?.athletics?.bonus ?? 0, sheet.skills?.acrobatics?.bonus ?? 0, sheet.attacks.find((a) => !a.ranged)));
   // Drawing or stowing a weapon is one object interaction: the first each turn is free, another takes an Action (SRD 5.1). Hands as hands.ts.
   const inv = c.inventory ?? [], free = HANDS - handsHeld(inv);
@@ -192,9 +194,9 @@ export function characterEffect(c: Character, a: TurnAction, pick?: string): Cha
   if (a.id === 'free:stand') return prone(false);
   const e = c.inventory.find((x) => x.id === pick && x.item.weapon);
   if (!e) return c;
-  const set = (on: boolean) => ({ ...c, inventory: c.inventory.map((x) => (x.id === e.id ? { ...x, equipped: on } : x)) });
-  if (a.id === 'free:draw' && !e.equipped && handsHeld(c.inventory) + handsFor(e.item) <= HANDS) return set(true);
-  if (a.id === 'free:stow' && e.equipped) return set(false);
+  // one from a stack is drawn into its own row; a stowed one goes back on its stack (hands.ts)
+  if (a.id === 'free:draw' && !e.equipped && handsHeld(c.inventory) + handsFor(e.item) <= HANDS) return { ...c, inventory: equip(c.inventory, e.id).inventory };
+  if (a.id === 'free:stow' && e.equipped) return { ...c, inventory: unequip(c.inventory, e.id) };
   return c;
 }
 

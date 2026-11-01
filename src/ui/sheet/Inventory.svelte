@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { equip } from '../../lib/items/hands.ts';
+  import { equip, unequip } from '../../lib/items/hands.ts';
   import { db } from '../../lib/db.ts';
   import { rechargeEntry, refreshEntry } from '../../lib/items/inventory.ts';
   import { ATTUNEMENT_LIMIT } from '../../lib/rules/constants.ts';
@@ -68,11 +68,12 @@
       const was = x.inventory.find((e) => e.id === id), now = was && fn(was);
       if (!was || !now) return x;
       let inventory = x.inventory.map((e) => (e.id === id ? { ...now, equipped: was.equipped } : e));
-      if (now.equipped && !was.equipped) { // two hands, one suit of armor, one shield: what's in the way goes back (hands.ts)
+      if (now.equipped && !was.equipped) { // two hands, one suit of armor, one shield: what's in the way goes back; one from a stack (hands.ts)
         const r = equip(inventory, id);
         inventory = r.inventory;
         if (r.stowed.length) toast(`Unequipped ${r.stowed.join(', ')} to make room.`);
-      } else inventory = inventory.map((e) => (e.id === id ? now : e));
+      } else if (!now.equipped && was.equipped) inventory = unequip(inventory, id); // back on its stack
+      else inventory = inventory.map((e) => (e.id === id ? now : e));
       return { ...x, inventory };
     });
 </script>

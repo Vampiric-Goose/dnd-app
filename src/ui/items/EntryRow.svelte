@@ -104,7 +104,7 @@
     {#if v.canEquip || v.needsAttune || v.consumable || v.maxCharges > 0}
       <div class="gear">
         {#if v.canEquip}
-          <label class="check"><input type="checkbox" aria-label="Equipped: {v.name}" checked={entry.equipped} onchange={(e) => patch({ equipped: e.currentTarget.checked })} /> Equipped</label>
+          <label class="check"><input type="checkbox" aria-label="Equipped: {v.name}" checked={entry.equipped} onchange={(e) => { const on = e.currentTarget.checked; e.currentTarget.checked = entry.equipped; patch({ equipped: on }); }} /> Equipped</label><!-- the box shows the record: equipping one from a stack leaves this row unequipped -->
         {/if}
         {#if v.needsAttune}
           <label class="check"><input type="checkbox" aria-label="Attuned: {v.name}" checked={entry.attuned} aria-describedby={warnAttune ? `${uid}-warn` : undefined} onchange={(e) => patch({ attuned: e.currentTarget.checked })} /> Attuned</label>
