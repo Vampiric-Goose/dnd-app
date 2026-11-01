@@ -150,8 +150,7 @@
     </Drawer>
   </SettingsGroup>
 
-  <SettingsGroup title="Used in later stages">
-    <p class="muted">These are saved now but have no effect yet.</p>
+  <SettingsGroup title="Map and combat">
     <Drawer title="Map and monsters">
       {#snippet summary()}Diagonal <span class="num">{c.settings.diagonal}</span> · Monster HP {hpText[c.settings.monsterHp].toLowerCase()} · {onList(later.filter(([k]) => c.settings[k]).map(([, l]) => l))}{/snippet}
       <div class="field">

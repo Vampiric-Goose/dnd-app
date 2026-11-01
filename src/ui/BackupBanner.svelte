@@ -64,15 +64,15 @@
 {#if show}
   <div class="strip" role="region" aria-label="Backup reminder">
     <p>
-      Your data lives only in this browser.
+      <span class="wide">Your data lives only in this browser.</span>
       {app.lastBackupAt === undefined ? "You haven't made a backup yet." : 'Your last backup was more than two weeks ago.'}
     </p>
     <label class="check">
       <input type="checkbox" bind:checked={includeBooks} />
-      Include imported books (larger file)
+      Include<span class="wide"> imported</span> books<span class="wide"> (larger file)</span>
     </label>
     <button class="primary" disabled={busy} onclick={exportAll}>Export backup</button>
-    <button disabled={busy} onclick={snooze}>Remind me in 3 days</button>
+    <button disabled={busy} onclick={snooze} aria-label="Remind me in 3 days"><span class="wide">Remind me in 3 days</span><span class="narrow">Later</span></button>
     {#if error}<p role="alert" class="error">{error}</p>{/if}
   </div>
 {/if}
@@ -112,9 +112,26 @@
     flex-basis: 100%;
   }
 
+  .narrow {
+    display: none;
+  }
+
+  /* Phones: message on one line, the checkbox and both buttons on the next */
   @media (max-width: 767px) {
+    .strip p {
+      flex-basis: 100%;
+    }
+
     .strip button {
       min-height: 44px;
+    }
+
+    .wide {
+      display: none;
+    }
+
+    .narrow {
+      display: inline;
     }
   }
 </style>
