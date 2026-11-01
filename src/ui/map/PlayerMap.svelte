@@ -71,7 +71,8 @@
   const fight = $derived(session.tracker && session.tracker.round >= 1 ? session.tracker : undefined);
   const myRows = $derived(fight?.rows.filter((r) => r.econ && mine(r.characterId)) ?? []);
   let chosen: string | undefined = $state();
-  $effect(() => { void fight?.current; chosen = undefined; }); // a new turn: back to the acting (or next) one
+  const turnKey = $derived(fight?.current); // a string: a tracker update on the same turn keeps the pick
+  $effect(() => { void turnKey; chosen = undefined; }); // a new turn: back to the acting (or next) one
   const turn = $derived.by(() => {
     if (!fight || !myRows.length) return undefined;
     const i = Math.max(0, fight.rows.findIndex((r) => r.id === fight.current));

@@ -228,6 +228,18 @@ describe('engine', () => {
     expect(d.errors).toEqual([]);
   });
 
+  test('final review: while a hidden creature acts after Thorin, his player can neither end its turn nor take an action', async () => {
+    const { d, host, a } = await joined(fight({ turn: 'x1' }));
+    a.guest.sendEndTurn('thorin');
+    a.guest.sendUse('thorin', 'std:dodge');
+    await settle(host, a.guest);
+    expect(d.combat!.turn).toBe('x1');
+    expect(d.combat!.combatants.find((x) => x.id === 'pc:thorin')!.economy).toBeUndefined();
+    a.guest.sendUse('thorin', 'std:dodge'); // still refused on a second try
+    await settle(host, a.guest);
+    expect(d.combat!.turn).toBe('x1');
+  });
+
   test('pips reach only their owner: another player gets no econ for Thorin', () => {
     const c = fight({ combatants: fight().combatants.map((x) => (x.id === 'pc:thorin' ? { ...x, economy: { used: 1, extra: 0, bonus: false, attacks: 1 } } : x)) });
     expect(trackerForPlayers(c, [thorin()], settings(), undefined, 'A1')!.rows[0].econ).toMatchObject({ used: 1, attacks: 1, perAction: 1, reaction: false });

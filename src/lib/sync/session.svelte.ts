@@ -177,7 +177,7 @@ function hostDeps(r: Run, cid: string): HostDeps {
     loadPack: (id) => db.packs.get(id),
     loadCombat: () => db.combat.get(cid),
     updateCombat: (fn) => db.combat.update(cid, (c) => c && fn(c)).then((c) => (changed(r), c)), // the DM's tracker re-reads (session.rev)
-    endTurn: () => import('../combat/store.ts').then((m) => m.turn(cid, 'next')).then(() => changed(r)),
+    endTurn: (id) => import('../combat/store.ts').then((m) => m.turn(cid, 'next', id)).then(() => changed(r)),
     editCharacter: (id, fn) => import('../combat/store.ts').then((m) => m.editCharacter(id, fn)).then((ok) => (changed(r), ok)),
     loadScene: () => db.scenes.shown(cid),
     updateScene: (id, fn) => db.scenes.update(id, fn, { network: true }).then((s) => (changed(r), s)),

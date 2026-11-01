@@ -89,7 +89,7 @@ export class Device {
       loadPack: async (id) => clone(this.packs.get(id)),
       loadCombat: async () => clone(this.combat),
       updateCombat: async (fn) => (this.combat ? clone(this.combat = clone(fn(clone(this.combat)))) : undefined),
-      endTurn: async () => { if (this.combat) this.combat = next(this.combat).combat; },
+      endTurn: async (id) => { if (this.combat?.turn === id) this.combat = next(this.combat).combat; },
       editCharacter: async (id, fn) => { const c = this.char(id); if (c) this.edit(fn(c)); return !!c; },
       ...(this.map && {
         loadScene: async () => (this.scene?.shown ? clone(this.scene) : undefined),

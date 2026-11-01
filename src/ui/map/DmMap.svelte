@@ -14,7 +14,7 @@
   import { budgetApplies, budgetFeet, combatantForToken, effectiveSpeed, originOf, recordMove } from '../../lib/combat/movement.ts';
   import { editCharacter, turn, updateCombat } from '../../lib/combat/store.ts';
   import { grantAction, setPip } from '../../lib/combat/economy.ts';
-  import { applyUse, attacksPerAction, monsterActions, payment, pcActions, slotsLeft, spendOn, type TurnAction } from '../../lib/combat/turnActions.ts';
+  import { applyUse, attacksPerAction, monsterActions, payment, pcActions, problemOf, slotsLeft, spendOn, type TurnAction } from '../../lib/combat/turnActions.ts';
   import { featureList } from '../../lib/character/play.ts';
   import TurnPanel from '../turn/TurnPanel.svelte';
   import { toast } from '../../lib/toast.svelte.ts';
@@ -291,7 +291,9 @@
   const fighting = $derived(!!combat && combat.round >= 1);
   let viewId: string | undefined = $state();
   $effect(() => { const on = fighting; untrack(() => { if (on) tab = 'turn'; else if (tab === 'turn') tab = 'tokens'; }); });
-  $effect(() => { void combat?.turn; void combat?.round; untrack(() => (viewId = undefined)); });
+  // A string, so only a new turn resets the view (every reload makes a new combat object).
+  const turnKey = $derived(combat ? `${combat.round}:${combat.turn}` : '');
+  $effect(() => { void turnKey; untrack(() => (viewId = undefined)); });
   const runList = $derived(combat ? combat.combatants.filter((x) => turnIds.has(x.id)) : []);
   const view = $derived.by(() => {
     const x = combat?.combatants.find((z) => z.id === viewId) ?? runList[0];
@@ -311,8 +313,14 @@
     if (!v || !combat) return;
     const pay = v.ch && v.sheet ? payment(a, v.sheet, v.ch, slot) : {};
     if (pay.problem) throw new Error(`Not done: ${pay.problem}.`);
-    await updateCombat(cid, (k) => { const y = k.combatants.find((z) => z.id === v.x.id); return y ? applyUse(k, y, a, v.perAction) : k; });
-    if (v.ch && (pay.level !== undefined || a.resource)) await editCharacter(v.ch.id, (c) => spendOn(c, pay.level, a.resource));
+    let why: string | undefined;
+    await updateCombat(cid, (k) => { // checked again on the fresh fight: a quick second tap spends nothing
+      const y = k.combatants.find((z) => z.id === v.x.id);
+      why = y ? problemOf(y, a, v.ch ? v.conditions : y.conditions ?? [], currentRun(k).has(y.id), v.perAction) : 'not in the fight';
+      return y && !why ? applyUse(k, y, a, v.perAction) : k;
+    });
+    if (why) throw new Error(`Not done: ${why}.`);
+    if (v.ch && (pay.level !== undefined || a.resource)) await editCharacter(v.ch.id, (c) => spendOn(c, pay.level, a.resource, pay.pact));
     await reload();
   });
   const onpip = (pip: 'action' | 'bonus' | 'reaction' | 'extra', used: boolean) => run(async () => {
@@ -417,7 +425,7 @@
           <TurnPanel dm name={view.name} order={combat.combatants} self={view.x.id} current={combat.turn} round={combat.round}
             hp={view.hp} maxHp={view.maxHp} tempHp={view.tempHp} tone={view.ch ? 'accent' : 'danger'} conditions={view.conditions}
             x={view.x} perAction={view.perAction} onTurn={turnIds.has(view.x.id)} actions={view.actions} slots={view.slots}
-            concentrating={!!view.x.concentrating} canEnd={!busy} endLabel="Next turn ▶" onuse={useAction} onend={nextTurn} {onpip}
+            concentrating={!!view.x.concentrating} {busy} canEnd={!busy} endLabel="Next turn ▶" onuse={useAction} onend={nextTurn} {onpip}
             onstrip={(id) => (viewId = id)}>
             {#snippet top()}
               {#if runList.length > 1}

@@ -114,10 +114,23 @@ describe('using an action', () => {
     const sh = sheet({ slots: [2, 1] });
     const sleep = { id: 'spell:sleep', name: 'Sleep', cost: 'action', group: 'spell', spell: { id: 's', level: 1, concentration: false } } as TurnAction;
     expect(slotsLeft(sh, c)).toEqual([0, 1]);
-    expect(payment(sleep, sh, c)).toEqual({ level: 1, problem: 'no level 1 slot left' });
+    expect(payment(sleep, sh, c, 1)).toEqual({ level: 1, problem: 'no level 1 slot left' });
+    expect(payment(sleep, sh, c)).toEqual({ level: 2 }); // the lowest free slot at or above
     expect(payment(sleep, sh, c, 2)).toEqual({ level: 2 });
     const paid = spendOn(c, 2, 'Rage');
     expect(paid.state.slotsUsed).toEqual([2, 1]);
     expect(paid.state.resourcesUsed.Rage).toBe(1);
+  });
+
+  test('final review: a warlock casts with Pact Magic slots, at the pact level', () => {
+    const c = character(); c.state.pactSlotsUsed = 0; c.state.slotsUsed = [];
+    const sh = sheet({ slots: [], pact: { slots: 2, level: 3 } });
+    const hex = { id: 'spell:hex', name: 'Hex', cost: 'bonus', group: 'spell', spell: { id: 'h', level: 1, concentration: true } } as TurnAction;
+    expect(slotsLeft(sh, c)).toEqual([0, 0, 2]);
+    expect(payment(hex, sh, c)).toEqual({ level: 3, pact: true });
+    const paid = spendOn(c, 3, undefined, true);
+    expect(paid.state.pactSlotsUsed).toBe(1);
+    expect(paid.state.slotsUsed).toEqual([]);
+    expect(payment(hex, sh, { ...c, state: { ...c.state, pactSlotsUsed: 2 } })).toEqual({ level: 1, problem: 'no level 1 slot left' });
   });
 });

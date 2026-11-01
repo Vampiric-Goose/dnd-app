@@ -64,10 +64,16 @@ async function clearExpired(step: Step): Promise<Step> {
 /** The campaign's combat changed by `fn` (a new one when there is none), with updatedAt stamped. */
 export const updateCombat = (cid: string, fn: (c: Combat) => Combat): Promise<Combat> => serial(() => update(cid, fn));
 
-/** Start the fight, or end the turn and start the next; PC conditions that expire are removed from their characters. */
-export const turn = (cid: string, dir: 'start' | 'next'): Promise<Step> => serial(async () => {
+/**
+ * Start the fight, or end the turn and start the next; PC conditions that expire are removed from their characters. `expect`: only
+ * while that combatant holds the turn (a player's End turn that arrives after the turn moved on changes nothing).
+ */
+export const turn = (cid: string, dir: 'start' | 'next', expect?: string): Promise<Step> => serial(async () => {
   let expired: Expired[] = [];
-  const combat = await update(cid, (c) => { const s = dir === 'start' ? start(c) : next(c); expired = s.expired; return s.combat; });
+  const combat = await update(cid, (c) => {
+    if (expect !== undefined && c.turn !== expect) return c;
+    const s = dir === 'start' ? start(c) : next(c); expired = s.expired; return s.combat;
+  });
   return clearExpired({ combat, expired });
 });
 

@@ -49,7 +49,8 @@ export interface HostDeps {
   /** A read-modify-write of the existing live combat (db.combat.update; none: nothing happens). Its change re-sends the tracker. */
   updateCombat?(fn: (c: Combat) => Combat): Promise<Combat | undefined>;
   /** Turn panel: a player ended their turn (the DM's Next, with expiry). */
-  endTurn?(): Promise<void>;
+  /** Next, only while `combatantId` still holds the turn (checked in the same write). */
+  endTurn?(combatantId: string): Promise<void>;
   /** Turn panel: the DM's own edit of a character (a player's slot or resource spent by a use), stamped and synced like any DM edit. */
   editCharacter?(id: string, fn: (c: Character) => Character): Promise<unknown>;
   /** Stage 5: the campaign's shown scene (db.scenes.shown). Without it no scene is sent. */
@@ -340,30 +341,29 @@ export class Host {
     const sheet = computeSheet(ch, { settings: camp.settings, viewer: 'player' }), features = featureList(ch, camp.settings);
     const a = pcActions(ch, sheet, features).find((x) => x.id === m.action);
     if (!a) return refuse('that action is not available');
-    const { level, problem } = payment(a, sheet, ch, m.slot);
+    const { level, pact, problem } = payment(a, sheet, ch, m.slot);
     if (problem) return refuse(problem);
     if ((level !== undefined || a.resource) && !this.#deps.editCharacter) return refuse('this device cannot spend it');
-    const chars = (await this.#deps.loadCharacters()).filter((x) => x.campaignId === camp.id);
     const per = attacksPerAction(features);
     let why: string | undefined = 'not in the fight';
     await this.#deps.updateCombat((k) => {
       const x = k.round >= 1 ? combatantForToken(k, { characterId: ch.id }) : undefined;
-      why = x && problemOf(x, a, ch.state.conditions, currentActor(trackerForPlayers(k, chars, camp.settings)) === ch.id, per);
+      why = x && problemOf(x, a, ch.state.conditions, k.turn === x.id, per); // the real turn: a hidden creature's turn is not theirs (final review)
       if (!x || why) { why ??= 'not in the fight'; return k; }
       return applyUse(k, x, a, per);
     });
     if (why) return refuse(why);
-    if (level !== undefined || a.resource) await this.#deps.editCharacter!(ch.id, (x) => spendOn(x, level, a.resource));
+    if (level !== undefined || a.resource) await this.#deps.editCharacter!(ch.id, (x) => spendOn(x, level, a.resource, pact));
   }
 
-  /** Turn panel: the player's own character (else a violation) ends its turn, only while it is acting as players see it; else ignored. */
+  /** Turn panel: the player's own character (else a violation) ends its turn, only while it really holds the turn (not a hidden creature's after it); else ignored. */
   async #endTurn(c: Conn, pid: string, id: string): Promise<void> {
     const camp = await this.#deps.loadCampaign();
     const ch = await this.#deps.loadCharacter(id);
     if (!camp || !ch || ch.ownerId !== pid || ch.campaignId !== camp.id) return this.#violation(c, 'not their character');
-    const chars = (await this.#deps.loadCharacters()).filter((x) => x.campaignId === camp.id);
     const k = await this.#deps.loadCombat?.();
-    if (k && k.round >= 1 && currentActor(trackerForPlayers(k, chars, camp.settings)) === id) await this.#deps.endTurn?.();
+    const x = k && k.round >= 1 ? combatantForToken(k, { characterId: id }) : undefined;
+    if (x && k!.turn === x.id) await this.#deps.endTurn?.(x.id);
   }
 
   /** Review Focus 4: only for the player's own character in this campaign. Whether it fits the fight is the store's check. */

@@ -103,14 +103,25 @@ export function problemOf(x: Combatant, a: TurnAction, conditions: readonly stri
   return !x.legendary || x.legendary.max - x.legendary.used < a.legendary ? 'no legendary actions left' : undefined;
 }
 
-/** Spell slots left per level (index 0 = 1st). */
-export const slotsLeft = (sheet: Sheet, c: Character): number[] => sheet.slots.map((n, i) => n - (c.state.slotsUsed[i] ?? 0));
+const pactLeft = (sheet: Sheet, c: Character) => (sheet.pact ? sheet.pact.slots - c.state.pactSlotsUsed : 0);
 
-/** A levelled spell's slot level (the chosen one, else its own) and why it can't be paid, if so. Cantrips and the rest: no level. */
-export function payment(a: TurnAction, sheet: Sheet, c: Character, slot?: number): { level?: number; problem?: string } {
-  const level = a.spell && a.spell.level > 0 ? slot ?? a.spell.level : undefined;
-  if (level !== undefined && (level < a.spell!.level || (slotsLeft(sheet, c)[level - 1] ?? 0) < 1)) return { level, problem: `no level ${level} slot left` };
-  return { level };
+/** Spell slots left per level (index 0 = 1st), Pact Magic slots counted at their level. */
+export function slotsLeft(sheet: Sheet, c: Character): number[] {
+  const out = sheet.slots.map((n, i) => n - (c.state.slotsUsed[i] ?? 0));
+  if (sheet.pact && pactLeft(sheet, c) > 0) { while (out.length < sheet.pact.level) out.push(0); out[sheet.pact.level - 1] += pactLeft(sheet, c); }
+  return out;
+}
+
+/**
+ * A levelled spell's slot level (the chosen one, else the lowest free one at or above its own) and why it can't be paid, if so; `pact`
+ * when a Pact Magic slot pays (a regular slot of that level goes first). Cantrips and the rest: no level.
+ */
+export function payment(a: TurnAction, sheet: Sheet, c: Character, slot?: number): { level?: number; pact?: true; problem?: string } {
+  if (!a.spell || a.spell.level < 1) return {};
+  const left = slotsLeft(sheet, c), min = a.spell.level;
+  const level = slot ?? (left.findIndex((n, i) => n > 0 && i + 1 >= min) + 1 || min);
+  if (level < min || (left[level - 1] ?? 0) < 1) return { level, problem: `no level ${level} slot left` };
+  return (sheet.slots[level - 1] ?? 0) - (c.state.slotsUsed[level - 1] ?? 0) > 0 ? { level } : { level, pact: true };
 }
 
 /** The fight after the use (check problemOf first): its pip, an extra Action, concentration, a Dash's movement, legendary uses. */
@@ -123,9 +134,10 @@ export function applyUse(k: Combat, x: Combatant, a: TurnAction, perAction = 1):
   return a.grants === 'dash' ? addDash(next, x.id) : next;
 }
 
-/** The character after paying: a slot of `level` and one use of `resource`. */
-export function spendOn(c: Character, level: number | undefined, resource: string | undefined): Character {
+/** The character after paying: a slot of `level` (a Pact Magic one with `pact`) and one use of `resource`. */
+export function spendOn(c: Character, level: number | undefined, resource: string | undefined, pact?: boolean): Character {
   const slotsUsed = [...c.state.slotsUsed];
-  if (level !== undefined) { while (slotsUsed.length < level) slotsUsed.push(0); slotsUsed[level - 1] += 1; }
-  return { ...c, state: { ...c.state, slotsUsed, ...(resource && { resourcesUsed: { ...c.state.resourcesUsed, [resource]: (c.state.resourcesUsed[resource] ?? 0) + 1 } }) } };
+  if (level !== undefined && !pact) { while (slotsUsed.length < level) slotsUsed.push(0); slotsUsed[level - 1] += 1; }
+  return { ...c, state: { ...c.state, slotsUsed, ...(pact && level !== undefined && { pactSlotsUsed: c.state.pactSlotsUsed + 1 }),
+    ...(resource && { resourcesUsed: { ...c.state.resourcesUsed, [resource]: (c.state.resourcesUsed[resource] ?? 0) + 1 } }) } };
 }
