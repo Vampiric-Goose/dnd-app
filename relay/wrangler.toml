@@ -1,0 +1,13 @@
+# The dnd-app sync relay: a Cloudflare Worker with one Durable Object per campaign room. Deploy: `npx wrangler deploy` from this folder.
+name = "dnd-relay"
+main = "src/index.ts"
+compatibility_date = "2025-09-01"
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "Room"
+
+# SQLite-backed Durable Objects are the kind the free plan offers.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Room"]

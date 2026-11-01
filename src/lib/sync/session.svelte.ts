@@ -47,6 +47,8 @@ export const backoff = (attempt: number): number => [2000, 5000, 15000, 30000, 1
 
 // This device's relay (if any) is read on every start, so a change applies to the next host or join.
 let transport = async (): Promise<Transport> => {
+  const w = await import('./ws.ts');
+  if (w.RELAY_URL) return w.relayTransport(w.RELAY_URL); // the relay server: works through hotel Wi-Fi and strict networks
   const [m, v] = await Promise.all([import('./peer.ts'), db.meta.get(RELAY_KEY)]);
   m.setRelay(storedRelay(v));
   return m.transport;
@@ -145,7 +147,7 @@ async function listen(r: Run): Promise<void> {
       Object.assign(session, { status: 'retrying', reason: why ?? '', retryAt: Date.now() + ms });
       r.timer = setTimeout(() => { session.retryAt = undefined; r.listener?.retry(); }, ms);
     },
-  });
+  }, r.code);
 }
 
 const changed = (r: Run) => { if (live(r)) session.rev++; };
@@ -251,7 +253,7 @@ async function dial(r: Run): Promise<void> {
   if (!live(r)) return;
   Object.assign(session, { status: 'connecting', retryAt: undefined });
   try {
-    const link = await r.t!.dial((r.peerId ??= await peerIdFor(r.code)));
+    const link = await r.t!.dial((r.peerId ??= await peerIdFor(r.code)), r.code);
     if (!live(r)) return link.close();
     r.guest!.connect(link);
   } catch (e) {

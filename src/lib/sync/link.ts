@@ -40,9 +40,9 @@ export function memoryPair(): [Link, Link] {
 /** How a session reaches the other devices (Task 5: PeerJS in peer.ts; tests: an in-memory fake). */
 export interface Transport {
   /** Registers as `peerId` and hands over every incoming link once it is open. `status(false)` = not reachable; the caller retries. */
-  listen(peerId: string, on: { link(l: Link): void; status(up: boolean, why?: string): void }): Listener;
-  /** An open link to `peerId`, or a rejection saying why not. */
-  dial(peerId: string): Promise<Link>;
+  listen(peerId: string, on: { link(l: Link): void; status(up: boolean, why?: string): void }, secret?: string): Listener;
+  /** An open link to `peerId`, or a rejection saying why not. `secret` (the join code) keys end-to-end encryption where a server relays. */
+  dial(peerId: string, secret?: string): Promise<Link>;
 }
 export interface Listener {
   /** Tries to register again (after status(false)). */
