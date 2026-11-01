@@ -92,7 +92,7 @@
   {/each}
 </fieldset>
 
-<h3>Redactions</h3>
+<h3 class="caption">Redactions</h3>
 {#each redactions as [id, hidden] (id)}
   <div class="row">
     <span><code>{id}</code>: {hidden}</span>
@@ -111,26 +111,25 @@
   <span class="muted">Players now know everything: no cover name, nothing hidden, every redaction revealed.</span>
 </div>
 
-<section class="card" aria-label="Players see">
-  <strong>Players see</strong>
+<section class="seen" aria-label="Players see">
+  <h3 class="caption">Players see</h3>
   <EntityDetail entity={seen} />
 </section>
 
 <style>
-  fieldset {
-    border: 1px solid var(--border);
-    border-radius: 0.35rem;
-    margin: 0.75rem 0;
+  h3.caption {
+    margin: 0.75rem 0 0.25rem;
+  }
+
+  .seen {
+    margin-top: 0.75rem;
+    padding: 0 0 0 0.75rem;
+    border-left: 2px solid var(--line-strong);
   }
 
   textarea {
-    font: inherit;
-    color: inherit;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 0.35rem;
-    padding: 0.4rem 0.7rem;
-    max-width: 100%;
+    width: 100%;
     box-sizing: border-box;
   }
 </style>
+

@@ -5,6 +5,7 @@
   import { stripStored } from '../lib/items/rows.ts';
   import type { InventoryEntry, ItemDef, StoredItem } from '../lib/types.ts';
   import type { Pool } from './items/pool.ts';
+  import Menu from './kit/Menu.svelte';
   import VirtualList from './VirtualList.svelte';
 
   let { pool, viewer, onpick }: { pool: Pool; viewer: 'dm' | 'player'; onpick: (entry: InventoryEntry) => void } = $props();
@@ -36,17 +37,13 @@
   }
 </script>
 
-<div class="picker card">
-  <div class="row">
-    <label class="field">Search <input type="search" bind:value={q} autocomplete="off" placeholder="{pool.index.all('item').length + pool.homebrew.length} items" /></label>
-    <label class="field">Type
-      <select bind:value={type}><option value="">Any</option>{#each types as t (t)}<option value={t}>{t}</option>{/each}</select>
-    </label>
-    <label class="field">Rarity
-      <select bind:value={rarity}><option value="">Any</option>{#each RARITIES as r (r)}<option value={r}>{r}</option>{/each}</select>
-    </label>
+<div class="picker">
+  <div class="filters">
+    <input class="search" type="search" aria-label="Search" bind:value={q} autocomplete="off" placeholder="Search {pool.index.all('item').length + pool.homebrew.length} items…" />
+    <Menu label={type || 'Type'} active={!!type} items={[{ label: 'Any type', checked: !type, onselect: () => (type = '') }, ...types.map((t) => ({ label: t, checked: type === t, onselect: () => (type = t) }))]} />
+    <Menu label={rarity || 'Rarity'} active={!!rarity} items={[{ label: 'Any rarity', checked: !rarity, onselect: () => (rarity = '') }, ...RARITIES.map((r) => ({ label: r, checked: rarity === r, onselect: () => (rarity = r) }))]} />
   </div>
-  <p class="muted" aria-live="polite">{hits.length} found. Click an item or press Enter to add it.{last ? ` Added ${last}.` : ''}</p>
+  <p class="muted note" aria-live="polite"><span class="num">{hits.length}</span> found. Click an item or press Enter to add it.{last ? ` Added ${last}.` : ''}</p>
   <div class="list">
     <VirtualList items={hits} label="Items" onselect={pick}>
       {#snippet row(i: ItemDef)}
@@ -58,11 +55,44 @@
 </div>
 
 <style>
+  .filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+
+  .search {
+    flex: 1 1 10rem;
+    min-width: 0;
+  }
+
+  .note {
+    margin: 0.4rem 0;
+    font-size: 0.875rem;
+  }
+
   .list {
     height: 16rem;
   }
 
-  .field {
-    margin: 0;
+  .list :global(.list) {
+    border-color: var(--line);
+    background: transparent;
+  }
+
+  .list :global(.item) {
+    border-bottom-color: var(--line);
+  }
+
+  strong,
+  small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  strong {
+    color: var(--text-strong);
+    font-weight: 500;
   }
 </style>

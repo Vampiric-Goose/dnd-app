@@ -8,7 +8,7 @@
 </script>
 
 <section aria-labelledby="item-effects-h">
-  <h3 id="item-effects-h">Effects</h3>
+  <h3 id="item-effects-h" class="caption">Effects</h3>
   <p class="muted">What the item does for its carrier while it is equipped (and attuned, if it needs that).</p>
   {#if effects.length}
     <ul class="plain">
@@ -24,6 +24,10 @@
 </section>
 
 <style>
+  h3.caption {
+    margin: 0.75rem 0 0.25rem;
+  }
+
   .grow {
     flex: 1 1 12rem;
   }
