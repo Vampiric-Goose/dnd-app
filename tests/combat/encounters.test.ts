@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import { beforeEach, describe, expect, test } from 'vitest';
 import { addCombatants, monsterCombatant, newCombat, start } from '../../src/lib/combat/combat.ts';
 import { restoreCombat, restoreScene, snapshotFight } from '../../src/lib/combat/encounters.ts';
-import { deleteEncounter, resumeFight, saveFight, saveFightAs, updateCombat } from '../../src/lib/combat/store.ts';
+import { addPreparedToFight, deleteEncounter, resumeFight, saveFight, saveFightAs, updateCombat } from '../../src/lib/combat/store.ts';
 import { db, resetDb } from '../../src/lib/db.ts';
 import { addTokens, newScene } from '../../src/lib/map/scene.ts';
 import { encounterProblem } from '../../src/lib/recordShape.ts';
@@ -143,5 +143,17 @@ describe('store flows', () => {
     const c = await db.combat.get('c1');
     expect(c).toBeDefined();
     expect(c?.encounterId).toBeUndefined();
+  });
+
+  test('P1: a prepared encounter started mid-fight adds its monsters to it, keeping the others and the link', async () => {
+    await updateCombat('c1', () => fight());
+    const prep: Encounter = { id: 'p', campaignId: 'c1', name: 'Reinforcements', monsters: [{ monsterId: goblin.id, count: 2 }, { monsterId: 'monster:gone@X', name: 'Gone', count: 1 }], updatedAt: 0 };
+    const { added, missing } = await addPreparedToFight('c1', prep, (id) => (id === goblin.id ? goblin : undefined), 'average');
+    expect(added.length).toBe(2);
+    expect(missing).toEqual(['Gone']);
+    const c = (await db.combat.get('c1'))!;
+    expect(c.combatants.length).toBe(6);
+    for (const id of ['g1', 'g2', 'pc:a', 'pc:b']) expect(c.combatants.some((x) => x.id === id)).toBe(true);
+    expect(c.encounterId).toBe('old');
   });
 });

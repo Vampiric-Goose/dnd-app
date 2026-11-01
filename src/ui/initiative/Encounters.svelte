@@ -1,14 +1,25 @@
 <script lang="ts">
-  import { addMonsters, encounterPicks } from '../../lib/combat/combat.ts';
-  import { updateCombat } from '../../lib/combat/store.ts';
+  import { addPreparedToFight, deleteEncounter, resumeFight, saveFight, saveFightAs } from '../../lib/combat/store.ts';
   import { db } from '../../lib/db.ts';
   import { toast } from '../../lib/toast.svelte.ts';
-  import type { Campaign, Encounter, MonsterDef } from '../../lib/types.ts';
+  import type { Campaign, Combat, Encounter, MonsterDef } from '../../lib/types.ts';
   import { uid } from '../../lib/uid.ts';
+  import Pill from '../kit/Pill.svelte';
   import { act } from './act.ts';
+  import type { FightAnswer, FightAsk } from './FightDialog.svelte';
   import MonsterSearch from './MonsterSearch.svelte';
 
-  let { campaign, encounters, pool, reload }: { campaign: Campaign; encounters: Encounter[]; pool: MonsterDef[]; reload: () => Promise<void> } = $props();
+  let { campaign, combat, encounters, pool, reload, ask }: {
+    campaign: Campaign; combat: Combat | undefined; encounters: Encounter[]; pool: MonsterDef[]; reload: () => Promise<void>;
+    ask: (k: FightAsk) => Promise<FightAnswer>;
+  } = $props();
+
+  const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
+  function kind(e: Encounter): string {
+    if (!e.fight) return plural(e.monsters.reduce((t, l) => t + l.count, 0), 'monster');
+    const { round, combatants } = e.fight.combat;
+    return `${round ? `Round ${round}` : 'Setup'} · ${plural(combatants.length, 'combatant')}`;
+  }
 
   // A line keeps the monster's name, so a missing monster can still be named.
   type Line = Encounter['monsters'][number];
@@ -44,28 +55,47 @@
 
   async function del(e: Encounter) {
     if (!confirm(`Delete the encounter "${e.name}"?`)) return;
-    await act(() => db.encounters.delete(e.id));
+    await act(() => deleteEncounter(campaign.id, e.id));
     await reload();
   }
 
-  // Review Focus 5: monsters deleted or in a disabled pack are left out and named; the rest join the fight.
+  // Review Focus 5 / P1: monsters deleted or in a disabled pack are left out and named; the rest join the fight (a running one too).
   async function start(e: Encounter) {
-    const { picks, missing } = encounterPicks(e, (id) => monById.get(id));
-    if (picks.length) await act(async () => {
-      let before = new Set<string>();
-      const after = await updateCombat(campaign.id, (c) => { before = new Set(c.combatants.map((x) => x.id)); return addMonsters(c, picks, campaign.settings.monsterHp); });
-      const added = after.combatants.filter((x) => !before.has(x.id)), cid = campaign.id;
+    const cid = campaign.id, lookup = (id: string) => monById.get(id);
+    const r = await act(() => addPreparedToFight(cid, e, lookup, campaign.settings.monsterHp));
+    if (r?.added.length) {
+      const added = r.added;
       // Stage 5: the new monsters get tokens on the current scene (the map chunk loads only here).
-      void import('../../lib/map/store.ts').then((m) => m.placeCombatants(cid, added, (id) => monById.get(id)))
-        .then((r) => {
-          if (r.why === 'no scene' && added.length) toast('No scene to place tokens on.');
-          else if (r.why === 'full') toast(`The scene is full (200 tokens): ${r.placed ? `only ${r.placed} placed` : 'no tokens placed'}.`, true);
-        },(e) => toast(`Tokens not placed: ${e instanceof Error ? e.message : e}`, true));
-    });
-    if (missing.length) {
-      const names = missing.map((id) => lineName(e.monsters.find((l) => l.monsterId === id) ?? { monsterId: id, count: 1 }));
-      toast(`Not in this campaign any more, so left out: ${names.join(', ')}.`, true);
+      void import('../../lib/map/store.ts').then((m) => m.placeCombatants(cid, added, lookup))
+        .then((p) => {
+          if (p.why === 'no scene') toast('No scene to place tokens on.');
+          else if (p.why === 'full') toast(`The scene is full (200 tokens): ${p.placed ? `only ${p.placed} placed` : 'no tokens placed'}.`, true);
+        }, (err) => toast(`Tokens not placed: ${err instanceof Error ? err.message : err}`, true));
     }
+    if (r?.missing.length) toast(`Not in this campaign any more, so left out: ${r.missing.join(', ')}.`, true);
+    await reload();
+  }
+
+  // A saved fight replaces the live one: a linked fight is saved back first; an unlinked one asks (save as / discard / cancel).
+  async function resume(e: Encounter) {
+    const cid = campaign.id;
+    await act(async () => {
+      const live = await db.combat.get(cid);
+      if (live?.combatants.length) {
+        if (!(live.encounterId && (await saveFight(cid)))) {
+          const a = await ask('first');
+          if (!a) return;
+          if (typeof a === 'object') await saveFightAs(cid, a.name);
+        }
+        // As at End combat: the old fight's monster HP stays on its map tokens.
+        try { await (await import('../../lib/map/store.ts')).endCombatWriteBack(cid); } catch (err) { console.warn(err); }
+      }
+      const fresh = await db.encounters.get(e.id); // saving back above may have just updated this very encounter
+      if (!fresh?.fight) throw new Error('That encounter is gone.');
+      const r = await resumeFight(cid, fresh);
+      if (r.dropped.length) toast(`No longer in the campaign, so left out: ${r.dropped.join(', ')}.`, true);
+      if (r.sceneMissing) toast("The saved map's scene was deleted; loaded the fight without it.", true);
+    });
     await reload();
   }
 </script>
@@ -106,18 +136,22 @@
     <ul class="plain list">
       {#each encounters as e (e.id)}
         <li>
-          <strong>{e.name}</strong>
-          <span class="muted small">{e.monsters.map((l) => `${lineName(l)} ×${l.count}`).join(', ') || 'No monsters'}</span>
+          <div class="row"><strong>{e.name}</strong>{#if combat?.encounterId === e.id}<Pill label="Current" accent />{/if}</div>
+          <span class="muted small">{kind(e)}{#if !e.fight && e.monsters.length}: {e.monsters.map((l) => `${lineName(l)} ×${l.count}`).join(', ')}{/if}</span>
           <div class="row">
-            <button type="button" class="primary" aria-label="Start {e.name}" disabled={!pool.length || !e.monsters.length} onclick={() => start(e)}>Start</button>
-            <button type="button" aria-label="Edit {e.name}" onclick={() => startEdit(e)}>Edit</button>
+            {#if e.fight}
+              <button type="button" class="primary" aria-label="Resume {e.name}" onclick={() => resume(e)}>Resume</button>
+            {:else}
+              <button type="button" class="primary" aria-label="Start {e.name}" disabled={!pool.length || !e.monsters.length} onclick={() => start(e)}>Start</button>
+              <button type="button" aria-label="Edit {e.name}" onclick={() => startEdit(e)}>Edit</button>
+            {/if}
             <button type="button" class="danger" aria-label="Delete {e.name}" onclick={() => del(e)}>Delete</button>
           </div>
         </li>
       {/each}
     </ul>
   {:else}
-    <p class="muted">No prepared encounters.</p>
+    <p class="muted">No encounters yet. Prepare one here, or save a running fight from the “⋯” menu.</p>
   {/if}
 </section>
 

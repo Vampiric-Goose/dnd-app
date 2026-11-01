@@ -3,9 +3,9 @@
 import { applyDamage, applyHealing, rollDeathSave } from '../character/rest.ts';
 import { db, DeletedError } from '../db.ts';
 import { computeSheet } from '../rules/sheet.ts';
-import type { CampaignSettings, Character, Combat, Combatant, Duration, Encounter } from '../types.ts';
+import type { CampaignSettings, Character, Combat, Combatant, Duration, Encounter, MonsterDef } from '../types.ts';
 import { uid } from '../uid.ts';
-import { concentrationDc, initOk, monsterHp, newCombat, next, patchCombatant, removeStep, setInit, start, type Expired, type HpOp, type Step } from './combat.ts';
+import { addMonsters, concentrationDc, encounterPicks, initOk,monsterHp, newCombat, next, patchCombatant, removeStep, setInit, start, type Expired, type HpOp, type Step } from './combat.ts';
 import { restoreCombat, restoreScene, snapshotFight } from './encounters.ts';
 
 // One operation at a time (per tab): two quick hits each read the character after the other's write, so both land.
@@ -127,6 +127,18 @@ export const setCondition = (cid: string, combatantId: string, name: string, on:
     return { ...y, durations, conditions: on ? [...conditions, name] : conditions };
   }) }));
 });
+
+/**
+ * P1: a prepared encounter's monsters join the live fight (a new one when there is none), whose link stays. `missing`: names of lines
+ * whose monster no longer resolves (left out).
+ */
+export async function addPreparedToFight(cid: string, e: Encounter, lookup: (id: string) => MonsterDef | undefined, hpMode: 'average' | 'roll'): Promise<{ added: Combatant[]; missing: string[] }> {
+  const { picks, missing } = encounterPicks(e, lookup);
+  if (!picks.length) return { added: [], missing };
+  let before = new Set<string>();
+  const after = await updateCombat(cid, (c) => { before = new Set(c.combatants.map((x) => x.id)); return addMonsters(c, picks, hpMode); });
+  return { added: after.combatants.filter((x) => !before.has(x.id)), missing };
+}
 
 /** Saves the live fight (and the shown scene's tokens and fog) as a new encounter, and links the fight to it. */
 export const saveFightAs = (cid: string, name: string): Promise<Encounter> => serial(async () => {
