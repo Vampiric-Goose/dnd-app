@@ -41,6 +41,7 @@
     ['characters/new', 'Creator', () => import('./ui/creator/Creator.svelte')],
     ['characters/:id', 'Sheet', () => import('./ui/sheet/Sheet.svelte')],
     ['characters/:id/level-up', 'LevelUp', () => import('./ui/creator/LevelUp.svelte')],
+    ['characters/:id/choices', 'Choices', () => import('./ui/creator/Choices.svelte')],
     ['combat', 'Initiative', () => import('./ui/pages/Initiative.svelte')],
     ['compendium', 'Compendium', () => import('./ui/pages/Compendium.svelte')],
     ['monsters', 'Monsters', () => import('./ui/pages/Monsters.svelte')],

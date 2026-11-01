@@ -11,7 +11,9 @@
   import { transfer } from '../../lib/items/inventory.ts';
   import { replay } from '../../lib/sync/merge.ts';
   import { session } from '../../lib/sync/session.svelte.ts';
-  import { app, refreshCampaigns } from '../../lib/store.svelte.ts';
+  import { app, getFullIndex, getIndex, refreshCampaigns } from '../../lib/store.svelte.ts';
+  import { listChoices } from '../../lib/character/build.ts';
+  import type { ContentIndex } from '../../lib/content/index.ts';
   import { toast } from '../../lib/toast.svelte.ts';
   import type { Campaign, CampaignSettings, Character, OverrideKey } from '../../lib/types.ts';
   import { ABILITY_NAMES, message, signed, titleCase } from '../creator/labels.ts';
@@ -119,6 +121,14 @@
 
   // R36: the character's own campaign settings, not the picker's.
   const settings = $derived(app.campaigns.find((x) => x.id === c?.campaignId)?.settings ?? DEFAULT_SETTINGS);
+  // Choices the character never made (a book upgrade can add one, such as Variant Human's feat): a button opens just those.
+  let index: ContentIndex | undefined = $state.raw();
+  $effect(() => { const cid = c?.campaignId; (cid ? getIndex(cid) : getFullIndex()).then((i) => (index = i), () => undefined); });
+  const pending = $derived.by(() => {
+    if (!c || !index) return 0;
+    const ch = c, racial = (id: string) => [ch.build.raceId, ch.build.subraceId].includes(id.split('/')[0]);
+    try { return listChoices(ch, index, settings).filter((p) => !p.answer && !(ch.build.customOrigin && p.choice.type === 'ability' && racial(p.sourceId))).length; } catch { return 0; }
+  });
   const sheet = $derived(c ? computeSheet(c, { settings, viewer: app.viewer }) : undefined);
 
   const update = (fn: (c: Character) => Character) => { if (c) c = fn(c); };
@@ -252,6 +262,7 @@
         <p class="muted">{characterSummary(c)}{sheet.totalLevel ? ` · level ${sheet.totalLevel}` : ''}</p>
       </div>
       <div class="actions">
+        {#if pending}<button type="button" class="primary" onclick={() => navigate(`characters/${c!.id}/choices`)}>Choices to make ({pending})</button>{/if}
         {#if app.viewer === 'dm'}
           <button type="button" aria-pressed={edit} onclick={() => (editOn = !editOn)}>Edit mode</button>
           <button type="button" class="primary" onclick={() => navigate(`characters/${c!.id}/level-up`)}>Level up</button>
