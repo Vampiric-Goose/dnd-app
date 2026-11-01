@@ -2,6 +2,7 @@
   import type { ContentIndex } from '../../lib/content/index.ts';
   import { db } from '../../lib/db.ts';
   import { app, getIndex } from '../../lib/store.svelte.ts';
+  import { trackerForPlayers } from '../../lib/sync/project.ts';
   import { session } from '../../lib/sync/session.svelte.ts';
   import type { Character, Combat, Encounter, MonsterDef } from '../../lib/types.ts';
   import { message } from '../creator/labels.ts';
@@ -16,16 +17,16 @@
   let chars: Character[] = $state([]);
   let encounters: Encounter[] = $state([]);
   let index: ContentIndex | undefined = $state();
-  let own: MonsterDef[] = $state([]);
+  let homebrew: MonsterDef[] = $state([]);
   let error = $state('');
 
   const cid = $derived(campaign?.id);
 
   async function load() {
     const id = cid;
-    if (!id || asPlayer) return;
+    if (!id) return;
     try {
-      const [c, cs, es] = await Promise.all([db.combat.get(id), db.characters.list(id), db.encounters.list(id)]);
+      const [c, cs, es] = await Promise.all([db.combat.get(id), db.characters.list(id), asPlayer ? [] : db.encounters.list(id)]);
       if (id !== cid) return;
       combat = c;
       chars = cs.sort((a, b) => a.name.localeCompare(b.name));
@@ -42,16 +43,20 @@
   $effect(() => {
     const id = cid;
     if (!id || asPlayer) return;
-    Promise.all([getIndex(id), db.monsters.list(id)]).then(([i, m]) => { if (id === cid) { index = i; own = m; } }, (e) => { error = message(e); });
+    Promise.all([getIndex(id), db.monsters.list(id)]).then(([i, m]) => { if (id === cid) { index = i; homebrew = m; } }, (e) => { error = message(e); });
   });
-  const pool = $derived<MonsterDef[]>(index ? [...own, ...index.all('monster')] : []);
+  // Players: a joined campaign shows what the DM sent; the DM's own Player view builds the same projection locally (R12).
+  const joined = $derived(campaign?.sync?.role === 'player');
+  const view = $derived(joined ? session.tracker : campaign && trackerForPlayers(combat, chars, campaign.settings));
+  const mine = $derived(joined ? chars.filter((c) => c.ownerId !== undefined && c.ownerId === campaign?.sync?.playerId) : []);
+  const pool = $derived<MonsterDef[]>(index ? [...homebrew, ...index.all('monster')] : []);
 </script>
 
 <h1>Initiative</h1>
 {#if !campaign}
   <p>Open a campaign to run combat.</p>
 {:else if asPlayer}
-  <PlayerTracker />
+  <PlayerTracker {view} own={mine} settings={campaign.settings} />
 {:else}
   {#if error}<p role="alert" class="error">{error}</p>{/if}
   <Tracker {campaign} {combat} {chars} {pool} {index} reload={load} />
