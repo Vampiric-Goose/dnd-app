@@ -55,27 +55,41 @@ export interface TrackerView { round: number; current?: string; rows: TrackerRow
  * The tracker as players see it, an allowlist (spec 3.6): no hidden combatants, no monsters during setup (round 0), and of everything
  * but a player's character only its name (plus a health word when the DM shows monster health). A player character carries its
  * initiative, HP and the player-view max HP (hidden item bonuses stay hidden). A DM-only character counts as "everything else" (R13).
+ * S4-R5: every row but a player's character gets its id from `alias` (the host passes opaque random ids, so no record id leaves).
+ * S4-R4: on a turn players can't see (hidden, or a missing PC), `current` and `round` stay where the last visible turn left them.
  */
-export function trackerForPlayers(c: Combat | undefined, characters: Character[], settings: CampaignSettings): TrackerView | undefined {
+export function trackerForPlayers(c: Combat | undefined, characters: Character[], settings: CampaignSettings, alias: (combatantId: string) => string = (id) => id): TrackerView | undefined {
   if (!c) return undefined;
   const byId = new Map(characters.map((ch) => [ch.id, ch]));
   const maxHp = (ch: Character) => computeSheet(ch, { settings, viewer: 'player' }).maxHp;
   const showHealth = settings.showMonsterHealth && settings.initiativeModules.hp;
   const rows: TrackerRow[] = [];
+  const sent = new Map<string, string>(); // combatant id → row id
   for (const x of c.combatants) {
     if (x.hidden) continue;
     const ch = x.characterId === undefined ? undefined : byId.get(x.characterId);
     if (x.characterId !== undefined && !ch) continue;
     if (ch?.ownerId) {
       rows.push({ id: x.id, name: ch.name, characterId: ch.id, ...(x.init !== undefined && { init: x.init }), hp: ch.state.hp, maxHp: maxHp(ch) });
+      sent.set(x.id, x.id);
       continue;
     }
     if (c.round === 0) continue;
     const health = showHealth ? (ch ? healthStatus(ch.state.hp, maxHp(ch)) : healthStatus(x.hp, x.maxHp)) : undefined;
-    rows.push({ id: x.id, name: x.name, ...(health && { health }) });
+    const id = alias(x.id);
+    rows.push({ id, name: x.name, ...(health && { health }) });
+    sent.set(x.id, id);
   }
-  const current = c.round > 0 && rows.some((r) => r.id === c.turn) ? c.turn : undefined;
-  return { round: c.round, ...(current !== undefined && { current }), rows };
+  // The current turn, or the nearest visible one before it; walking back past the top of the order is the previous round.
+  let round = c.round, current: string | undefined;
+  const i = c.combatants.findIndex((x) => x.id === c.turn);
+  for (let k = 0; c.round > 0 && i >= 0 && k < c.combatants.length && current === undefined; k++) {
+    const j = i - k;
+    if (j < 0 && c.round === 1) break; // no visible turn yet this fight
+    current = sent.get(c.combatants[(j + c.combatants.length) % c.combatants.length].id);
+    if (current !== undefined && j < 0) round = c.round - 1;
+  }
+  return { round, ...(current !== undefined && { current }), rows };
 }
 
 /** Stage 5's movement gate: the characterId whose turn it is, if any. */

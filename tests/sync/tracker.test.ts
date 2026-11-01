@@ -3,7 +3,7 @@ import { describe, expect, test } from 'vitest';
 import { makeEntry } from '../../src/lib/items/inventory.ts';
 import { computeSheet } from '../../src/lib/rules/sheet.ts';
 import { DEFAULT_SETTINGS } from '../../src/lib/settings.ts';
-import { cleanTracker, Guest, type GuestDeps } from '../../src/lib/sync/guest.ts';
+import { cleanRoster, cleanTracker, Guest, type GuestDeps } from '../../src/lib/sync/guest.ts';
 import { Host } from '../../src/lib/sync/host.ts';
 import { currentActor, healthStatus, trackerForPlayers, type TrackerView } from '../../src/lib/sync/project.ts';
 import { INIT_MAX, INIT_MIN, parseGuestMessage } from '../../src/lib/sync/protocol.ts';
@@ -44,6 +44,7 @@ function fight(o: Partial<Combat> = {}): Combat {
 const LEAKS = ['Assassin', 'Secret note', 'monster:goblin@SRD', '"ac"', 'conSave', 'durations', '"maxHp":7', '"maxHp":9', '"maxHp":31', '"maxHp":78',
   'poisoned', 'concentrating', 'reactionUsed', 'notes', '"init":12', '"init":8', 'Amulet', '"x1"'];
 const row = (v: TrackerView | undefined, id: string) => v?.rows.find((r) => r.id === id);
+const named = (v: TrackerView | undefined, name: string) => v?.rows.find((r) => r.name === name);
 
 test('healthStatus', () => {
   const cases: [number | undefined, number | undefined, string | undefined][] = [
@@ -90,10 +91,26 @@ describe('trackerForPlayers', () => {
     expect(JSON.stringify(v)).not.toMatch(/Goblin|Lair|Spy/);
   });
 
-  test('a hidden current turn is not revealed', () => {
-    const v = trackerForPlayers(fight({ turn: 'x1' }), chars(), settings())!;
-    expect(v.current).toBeUndefined();
-    expect('current' in v).toBe(false);
+  test('S4-R4: a hidden turn is not revealed: current and round stay on the last visible turn', () => {
+    expect(trackerForPlayers(fight({ turn: 'x1' }), chars(), settings())).toEqual(trackerForPlayers(fight({ turn: 'g1' }), chars(), settings()));
+    expect(trackerForPlayers(fight({ turn: 'x1' }), chars(), settings())!.current).toBe('g1');
+    // a hidden combatant first in the order: in round 3 its turn still shows round 2 and the last visible row
+    const first = fight().combatants.filter((x) => x.id !== 'x1');
+    const order = [cb({ id: 'x1', kind: 'monster', name: 'Assassin', hidden: true }), ...first];
+    const v = trackerForPlayers(fight({ combatants: order, round: 3, turn: 'x1' }), chars(), settings())!;
+    expect([v.round, v.current]).toEqual([2, 'pc:spy']);
+    // ...and in round 1, before any visible turn: round 1 and no current
+    const w = trackerForPlayers(fight({ combatants: order, round: 1, turn: 'x1' }), chars(), settings())!;
+    expect([w.round, 'current' in w]).toEqual([1, false]);
+    // a PC whose character is gone is skipped the same way
+    expect(trackerForPlayers(fight({ turn: 'pc:thorin' }), [spy()], settings())!.current).toBe('lair');
+  });
+
+  test('S4-R5: rows other than player characters take their id from alias, current too', () => {
+    const alias = (id: string) => `a-${id}`;
+    const v = trackerForPlayers(fight({ turn: 'g1' }), chars(), settings(), alias)!;
+    expect(v.rows.map((r) => r.id)).toEqual(['a-lair', 'pc:thorin', 'a-g1', 'a-pc:spy']);
+    expect(v.current).toBe('a-g1');
   });
 
   test('a PC\'s max HP is the player view\'s', () => {
@@ -139,7 +156,10 @@ describe('engine', () => {
     host.trackerChanged();
     await settle(host, a.guest);
     expect(a.views.at(-1)!.round).toBe(1);
-    expect(a.views.at(-1)!.rows.map((r) => r.id)).toEqual(['lair', 'pc:thorin', 'g1', 'pc:spy']);
+    const ids = a.views.at(-1)!.rows.map((r) => r.id);
+    expect(a.views.at(-1)!.rows.map((r) => r.name)).toEqual(['Lair actions', 'Thorin', 'Goblin 1', 'Spy']);
+    expect(ids[1]).toBe('pc:thorin');
+    for (const id of [ids[0], ids[2], ids[3]]) expect(id).toMatch(/^[0-9a-f-]{36}$/); // S4-R5: opaque aliases, no record ids
 
     const b = player('A2'), downB: string[] = [];
     connect(host, b.guest, downB);
@@ -166,6 +186,7 @@ describe('engine', () => {
     b.guest.characterChanged('bree');
     await settle(host, a.guest, b.guest);
     expect(row(a.views.at(-1), 'pc:bree')!.hp).toBe(6);
+    expect(a.views.at(-1)!.rows.map((r) => r.id).filter((id) => id !== 'pc:bree')).toEqual(ids); // aliases are stable
 
     // the fight ends: players are told
     d.combat = undefined;
@@ -174,7 +195,7 @@ describe('engine', () => {
     expect(a.views.at(-1)).toBeUndefined();
 
     expect(trackers(down).length).toBeGreaterThan(4);
-    for (const m of [...trackers(down), ...trackers(downB)]) for (const s of LEAKS) expect(m).not.toContain(s);
+    for (const m of [...trackers(down), ...trackers(downB)]) for (const s of [...LEAKS, '"lair"', '"g1"', 'pc:spy']) expect(m).not.toContain(s);
     for (const m of [...down, ...downB]) for (const s of ['Assassin', 'Secret note', 'monster:', '"maxHp":31']) expect(m).not.toContain(s);
   });
 
@@ -183,11 +204,53 @@ describe('engine', () => {
     const a = player('A1');
     connect(host, a.guest);
     await settle(host, a.guest);
-    expect(row(a.views.at(-1), 'g1')!.health).toBe('Bloodied');
+    expect(named(a.views.at(-1), 'Goblin 1')!.health).toBe('Bloodied');
     d.campaigns.get(CID)!.settings.showMonsterHealth = false;
     host.campaignChanged();
     await settle(host, a.guest);
-    expect(row(a.views.at(-1), 'g1')!.health).toBeUndefined();
+    expect(named(a.views.at(-1), 'Goblin 1')!.health).toBeUndefined();
+  });
+
+  test('M1: an unchanged view is not sent again; a hidden turn sends nothing (S4-R4)', async () => {
+    const { d, host } = setup(fight({ turn: 'g1' }));
+    const a = player('A1'), down: string[] = [];
+    connect(host, a.guest, down);
+    await settle(host, a.guest);
+    const n = trackers(down).length;
+    expect(n).toBe(1);
+    host.trackerChanged(); // nothing changed
+    d.combat = { ...fight({ turn: 'g1' }), combatants: fight().combatants.map((x) => (x.id === 'x1' ? { ...x, hp: 40 } : x)) }; // the hidden monster's HP
+    host.trackerChanged();
+    d.combat = { ...d.combat, turn: 'x1' }; // the turn passes to the hidden Assassin
+    host.trackerChanged();
+    d.combat = { ...d.combat, combatants: [...d.combat.combatants, cb({ id: 'x2', kind: 'monster', name: 'Shade', hidden: true })] }; // a hidden one added
+    host.trackerChanged();
+    await settle(host, a.guest);
+    expect(trackers(down).length).toBe(n);
+    d.combat = { ...d.combat, turn: 'pc:spy' }; // a visible turn begins
+    host.trackerChanged();
+    await settle(host, a.guest);
+    expect(trackers(down).length).toBe(n + 1);
+    expect(named(a.views.at(-1), 'Spy')!.id).toBe(a.views.at(-1)!.current);
+  });
+
+  test('I1: a player who was offline when the fight ended gets tracker null on reconnect', async () => {
+    const { d, host } = setup(fight());
+    const a = player('A1');
+    const [h] = connect(host, a.guest);
+    await settle(host, a.guest);
+    expect(a.views.at(-1)?.round).toBe(1);
+    h.close();
+    await settle(host, a.guest);
+    d.combat = undefined;
+    host.trackerChanged();
+    await settle(host, a.guest);
+    expect(a.views.at(-1)?.round).toBe(1); // it did not hear
+    connect(host, a.guest);
+    await settle(host, a.guest);
+    expect(a.guest.status).toBe('online');
+    expect(a.views.length).toBe(2);
+    expect(a.views.at(-1)).toBeUndefined();
   });
 
   test('initiative messages are validated (Review Focus 4)', async () => {
@@ -239,6 +302,12 @@ describe('engine', () => {
     expect(parseGuestMessage({ t: 'initiative', characterId: 'c', total: NaN })).toEqual({ error: 'bad initiative' });
     expect(parseGuestMessage({ t: 'initiative', total: 5 })).toEqual({ error: 'bad initiative' });
   });
+});
+
+test('I2: a repeated row id from a crafted host is dropped (tracker and roster)', () => {
+  expect(cleanTracker({ round: 1, rows: [{ id: 'a', name: 'x' }, { id: 'a', name: 'y' }, { id: 'b', name: 'z' }] })!.rows).toEqual([{ id: 'a', name: 'x' }, { id: 'b', name: 'z' }]);
+  const e = { id: 'p', ownerId: 'A1', name: 'Bree', race: 'Human', classes: 'Fighter 1', level: 1, hp: 5, maxHp: 10, conditions: [] };
+  expect(cleanRoster([e, { ...e, name: 'Twin' }, { ...e, id: 'q' }]).map((r) => [r.id, r.name])).toEqual([['p', 'Bree'], ['q', 'Bree']]);
 });
 
 test('cleanTracker', () => {

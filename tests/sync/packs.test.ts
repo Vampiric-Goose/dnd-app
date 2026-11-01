@@ -86,7 +86,7 @@ describe('pack sharing', () => {
     await settle(host);
     g2.send({ t: 'packWant', ids: [MM.id] });
     await settle(host);
-    expect(down.slice(before).map((s) => JSON.parse(s).t)).toEqual(['welcome']);
+    expect(down.slice(before).map((s) => JSON.parse(s).t)).toEqual(['welcome', 'tracker']); // stage 4 I1: a welcome is always followed by the tracker
     expect(d.errors.some((e) => String(e).includes('not offered'))).toBe(true);
   });
 

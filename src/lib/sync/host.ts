@@ -10,7 +10,8 @@ import { newJoinCode, nextPlayerId, sha256Text } from './code.ts';
 import { hlcNow, hlcReceive, MAX_AHEAD } from './hlc.ts';
 import type { Link } from './link.ts';
 import { canon, latestClock, mergeCharacter, type Synced } from './merge.ts';
-import { campaignForPlayers, characterForPlayer, packForPlayers, rosterEntry, trackerForPlayers, unprojectCharacter } from './project.ts';
+import { campaignForPlayers, characterForPlayer, packForPlayers, rosterEntry, trackerForPlayers, unprojectCharacter, type TrackerView } from './project.ts';
+import { uid } from '../uid.ts';
 import { cleanRoll, MAX_CHUNK, MAX_MESSAGE, MAX_PACK, parseGuestMessage, size, type GuestMsg, type HostMsg, type PackOffer } from './protocol.ts';
 
 export interface HostDeps {
@@ -44,7 +45,7 @@ export interface HostDeps {
   now?(): number;
 }
 
-interface Conn { link: Link; playerId?: string; name?: string; bad: number; closed: boolean; offered: Set<string>; streamed: Set<string>; packs: Promise<void> }
+interface Conn { link: Link; playerId?: string; name?: string; bad: number; closed: boolean; offered: Set<string>; streamed: Set<string>; packs: Promise<void>; tracker?: string /* JSON of the last tracker sent (M1) */ }
 
 /**
  * Characters of pack JSON per chunk. Worst case a character takes 3 UTF-8 bytes (a quote or backslash escapes to 2, anything else in
@@ -278,8 +279,8 @@ export class Host {
     c.offered = new Set(packs.map((p) => p.id));
     this.#send(c, { t: 'welcome', playerId: c.playerId, campaign: forPlayers(camp, packs), roster: await this.#roster(camp), packs });
     for (const ch of await this.#deps.loadCharacters()) if (ch.ownerId === c.playerId) this.#send(c, { t: 'chars', characters: [characterForPlayer(ch)] });
-    const combat = await this.#deps.loadCombat?.();
-    if (combat) this.#send(c, { t: 'tracker', tracker: await this.#tracker(camp, combat) });
+    // I1: always (null with no fight), so a player who was offline when the fight ended drops their stale tracker
+    if (this.#deps.loadCombat) this.#sendTrackerTo(c, await this.#tracker(camp, await this.#deps.loadCombat()));
   }
 
   #reject(c: Conn, reason: string): void {
@@ -436,11 +437,29 @@ export class Host {
   async #tracker(camp: Campaign, combat: Combat | undefined) {
     if (!combat) return null;
     const chars = (await this.#deps.loadCharacters()).filter((ch) => ch.campaignId === camp.id);
-    return trackerForPlayers(combat, chars, camp.settings) ?? null;
+    return trackerForPlayers(combat, chars, camp.settings, this.#alias) ?? null;
+  }
+
+  /** S4-R5: an opaque random row id per combatant, stable for this host's life, so players learn no record ids. */
+  #aliases = new Map<string, string>();
+  #alias = (id: string): string => {
+    let a = this.#aliases.get(id);
+    if (a === undefined) this.#aliases.set(id, a = uid());
+    return a;
+  };
+
+  /** M1: a view identical to the last one this link got is not sent again (no timing hint of changes players can't see). */
+  #sendTrackerTo(c: Conn, tracker: TrackerView | null): void {
+    const json = JSON.stringify(tracker);
+    if (c.tracker === json) return;
+    c.tracker = json;
+    this.#send(c, { t: 'tracker', tracker });
   }
 
   async #sendTracker(camp: Campaign, combat: Combat | undefined): Promise<void> {
-    if ([...this.#conns].some((c) => c.playerId)) this.#broadcast({ t: 'tracker', tracker: await this.#tracker(camp, combat) });
+    if (![...this.#conns].some((c) => c.playerId)) return;
+    const tracker = await this.#tracker(camp, combat);
+    for (const c of this.#conns) if (c.playerId) this.#sendTrackerTo(c, tracker);
   }
 
   /** Re-sends the tracker when the fight holds any of these characters. */

@@ -87,25 +87,30 @@ function playerCampaign(v: unknown): CampaignForPlayers | undefined {
 }
 const str = (x: unknown) => typeof x === 'string' && x.length <= 500;
 const fin = (x: unknown) => typeof x === 'number' && Number.isFinite(x);
-/** M1: only well-formed party entries reach the page, rebuilt from their known fields. */
-export const cleanRoster = (v: unknown): RosterEntry[] => (Array.isArray(v) ? v : []).flatMap((e): RosterEntry[] =>
+/** I2: the first entry of each id only (a repeated key crashes a keyed {#each}). */
+function uniqueIds<T extends { id: string }>(xs: T[]): T[] {
+  const seen = new Set<string>();
+  return xs.filter((x) => !seen.has(x.id) && !!seen.add(x.id));
+}
+/** M1: only well-formed party entries reach the page, rebuilt from their known fields; a repeated id is dropped (I2). */
+export const cleanRoster = (v: unknown): RosterEntry[] => uniqueIds((Array.isArray(v) ? v : []).flatMap((e): RosterEntry[] =>
   isRec(e) && str(e.id) && str(e.ownerId) && str(e.name) && str(e.race) && str(e.classes) && fin(e.level) && fin(e.hp) && fin(e.maxHp)
     && Array.isArray(e.conditions) && e.conditions.every(str) && (e.portrait === undefined || str(e.portrait))
     ? [{ id: e.id as string, ownerId: e.ownerId as string, name: e.name as string, ...(e.portrait !== undefined && { portrait: e.portrait as string }), race: e.race as string, classes: e.classes as string,
       level: e.level as number, hp: e.hp as number, maxHp: e.maxHp as number, conditions: [...e.conditions as string[]] }]
-    : []);
+    : []));
 const HEALTH: readonly string[] = ['Unhurt', 'Hurt', 'Bloodied', 'Down'] satisfies HealthStatus[];
 const MAX_ROWS = 200; // MAX_COMBATANTS (combat.ts is lazy: not imported here)
 const s = (x: unknown, max: number): x is string => typeof x === 'string' && x.length <= max;
-/** Stage 4: the DM's tracker rebuilt from its known fields: a row without a fitting id and name is dropped, a bad optional field omitted. */
+/** Stage 4: the DM's tracker rebuilt from its known fields: a row without a fitting id and name, or with an id already seen, is dropped; a bad optional field omitted. */
 export function cleanTracker(v: unknown): TrackerView | undefined {
   if (!isRec(v) || !fin(v.round) || !Array.isArray(v.rows)) return undefined;
-  const rows = v.rows.flatMap((r): TrackerRow[] => {
+  const rows = uniqueIds(v.rows.flatMap((r): TrackerRow[] => {
     if (!isRec(r) || !s(r.id, 100) || !s(r.name, 200)) return [];
     return [{ id: r.id, name: r.name, ...(s(r.characterId, 100) && { characterId: r.characterId }), ...(fin(r.init) && { init: r.init as number }),
       ...(fin(r.hp) && { hp: r.hp as number }), ...(fin(r.maxHp) && { maxHp: r.maxHp as number }),
       ...(typeof r.health === 'string' && HEALTH.includes(r.health) && { health: r.health as HealthStatus })}];
-  }).slice(0, MAX_ROWS);
+  })).slice(0, MAX_ROWS);
   const current = rows.some((r) => r.id === v.current) ? v.current as string : undefined;
   return { round: v.round as number, ...(current !== undefined && { current }), rows };
 }
