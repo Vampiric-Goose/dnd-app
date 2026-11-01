@@ -6,6 +6,7 @@ import { addRemoteRoll, rollHooks } from '../rolls.svelte.ts';
 import { app, getIndex, refreshCampaigns, setCampaign } from '../store.svelte.ts';
 import type { Campaign } from '../types.ts';
 import { newCampaignSync, newJoinCode, peerIdFor } from './code.ts';
+import { RELAY_KEY, storedRelay } from './relay.ts';
 import type { Guest, GuestDeps, GuestStatus, PackProgress } from './guest.ts';
 import type { Host, HostDeps } from './host.ts';
 import type { Listener, Transport } from './link.ts';
@@ -44,7 +45,12 @@ export const session = $state({
 /** S5-R1: reconnect delays 2 s, 5 s, 15 s, 30 s, 2 min, then every 5 min (a busy public sync server refuses rapid retries). */
 export const backoff = (attempt: number): number => [2000, 5000, 15000, 30000, 120000][attempt] ?? 300000;
 
-let transport = async (): Promise<Transport> => (await import('./peer.ts')).transport;
+// This device's relay (if any) is read on every start, so a change applies to the next host or join.
+let transport = async (): Promise<Transport> => {
+  const [m, v] = await Promise.all([import('./peer.ts'), db.meta.get(RELAY_KEY)]);
+  m.setRelay(storedRelay(v));
+  return m.transport;
+};
 /** Tests: a fake transport instead of PeerJS. */
 export const useTransport = (t: Transport): void => { transport = async () => t; };
 

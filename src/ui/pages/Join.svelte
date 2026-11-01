@@ -4,6 +4,7 @@
   import { codeFrom } from '../../lib/sync/code.ts';
   import { join, leaveJoin, session } from '../../lib/sync/session.svelte.ts';
   import NetLog from '../sync/NetLog.svelte';
+  import RelaySettings from '../sync/RelaySettings.svelte';
   import RetryNow from '../sync/RetryNow.svelte';
 
   let { params }: { params: { code?: string } } = $props();
@@ -90,6 +91,7 @@
     <button class="primary" type="submit" disabled={mode === 'id' && !pidOk}>Join</button>
   </form>
   <p class="muted">Players can join from anywhere over the internet. A few networks (some mobile carriers, schools and workplaces) block direct connections; if joining fails, try another network.</p>
+  <RelaySettings />
 {:else}
   {#if session.confirm}
     <div role="alertdialog" aria-label="Confirm joining" class="card">
@@ -115,6 +117,7 @@
   {/if}
   {#if packs?.error}<p role="alert" class="error">{packs.error}</p>{/if}
   {#if session.status === 'rejected'}<button onclick={() => (started = false)}>Back</button>{/if}
+  <RelaySettings />
   <NetLog />
 {/if}
 

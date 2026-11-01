@@ -4,6 +4,7 @@
   import { hostCampaign, removePlayer, rotateCode, session, stopHosting } from '../../lib/sync/session.svelte.ts';
   import type { Campaign, Character } from '../../lib/types.ts';
   import NetLog from './NetLog.svelte';
+  import RelaySettings from './RelaySettings.svelte';
   import RetryNow from './RetryNow.svelte';
 
   let { campaign }: { campaign: Campaign } = $props();
@@ -119,6 +120,7 @@
   {/if}
 {/if}
 <p class="muted">Players can join from anywhere over the internet. A few networks (some mobile carriers, schools and workplaces) block direct connections; if joining fails, try another network.</p>
+<RelaySettings />
 <NetLog />
 <p class="muted">Keep hosting in one tab; edits made in other tabs reach players when they reconnect.</p>
 <p class="muted">Give each character to its player with the Player menu on the Characters page; characters with no player stay with you.</p>

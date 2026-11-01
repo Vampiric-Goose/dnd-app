@@ -6,8 +6,15 @@ import { Peer, type DataConnection, type PeerOptions } from 'peerjs';
 import { frames, unframer, type Link, type Listener, type Transport } from './link.ts';
 import { note, watchIce } from './netlog.svelte.ts';
 import { MAX_CHUNK, MAX_MESSAGE } from './protocol.ts';
+import type { Relay } from './relay.ts';
 
-const OPTIONS: PeerOptions = { config: { iceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] }] } };
+const STUN: RTCIceServer = { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] };
+let OPTIONS: PeerOptions = { config: { iceServers: [STUN] } };
+/** Adds this device's TURN relay (relay.ts) to every connection made from now on; undefined removes it. */
+export function setRelay(r: Relay | undefined): void {
+  OPTIONS = { config: { iceServers: r ? [STUN, { urls: r.urls, username: r.username, credential: r.credential }] : [STUN] } };
+  note(r ? `relay: using ${r.urls.length} relay server address${r.urls.length === 1 ? '' : 'es'}` : 'relay: none set (direct connections only)');
+}
 const CONNECT = { reliable: true, serialization: 'json' } as const;
 /** The largest data channel message an honest peer sends (PeerJS's JSON-channel limit). A bigger one is refused unread. */
 const MAX_FRAME_TEXT = 16_300;
