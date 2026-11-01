@@ -152,3 +152,9 @@ export interface Sheet {
   carrying: { weight: number; capacity: number; encumbrance: 'none' | 'encumbered' | 'heavy' | 'over' };
   attunedCount: number; overridden: OverrideKey[]; warnings: string[];
 }
+
+// Stage 5: the battle map.
+export interface Grid { type: 'square' | 'hex-flat' | 'hex-pointy'; size: number /* px between neighbouring cell centres */; offsetX: number; offsetY: number; color: string /* #rrggbb */; opacity: number; feet: number }
+export interface Token { id: string; name: string; x: number; y: number /* centre, scene px */; size: Size; color: string; portrait?: string /* blob hash */; hidden?: boolean;
+  characterId?: string; monsterId?: string; hp?: number; maxHp?: number /* monster instance state */; combatantId?: string /* C3: linked monster combatant */ }
+export interface Scene { id: string; campaignId: string; name: string; image?: string /* blob hash */; width: number; height: number; grid: Grid; tokens: Token[]; fog?: string /* C */; shown?: boolean; updatedAt: number }
