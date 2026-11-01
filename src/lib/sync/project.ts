@@ -56,11 +56,13 @@ export interface TrackerView { round: number; current?: string; rows: TrackerRow
 /**
  * The tracker as players see it, an allowlist (spec 3.6): no hidden combatants, no monsters during setup (round 0), and of everything
  * but a player's character only its name (plus a health word when the DM shows monster health). A player character carries its
- * initiative, HP and the player-view max HP (hidden item bonuses stay hidden), and while a budget applies its movement this turn. A DM-only character counts as "everything else" (R13).
+ * initiative, HP and the player-view max HP (hidden item bonuses stay hidden). A DM-only character counts as "everything else" (R13).
+ * Spec 1: while a budget applies, only the `viewer` player's own characters carry their movement this turn (no viewer: none do).
  * S4-R5: every row but a player's character gets its id from `alias` (the host passes opaque random ids, so no record id leaves).
  * S4-R4: on a turn players can't see (hidden, or a missing PC), `current` and `round` stay where the last visible turn left them.
  */
-export function trackerForPlayers(c: Combat | undefined, characters: Character[], settings: CampaignSettings, alias: (combatantId: string) => string = (id) => id): TrackerView | undefined {
+export function trackerForPlayers(c: Combat | undefined, characters: Character[], settings: CampaignSettings, alias: (combatantId: string) => string = (id) => id,
+  viewer?: string): TrackerView | undefined {
   if (!c) return undefined;
   const byId = new Map(characters.map((ch) => [ch.id, ch]));
   const maxHp = (ch: Character) => computeSheet(ch, { settings, viewer: 'player' }).maxHp;
@@ -73,7 +75,7 @@ export function trackerForPlayers(c: Combat | undefined, characters: Character[]
     const ch = x.characterId === undefined ? undefined : byId.get(x.characterId);
     if (x.characterId !== undefined && !ch) continue;
     if (ch?.ownerId) {
-      const m = budget ? c.movement?.[x.id] : undefined;
+      const m = budget && ch.ownerId === viewer ? c.movement?.[x.id] : undefined;
       rows.push({ id: x.id, name: ch.name, characterId: ch.id, ...(x.init !== undefined && { init: x.init }), hp: ch.state.hp, maxHp: maxHp(ch),
         ...(m && { moved: { feet: m.feet, dashes: m.dashes } }) });
       sent.set(x.id, x.id);

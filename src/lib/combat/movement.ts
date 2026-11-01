@@ -43,7 +43,7 @@ export const resetMovement = (c: Combat, combatantId: string): Combat =>
 
 /**
  * The drop point of a drag from `from` toward `to` with `left` feet: the snapped target when it is within budget, else the last snapped
- * sample along the line (every quarter cell) within budget, stopping at the first one past it.
+ * sample along the line (every quarter cell) within budget.
  */
 export function clampMove(g: Grid, from: Pt, to: Pt, size: Size, left: number, diagonal: '5-5-5' | '5-10-5'): Pt {
   const a = snap(g, from, size), end = snap(g, to, size);
@@ -52,8 +52,7 @@ export function clampMove(g: Grid, from: Pt, to: Pt, size: Size, left: number, d
   let best = a;
   for (let i = 1; i <= n; i++) {
     const p = snap(g, { x: a.x + ((to.x - a.x) * i) / n, y: a.y + ((to.y - a.y) * i) / n }, size);
-    if (feetBetween(g, a, p, diagonal) > left) break;
-    best = p;
+    if (feetBetween(g, a, p, diagonal) <= left) best = p;
   }
   return best;
 }

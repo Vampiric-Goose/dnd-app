@@ -319,7 +319,7 @@ export class Host {
     this.#send(c, { t: 'welcome', playerId: c.playerId, campaign: forPlayers(camp, packs), roster: await this.#roster(camp), packs });
     for (const ch of await this.#deps.loadCharacters()) if (ch.ownerId === c.playerId) this.#send(c, { t: 'chars', characters: [characterForPlayer(ch)] });
     // I1: always (null with no fight), so a player who was offline when the fight ended drops their stale tracker
-    if (this.#deps.loadCombat) this.#sendTrackerTo(c, await this.#tracker(camp, await this.#deps.loadCombat()));
+    if (this.#deps.loadCombat) this.#sendTrackerTo(c, (await this.#tracker(camp, await this.#deps.loadCombat()))(c.playerId));
     if (this.#deps.loadScene) this.#sendSceneTo(c, await this.#scene(camp)); // always (null with none), as the tracker
   }
 
@@ -475,11 +475,11 @@ export class Host {
     if (camp && [...this.#conns].some((c) => c.playerId)) this.#broadcast({ t: 'roster', roster: await this.#roster(camp) });
   }
 
-  /** Stage 4: the player tracker (trackerForPlayers, the allowlist), or null with no fight. */
-  async #tracker(camp: Campaign, combat: Combat | undefined) {
-    if (!combat) return null;
+  /** Stage 4: each player's tracker (trackerForPlayers, the allowlist; only their own movement), or null with no fight. */
+  async #tracker(camp: Campaign, combat: Combat | undefined): Promise<(playerId: string) => TrackerView | null> {
+    if (!combat) return () => null;
     const chars = (await this.#deps.loadCharacters()).filter((ch) => ch.campaignId === camp.id);
-    return trackerForPlayers(combat, chars, camp.settings, this.#alias) ?? null;
+    return (pid) => trackerForPlayers(combat, chars, camp.settings, this.#alias, pid) ?? null;
   }
 
   /** S4-R5: an opaque random row id per combatant, stable for this host's life, so players learn no record ids. */
@@ -501,7 +501,7 @@ export class Host {
   async #sendTracker(camp: Campaign, combat: Combat | undefined): Promise<void> {
     if (![...this.#conns].some((c) => c.playerId)) return;
     const tracker = await this.#tracker(camp, combat);
-    for (const c of this.#conns) if (c.playerId) this.#sendTrackerTo(c, tracker);
+    for (const c of this.#conns) if (c.playerId) this.#sendTrackerTo(c, tracker(c.playerId));
   }
 
   /** Re-sends the tracker when the fight holds any of these characters. */

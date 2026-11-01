@@ -147,10 +147,11 @@ describe('engine', () => {
 
   test('Review Focus 1: the tracker carries the player\'s own movement, never a monster\'s; a reconnect gets it in its first tracker', async () => {
     const c = fight({ movement: { 'pc:thorin': mv(20, 1), g1: mv(15) } });
-    const v = trackerForPlayers(c, [thorin()], settings())!;
+    const v = trackerForPlayers(c, [thorin()], settings(), undefined, 'A1')!;
     expect(v.rows.find((r) => r.characterId === 'thorin')!.moved).toEqual(mv(20, 1));
     expect(v.rows.filter((r) => r.moved).length).toBe(1);
-    expect(trackerForPlayers(c, [thorin()], settings({ freeMovement: true }))!.rows.some((r) => r.moved)).toBe(false);
+    expect(trackerForPlayers(c, [thorin()], settings({ freeMovement: true }), undefined, 'A1')!.rows.some((r) => r.moved)).toBe(false);
+    for (const viewer of ['A2', undefined]) expect(trackerForPlayers(c, [thorin()], settings(), undefined, viewer)!.rows.some((r) => r.moved)).toBe(false);
 
     const { host, move } = await joined();
     await move(4);
@@ -160,6 +161,21 @@ describe('engine', () => {
     expect(again.trackers[0]!.rows.find((r) => r.characterId === 'thorin')!.moved).toEqual(mv(20));
     const sent = JSON.parse(down.find((m) => JSON.parse(m).t === 'tracker')!).tracker as TrackerView;
     expect(sent.rows.filter((r) => r.moved).map((r) => r.characterId)).toEqual(['thorin']);
+  });
+
+  test('spec 1: another player never gets Thorin\'s movement; his owner does', async () => {
+    const { host, a, move } = await joined();
+    const b = player('A2'), downB: string[] = [];
+    connect(host, b.guest, downB);
+    await settle(host, a.guest, b.guest);
+    await move(4);
+    host.trackerChanged(); // the session's db change hook does this
+    await settle(host, a.guest, b.guest);
+    const thorinRow = (t: TrackerView | undefined) => t!.rows.find((r) => r.characterId === 'thorin')!;
+    expect(thorinRow(a.trackers.at(-1)).moved).toEqual(mv(20));
+    expect(thorinRow(b.trackers.at(-1))).toBeDefined();
+    expect(thorinRow(b.trackers.at(-1)).moved).toBeUndefined();
+    expect(downB.some((m) => m.includes('moved'))).toBe(false);
   });
 
   test('cleanTracker keeps a well-formed moved only', () => {

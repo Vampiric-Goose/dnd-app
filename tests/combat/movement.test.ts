@@ -4,7 +4,7 @@ import { currentRun, newCombat, next, prev, removeStep, start } from '../../src/
 import {
   addDash, budgetApplies, clampMove, combatantForToken, effectiveSpeed, recordMove, remainingFeet, resetMovement, undoDash,
 } from '../../src/lib/combat/movement.ts';
-import { cellAt, cellCenter, feetBetween } from '../../src/lib/map/grid.ts';
+import { cellAt, cellCenter, feetBetween, snap } from '../../src/lib/map/grid.ts';
 import type { Combat, Combatant, Grid } from '../../src/lib/types.ts';
 
 const cb = (id: string, init: number, o: Partial<Combatant> = {}): Combatant => ({ id, kind: 'monster', name: id, init, initMod: 0, dex: 10, tie: 0.5, conSave: 0, ...o });
@@ -115,6 +115,16 @@ describe('clampMove (Review Focus 3)', () => {
     for (const to of [{ x: 600, y: 300 }, { x: 37, y: 512 }, { x: 410, y: 10 }]) {
       const p = clampMove(hex, { x: 0, y: 0 }, to, 'M', 15, '5-5-5');
       expect(feetBetween(hex, { x: 0, y: 0 }, p, '5-5-5')).toBe(15);
+    }
+  });
+  test('hex-flat: the farthest legal cell along the line (no legal cell past it)', () => {
+    const hex: Grid = { ...sq, type: 'hex-flat' }, a = { x: 0, y: 0 }, left = 20;
+    for (const to of [{ x: 600, y: 300 }, { x: 37, y: 512 }, { x: 410, y: 10 }, { x: 300, y: 520 }]) {
+      const p = clampMove(hex, a, to, 'M', left, '5-5-5');
+      const n = 2000, along = Array.from({ length: n + 1 }, (_, i) => snap(hex, { x: (to.x * i) / n, y: (to.y * i) / n }, 'M'));
+      const last = along.map((q) => q.x === p.x && q.y === p.y).lastIndexOf(true);
+      expect(last).toBeGreaterThan(0);
+      expect(along.slice(last + 1).every((q) => feetBetween(hex, a, q, '5-5-5') > left)).toBe(true);
     }
   });
 });
