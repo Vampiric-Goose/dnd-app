@@ -53,8 +53,10 @@ class Net implements Transport {
 }
 
 let net: Net;
+/** CI runners are slow under a parallel run: wait up to 10 s, not vi.waitFor's 1 s. */
+const SLOW = { timeout: 10_000, interval: 20 };
 async function settle(...hosts: { idle(): Promise<void> }[]) {
-  for (let i = 0; i < 60; i++) {
+  for (let i = 0; i < 200; i++) {
     await Promise.all(hosts.map((h) => h.idle()));
     await new Promise((r) => setImmediate(r));
   }
@@ -259,14 +261,14 @@ describe('final review fixes (DM side)', () => {
     const { p, guest } = await hostWithGuest({ onTracker: (t) => { views.push(t); } });
     await db.characters.put({ ...char('ch1', CID), ownerId: 'A1' });
     await settle(guest);
-    await vi.waitFor(() => expect(p.char('ch1')).toBeTruthy());
+    await vi.waitFor(() => expect(p.char('ch1')).toBeTruthy(), SLOW);
     await db.combat.update(CID, () => fightWith('ch1')); // reported as 'combat': the session sends the tracker
-    await vi.waitFor(() => expect(views.at(-1)?.round).toBe(1));
+    await vi.waitFor(() => expect(views.at(-1)?.round).toBe(1), SLOW);
     expect(views.at(-1)?.rows[0]).toMatchObject({ characterId: 'ch1' });
     expect(views.at(-1)?.rows[0].init).toBeUndefined();
     guest.sendInitiative('ch1', 14); // the host validates it; the session applies it through the lazily loaded combat store
-    await vi.waitFor(async () => expect((await db.combat.get(CID))!.combatants[0].init).toBe(14));
-    await vi.waitFor(() => expect(views.at(-1)?.rows[0].init).toBe(14));
+    await vi.waitFor(async () => expect((await db.combat.get(CID))!.combatants[0].init).toBe(14), SLOW);
+    await vi.waitFor(() => expect(views.at(-1)?.rows[0].init).toBe(14), SLOW);
   });
 
   test('M2: when hosting cannot start, the session stops and says why (Host again shows)', async () => {
@@ -356,14 +358,14 @@ describe('player', () => {
     await join({ code: CODE, name: 'Ann' });
     await settle(host);
     await db.characters.put(char('n1', CID)); // the player's own character (A1)
-    await vi.waitFor(() => expect(d.char('n1')?.ownerId).toBe('A1')); // ponytail: waitFor, settle alone ran short under a loaded full run
+    await vi.waitFor(() => expect(d.char('n1')?.ownerId).toBe('A1'), SLOW); // ponytail: waitFor, settle alone ran short under a loaded full run
     d.combat = fightWith('n1');
     host.trackerChanged();
-    await vi.waitFor(() => expect(session.tracker?.rows.map((r) => r.characterId)).toEqual(['n1']));
+    await vi.waitFor(() => expect(session.tracker?.rows.map((r) => r.characterId)).toEqual(['n1']), SLOW);
     expect(session.tracker?.round).toBe(1);
     sendInitiative('n1', 14);
     sendInitiative('n1', 14.5); // never sent
-    await vi.waitFor(() => expect(calls).toEqual([['n1', 14, 'A1']]));
+    await vi.waitFor(() => expect(calls).toEqual([['n1', 14, 'A1']]), SLOW);
     await settle(host);
     expect(calls.length).toBe(1);
     stopSession();
