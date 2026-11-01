@@ -7,10 +7,11 @@ import { roll, rollLog, rollViewer, rollVisibility } from '../../src/lib/rolls.s
 import { computeSheet } from '../../src/lib/rules/sheet.ts';
 import { DEFAULT_SETTINGS } from '../../src/lib/settings.ts';
 import { peerIdFor } from '../../src/lib/sync/code.ts';
-import { Guest } from '../../src/lib/sync/guest.ts';
-import { Host } from '../../src/lib/sync/host.ts';
+import { Guest, type GuestDeps } from '../../src/lib/sync/guest.ts';
+import { Host, type HostDeps } from '../../src/lib/sync/host.ts';
+import type { TrackerView } from '../../src/lib/sync/project.ts';
 import { memoryPair, type Link, type Transport } from '../../src/lib/sync/link.ts';
-import type { Campaign, ItemDef } from '../../src/lib/types.ts';
+import type { Campaign, Combat, ItemDef } from '../../src/lib/types.ts';
 import { rollD20 } from '../../src/ui/sheet/roll.ts';
 import { camp, char } from '../fixtures/records.ts';
 import { Device } from './fakes.ts';
@@ -18,7 +19,7 @@ import { Device } from './fakes.ts';
 vi.mock('../../src/lib/content/srd.ts', async () => ({ loadSrd: async () => (await import('../fixtures/srdPack.ts')).srdPackFixture }));
 await import('../fixtures/srdPack.ts'); // loaded once here, so the mocked SRD resolves at once inside settle()
 const { app, refreshCampaigns, setCampaign } = await import('../../src/lib/store.svelte.ts');
-const { backoff, follow, hostCampaign, join, rotateCode, session, stopHosting, stopSession, useTransport } = await import('../../src/lib/sync/session.svelte.ts');
+const { backoff, follow, hostCampaign, join, rotateCode, sendInitiative, session, stopHosting, stopSession, useTransport } = await import('../../src/lib/sync/session.svelte.ts');
 
 const CODE = 'ABCDEFGHJKMN';
 const CID = 'c1';
@@ -58,6 +59,9 @@ async function settle(...hosts: { idle(): Promise<void> }[]) {
     await new Promise((r) => setImmediate(r));
   }
 }
+/** Stage 4: a started fight holding only ch1's character, its initiative not rolled. */
+const fightWith = (id: string): Combat => ({ campaignId: CID, round: 1, turn: `pc:${id}`, groupMonsters: false, updatedAt: 1,
+  combatants: [{ id: `pc:${id}`, kind: 'pc', name: id, characterId: id, initMod: 0, dex: 10, tie: 0.5, conSave: 0 }] });
 const hosted = (): Campaign => ({ ...camp(CID), name: 'Ravenloft', sync: { role: 'dm', code: CODE, node: 'dmnode01' } });
 
 beforeEach(async () => {
@@ -71,13 +75,13 @@ beforeEach(async () => {
 afterEach(() => { stopSession(); vi.useRealTimers(); rollViewer.value = 'dm'; rollVisibility.dm = false; });
 
 /** The DM hosting CID on the real db with a guest device connected over the fake network (as A1, the first player). */
-async function hostWithGuest(o: { onRoster?: (r: unknown[]) => void } = {}) {
+async function hostWithGuest(o: Partial<GuestDeps> = {}) {
   await db.campaigns.put(hosted());
   await refreshCampaigns();
   await setCampaign(CID);
   await follow(app.campaign);
   await settle();
-  const p = new Device(), guest = new Guest(p.guestDeps(CODE, { name: 'Ann', ...(o.onRoster && { onRoster: o.onRoster }) }));
+  const p = new Device(), guest = new Guest(p.guestDeps(CODE, { name: 'Ann', ...o }));
   guest.connect(await net.dial(await peerIdFor(CODE)));
   await settle(guest);
   expect(guest.playerId).toBe('A1');
@@ -247,6 +251,21 @@ describe('final review fixes (DM side)', () => {
     expect((await db.characters.get('npc'))?.name).toBe('Sidekick Sam');
   });
 
+  test("stage 4: the DM's combat reaches the player, and the player's roll lands in it", async () => {
+    const views: (TrackerView | undefined)[] = [];
+    const { p, guest } = await hostWithGuest({ onTracker: (t) => { views.push(t); } });
+    await db.characters.put({ ...char('ch1', CID), ownerId: 'A1' });
+    await settle(guest);
+    await vi.waitFor(() => expect(p.char('ch1')).toBeTruthy());
+    await db.combat.update(CID, () => fightWith('ch1')); // reported as 'combat': the session sends the tracker
+    await vi.waitFor(() => expect(views.at(-1)?.round).toBe(1));
+    expect(views.at(-1)?.rows[0]).toMatchObject({ characterId: 'ch1' });
+    expect(views.at(-1)?.rows[0].init).toBeUndefined();
+    guest.sendInitiative('ch1', 14); // the host validates it; the session applies it through the lazily loaded combat store
+    await vi.waitFor(async () => expect((await db.combat.get(CID))!.combatants[0].init).toBe(14));
+    await vi.waitFor(() => expect(views.at(-1)?.rows[0].init).toBe(14));
+  });
+
   test('M2: when hosting cannot start, the session stops and says why (Host again shows)', async () => {
     net.listen = () => { throw new Error('no WebRTC here'); };
     await db.campaigns.put(hosted());
@@ -258,10 +277,10 @@ describe('final review fixes (DM side)', () => {
 
 describe('player', () => {
   /** A DM device with a host engine listening on the fake network. */
-  async function dmDevice() {
+  async function dmDevice(o: Partial<HostDeps> = {}) {
     const d = new Device();
     d.putCampaign(hosted());
-    const host = new Host(d.hostDeps(CID));
+    const host = new Host({ ...d.hostDeps(CID), ...o });
     net.listen(await peerIdFor(CODE), { link: (l) => host.accept(l), status: () => {} });
     return { d, host };
   }
@@ -326,6 +345,26 @@ describe('player', () => {
     const dials = net.dials.length;
     await follow(app.campaign);
     expect(net.dials.length).toBe(dials);
+  });
+
+  test('stage 4: the tracker reaches session.tracker, sendInitiative goes to the DM, and stopSession clears it', async () => {
+    const calls: unknown[][] = [];
+    const { d, host } = await dmDevice({ onInitiative: (...a) => { calls.push(a); } });
+    await join({ code: CODE, name: 'Ann' });
+    await settle(host);
+    await db.characters.put(char('n1', CID)); // the player's own character (A1)
+    await vi.waitFor(() => expect(d.char('n1')?.ownerId).toBe('A1')); // ponytail: waitFor, settle alone ran short under a loaded full run
+    d.combat = fightWith('n1');
+    host.trackerChanged();
+    await vi.waitFor(() => expect(session.tracker?.rows.map((r) => r.characterId)).toEqual(['n1']));
+    expect(session.tracker?.round).toBe(1);
+    sendInitiative('n1', 14);
+    sendInitiative('n1', 14.5); // never sent
+    await vi.waitFor(() => expect(calls).toEqual([['n1', 14, 'A1']]));
+    await settle(host);
+    expect(calls.length).toBe(1);
+    stopSession();
+    expect(session.tracker).toBeUndefined();
   });
 
   test('M9: a link join that would take over a campaign joined as another ID asks first; No keeps it', async () => {

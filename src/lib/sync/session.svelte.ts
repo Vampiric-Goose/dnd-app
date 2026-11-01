@@ -9,7 +9,7 @@ import { newCampaignSync, newJoinCode, peerIdFor } from './code.ts';
 import type { Guest, GuestDeps, GuestStatus, PackProgress } from './guest.ts';
 import type { Host, HostDeps } from './host.ts';
 import type { Listener, Transport } from './link.ts';
-import type { RosterEntry } from './project.ts';
+import type { RosterEntry, TrackerView } from './project.ts';
 
 export type SessionStatus = 'off' | 'starting' | 'hosting' | 'retrying' | GuestStatus;
 
@@ -23,6 +23,8 @@ export const session = $state({
   online: {} as Record<string, number>,
   /** Player: the party as the DM last sent it. */
   roster: [] as RosterEntry[],
+  /** Player: the initiative tracker as the DM last sent it (stage 4). */
+  tracker: undefined as TrackerView | undefined,
   /** Player: pack download progress since the last welcome. */
   packs: undefined as PackProgress | undefined,
   /** Player: the last welcome has been handled (its pack requests are out). */
@@ -71,7 +73,7 @@ export function stopSession(): void {
     r.listener?.close();
   }
   session.confirm?.answer(false);
-  Object.assign(session, { role: undefined, campaignId: undefined, status: 'off', reason: '', online: {}, roster: [], packs: undefined, welcomed: false, confirm: undefined });
+  Object.assign(session, { role: undefined, campaignId: undefined, status: 'off', reason: '', online: {}, roster: [], tracker: undefined, packs: undefined, welcomed: false, confirm: undefined });
 }
 
 function begin(role: Run['role'], code: string, campaignId?: string): Run {
@@ -150,6 +152,9 @@ function hostDeps(r: Run, cid: string): HostDeps {
     index: () => getIndex(cid),
     packMeta: () => db.packs.listMeta(),
     loadPack: (id) => db.packs.get(id),
+    loadCombat: () => db.combat.get(cid),
+    // Dynamic, so the combat store (and the engine) stay out of the first load. applyInitiative checks the fit and reports 'combat'.
+    onInitiative: (id, n) => void import('../combat/store.ts').then((m) => m.applyInitiative(cid, id, n)).then(() => changed(r), (e) => console.warn(e)),
     addRoll: (e, from) => void db.characters.list(cid).then((cs) => {
       if (live(r)) addRemoteRoll(e, who(from, cs.filter((c) => c.ownerId === from).map((c) => c.name || 'Unnamed')));
     }),
@@ -297,6 +302,7 @@ function guestDeps(r: Run): Omit<GuestDeps, 'code' | 'playerId' | 'name' | 'camp
     onStatus: (s, reason) => guestStatus(r, s, reason),
     onPacks: (p) => { if (live(r)) session.packs = p; },
     onRoster: (x) => { if (live(r)) session.roster = x; },
+    onTracker: (t) => { if (live(r)) session.tracker = t; },
     onRoll: (e, from) => { if (live(r)) addRemoteRoll(e, who(from, session.roster.filter((x) => x.ownerId === from).map((x) => x.name))); },
     onError: (e) => console.warn(e),
   };
@@ -310,8 +316,14 @@ onLocalChange((kind, id) => {
   if (kind === 'character') {
     r.host?.characterChanged(id); // a restore from Deleted characters too: the owner's devices get it back
     r.guest?.characterChanged(id);
-  } else if (kind === 'campaign' && id === r.campaignId) r.host?.campaignChanged(); // 'combat': the tracker message (stage 4, Task 3)
+  } else if (kind === 'campaign' && id === r.campaignId) r.host?.campaignChanged();
+  else if (kind === 'combat' && id === r.campaignId) r.host?.trackerChanged();
 });
+
+/** Stage 4: the player's own initiative roll, sent to the DM (the guest checks owner, range and that it is online). */
+export function sendInitiative(characterId: string, total: number): void {
+  run?.guest?.sendInitiative(characterId, total);
+}
 
 rollHooks.public = (e) => {
   run?.host?.broadcastRoll(e);

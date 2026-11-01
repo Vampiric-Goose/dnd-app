@@ -5,12 +5,12 @@ import { strip2024 } from '../character/strip2024.ts';
 import type { ContentIndex } from '../content/index.ts';
 import { idSource, is2024Source, restorablePack } from '../content/sources.ts';
 import type { RollEntry } from '../rolls.svelte.ts';
-import type { Campaign, CampaignSync, Character, Pack, PackMeta } from '../types.ts';
+import type { Campaign, CampaignSync, Character, Combat, Pack, PackMeta } from '../types.ts';
 import { newJoinCode, nextPlayerId, sha256Text } from './code.ts';
 import { hlcNow, hlcReceive, MAX_AHEAD } from './hlc.ts';
 import type { Link } from './link.ts';
 import { canon, latestClock, mergeCharacter, type Synced } from './merge.ts';
-import { campaignForPlayers, characterForPlayer, packForPlayers, rosterEntry, unprojectCharacter } from './project.ts';
+import { campaignForPlayers, characterForPlayer, packForPlayers, rosterEntry, trackerForPlayers, unprojectCharacter } from './project.ts';
 import { cleanRoll, MAX_CHUNK, MAX_MESSAGE, MAX_PACK, parseGuestMessage, size, type GuestMsg, type HostMsg, type PackOffer } from './protocol.ts';
 
 export interface HostDeps {
@@ -33,6 +33,10 @@ export interface HostDeps {
   loadPack(id: string): Promise<Pack | undefined>;
   /** A player's public roll, for the DM's log. */
   addRoll?(e: RollEntry, from: string): void;
+  /** Stage 4: the campaign's live combat (db.combat.get). Without it no tracker is sent. */
+  loadCombat?(): Promise<Combat | undefined>;
+  /** Stage 4: a player's initiative roll for their own character in this campaign (shape and owner checked; the store checks the fit). */
+  onInitiative?(characterId: string, total: number, from: string): void;
   /** The connected players changed. */
   onChange?(): void;
   onError?(e: unknown): void;
@@ -169,14 +173,26 @@ export class Host {
         this.#broadcast({ t: 'deleteChar', id, at: del[id] });
       }
       await this.#sendRoster(camp);
+      await this.#trackerIfFighting(camp, [id]);
     });
   }
 
-  /** The DM changed the campaign's name or settings. */
+  /** The DM changed the campaign's name or settings (the tracker too: the health words follow the settings). */
   campaignChanged(): void {
     void this.#task(async () => {
       const camp = await this.#deps.loadCampaign();
-      if (camp) this.#broadcast({ t: 'settings', campaign: forPlayers(camp, await this.#packOffers(camp)) });
+      if (!camp) return;
+      this.#broadcast({ t: 'settings', campaign: forPlayers(camp, await this.#packOffers(camp)) });
+      const combat = await this.#deps.loadCombat?.();
+      if (combat) await this.#sendTracker(camp, combat);
+    });
+  }
+
+  /** Stage 4: the combat changed (or ended): everyone gets the new player tracker. */
+  trackerChanged(): void {
+    void this.#task(async () => {
+      const camp = await this.#deps.loadCampaign();
+      if (camp && this.#deps.loadCombat) await this.#sendTracker(camp, await this.#deps.loadCombat());
     });
   }
 
@@ -227,7 +243,16 @@ export class Host {
         this.#deps.addRoll?.(msg.entry, c.playerId);
         return this.#broadcast({ t: 'roll', entry: msg.entry, from: c.playerId }, c);
       case 'packWant': return this.#packWant(c, msg.ids);
+      case 'initiative': return this.#initiative(c, c.playerId, msg.characterId, msg.total);
     }
+  }
+
+  /** Review Focus 4: only for the player's own character in this campaign. Whether it fits the fight is the store's check. */
+  async #initiative(c: Conn, pid: string, id: string, total: number): Promise<void> {
+    const camp = await this.#deps.loadCampaign();
+    const ch = await this.#deps.loadCharacter(id);
+    if (!camp || !ch || ch.ownerId !== pid || ch.campaignId !== camp.id) return this.#violation(c, 'not their character');
+    this.#deps.onInitiative?.(id, total, pid);
   }
 
   async #hello(c: Conn, msg: Extract<GuestMsg, { t: 'hello' }>): Promise<void> {
@@ -253,6 +278,8 @@ export class Host {
     c.offered = new Set(packs.map((p) => p.id));
     this.#send(c, { t: 'welcome', playerId: c.playerId, campaign: forPlayers(camp, packs), roster: await this.#roster(camp), packs });
     for (const ch of await this.#deps.loadCharacters()) if (ch.ownerId === c.playerId) this.#send(c, { t: 'chars', characters: [characterForPlayer(ch)] });
+    const combat = await this.#deps.loadCombat?.();
+    if (combat) this.#send(c, { t: 'tracker', tracker: await this.#tracker(camp, combat) });
   }
 
   #reject(c: Conn, reason: string): void {
@@ -304,7 +331,10 @@ export class Host {
       for (const k of this.#conns) if (k.playerId === pid && (k === c ? echo : changed)) this.#send(k, { t: 'chars', characters: [p] });
       rosterChanged ||= changed;
     }
-    if (rosterChanged) await this.#sendRoster(camp);
+    if (rosterChanged) {
+      await this.#sendRoster(camp);
+      await this.#trackerIfFighting(camp, list.map((ch) => ch.id)); // a player's own HP change shows on everyone's tracker
+    }
   }
 
   async #deleteChar(c: Conn, pid: string, id: string, at: string): Promise<void> {
@@ -330,6 +360,7 @@ export class Host {
     const tomb = (await this.#deps.loadCampaign())?.sync?.deleted?.[id] ?? at;
     this.#broadcast({ t: 'deleteChar', id, at: tomb }, c);
     await this.#sendRoster();
+    await this.#trackerIfFighting(camp, [id]);
   }
 
   /** The campaign's enabled packs that players may have, with the hash and size of what would be sent. Cached per stored pack version. */
@@ -399,5 +430,22 @@ export class Host {
   async #sendRoster(camp?: Campaign): Promise<void> {
     camp ??= await this.#deps.loadCampaign();
     if (camp && [...this.#conns].some((c) => c.playerId)) this.#broadcast({ t: 'roster', roster: await this.#roster(camp) });
+  }
+
+  /** Stage 4: the player tracker (trackerForPlayers, the allowlist), or null with no fight. */
+  async #tracker(camp: Campaign, combat: Combat | undefined) {
+    if (!combat) return null;
+    const chars = (await this.#deps.loadCharacters()).filter((ch) => ch.campaignId === camp.id);
+    return trackerForPlayers(combat, chars, camp.settings) ?? null;
+  }
+
+  async #sendTracker(camp: Campaign, combat: Combat | undefined): Promise<void> {
+    if ([...this.#conns].some((c) => c.playerId)) this.#broadcast({ t: 'tracker', tracker: await this.#tracker(camp, combat) });
+  }
+
+  /** Re-sends the tracker when the fight holds any of these characters. */
+  async #trackerIfFighting(camp: Campaign, ids: string[]): Promise<void> {
+    const combat = await this.#deps.loadCombat?.();
+    if (combat?.combatants.some((x) => x.characterId !== undefined && ids.includes(x.characterId))) await this.#sendTracker(camp, combat);
   }
 }

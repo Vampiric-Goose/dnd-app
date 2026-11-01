@@ -10,8 +10,8 @@ import { newCampaignSync, sha256Text } from './code.ts';
 import { MAX_AHEAD } from './hlc.ts';
 import type { Link } from './link.ts';
 import { canon, latestClock, mergeCharacter, type Synced } from './merge.ts';
-import type { CampaignForPlayers, RosterEntry } from './project.ts';
-import { cleanRoll, HLC, MAX_MESSAGE, MAX_PACK, PLAYER_ID, size, type GuestMsg, type PackOffer } from './protocol.ts';
+import type { CampaignForPlayers, HealthStatus, RosterEntry, TrackerRow, TrackerView } from './project.ts';
+import { cleanRoll, HLC, INIT_MAX, INIT_MIN, MAX_MESSAGE, MAX_PACK, PLAYER_ID, size, type GuestMsg, type PackOffer } from './protocol.ts';
 
 export type GuestStatus = 'connecting' | 'online' | 'offline' | 'rejected';
 /** Pack download progress: packs finished (stored or refused) of those wanted, and bytes received of their total. */
@@ -50,6 +50,8 @@ export interface GuestDeps {
   onRoster?(roster: RosterEntry[]): void;
   /** A public roll from the DM (`from` absent) or another player. */
   onRoll?(e: RollEntry, from?: string): void;
+  /** Stage 4: the DM's tracker as players see it (cleanTracker); undefined = no fight. */
+  onTracker?(t: TrackerView | undefined): void;
   onError?(e: unknown): void;
   now?(): number;
 }
@@ -92,6 +94,21 @@ export const cleanRoster = (v: unknown): RosterEntry[] => (Array.isArray(v) ? v 
     ? [{ id: e.id as string, ownerId: e.ownerId as string, name: e.name as string, ...(e.portrait !== undefined && { portrait: e.portrait as string }), race: e.race as string, classes: e.classes as string,
       level: e.level as number, hp: e.hp as number, maxHp: e.maxHp as number, conditions: [...e.conditions as string[]] }]
     : []);
+const HEALTH: readonly string[] = ['Unhurt', 'Hurt', 'Bloodied', 'Down'] satisfies HealthStatus[];
+const MAX_ROWS = 200; // MAX_COMBATANTS (combat.ts is lazy: not imported here)
+const s = (x: unknown, max: number): x is string => typeof x === 'string' && x.length <= max;
+/** Stage 4: the DM's tracker rebuilt from its known fields: a row without a fitting id and name is dropped, a bad optional field omitted. */
+export function cleanTracker(v: unknown): TrackerView | undefined {
+  if (!isRec(v) || !fin(v.round) || !Array.isArray(v.rows)) return undefined;
+  const rows = v.rows.flatMap((r): TrackerRow[] => {
+    if (!isRec(r) || !s(r.id, 100) || !s(r.name, 200)) return [];
+    return [{ id: r.id, name: r.name, ...(s(r.characterId, 100) && { characterId: r.characterId }), ...(fin(r.init) && { init: r.init as number }),
+      ...(fin(r.hp) && { hp: r.hp as number }), ...(fin(r.maxHp) && { maxHp: r.maxHp as number }),
+      ...(typeof r.health === 'string' && HEALTH.includes(r.health) && { health: r.health as HealthStatus })}];
+  }).slice(0, MAX_ROWS);
+  const current = rows.some((r) => r.id === v.current) ? v.current as string : undefined;
+  return { round: v.round as number, ...(current !== undefined && { current }), rows };
+}
 /** B3: a tombstone clock from the DM, unless it claims a wall time past MAX_AHEAD (then the local clock is used). */
 const fairAt = (at: unknown, now: number): string | undefined =>
   typeof at === 'string' && HLC.test(at) && Number(at.slice(0, 15)) <= now + MAX_AHEAD ? at : undefined;
@@ -163,6 +180,16 @@ export class Guest {
     if (entry && this.#status === 'online') this.#send({ t: 'roll', entry });
   }
 
+  /** Stage 4: the player's own initiative roll, for a character of theirs in this campaign, sent only while online. */
+  sendInitiative(characterId: string, total: number): void {
+    if (!Number.isInteger(total) || total < INIT_MIN || total > INIT_MAX) return;
+    void this.#task(async () => {
+      if (this.#status !== 'online') return;
+      const c = await this.#deps.loadCharacter(characterId);
+      if (c && c.campaignId === this.#campaignId && c.ownerId === this.#playerId) this.#send({ t: 'initiative', characterId, total });
+    });
+  }
+
   stop(): void {
     const l = this.#link;
     this.#link = undefined;
@@ -225,6 +252,7 @@ export class Guest {
         return;
       }
       case 'packChunk': return this.#packChunk(m);
+      case 'tracker': return this.#deps.onTracker?.(m.tracker === null ? undefined : cleanTracker(m.tracker));
     }
   }
 

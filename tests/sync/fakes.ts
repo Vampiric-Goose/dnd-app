@@ -6,7 +6,7 @@ import { Host, type HostDeps } from '../../src/lib/sync/host.ts';
 import { hlcNow, hlcReceive } from '../../src/lib/sync/hlc.ts';
 import { memoryPair, type Link } from '../../src/lib/sync/link.ts';
 import { latestClock, mergeCharacter, rebase, stamp } from '../../src/lib/sync/merge.ts';
-import type { Campaign, CampaignSync, Character, Pack, PackMeta } from '../../src/lib/types.ts';
+import type { Campaign, CampaignSync, Character, Combat, Pack, PackMeta } from '../../src/lib/types.ts';
 import { fixtureIndex } from '../fixtures/content.ts';
 
 const clone = <T>(x: T): T => (x === undefined ? x : structuredClone(x));
@@ -15,6 +15,8 @@ export class Device {
   campaigns = new Map<string, Campaign>();
   characters = new Map<string, Character>();
   packs = new Map<string, Pack>();
+  /** The hosted campaign's live combat (stage 4). */
+  combat?: Combat;
   other: unknown[] = []; // records the engine must never read (DM monsters, homebrew items)
   rolls: { e: RollEntry; from?: string }[] = [];
   errors: unknown[] = [];
@@ -78,6 +80,7 @@ export class Device {
       index: fixtureIndex,
       packMeta: async () => this.packMeta(),
       loadPack: async (id) => clone(this.packs.get(id)),
+      loadCombat: async () => clone(this.combat),
       addRoll: (e, from) => { this.rolls.push({ e, from }); },
       onError: (e) => { this.errors.push(e); },
       now: this.wall,

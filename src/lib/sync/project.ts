@@ -1,10 +1,11 @@
 // Pure (no Svelte/Vite/DOM). Stage 3: everything a player receives is built here, and none of it may carry hidden data (spec 3.6):
 // no loot (R50), no sync secrets or player list, no monsters, no item secrets (R51), only summaries of other players' characters.
+// Stage 4: the initiative tracker's player view (trackerForPlayers).
 import { entityAllowed, packAllowed, patchAllowed } from '../content/sources.ts';
 import type { ContentIndex } from '../content/index.ts';
 import { playerCharacter, restoreSecrets } from '../items/playerView.ts';
 import { computeSheet } from '../rules/sheet.ts';
-import type { Campaign, CampaignSettings, Character, Pack } from '../types.ts';
+import type { Campaign, CampaignSettings, Character, Combat, Pack } from '../types.ts';
 import type { Synced } from './merge.ts';
 
 export interface CampaignForPlayers { id: string; name: string; settings: CampaignSettings; enabledPacks: string[] }
@@ -38,6 +39,47 @@ export function packForPlayers(p: Pack): Pack | undefined {
   const patches = p.patches.filter((x) => !x.targetId.startsWith('monster:') && !x.lair && !x.regional && patchAllowed(x));
   return entities.length || patches.length ? { ...p, entities, patches } : undefined;
 }
+
+export type HealthStatus = 'Unhurt' | 'Hurt' | 'Bloodied' | 'Down';
+
+/** Spec 3.6's health words (Hurt fills the gap between full and half). Undefined without a positive max. Stage 5's tokens reuse it. */
+export function healthStatus(hp: number | undefined, maxHp: number | undefined): HealthStatus | undefined {
+  if (hp === undefined || maxHp === undefined || !(maxHp > 0)) return undefined;
+  return hp <= 0 ? 'Down' : hp >= maxHp ? 'Unhurt' : hp * 2 <= maxHp ? 'Bloodied' : 'Hurt';
+}
+
+export interface TrackerRow { id: string; name: string; characterId?: string; init?: number; hp?: number; maxHp?: number; health?: HealthStatus }
+export interface TrackerView { round: number; current?: string; rows: TrackerRow[] }
+
+/**
+ * The tracker as players see it, an allowlist (spec 3.6): no hidden combatants, no monsters during setup (round 0), and of everything
+ * but a player's character only its name (plus a health word when the DM shows monster health). A player character carries its
+ * initiative, HP and the player-view max HP (hidden item bonuses stay hidden). A DM-only character counts as "everything else" (R13).
+ */
+export function trackerForPlayers(c: Combat | undefined, characters: Character[], settings: CampaignSettings): TrackerView | undefined {
+  if (!c) return undefined;
+  const byId = new Map(characters.map((ch) => [ch.id, ch]));
+  const maxHp = (ch: Character) => computeSheet(ch, { settings, viewer: 'player' }).maxHp;
+  const showHealth = settings.showMonsterHealth && settings.initiativeModules.hp;
+  const rows: TrackerRow[] = [];
+  for (const x of c.combatants) {
+    if (x.hidden) continue;
+    const ch = x.characterId === undefined ? undefined : byId.get(x.characterId);
+    if (x.characterId !== undefined && !ch) continue;
+    if (ch?.ownerId) {
+      rows.push({ id: x.id, name: ch.name, characterId: ch.id, ...(x.init !== undefined && { init: x.init }), hp: ch.state.hp, maxHp: maxHp(ch) });
+      continue;
+    }
+    if (c.round === 0) continue;
+    const health = showHealth ? (ch ? healthStatus(ch.state.hp, maxHp(ch)) : healthStatus(x.hp, x.maxHp)) : undefined;
+    rows.push({ id: x.id, name: x.name, ...(health && { health }) });
+  }
+  const current = c.round > 0 && rows.some((r) => r.id === c.turn) ? c.turn : undefined;
+  return { round: c.round, ...(current !== undefined && { current }), rows };
+}
+
+/** Stage 5's movement gate: the characterId whose turn it is, if any. */
+export const currentActor = (v: TrackerView | undefined): string | undefined => v?.rows.find((r) => r.id === v.current)?.characterId;
 
 /** A player's own character as sent to them: `playerCharacter` (item player views only, R51), with its sync meta. */
 export const characterForPlayer = (c: Synced<Character>): Synced<Character> => playerCharacter(c);

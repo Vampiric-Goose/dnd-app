@@ -4,16 +4,18 @@ import { characterProblem, isRec } from '../recordShape.ts';
 import type { RollEntry } from '../rolls.svelte.ts';
 import type { Character } from '../types.ts';
 import type { Synced } from './merge.ts';
-import type { CampaignForPlayers, RosterEntry } from './project.ts';
+import type { CampaignForPlayers, RosterEntry, TrackerView } from './project.ts';
 
 export const MAX_MESSAGE = 256 * 1024, MAX_CHUNK = 64 * 1024, MAX_PACK = 64 * 1024 * 1024;
+export const INIT_MIN = -10, INIT_MAX = 50;
 
 export type GuestMsg =
   | { t: 'hello'; code: string; playerId?: string; name?: string }
   | { t: 'chars'; characters: Synced<Character>[] }
   | { t: 'deleteChar'; id: string; at: string }
   | { t: 'roll'; entry: RollEntry }
-  | { t: 'packWant'; ids: string[] };
+  | { t: 'packWant'; ids: string[] }
+  | { t: 'initiative'; characterId: string; total: number /* stage 4: the player's own roll, an integer INIT_MIN–INIT_MAX */ };
 
 export interface PackOffer { id: string; hash: string; size: number }
 
@@ -27,6 +29,7 @@ export type HostMsg =
   | { t: 'roll'; entry: RollEntry; from?: string /* player ID; absent for the DM */ }
   | { t: 'packChunk'; id: string; hash: string; seq: number; total: number; data: string }
   | { t: 'settings'; campaign: CampaignForPlayers }
+  | { t: 'tracker'; tracker: TrackerView | null /* stage 4: trackerForPlayers; null = no fight */ }
   | { t: 'bye'; reason: string };
 
 /** Serialized length (UTF-16 units, close enough to bytes for a limit). */
@@ -75,6 +78,10 @@ export function parseGuestMessage(raw: unknown): GuestMsg | { error: string } {
     }
     case 'packWant':
       return Array.isArray(raw.ids) && raw.ids.length <= 1000 && raw.ids.every((x) => str(x, 200)) ? { t: 'packWant', ids: raw.ids as string[] } : { error: 'bad packWant' };
+    case 'initiative': {
+      const { characterId: id, total: n } = raw;
+      return str(id, 100) && Number.isInteger(n) && (n as number) >= INIT_MIN && (n as number) <= INIT_MAX ? { t: 'initiative', characterId: id, total: n as number } : { error: 'bad initiative' };
+    }
     default:
       return { error: 'unknown message' };
   }
