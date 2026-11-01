@@ -92,9 +92,11 @@
       }
       const fresh = await db.encounters.get(e.id); // saving back above may have just updated this very encounter
       if (!fresh?.fight) throw new Error('That encounter is gone.');
-      const r = await resumeFight(cid, fresh);
+      const r = await resumeFight(cid, fresh, (id) => monById.get(id));
       if (r.dropped.length) toast(`No longer in the campaign, so left out: ${r.dropped.join(', ')}.`, true);
-      if (r.sceneMissing) toast("The saved map's scene was deleted; loaded the fight without it.", true);
+      if (r.place.why === 'no scene') toast('No scene to place tokens on.');
+      else if (r.sceneMissing) toast("The saved map's scene was deleted; the fight's tokens went on the current scene.", true);
+      if (r.place.why === 'full') toast(`The scene is full (200 tokens): ${r.place.placed ? `only ${r.place.placed} placed` : 'no tokens placed'}.`, true);
     });
     await reload();
   }
