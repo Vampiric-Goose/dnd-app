@@ -1,9 +1,10 @@
 import fs from 'node:fs';
 import { describe, expect, test } from 'vitest';
 import {
-  addCombatants, addMonsters, concentrationDc, encounterPicks, lairCombatant, MAX_COMBATANTS, monsterCombatant, monsterHp, moveTo, newCombat,
-  next, numberedNames, prev, removeCombatant, sortCombatants, start,
+  addCombatants, addMonsters, concentrationDc, encounterPicks, lairCombatant, MAX_COMBATANTS, monsterCombatant, monsterHp, moveCombatant, moveTo, newCombat,
+  next, numberedNames, prev, removeCombatant, setInit, sortCombat, sortCombatants, start,
 } from '../../src/lib/combat/combat.ts';
+import { encounterProblem } from '../../src/lib/recordShape.ts';
 import type { Combat, Combatant, Encounter, MonsterDef, Pack } from '../../src/lib/types.ts';
 
 const srd: Pack = JSON.parse(fs.readFileSync('src/data/srd.json', 'utf8'));
@@ -183,4 +184,61 @@ test('encounterPicks names the missing monsters', () => {
 
 test('MAX_COMBATANTS', () => {
   expect(addMonsters(newCombat('c1'), [{ monster: goblin, count: 250 }], 'average', half).combatants).toHaveLength(MAX_COMBATANTS);
+});
+
+describe('fix round 1', () => {
+  test('I1: the current combatant whose init changes keeps its place, and the others still act this round', () => {
+    let c = start(fight([cb('A', 18), cb('B', 15), cb('C', 10)])).combat;
+    c = setInit(c, 'A', 5);
+    expect(names(c)).toEqual(['A', 'B', 'C']);
+    expect(byId(c, 'A').init).toBe(5);
+    c = next(c).combat;
+    expect([c.turn, c.round]).toEqual(['B', 1]);
+    c = next(c).combat;
+    expect([c.turn, c.round]).toEqual(['C', 1]);
+  });
+  test('I1: nobody crosses the current turn', () => {
+    const atB = next(start(fight([cb('A', 18), cb('B', 15), cb('C', 10), cb('D', 8)])).combat).combat;
+    expect(names(setInit(atB, 'C', 25))).toEqual(['A', 'B', 'C', 'D']); // still to act: stays after B
+    expect(names(setInit(atB, 'D', 12))).toEqual(['A', 'B', 'D', 'C']); // still to act: sorted among them
+    expect(names(setInit(atB, 'A', 1))).toEqual(['A', 'B', 'C', 'D']); // already acted: stays before B
+  });
+  test('I1: a late player roll still gets its turn this round', () => {
+    let c = start(fight([cb('M1', 15), cb('M2', 10), cb('P', undefined, { kind: 'pc', characterId: 'p' })])).combat;
+    expect(c.turn).toBe('M1');
+    c = setInit(c, 'P', 18);
+    expect(names(c)).toEqual(['M1', 'P', 'M2']);
+    c = next(c).combat;
+    expect([c.turn, c.round]).toEqual(['P', 1]);
+  });
+  test('M1: Previous then Next ticks a turn boundary once', () => {
+    let c = start(fight([cb('A', 18), cb('B', 15, { conditions: ['Poisoned', 'Prone'], durations: {
+      Poisoned: { rounds: 2, at: 'end', of: 'A' }, Prone: { rounds: 2, at: 'start', of: 'B' } } })])).combat;
+    c = next(c).combat; // A's turn ends, B's starts: 1 left of each
+    c = prev(c);
+    const s = next(c);
+    expect(s.expired).toEqual([]);
+    expect(byId(s.combat, 'B').durations).toEqual({ Poisoned: { rounds: 1, at: 'end', of: 'A' }, Prone: { rounds: 1, at: 'start', of: 'B' } });
+    c = next(next(s.combat).combat).combat; // B ends, A (round 2) ends, B starts
+    expect(byId(c, 'B').conditions).toEqual([]);
+  });
+  test('M2: setInit refuses anything but an integer from -10 to 50', () => {
+    const c = fight([cb('A', 10)]);
+    for (const bad of [17.5, 51, -11, NaN, Infinity]) expect(setInit(c, 'A', bad)).toBe(c);
+    expect(byId(setInit(c, 'A', 50), 'A').init).toBe(50);
+    expect(byId(setInit(c, 'A', undefined), 'A').init).toBeUndefined();
+  });
+  test('M4: Start keeps a manual order made in setup, until the next Sort or add', () => {
+    const base = fight([cb('A', 15, { tie: 0.9 }), cb('B', 15, { tie: 0.1 })]);
+    const dragged = moveCombatant(base, 'B', 0);
+    expect(names(start(dragged).combat)).toEqual(['B', 'A']);
+    expect(names(start(sortCombat(dragged)).combat)).toEqual(['A', 'B']);
+    expect(names(start(addCombatants(dragged, [cb('C', 3)])).combat)).toEqual(['A', 'B', 'C']);
+  });
+  test('M5: a missing encounter monster is named', () => {
+    const e: Encounter = { id: 'e', campaignId: 'c1', name: 'Ambush', monsters: [{ monsterId: 'monster:homebrew-1a2b@HOMEBREW', name: 'Grue', count: 1 }], updatedAt: 0 };
+    expect(encounterPicks(e, () => undefined).missing).toEqual(['Grue']);
+    expect(encounterProblem(e)).toBeUndefined();
+    expect(encounterProblem({ ...e, monsters: [{ monsterId: 'x', name: 5, count: 1 }] })).toBeDefined();
+  });
 });

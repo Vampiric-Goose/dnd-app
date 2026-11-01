@@ -4,7 +4,7 @@ import { applyDamage, applyHealing, rollDeathSave } from '../character/rest.ts';
 import { db, DeletedError } from '../db.ts';
 import { computeSheet } from '../rules/sheet.ts';
 import type { CampaignSettings, Character, Combat, Combatant, Duration } from '../types.ts';
-import { concentrationDc, monsterHp, newCombat, next, removeStep, setInit, start, type Expired, type HpOp, type Step } from './combat.ts';
+import { concentrationDc, initOk, monsterHp, newCombat, next, removeStep, setInit, start, type Expired, type HpOp, type Step } from './combat.ts';
 
 // One operation at a time (per tab): two quick hits each read the character after the other's write, so both land.
 let queue: Promise<unknown> = Promise.resolve();
@@ -34,16 +34,29 @@ async function combatant(cid: string, id: string): Promise<{ combat: Combat; x: 
   return { combat, x };
 }
 
-/** Each expired PC condition leaves its character (one put per character). */
-async function clearExpired(combat: Combat, expired: Expired[]): Promise<void> {
-  const byChar = new Map<string, Set<string>>();
-  for (const e of expired) {
-    const x = combat.combatants.find((y) => y.id === e.combatantId);
-    if (x?.kind === 'pc' && x.characterId) byChar.set(x.characterId, (byChar.get(x.characterId) ?? new Set()).add(e.condition));
+/**
+ * Each expired PC condition leaves its character (one put per character). M3: a failed write doesn't fail the turn (it happened);
+ * the step lists the combatant's name in `failed` so the page can say so.
+ */
+async function clearExpired(step: Step): Promise<Step> {
+  const byChar = new Map<string, { name: string; gone: Set<string> }>();
+  for (const e of step.expired) {
+    const x = step.combat.combatants.find((y) => y.id === e.combatantId);
+    if (x?.kind !== 'pc' || !x.characterId) continue;
+    const entry = byChar.get(x.characterId) ?? { name: x.name, gone: new Set<string>() };
+    byChar.set(x.characterId, entry);
+    entry.gone.add(e.condition);
   }
-  for (const [id, gone] of byChar) {
-    await editCharacter(id, (c) => (c.state.conditions.some((n) => gone.has(n)) ? { ...c, state: { ...c.state, conditions: c.state.conditions.filter((n) => !gone.has(n)) } } : c));
+  const failed: string[] = [];
+  for (const [id, { name, gone }] of byChar) {
+    try {
+      await editCharacter(id, (c) => (c.state.conditions.some((n) => gone.has(n)) ? { ...c, state: { ...c.state, conditions: c.state.conditions.filter((n) => !gone.has(n)) } } : c));
+    } catch (e) {
+      console.warn(e);
+      failed.push(name);
+    }
   }
+  return failed.length ? { ...step, failed } : step;
 }
 
 /** The campaign's combat changed by `fn` (a new one when there is none), with updatedAt stamped. */
@@ -53,16 +66,14 @@ export const updateCombat = (cid: string, fn: (c: Combat) => Combat): Promise<Co
 export const turn = (cid: string, dir: 'start' | 'next'): Promise<Step> => serial(async () => {
   let expired: Expired[] = [];
   const combat = await update(cid, (c) => { const s = dir === 'start' ? start(c) : next(c); expired = s.expired; return s.combat; });
-  await clearExpired(combat, expired);
-  return { combat, expired };
+  return clearExpired({ combat, expired });
 });
 
 /** removeCombatant, writing the PC side of any expiry the passed turn starts (see removeStep). */
 export const remove = (cid: string, combatantId: string): Promise<Step> => serial(async () => {
   let expired: Expired[] = [];
   const combat = await update(cid, (c) => { const s = removeStep(c, combatantId); expired = s.expired; return s.combat; });
-  await clearExpired(combat, expired);
-  return { combat, expired };
+  return clearExpired({ combat, expired });
 });
 
 /** `concentrationDc`: a damage op on a concentrating combatant (the full amount entered, temp HP included). */
@@ -107,6 +118,7 @@ export const deathSave = (cid: string, combatantId: string, d20: number): Promis
  * False otherwise, and the combat is left untouched.
  */
 export const applyInitiative = (cid: string, characterId: string, total: number): Promise<boolean> => serial(async () => {
+  if (!initOk(total)) return false; // M2: whoever calls
   let taken = false;
   await db.combat.update(cid, (c) => {
     const x = c?.combatants.find((y) => y.kind === 'pc' && y.characterId === characterId && y.init === undefined);

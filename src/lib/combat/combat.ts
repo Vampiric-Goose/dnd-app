@@ -5,9 +5,13 @@ import type { Character, Combat, Combatant, Duration, Encounter, MonsterDef, She
 import { uid } from '../uid.ts';
 
 export const MAX_COMBATANTS = 200;
+/** An initiative total is an integer in this range (the one source; the sync protocol imports it). */
+export const INIT_MIN = -10, INIT_MAX = 50;
+export const initOk = (n: unknown): n is number => Number.isInteger(n) && (n as number) >= INIT_MIN && (n as number) <= INIT_MAX;
 export type HpOp = { damage: number; crit?: boolean } | { heal: number } | { temp: number };
 export interface Expired { combatantId: string; condition: string }
-export interface Step { combat: Combat; expired: Expired[] }
+/** `failed` (store only): names of characters whose expired conditions could not be removed (M3). */
+export interface Step { combat: Combat; expired: Expired[]; failed?: string[] }
 type Pick = { monster: MonsterDef; count: number };
 
 export const newCombat = (campaignId: string): Combat => ({ campaignId, combatants: [], round: 0, groupMonsters: false, updatedAt: Date.now() });
@@ -37,6 +41,11 @@ export function moveTo(cs: Combatant[], id: string, index: number): Combatant[] 
   const i = Math.max(0, Math.min(rest.length, Math.trunc(index) || 0));
   return [...rest.slice(0, i), c, ...rest.slice(i)];
 }
+
+/** S4-R2: a drag on the combat; Start then keeps the order until the next Sort or add. */
+export const moveCombatant = (c: Combat, id: string, index: number): Combat => ({ ...c, combatants: moveTo(c.combatants, id, index), reordered: true });
+/** The Sort button. */
+export const sortCombat = (c: Combat): Combat => ({ ...c, combatants: sortCombatants(c.combatants), reordered: false });
 
 export const rollInit = (mod: number, rng?: () => number): number => rollDice(mod < 0 ? `1d20${mod}` : `1d20+${mod}`, { rng }).total;
 
@@ -79,7 +88,7 @@ export function addCombatants(c: Combat, list: Combatant[]): Combat {
     if (cs.length >= MAX_COMBATANTS) break;
     if (!cs.some((y) => y.id === x.id)) cs = place(cs, x);
   }
-  return { ...c, combatants: cs };
+  return { ...c, combatants: cs, reordered: false };
 }
 
 /** With groupMonsters on, copies of a monster share one roll, one tiebreak and `group` (a later copy joins the existing group). */
@@ -106,17 +115,38 @@ export function encounterPicks(e: Encounter, lookup: (id: string) => MonsterDef 
   const picks: Pick[] = [], missing: string[] = [];
   for (const l of e.monsters) {
     const m = lookup(l.monsterId);
-    if (m) picks.push({ monster: m, count: l.count }); else missing.push(l.monsterId);
+    if (m) picks.push({ monster: m, count: l.count }); else missing.push(l.name ?? l.monsterId);
   }
   return { picks, missing };
 }
 
-/** Sets the initiative and re-places the combatant (a grouped monster's whole group, which acts as one). */
+/**
+ * Sets the initiative (an integer INIT_MIN–INIT_MAX, or undefined; anything else is refused) and re-places the combatant (a grouped
+ * monster's whole group, which acts as one). S4-R1: during a fight nobody crosses the current turn. A member of the current run keeps
+ * its place; anyone else is placed by key but stays on its side: already acted, or still to act (where an unset init counts).
+ */
 export function setInit(c: Combat, id: string, init: number | undefined): Combat {
   const x = c.combatants.find((y) => y.id === id);
-  if (!x) return c;
+  if (!x || (init !== undefined && !initOk(init))) return c;
+  const members = new Set(c.combatants.filter((y) => y.id === id || (x.group !== undefined && y.group === x.group)).map((y) => y.id));
+  const t = c.combatants.findIndex((y) => y.id === c.turn);
+  if (c.round === 0 || t < 0) {
+    let cs = c.combatants;
+    for (const y of c.combatants) if (members.has(y.id)) cs = place(cs, { ...y, init });
+    return { ...c, combatants: cs };
+  }
+  if (idsOf(c.combatants, runAt(c.combatants, t)).has(id)) return { ...c, combatants: c.combatants.map((y) => (members.has(y.id) ? { ...y, init } : y)) };
   let cs = c.combatants;
-  for (const y of c.combatants) if (y.id === id || (x.group !== undefined && y.group === x.group)) cs = place(cs, { ...y, init });
+  for (const y of c.combatants) {
+    if (!members.has(y.id)) continue;
+    const toAct = y.init === undefined || cs.findIndex((z) => z.id === y.id) > runAt(cs, cs.findIndex((z) => z.id === c.turn))[1];
+    const rest = cs.filter((z) => z.id !== y.id), moved = { ...y, init };
+    const [ra, rb] = runAt(rest, rest.findIndex((z) => z.id === c.turn));
+    let i = rest.findIndex((z) => outranks(moved, z));
+    if (i < 0) i = rest.length;
+    i = toAct ? Math.max(i, rb + 1) : Math.min(i, ra);
+    cs = [...rest.slice(0, i), moved, ...rest.slice(i)];
+  }
   return { ...c, combatants: cs };
 }
 
@@ -162,29 +192,36 @@ function startTurn(cs: Combatant[], r: [number, number], expired: Expired[]): Co
   return tick(reset, run, 'start', expired);
 }
 
-/** The turn goes to the run at index j (past the end: the first, in a new round), with its start-of-turn effects. */
+/**
+ * The turn goes to the run at index j (past the end: the first, in a new round), with its start-of-turn effects unless that boundary
+ * was applied already (M1: after Previous). Markers older than the previous round are dropped.
+ */
 function pass(c: Combat, cs: Combatant[], j: number, expired: Expired[]): Combat {
   if (!cs.length) return { ...c, combatants: cs, turn: undefined };
   const wrap = j >= cs.length, at = wrap ? 0 : j;
-  return { ...c, combatants: startTurn(cs, runAt(cs, at), expired), round: wrap ? c.round + 1 : c.round, turn: cs[at].id };
+  const round = wrap ? c.round + 1 : c.round, turn = cs[at].id, key = `${round}:s:${turn}`;
+  const done = (c.done ?? []).filter((k) => parseInt(k, 10) >= round - 1);
+  const fresh = !done.includes(key);
+  return { ...c, combatants: fresh ? startTurn(cs, runAt(cs, at), expired) : cs, round, turn, done: fresh ? [...done, key] : done };
 }
 
-/** Sorts, round 1, the first combatant's turn (with its start-of-turn effects). */
+/** Round 1, the first combatant's turn (with its start-of-turn effects). Sorts first, unless the DM reordered by hand (S4-R2). */
 export function start(c: Combat): Step {
-  const cs = sortCombatants(c.combatants);
+  const cs = c.reordered ? c.combatants : sortCombatants(c.combatants);
   if (!cs.length) return { combat: { ...c, combatants: cs }, expired: [] };
   const expired: Expired[] = [];
-  return { combat: { ...c, combatants: startTurn(cs, runAt(cs, 0), expired), round: 1, turn: cs[0].id }, expired };
+  return { combat: { ...c, combatants: startTurn(cs, runAt(cs, 0), expired), round: 1, turn: cs[0].id, done: [`1:s:${cs[0].id}`] }, expired };
 }
 
-/** Ends the current turn (its end-of-turn durations tick), then starts the next (wrapping to a new round). */
+/** Ends the current turn (its end-of-turn durations tick, once: M1), then starts the next (wrapping to a new round). */
 export function next(c: Combat): Step {
   const i = c.combatants.findIndex((x) => x.id === c.turn);
   if (c.round === 0 || i < 0) return start(c);
   const expired: Expired[] = [];
-  const r = runAt(c.combatants, i);
-  const cs = tick(c.combatants, idsOf(c.combatants, r), 'end', expired);
-  return { combat: pass(c, cs, r[1] + 1, expired), expired };
+  const r = runAt(c.combatants, i), key = `${c.round}:e:${c.turn}`;
+  const ended = (c.done ?? []).includes(key);
+  const cs = ended ? c.combatants : tick(c.combatants, idsOf(c.combatants, r), 'end', expired);
+  return { combat: pass(ended ? c : { ...c, done: [...(c.done ?? []), key] }, cs, r[1] + 1, expired), expired };
 }
 
 /** The pointer only (round − 1 on a wrap, never below 1): undoes no resets or expirations. */

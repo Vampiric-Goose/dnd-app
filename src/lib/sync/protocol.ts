@@ -1,5 +1,6 @@
 // Pure (no Svelte/Vite/DOM). The sync messages. Every message is `{ t: <type>, ... }`. Guest messages are untrusted: the host reads
 // them only through parseGuestMessage, which checks each one against an explicit shape and returns a clean copy of the parts it reads.
+import { INIT_MAX, INIT_MIN } from '../combat/combat.ts';
 import { characterProblem, isRec } from '../recordShape.ts';
 import type { RollEntry } from '../rolls.svelte.ts';
 import type { Character } from '../types.ts';
@@ -7,7 +8,7 @@ import type { Synced } from './merge.ts';
 import type { CampaignForPlayers, RosterEntry, TrackerView } from './project.ts';
 
 export const MAX_MESSAGE = 256 * 1024, MAX_CHUNK = 64 * 1024, MAX_PACK = 64 * 1024 * 1024;
-export const INIT_MIN = -10, INIT_MAX = 50;
+export { INIT_MAX, INIT_MIN } from '../combat/combat.ts'; // one source (M2)
 
 export type GuestMsg =
   | { t: 'hello'; code: string; playerId?: string; name?: string }

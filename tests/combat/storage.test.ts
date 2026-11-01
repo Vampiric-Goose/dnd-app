@@ -1,7 +1,9 @@
 import 'fake-indexeddb/auto';
 import fs from 'node:fs';
 import { openDB } from 'idb';
-import { afterEach, beforeEach, describe, expect, test } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { hlcNow } from '../../src/lib/sync/hlc.ts';
+import { latestClock } from '../../src/lib/sync/merge.ts';
 import { exportBackup } from '../../src/lib/backup.ts';
 import { addCombatants, monsterCombatant, newCombat, start } from '../../src/lib/combat/combat.ts';
 import { applyInitiative, changeHp, deathSave, setCondition, turn, updateCombat } from '../../src/lib/combat/store.ts';
@@ -116,15 +118,17 @@ test('PC damage from the tracker goes through characters.put', async () => {
   expect(once.state.hp).toBe(15);
   expect(once.sync?.clock['state.hp']).toBeTruthy();
   expect(seen).toContainEqual(['character', 'p']);
-  // the player edits their notes in between
+  // the player edits their notes in between, and heals to 18 on their phone (arriving through sync with a newer clock)
   await db.characters.put({ ...once, details: { ...once.details, notes: 'kept' } });
+  const mid = (await db.characters.get('p'))!;
+  await db.characters.putSynced({ ...mid, state: { ...mid.state, hp: 18 }, sync: { ...mid.sync!, clock: { ...mid.sync!.clock, 'state.hp': hlcNow('phone001', latestClock(mid)) } } });
   await changeHp('c1', 'pc:p', { damage: 5 }, settings);
   const twice = (await db.characters.get('p'))!;
-  expect(twice.state.hp).toBe(10);
+  expect(twice.state.hp).toBe(13); // a stale copy (15) would give 10
   expect(twice.details.notes).toBe('kept');
   // two quick hits from the same page both land
   await Promise.all([changeHp('c1', 'pc:p', { damage: 1 }, settings), changeHp('c1', 'pc:p', { damage: 1 }, settings)]);
-  expect((await db.characters.get('p'))!.state.hp).toBe(8);
+  expect((await db.characters.get('p'))!.state.hp).toBe(11);
 });
 
 test('concentration', async () => {
@@ -183,4 +187,23 @@ test('applyInitiative', async () => {
   expect(await db.combat.get('c1')).toEqual(c);
   expect(await applyInitiative('c2', 'p', 12)).toBe(false); // no fight at all
   expect(seen).toEqual([]);
+});
+
+test('M2: applyInitiative refuses a total that is not an integer from -10 to 50', async () => {
+  await updateCombat('c1', (c) => addCombatants(c, [pcC('p')]));
+  const before = await db.combat.get('c1');
+  for (const bad of [17.5, 51, -11, NaN]) expect(await applyInitiative('c1', 'p', bad)).toBe(false);
+  expect(await db.combat.get('c1')).toEqual(before);
+});
+
+test('M3: a failed character write after a turn still resolves, naming the character', async () => {
+  await db.characters.put({ ...pc(), state: { ...pc().state, conditions: ['Poisoned'] } });
+  await updateCombat('c1', (c) => addCombatants(c, [pcC('p', { init: 25, durations: { Poisoned: { rounds: 1, at: 'end', of: 'pc:p' } } }), pcC('q', { init: 5 })]));
+  await turn('c1', 'start');
+  vi.spyOn(db.characters, 'put').mockRejectedValueOnce(new Error('disk full'));
+  vi.spyOn(console, 'warn').mockImplementation(() => {});
+  const s = await turn('c1', 'next');
+  expect(s.failed).toEqual(['p']);
+  expect(s.combat.turn).toBe('pc:q');
+  vi.restoreAllMocks();
 });
