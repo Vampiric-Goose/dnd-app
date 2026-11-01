@@ -1,6 +1,7 @@
 // Pure (no Svelte/Vite/DOM). The sync messages. Every message is `{ t: <type>, ... }`. Guest messages are untrusted: the host reads
 // them only through parseGuestMessage, which checks each one against an explicit shape and returns a clean copy of the parts it reads.
 import { INIT_MAX, INIT_MIN } from '../combat/combat.ts';
+import { cleanActionRequest, type ActionRequest, type PlayerAction } from '../map/actions.ts';
 import { MAX_SIDE } from '../map/scene.ts';
 import { characterProblem, isRec } from '../recordShape.ts';
 import type { RollEntry } from '../rolls.svelte.ts';
@@ -26,7 +27,9 @@ export type GuestMsg =
   | { t: 'initiative'; characterId: string; total: number /* stage 4: the player's own roll, an integer INIT_MIN–INIT_MAX */ }
   | { t: 'move'; sceneId: string; tokenId: string; x: number; y: number /* stage 5: the player's own token, scene px */ }
   | { t: 'blobWant'; hashes: string[] /* stage 5: images of the current scene it lacks */ }
-  | { t: 'dash'; characterId: string /* the player's own character Dashes on its turn (honour system) */ };
+  | { t: 'dash'; characterId: string /* the player's own character Dashes on its turn (honour system) */ }
+  | { t: 'action'; action: ActionRequest /* declared action: the player's arrow (replaces their last) */ }
+  | { t: 'clearAction' /* the player's arrow goes */ };
 
 export interface PackOffer { id: string; hash: string; size: number }
 
@@ -43,6 +46,7 @@ export type HostMsg =
   | { t: 'tracker'; tracker: TrackerView | null /* stage 4: trackerForPlayers; null = no fight */ }
   | { t: 'scene'; scene: PlayerScene | null /* stage 5: sceneForPlayers; null = no scene shown */ }
   | { t: 'blobChunk'; hash: string; type: string; size: number; seq: number; total: number; data: string /* base64 */ }
+  | { t: 'actions'; actions: PlayerAction[] /* declared actions players may see (actionsForPlayers) */ }
   | { t: 'bye'; reason: string };
 
 /** Serialized length (UTF-16 units, close enough to bytes for a limit). */
@@ -106,6 +110,11 @@ export function parseGuestMessage(raw: unknown): GuestMsg | { error: string } {
     }
     case 'dash':
       return str(raw.characterId, 100) ? { t: 'dash', characterId: raw.characterId } : { error: 'bad dash' };
+    case 'action': {
+      const action = cleanActionRequest(raw.action);
+      return action ? { t: 'action', action } : { error: 'bad action' };
+    }
+    case 'clearAction': return { t: 'clearAction' };
     default:
       return { error: 'unknown message' };
   }

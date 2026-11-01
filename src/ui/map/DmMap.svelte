@@ -7,7 +7,8 @@
   import { resizeImage } from '../../lib/images.ts';
   import { encodeFog, newFog, paintFog, type FogEdit } from '../../lib/map/fog.ts';
   import { snap, type Pt } from '../../lib/map/grid.ts';
-  import { addTokens, liveHp, MAX_SIDE, MAX_TOKENS, moveTokens, newScene, patchToken, regrid, removeTokens, type NewToken } from '../../lib/map/scene.ts';
+  import { addTokens, liveHp, MAX_SIDE, MAX_TOKENS, moveTokens, newScene, patchToken, regrid, removeTokens, tokenColor, type NewToken } from '../../lib/map/scene.ts';
+  import { arrowsOn } from '../../lib/map/actions.ts';
   import { addTokensToCombat, editScene, tokenForCharacter, tokenForMonster } from '../../lib/map/store.ts';
   import { currentRun, patchCombatant } from '../../lib/combat/combat.ts';
   import { budgetApplies, combatantForToken, effectiveSpeed, recordMove, remainingFeet } from '../../lib/combat/movement.ts';
@@ -19,7 +20,7 @@
   import { computeSheet } from '../../lib/rules/sheet.ts';
   import { getIndex, saveCampaign } from '../../lib/store.svelte.ts';
   import { MAX_BLOB } from '../../lib/sync/protocol.ts';
-  import { session } from '../../lib/sync/session.svelte.ts';
+  import { clearDeclared, declareAction, session } from '../../lib/sync/session.svelte.ts';
   import type { Campaign, Character, Combat, Combatant, MonsterDef, RaceDef, Scene, Sheet, Size, Token } from '../../lib/types.ts';
   import GridForm from './GridForm.svelte';
   import { detectSquareGrid } from '../../lib/map/detectGrid.ts';
@@ -266,6 +267,13 @@
     // M6: a character token follows the character's current portrait unless the DM gave the token its own
     return { ...t, ...(pc ?? liveHp(t, combat)), ...(c && !t.portrait && c.details.portrait && { portrait: c.details.portrait }) };
   }));
+  // Declared actions: the DM sees and may clear every arrow, and may point from any token, on the shown scene (arrows are table state:
+  // another scene ends them). The DM's no-token arrow is --text-strong.
+  const strong = getComputedStyle(document.documentElement).getPropertyValue('--text-strong').trim() || '#eafffb';
+  const arrows = $derived(scene ? arrowsOn(session.actions, scene.id, scene.tokens, () => true, (by) => (by === 'dm' ? strong : tokenColor(by))) : []);
+  const ondeclare = (d: { from: Pt; fromToken?: string; to: Pt; toToken?: string }) => {
+    if (scene) void declareAction({ sceneId: scene.id, from: d.fromToken ? { tokenId: d.fromToken } : d.from, to: d.toToken ? { tokenId: d.toToken } : d.to, kind: 'intent' });
+  };
   const GRID_NAMES = { square: 'Square', 'hex-flat': 'Hex (flat)', 'hex-pointy': 'Hex (pointy)' } as const;
 </script>
 
@@ -291,6 +299,9 @@
         fog={settings.fog ? scene.fog ?? encodeFog(newFog(scene.width, scene.height, false)) : undefined}
         onfog={settings.fog ? onfog : undefined}
         {corner}
+        {arrows}
+        ondeclare={scene.shown ? ondeclare : undefined}
+        onclear={(id) => clearDeclared(id)}
       />
     {/key}
     <button type="button" class="sheet-btn" onclick={() => (sheet = true)}>Tokens and scene</button>
@@ -368,6 +379,7 @@
                 <MonsterSearch {pool} label="Add monster tokens" onadd={addMonster} />
               {/snippet}
             </Menu>
+            {#if arrows.length}<button type="button" onclick={() => clearDeclared()}>Clear all arrows</button>{/if}
           </div>
           <TokenList tokens={canvasTokens} {selected} onselect={(ids) => (selected = ids)} />
         {:else}
@@ -490,6 +502,9 @@
   }
 
   .addbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
     margin-bottom: 0.5rem;
   }
 

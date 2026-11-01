@@ -13,6 +13,7 @@ import type { Listener, Transport } from './link.ts';
 import type { RosterEntry, TrackerView } from './project.ts';
 import type { PlayerScene } from './scene.ts';
 import type { Pt } from '../map/grid.ts';
+import type { ActionBoard, ActionRequest, DeclaredAction, PlayerAction } from '../map/actions.ts';
 
 export type SessionStatus = 'off' | 'starting' | 'hosting' | 'retrying' | GuestStatus;
 
@@ -40,6 +41,8 @@ export const session = $state({
   confirm: undefined as { text: string; answer(ok: boolean): void } | undefined,
   /** S5-R1: when the next automatic retry (host re-register or guest redial) is due, in ms since the epoch; undefined = none waiting. */
   retryAt: undefined as number | undefined,
+  /** Declared actions on the map: all of them on the DM's device, the visible ones (as the DM sent them) on a player's. */
+  actions: [] as (DeclaredAction | PlayerAction)[],
 });
 
 /** S5-R1: reconnect delays 2 s, 5 s, 15 s, 30 s, 2 min, then every 5 min (a busy public sync server refuses rapid retries). */
@@ -80,6 +83,7 @@ const keyOf = (role: string, id: string, code: string) => `${role}|${id}|${code}
 export function stopSession(): void {
   const r = run;
   run = undefined;
+  local = undefined;
   if (r) {
     clearTimeout(r.timer);
     r.host?.stop();
@@ -87,7 +91,7 @@ export function stopSession(): void {
     r.listener?.close();
   }
   session.confirm?.answer(false);
-  Object.assign(session, { role: undefined, campaignId: undefined, status: 'off', reason: '', online: {}, roster: [], tracker: undefined, scene: undefined, packs: undefined, welcomed: false, confirm: undefined, retryAt: undefined });
+  Object.assign(session, { role: undefined, campaignId: undefined, status: 'off', reason: '', online: {}, roster: [], tracker: undefined, scene: undefined, packs: undefined, welcomed: false, confirm: undefined, retryAt: undefined, actions: [] });
 }
 
 function begin(role: Run['role'], code: string, campaignId?: string): Run {
@@ -172,6 +176,7 @@ function hostDeps(r: Run, cid: string): HostDeps {
     loadScene: () => db.scenes.shown(cid),
     updateScene: (id, fn) => db.scenes.update(id, fn, { network: true }).then((s) => (changed(r), s)),
     loadBlob: async (hash) => { const b = await db.blobs.get(hash); return b && { type: b.type, data: await b.arrayBuffer() }; },
+    onActions: (list) => { if (live(r)) session.actions = list; },
     // Dynamic, so the combat store (and the engine) stay out of the first load. applyInitiative checks the fit and reports 'combat'.
     onInitiative: (id, n) => void import('../combat/store.ts').then((m) => m.applyInitiative(cid, id, n)).then(() => changed(r), (e) => console.warn(e)),
     addRoll: (e, from) => void db.characters.list(cid).then((cs) => {
@@ -337,6 +342,7 @@ function guestDeps(r: Run): Omit<GuestDeps, 'code' | 'playerId' | 'name' | 'camp
     onRoster: (x) => { if (live(r)) session.roster = x; },
     onTracker: (t) => { if (live(r)) session.tracker = t; },
     onScene: (s) => { if (live(r)) session.scene = s; },
+    onActions: (list) => { if (live(r)) session.actions = list; },
     hasBlob: (hash) => db.blobs.has(hash),
     saveBlob: (type, d) => save(db.blobs.put(new Blob([d as Uint8Array<ArrayBuffer>], { type }))),
     onRoll: (e, from) => { if (live(r)) addRemoteRoll(e, who(from, session.roster.filter((x) => x.ownerId === from).map((x) => x.name))); },
@@ -347,6 +353,7 @@ function guestDeps(r: Run): Omit<GuestDeps, 'code' | 'playerId' | 'name' | 'camp
 // ---- Local changes and rolls go to the running engine ----
 
 onLocalChange((kind, id) => {
+  if (!run && local?.cid === id && (kind === 'combat' || kind === 'scene')) void localFollow(local);
   const r = run;
   if (!r) return;
   if (kind === 'character') {
@@ -376,3 +383,37 @@ rollHooks.public = (e) => {
   run?.host?.broadcastRoll(e);
   run?.guest?.sendRoll(e);
 };
+
+// ---- Declared actions (intent arrows) ----
+
+/** The DM's board while not hosting (no engine to hold it), for the open campaign. Live state: never stored. */
+let local: { cid: string; board: ActionBoard } | undefined;
+
+/** The local board follows the fight and the shown scene (turn ends, combat ends, another scene), as the host's does. */
+async function localFollow(l: NonNullable<typeof local>): Promise<void> {
+  const [combat, s] = await Promise.all([db.combat.get(l.cid), db.scenes.shown(l.cid)]);
+  if (local !== l) return;
+  const a = l.board.onCombat(combat), b = l.board.onScene(s?.id);
+  if (a || b) session.actions = l.board.list();
+}
+
+/** Draws an arrow: the DM's (hosting or not) or the player's (sent to the DM, who checks it; nothing while offline). */
+export async function declareAction(r: ActionRequest): Promise<void> {
+  if (run?.host) return run.host.setDmAction(r);
+  if (run?.guest) return run.guest.sendAction(r);
+  const cid = app.campaign?.id;
+  if (!cid || app.campaign?.sync?.role === 'player') return;
+  const [{ ActionBoard, expiry }, { uid }, combat, s] = await Promise.all([import('../map/actions.ts'), import('../uid.ts'), db.combat.get(cid), db.scenes.shown(cid)]);
+  if (run || app.campaign?.id !== cid || !s || s.id !== r.sceneId) return;
+  if (local?.cid !== cid) local = { cid, board: new ActionBoard() };
+  local.board.onCombat(combat);
+  local.board.set({ ...r, id: uid(), by: 'dm', ...expiry(r, s, combat), at: Date.now() });
+  session.actions = local.board.list();
+}
+
+/** Clears an arrow: the DM one (or, without `id`, every one); a player their own. */
+export function clearDeclared(id?: string): void {
+  if (run?.host) return run.host.clearAction(id);
+  if (run?.guest) return run.guest.clearAction();
+  if (local?.board.clear('dm', id)) session.actions = local.board.list();
+}
