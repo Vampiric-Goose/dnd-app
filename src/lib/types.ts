@@ -136,7 +136,8 @@ export interface Combat { campaignId: string; combatants: Combatant[]; round: nu
   /** S4-R2: the DM reordered by hand since the last Sort or add, so Start keeps the order. */ reordered?: boolean;
   /** M1: turn boundaries already applied (`round:e|s:turnId`), so Previous then Next never ticks one twice. */ done?: string[];
   /** Combatant id → its movement this turn (dropped where its own turn starts). */ movement?: Record<string, Movement>;
-  /** The saved encounter this fight was resumed from (Group C). */ encounterId?: string }
+  /** The saved encounter this fight was resumed from (Group C). */ encounterId?: string;
+  /** This fight's identity: new when a fight is made or resumed, kept by saves (the map's arrows end with it). */ fightId?: string }
 /** Map ↔ combat: feet used and Dashes taken on the current turn. */
 export interface Movement { feet: number; dashes: number }
 /** A fight saved into an encounter: the whole combat, plus the shown scene's tokens and fog at save time (none when no scene was shown). */

@@ -98,6 +98,25 @@ describe('validation', () => {
   });
 });
 
+describe('restore: fight identity and movement', () => {
+  test('a restored fight gets a fresh fightId; the snapshot carries none', () => {
+    const c = { ...fight(), fightId: 'f1' };
+    const f = snapshotFight(c, undefined);
+    expect(f.combat.fightId).toBeUndefined();
+    const { combat } = restoreCombat(f, 'e1', [char('a', 'c1'), char('b', 'c1')], 'c1');
+    expect(combat.fightId).toBeTruthy();
+    expect(combat.fightId).not.toBe('f1');
+  });
+
+  test('a dropped PC holding the turn: its movement and the new turn holder movement go, others stay', () => {
+    const c = { ...fight(), movement: { g1: { feet: 10, dashes: 0 }, 'pc:a': { feet: 5, dashes: 0 }, 'pc:b': { feet: 15, dashes: 1 } } };
+    const { combat, dropped } = restoreCombat(snapshotFight(c, undefined), 'e1', [char('b', 'c1')], 'c1');
+    expect(dropped).toEqual(['a']);
+    expect(combat.turn).toBe('pc:b');
+    expect(combat.movement).toEqual({ g1: { feet: 10, dashes: 0 } });
+  });
+});
+
 describe('store flows', () => {
   beforeEach(async () => {
     await resetDb();
@@ -114,6 +133,18 @@ describe('store flows', () => {
     await updateCombat('c1', (x) => ({ ...x, round: 4 }));
     expect((await saveFight('c1'))?.id).toBe(e.id);
     expect((await db.encounters.list('c1')).map((x) => [x.id, x.fight?.combat.round])).toEqual([[e.id, 4]]);
+  });
+
+  test('saveFight with no scene shown keeps the map an earlier save stored', async () => {
+    const s = addTokens(newScene('c1', 'Cave'), [{ name: 'a', size: 'M', characterId: 'a', x: 100, y: 100 }]);
+    await db.scenes.put(s);
+    await db.scenes.show('c1', s.id);
+    const { encounterId: _, ...c } = fight();
+    await updateCombat('c1', () => c);
+    const e = await saveFightAs('c1', 'Ambush');
+    expect(e.fight?.map?.sceneId).toBe(s.id);
+    await db.scenes.show('c1', undefined);
+    expect((await saveFight('c1'))?.fight?.map?.sceneId).toBe(s.id);
   });
 
   test('saveFight on an unlinked fight is undefined', async () => {

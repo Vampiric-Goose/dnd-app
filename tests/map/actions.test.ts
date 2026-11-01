@@ -118,6 +118,18 @@ describe('ActionBoard', () => {
     expect(b.list().map((a) => a.id)).toEqual(['free']);
   });
 
+  test('Review Focus 4: a resumed fight (a new fightId) drops the old fight arrows even with the same combatant ids; a save keeps them', () => {
+    const b = new ActionBoard();
+    b.onCombat(fight({ fightId: 'f1' }));
+    b.set(act({ id: 'pc', by: 'A1', endsWith: 'B', duringFight: true }));
+    b.set(act({ id: 'pt', by: 'A2', from: { x: 5, y: 5 }, duringFight: true }));
+    b.set(act({ id: 'free', by: 'dm', from: { x: 9, y: 9 } }));
+    expect(b.onCombat(fight({ fightId: 'f1', encounterId: 'e1' }))).toBe(false); // Save as: same fight
+    expect(b.list().map((a) => a.id)).toEqual(['pc', 'pt', 'free']);
+    expect(b.onCombat(fight({ fightId: 'f2', encounterId: 'e1' }))).toBe(true); // resumed: same ids, new fight
+    expect(b.list().map((a) => a.id)).toEqual(['free']);
+  });
+
   test('onScene drops other scenes', () => {
     const b = new ActionBoard();
     b.set(act({ id: 'a', by: 'A1' }));

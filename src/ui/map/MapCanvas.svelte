@@ -506,7 +506,8 @@
     if (pointers.size > 2) return;
     const w = toWorld(view, p), shift = e.shiftKey || e.ctrlKey || e.metaKey;
     if (e.button === 2) { mode = { k: 'none' }; if (ondeclare) startArrow(w); return; } // the right button points, in any tool
-    const px = 1 / view.scale, reach = (e.pointerType === 'mouse' ? 10 : 22) * px; // ✕ discs: a 44 px target on touch
+    // ✕ discs: a 44 px target on touch, but a token under the finger wins unless the press is on the disc itself
+    const px = 1 / view.scale, reach = (e.pointerType === 'mouse' || tokenAt(scene(), w, dm) ? 10 : 22) * px;
     const x = onclear && arrows.find((a) => { if (!a.clearable) return false; const g = arrowGeometry(a, px); return g.len > 12 * px && Math.hypot(g.disc.x - w.x, g.disc.y - w.y) <= reach; });
     if (x) { mode = { k: 'none' }; onclear!(x.id); return; }
     if (ruler) { ruler = undefined; schedule(); } // the next tap clears the ruler

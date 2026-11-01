@@ -15,7 +15,7 @@ export interface Expired { combatantId: string; condition: string }
 export interface Step { combat: Combat; expired: Expired[]; failed?: string[] }
 type Pick = { monster: MonsterDef; count: number };
 
-export const newCombat = (campaignId: string): Combat => ({ campaignId, combatants: [], round: 0, groupMonsters: false, updatedAt: Date.now() });
+export const newCombat = (campaignId: string): Combat => ({ campaignId, combatants: [], round: 0, groupMonsters: false, updatedAt: Date.now(), fightId: uid() });
 
 /** a acts before b: higher init (unset last), a lair loses a tie, then higher Dex score, then the stored random tiebreak. */
 export function outranks(a: Combatant, b: Combatant): boolean {

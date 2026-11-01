@@ -155,7 +155,9 @@ export const saveFight = (cid: string): Promise<Encounter | undefined> => serial
   const c = await db.combat.get(cid);
   const had = c?.encounterId ? await db.encounters.get(c.encounterId) : undefined;
   if (!c || !had) return undefined;
-  const e: Encounter = { ...had, fight: snapshotFight(c, await db.scenes.shown(cid)), updatedAt: Date.now() };
+  const shown = await db.scenes.shown(cid), fight = snapshotFight(c, shown);
+  // with no scene shown, the map an earlier save stored stays
+  const e: Encounter = { ...had, fight: { ...fight, ...(!shown && had.fight?.map && { map: had.fight.map }) }, updatedAt: Date.now() };
   await db.encounters.put(e);
   return e;
 });

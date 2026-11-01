@@ -2,9 +2,10 @@
 // record and its validation live here, so a future kind ('attack', 'spell', 'roll', …) is: add it to ACTION_KINDS and give its `data`
 // a check in cleanActionRequest. The board is live table state on the DM's device: never persisted, never backed up.
 import { currentRun } from '../combat/combat.ts';
+import { combatantForToken } from '../combat/movement.ts';
 import { isRec } from '../recordShape.ts';
 import type { PlayerScene } from '../sync/scene.ts';
-import type { Combat, Combatant, Scene, Token } from '../types.ts';
+import type { Combat, Scene } from '../types.ts';
 import { decodeFog, isRevealed } from './fog.ts';
 import type { Pt } from './grid.ts';
 
@@ -46,15 +47,11 @@ export function cleanActions(v: unknown): PlayerAction[] {
 
 const tokenOf = (e: ActionEnd): string | undefined => ('tokenId' in e ? e.tokenId : undefined);
 
-/** The combatant a token stands for: a monster's linked combatant, or a PC's by character. */
-const combatantFor = (c: Combat, t: Token): Combatant | undefined =>
-  c.combatants.find((x) => (t.combatantId !== undefined && x.id === t.combatantId) || (t.characterId !== undefined && x.characterId === t.characterId));
-
 /** While a fight runs: the source token's combatant (its turn ends the action), and the mark that combat ending ends it. */
 export function expiry(r: ActionRequest, s: Scene | undefined, c: Combat | undefined): { endsWith?: string; duringFight?: true } {
   if (!c || c.round < 1) return {};
   const id = tokenOf(r.from), t = id === undefined ? undefined : s?.tokens.find((x) => x.id === id);
-  const endsWith = t && combatantFor(c, t)?.id;
+  const endsWith = t && combatantForToken(c, t)?.id;
   return { ...(endsWith !== undefined && { endsWith }), duringFight: true };
 }
 
@@ -62,6 +59,7 @@ export function expiry(r: ActionRequest, s: Scene | undefined, c: Combat | undef
 export class ActionBoard {
   #list: DeclaredAction[] = [];
   #run = new Set<string>();
+  #fight: string | undefined;
 
   list(): DeclaredAction[] { return [...this.#list]; }
 
@@ -77,14 +75,17 @@ export class ActionBoard {
 
   /**
    * The fight changed: actions of a turn that ended (in the previous run, not the new one) go, and those of combatants no longer in it
-   * (a removed monster, another fight resumed). No fight: everything made during one goes.
+   * (a removed monster, another fight resumed). No fight: everything made during one goes. Another fight (a new fightId, as a resume
+   * makes, even with the same combatant ids): everything made during the old one goes first.
    */
   onCombat(c: Combat | undefined): boolean {
-    const was = this.#run, run = c ? currentRun(c) : new Set<string>();
+    const was = this.#run, run = c ? currentRun(c) : new Set<string>(), swapped = c?.fightId !== undefined && c.fightId !== this.#fight;
     this.#run = run;
+    this.#fight = c?.fightId;
+    const dropped = swapped && this.#keep((x) => x.endsWith === undefined && !x.duringFight);
     if (!c) return this.#keep((x) => x.endsWith === undefined && !x.duringFight);
     const ids = new Set(c.combatants.map((x) => x.id));
-    return this.#keep((x) => x.endsWith === undefined || (ids.has(x.endsWith) && !(was.has(x.endsWith) && !run.has(x.endsWith))));
+    return this.#keep((x) => x.endsWith === undefined || (ids.has(x.endsWith) && !(was.has(x.endsWith) && !run.has(x.endsWith)))) || dropped;
   }
 
   /** Another scene is shown (or none): actions on any other go. */
