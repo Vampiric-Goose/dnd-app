@@ -478,6 +478,12 @@ export const db = {
       const store = (await open()).transaction('raw5e').store;
       return Promise.all(keys.map((k) => store.get(k)));
     },
+    /** Every kept raw record with its key (the converter upgrade re-reads them all). */
+    all: async (): Promise<[string, unknown][]> => {
+      const store = (await open()).transaction('raw5e').store;
+      const [keys, values] = await Promise.all([store.getAllKeys(), store.getAll()]);
+      return keys.map((k, i) => [String(k), values[i]]);
+    },
     putMany: (entries: [string, unknown][]) => write(['raw5e'], async (tx) => {
       const store = tx.objectStore('raw5e');
       for (const [k, v] of entries) await store.put(v, k);

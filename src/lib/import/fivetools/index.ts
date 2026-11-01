@@ -55,7 +55,9 @@ const sourceOf = (key: string, r: Raw): string | undefined => (key === 'magicvar
 const keySource = (r: Raw): string | undefined => r?.source ?? r?.inherits?.source;
 /** The `_copy` / raw-store key; class-family records carry their parent class in it (names collide across classes). */
 const keyOf = (key: string, r: Raw): string | undefined =>
-  CLASS_KEYS.has(key) ? classRawKey(key, r) : r?.name !== undefined && keySource(r) ? rawKey(key, r.name, keySource(r)!) : undefined;
+  CLASS_KEYS.has(key) ? classRawKey(key, r)
+  : key === 'subrace' && r?.name === undefined && typeof r?.raceName === 'string' && keySource(r) ? rawKey(key, `(${r.raceName})`, keySource(r)!) // a nameless subrace, kept for re-conversion
+  : r?.name !== undefined && keySource(r) ? rawKey(key, r.name, keySource(r)!) : undefined;
 /** The name, then noun-first forms ("Light Crossbow" -> "Crossbow, Light"), which is how the SRD names much of its gear. */
 const srdNames = (name: string): string[] => {
   const [, head, paren = ''] = /^(.*?)(\s*\(.*\))?$/.exec(name)!;
@@ -293,6 +295,15 @@ export async function import5etools(
     if (twin) p.patches.set(twin.id, { targetId: twin.id, alias: def.source, ...(def.text.length && { text: def.text }), ...lair });
     else p.entities.set(def.id, def);
   };
+  // 5etools keeps some races' defaults on a nameless subrace (PHB Human's +1s): they become the race's own, so no unnamed subrace is offered
+  const nameless = new Map<string, Raw>();
+  for (const { key, r } of live) if (key === 'subrace' && r.name === undefined && r.raceName) nameless.set(rawKey('race', r.raceName, r.raceSource ?? r.source), r);
+  const fold = (r: Raw): Raw => {
+    const n = r.name !== undefined && r.source ? nameless.get(rawKey('race', r.name, r.source)) : undefined;
+    if (!n) return r;
+    const { source: _s, raceName: _n, raceSource: _rs, page: _p, entries, ...rest } = n;
+    return { ...rest, ...r, entries: [...arr(r.entries), ...arr(entries)] };
+  };
   const bases: { view: Raw; def: ItemDef }[] = [];
   for (const { key, r, file, label } of live) {
     const c = CONVERT[key];
@@ -302,7 +313,7 @@ export async function import5etools(
       const name = nameOf(key, r) ?? fail('missing name');
       if (!r.source) fail('missing source');
       const twin = srdTwin(c[0], name, r);
-      const def = c[1](r, conv, entityId(c[0], name, r.source), name);
+      const def = c[1](key === 'race' ? fold(r) : r, conv, entityId(c[0], name, r.source), name);
       emit(def, twin);
       if (key === 'baseitem') bases.push({ view: r, def: { ...(def as ItemDef), id: twin?.id ?? def.id } });
     } catch (err) {

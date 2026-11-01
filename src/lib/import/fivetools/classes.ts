@@ -4,6 +4,7 @@
 import { entityId, featureId, slug, sourceOf } from '../../content/ids.ts';
 import { renderTags } from '../../content/richtext.ts';
 import type { Ability, Choice, ClassDef, Entity, EntityPatch, FeatureDef, FeatureRef, MulticlassPrereq, Progression, Skill, Spellcasting, SubclassDef, Trait } from '../../types.ts';
+import { equipmentChoices } from './backgrounds.ts';
 import { ABILITIES, arr, base, code, fail, proficiencies, rich, table, type Ctx, type Raw } from './common.ts';
 
 export const CLASS_KEYS = new Set(['class', 'subclass', 'classFeature', 'subclassFeature']);
@@ -273,8 +274,7 @@ export async function importClasses(live: Live[], ctx: Ctx, rawLookup: (key: str
           ...(mcp && { multiclassPrereq: mcp }),
           multiclassProficiencies: mc.p,
           ...(mc.skillChoice && { multiclassSkillChoice: mc.skillChoice }),
-          // ponytail: equipment is text only; `defaultData` item picks aren't mapped (the SRD classes carry structured picks)
-          startingEquipment: { text: se?.default ? [{ list: arr(se.default).map(x => renderTags(String(x))) }] : [], choices: [], ...(se?.goldAlternative && { gold: renderTags(String(se.goldAlternative)) }) },
+          startingEquipment: { text: se?.default ? [{ list: arr(se.default).map(x => renderTags(String(x))) }] : [], choices: equipmentChoices(se?.defaultData, ctx), ...(se?.goldAlternative && { gold: renderTags(String(se.goldAlternative)) }) },
           subclassLevel: gain.length ? Math.min(...gain) : 0,
           subclassTitle: String(r.subclassTitle ?? ''),
           asiLevels: [...new Set(parsed.filter(p => slug(p.name) === 'ability-score-improvement').map(p => p.level))].sort((a, b) => a - b),

@@ -41,6 +41,14 @@ test('subrace overwrite: explicit (5etools `overwrite`, trait `data.overwrite`) 
   expect(r.errors).toEqual([]);
 });
 
+test('a nameless subrace (PHB Human standard) becomes its race own: the race carries the +1s, no unnamed subrace, and it is kept raw', async () => {
+  const r = await run({ 'races.json': readFixture('races-human.json') });
+  const human = r.packs.flatMap(p => p.entities).find(e => e.kind === 'race' && e.name === 'Testhuman') as RaceDef;
+  expect(human.abilityBonuses).toEqual({ str: 1, dex: 1, con: 1, int: 1, wis: 1, cha: 1 });
+  expect(r.packs.flatMap(p => p.entities).filter(e => e.kind === 'subrace' && !e.name.trim())).toEqual([]);
+  expect(r.raw.map(([k]) => k)).toContain('subrace|(testhuman)|TST');
+});
+
 test('SRD overlap becomes a patch; 2024 is dropped', async () => {
   const r = await run({ 'x.json': { race: [{ name: 'Dwarf', source: 'PHB', srd: true, size: ['M'], speed: 25, entries: ['Full text.'] }], spell: [{ name: 'Fireball', source: 'XPHB', level: 3 }] } });
   const phb = r.packs.find(p => p.source === 'PHB')!;

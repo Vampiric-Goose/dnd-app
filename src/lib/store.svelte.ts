@@ -3,6 +3,8 @@ import { ContentIndex } from './content/index.ts';
 import { loadSrd } from './content/srd.ts';
 import { entityAllowed, mayPatch, packAllowed, patchAllowed } from './content/sources.ts';
 import { db, onUpgradeBlocked } from './db.ts';
+import { CONVERTER_5E } from './import/version.ts';
+import { toast } from './toast.svelte.ts';
 import type { Campaign, Pack } from './types.ts';
 
 export const app: {
@@ -59,6 +61,18 @@ export async function startup(): Promise<void> {
     app.error = 'Could not open local storage: ' + msg(e);
   } finally {
     app.ready = true;
+  }
+  void upgradeBooks();
+}
+
+/** Books imported before a converter fix are re-converted from their kept raw records, in the background (the importer loads only then). */
+async function upgradeBooks(): Promise<void> {
+  try {
+    if (((await db.meta.get<number>('converter5e')) ?? 1) >= CONVERTER_5E) return;
+    const { upgradeImports } = await import('./import/fivetools/upgrade.ts');
+    if (await upgradeImports(getFullIndex)) toast('Your imported books were updated with the latest fixes.');
+  } catch (e) {
+    console.warn('Book upgrade failed', e); // the next start tries again
   }
 }
 

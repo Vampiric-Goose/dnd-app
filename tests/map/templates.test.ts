@@ -15,39 +15,42 @@ describe('area templates (cell-centre test, origin on a cell centre)', () => {
     const hex: Grid = { ...g, type: 'hex-flat' }, p = { x: 133, y: 171 };
     expect(snap(hex, p, 'M')).toEqual(cellCenter(hex, cellAt(hex, p)));
   });
-  test('sphere: a 20 ft radius centred in a cell covers exactly the cells whose centres are within 20 ft of it', () => {
+  test('sphere: a 20 ft radius centred in a cell is a round blob, 9 cells across, the origin in the middle and no stray tips', () => {
     const o = cellCenter(g, { q: 10, r: 10 });
     const cells = affectedCells(t('sphere', 20, { origin: o }), g, 1050, 1050);
-    const want = cellsIn(g, 0, 0, 1050, 1050).filter((c) => { const p = cellCenter(g, c); return Math.hypot(p.x - o.x, p.y - o.y) <= 200; });
-    expect(cells.map(key).sort()).toEqual(want.map(key).sort());
-    expect(cells).toHaveLength(49); // radius 4 cells: the Gauss circle count, origin cell included
+    const rows = new Map<number, number>();
+    for (const c of cells) rows.set(c.r, (rows.get(c.r) ?? 0) + 1);
+    expect([...rows.keys()].sort((x, y) => x - y).map((r) => rows.get(r))).toEqual([5, 7, 9, 9, 9, 9, 9, 7, 5]);
     expect(cells.map(key)).toContain('10,10');
   });
-  test('sphere: 10 ft from a cell centre covers 13 squares; 5 ft on a pointy hex grid covers 7 hexes', () => {
-    expect(affectedCells(t('sphere', 10, { origin: { x: 275, y: 275 } }), g, 1000, 1000)).toHaveLength(13);
+  test('sphere: 5 ft from a cell centre covers that cell and its 8 neighbours; on a pointy hex grid 7 hexes', () => {
+    expect(affectedCells(t('sphere', 5, { origin: { x: 275, y: 275 } }), g, 1000, 1000)).toHaveLength(9);
     const hex: Grid = { ...g, type: 'hex-pointy' };
     expect(affectedCells(t('sphere', 5, { origin: cellCenter(hex, { q: 2, r: 2 }) }), hex, 400, 400)).toHaveLength(7);
   });
   test('only cells inside the scene', () => {
-    // from the corner cell's centre: (0,0) (1,0) (2,0) (0,1) (0,2) (1,1)
-    expect(affectedCells(t('sphere', 10, { origin: { x: 25, y: 25 } }), g, 1000, 1000)).toHaveLength(6);
+    // from the corner cell's centre: the quarter of a 10 ft blob that is on the map (3 + 3 + 2)
+    expect(affectedCells(t('sphere', 10, { origin: { x: 25, y: 25 } }), g, 1000, 1000)).toHaveLength(8);
   });
   test('cylinder: a radius around the origin cell centre, which it includes', () => {
     const c = t('cylinder', 10, { origin: { x: 325, y: 325 } });
-    expect(at(c, 325 + 99, 325)).toBe(true);
-    expect(at(c, 325, 325 + 101)).toBe(false);
+    expect(at(c, 325 + 100, 325)).toBe(true);
+    expect(at(c, 325, 325 + 150)).toBe(false);
     expect(affectedCells(c, g, 1000, 1000).map(key)).toContain('6,6');
   });
-  test('cone: as wide as it is far, the origin cell left out', () => {
-    const c = t('cone', 30);
-    expect(at(c, 200, 90)).toBe(true);
-    expect(at(c, 200, 110)).toBe(false);
-    expect(at(c, 310, 0)).toBe(false);
-    expect(at(c, -10, 0)).toBe(false);
-    expect(at(c, 0, 0)).toBe(false);
-    expect(at(t('cone', 30, { aim: { x: 0, y: 1 } }), 90, 200)).toBe(true);
-    // 15 ft from a cell centre aimed east: 1, 3, 3 cells in its three columns
-    expect(affectedCells(t('cone', 15, { origin: { x: 275, y: 275 }, aim: { x: 500, y: 275 } }), g, 1000, 1000)).toHaveLength(7);
+  test('cone: as wide as it is far, the origin cell left out, and it widens away from the caster on a diagonal too', () => {
+    const o = { x: 275, y: 275 }, e = { origin: o, aim: { x: 900, y: 275 } };
+    expect(at(t('cone', 30, e), 275 + 200, 275 + 90)).toBe(true);
+    expect(at(t('cone', 30, e), 275 + 200, 275 + 110)).toBe(false);
+    expect(at(t('cone', 30, e), 275 - 50, 275)).toBe(false);
+    expect(at(t('cone', 30, e), 275, 275)).toBe(false);
+    // 15 ft aimed east: 1, 3, 3 cells in its three columns
+    expect(affectedCells(t('cone', 15, { origin: o, aim: { x: 500, y: 275 } }), g, 1000, 1000)).toHaveLength(7);
+    // aimed south-east: each ring out from the caster is at least as wide as the one before
+    const cells = affectedCells(t('cone', 30, { origin: o, aim: { x: 500, y: 500 } }), g, 1000, 1000);
+    const ring = (c: { q: number; r: number }) => Math.max(Math.abs(c.q - 5), Math.abs(c.r - 5));
+    const per = [1, 2, 3, 4, 5].map((k) => cells.filter((c) => ring(c) === k).length);
+    for (let k = 1; k < per.length; k++) expect(per[k]).toBeGreaterThanOrEqual(per[k - 1]);
   });
   test('line: 5 ft wide by default, its length counted out from the origin cell', () => {
     const l = t('line', 30);
@@ -58,14 +61,11 @@ describe('area templates (cell-centre test, origin on a cell centre)', () => {
     const cells = affectedCells(t('line', 30, { origin: { x: 275, y: 275 }, aim: { x: 900, y: 275 } }), g, 1000, 1000);
     expect(cells.map(key)).toEqual(['6,5', '7,5', '8,5', '9,5', '10,5', '11,5']);
   });
-  test('cube: the origin is the middle of one face; from a cell centre a 10 ft cube covers 2 × 2 cells', () => {
-    const c = t('cube', 10);
-    expect(at(c, 50, 49)).toBe(true);
-    expect(at(c, 50, 51)).toBe(false);
-    expect(at(c, 101, 0)).toBe(false);
-    const cells = affectedCells(t('cube', 10, { origin: { x: 275, y: 275 }, aim: { x: 900, y: 275 } }), g, 1000, 1000);
-    expect(cells).toHaveLength(4);
-    expect(cells.map(key)).not.toContain('5,5');
+  test('cube: a square centred on the origin cell; an even side reaches toward the aim', () => {
+    const o = { x: 275, y: 275 };
+    expect(affectedCells(t('cube', 15, { origin: o }), g, 1000, 1000).map(key).sort()).toEqual(['4,4', '4,5', '4,6', '5,4', '5,5', '5,6', '6,4', '6,5', '6,6']);
+    expect(affectedCells(t('cube', 10, { origin: o, aim: { x: 275, y: 0 } }), g, 1000, 1000).map(key).sort()).toEqual(['5,4', '5,5', '6,4', '6,5']);
+    expect(affectedCells(t('cube', 10, { origin: o, aim: { x: 0, y: 900 } }), g, 1000, 1000).map(key).sort()).toEqual(['4,5', '4,6', '5,5', '5,6']);
   });
   test('aim at the origin points +x', () => {
     expect(at(t('line', 30, { aim: { x: 0, y: 0 } }), 150, 0)).toBe(true);

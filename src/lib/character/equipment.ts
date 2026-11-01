@@ -44,10 +44,10 @@ export function startingInventory(sources: EquipSource[], equip: Equip, item: (i
  * anything else ('holy-symbols', 'arcane-foci', 'musical-instruments'...) matches `ItemDef.category` (R15).
  */
 export function itemsInCategory(items: ItemDef[], category: string): ItemDef[] {
-  const w = /^(simple|martial)(?:-(melee|ranged))?-weapons$/.exec(category);
+  const w = /^(?:(simple|martial)-)?(?:(melee|ranged)-)?weapons$/.exec(category);
   const a = /^(light|medium|heavy)-armor$/.exec(category);
   const ok = (i: ItemDef): boolean =>
-    w ? i.weapon?.category === w[1] && (!w[2] || i.weapon.ranged === (w[2] === 'ranged'))
+    w ? !!i.weapon && (!w[1] || i.weapon.category === w[1]) && (!w[2] || i.weapon.ranged === (w[2] === 'ranged'))
     : a ? i.armor?.category === a[1]
     : category === 'shields' ? i.armor?.category === 'shield'
     : i.category === category;
