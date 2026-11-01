@@ -71,6 +71,11 @@
     ['About', 'about'],
   ]);
 
+  // The phone bottom bar's tabs; everything else is under More.
+  const PRIMARY = new Set(['characters', 'combat', 'map', 'items']);
+  const here = $derived(router.path[0] ?? '');
+  let moreOpen = $state(false);
+
   function match(key: string) {
     const path = key.split('/').filter(Boolean);
     for (const [pattern, name, load] of routes) {
@@ -102,8 +107,17 @@
 
   <nav aria-label="Main">
     {#each nav as [label, segment]}
-      <a href="#/{segment}" class:wide-only={segment === 'packs' || segment === 'about'} aria-current={(router.path[0] ?? '') === segment ? 'page' : undefined}>{label}</a>
+      <a href="#/{segment}" class:secondary={!PRIMARY.has(segment)} aria-current={here === segment ? 'page' : undefined}>{label}</a>
     {/each}
+    <!-- Phones: the bottom bar keeps four big tabs; the rest sit behind More. -->
+    <details class="more" bind:open={moreOpen}>
+      <summary aria-current={nav.some(([, g]) => g === here && !PRIMARY.has(g)) ? 'page' : undefined}>More</summary>
+      <div class="menu card">
+        {#each nav.filter(([, g]) => !PRIMARY.has(g)) as [label, segment]}
+          <a href="#/{segment}" aria-current={here === segment ? 'page' : undefined} onclick={() => (moreOpen = false)}>{label}</a>
+        {/each}
+      </div>
+    </details>
   </nav>
 
   <main>
@@ -164,30 +178,68 @@
   nav {
     position: fixed;
     inset: auto 0 0 0;
+    z-index: 30; /* the More menu opens above the page and the floating Dice button */
     display: flex;
     background: var(--surface);
     border-top: 1px solid var(--border);
   }
 
-  nav a {
-    flex: 1 1 auto; /* size by label so all eight labels fit at 375px */
-    padding: 0.9rem 0.05rem;
-    text-align: center;
-    font-size: 0.7rem;
+  nav > a,
+  .more > summary {
+    flex: 1 1 0;
+    min-height: 3.25rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.9rem;
     color: var(--muted);
+    text-decoration: none;
+    cursor: pointer;
+  }
+
+  nav > a.secondary {
+    display: none;
+  }
+
+  .more {
+    flex: 1 1 0;
+    display: flex;
+  }
+
+  .more > summary {
+    list-style: none;
+  }
+
+  .more > summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .more .menu {
+    position: fixed;
+    right: 0.5rem;
+    bottom: 3.75rem;
+    display: flex;
+    flex-direction: column;
+    min-width: 12rem;
+    margin: 0;
+    padding: 0.25rem 0;
+    box-shadow: 0 0.5rem 1.5rem rgb(0 0 0 / 0.35);
+  }
+
+  .more .menu a {
+    padding: 0.85rem 1.25rem;
+    color: var(--text);
     text-decoration: none;
   }
 
-  nav a[aria-current='page'] {
+  nav a[aria-current='page'],
+  .more > summary[aria-current='page'] {
     color: var(--accent);
     box-shadow: inset 0 3px var(--accent);
   }
 
-  /* Stage 5: below 768 px Packs and About leave the bottom bar (the Campaigns page links to both) so the labels still fit at 375 px. */
-  @media (max-width: 767.98px) {
-    nav a.wide-only {
-      display: none;
-    }
+  .more .menu a[aria-current='page'] {
+    box-shadow: inset 3px 0 var(--accent);
   }
 
   @media (min-width: 768px) {
@@ -207,12 +259,18 @@
       border-right: 1px solid var(--border);
     }
 
-    nav a {
+    nav > a,
+    nav > a.secondary {
       display: block;
       flex: none;
+      min-height: 0;
       padding: 0.75rem 1.25rem;
       text-align: left;
       font-size: 1rem;
+    }
+
+    .more {
+      display: none;
     }
 
     nav a[aria-current='page'] {

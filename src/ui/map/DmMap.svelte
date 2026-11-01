@@ -12,7 +12,6 @@
   import { patchCombatant } from '../../lib/combat/combat.ts';
   import { updateCombat } from '../../lib/combat/store.ts';
   import { toast } from '../../lib/toast.svelte.ts';
-  import { filterMonsters } from '../../lib/monsters/library.ts';
   import { soundMonster } from '../../lib/monsters/homebrew.ts';
   import { router } from '../../lib/router.svelte.ts';
   import { computeSheet } from '../../lib/rules/sheet.ts';
@@ -23,6 +22,7 @@
   import GridForm from './GridForm.svelte';
   import MapCanvas from './MapCanvas.svelte';
   import TokenList from './TokenList.svelte';
+  import MonsterSearch from '../initiative/MonsterSearch.svelte';
 
   let { campaign }: { campaign: Campaign } = $props();
 
@@ -126,18 +126,19 @@
     return edit((s) => addTokens(s, list));
   };
 
+  // Characters already on this scene are not offered again (one token per character).
+  const onScene = $derived(new Set(scene?.tokens.flatMap((t) => (t.characterId ? [t.characterId] : [])) ?? []));
+  const offChars = $derived(chars.filter((c) => !onScene.has(c.id)));
   let charId = $state('');
-  const addCharacter = () => { const c = chars.find((x) => x.id === charId); if (c) void add([tokenForCharacter(c, charSize(c))]); };
+  $effect(() => { if (charId && !offChars.some((c) => c.id === charId)) charId = ''; });
+  const addCharacter = () => { const c = offChars.find((x) => x.id === charId); if (c) { charId = ''; void add([tokenForCharacter(c, charSize(c))]); } };
+  /** Every campaign character not yet on the scene, players' characters first. */
+  const addParty = () => void add([...offChars].sort((a, b) => Number(!a.ownerId) - Number(!b.ownerId)).map((c) => tokenForCharacter(c, charSize(c))));
+  const owner = (c: Character) => (c.ownerId ? ` (${c.ownerId})` : ' (DM)');
 
-  let q = $state('');
-  let monsterId = $state('');
-  let count = $state(1);
-  const matches = $derived(q.trim() ? filterMonsters(pool, { q }).slice(0, 20) : []);
-  const addMonster = () => {
-    const m = matches.find((x) => x.id === monsterId) ?? matches[0]; // the select shows the first match until one is chosen
-    if (!m || !scene) return;
-    const n = Math.max(1, Math.min(20, Math.round(count) || 1));
-    const names = numberedNames(m.name, n, scene.tokens.map((t) => t.name));
+  const addMonster = (m: MonsterDef, count: number) => {
+    if (!scene) return;
+    const names = numberedNames(m.name, Math.min(count, MAX_TOKENS), scene.tokens.map((t) => t.name));
     void add(names.map((name) => tokenForMonster(m, name, settings.monsterHp)));
   };
 
@@ -262,26 +263,20 @@
 
   <details open>
     <summary>Tokens ({scene.tokens.length})</summary>
-    <div class="row">
-      <label>Character
-        <select bind:value={charId}>
-          <option value="">Choose a character</option>
-          {#each chars as c (c.id)}<option value={c.id}>{c.name}</option>{/each}
-        </select>
-      </label>
-      <button type="button" disabled={busy || !charId} onclick={addCharacter}>Add character token</button>
-    </div>
-    <div class="row">
-      <label>Search monsters <input type="search" bind:value={q} /></label>
-      {#if matches.length}
-        <label>Monster
-          <select bind:value={monsterId}>
-            {#each matches as m (m.id)}<option value={m.id}>{m.name}</option>{/each}
+    <div class="adder">
+      <div class="row">
+        <button type="button" disabled={busy || !offChars.length} onclick={addParty}>Add party ({offChars.length})</button>
+      </div>
+      <div class="row">
+        <label class="row"><span>Character</span>
+          <select bind:value={charId} disabled={!offChars.length}>
+            <option value="">{offChars.length ? 'Choose a character' : 'Everyone is on the map'}</option>
+            {#each offChars as c (c.id)}<option value={c.id}>{c.name}{owner(c)}</option>{/each}
           </select>
         </label>
-      {/if}
-      <label>Count <input class="count" type="number" min="1" max="20" bind:value={count} /></label>
-      <button type="button" disabled={busy || !matches.length} onclick={addMonster}>Add monster token</button>
+        <button type="button" disabled={busy || !charId} onclick={addCharacter}>Add</button>
+      </div>
+      <MonsterSearch {pool} label="Add monster tokens" onadd={addMonster} />
     </div>
     <TokenList tokens={scene.tokens.map((t) => (t.combatantId ? { ...t, ...liveHp(t, combat) } : t))} {selected} onselect={(ids) => (selected = ids)} onpatch={patch} onremove={removeIds} onportrait={portrait} />
   </details>
@@ -318,8 +313,8 @@
     max-width: 14rem;
   }
 
-  .count {
-    width: 4rem;
+  .adder select {
+    max-width: 100%;
   }
 
   .check {
