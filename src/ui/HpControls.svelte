@@ -47,11 +47,31 @@
 </div>
 
 <style>
+  /* Sized for a 260-320 px side panel (the sheet's status panel, the tracker's row panel): one row each, wrapping if narrower. */
   .hpc {
+    gap: 0.35rem;
     margin: 0.4rem 0;
   }
 
+  label.row {
+    gap: 0.35rem;
+  }
+
+  label.row > span {
+    color: var(--label);
+    font-size: 0.72rem;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+  }
+
   input {
-    width: 5rem;
+    width: 4.25rem;
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .check {
+    margin: 0.2rem 0;
+    font-size: 0.9rem;
   }
 </style>

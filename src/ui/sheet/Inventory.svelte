@@ -66,74 +66,112 @@
     update((x) => ({ ...x, inventory: x.inventory.map((e) => (e.id === id ? fn(e) : e)) }));
 </script>
 
-<section aria-labelledby="inv-h">
-  <h2 id="inv-h">Inventory</h2>
+<!-- The "Inventory" drawer: coins, carrying, the item actions, then the rows. -->
+<fieldset class="coins">
+  <legend>Currency</legend>
+  {#each COINS as k (k)}
+    <label class="coin"><span>{k.toUpperCase()}</span> <input type="number" class="num" min="0" step="1" value={c.currency[k]} onchange={(e) => setCoin(k, e.currentTarget)} /></label>
+  {/each}
+</fieldset>
 
-  <fieldset class="card coins">
-    <legend>Currency</legend>
-    <div class="row">
-      {#each COINS as k (k)}
-        <label class="field">{k.toUpperCase()} <input type="number" min="0" step="1" value={c.currency[k]} onchange={(e) => setCoin(k, e.currentTarget)} /></label>
-      {/each}
-    </div>
-  </fieldset>
-
-  <p>
-    Attuned: <strong>{sheet.attunedCount} of {ATTUNEMENT_LIMIT}</strong>
-    {#if settings.encumbrance !== 'off'}
-      · Carrying <strong>{lb(sheet.carrying.weight)} lb</strong> of {sheet.carrying.capacity} lb
-      {#if settings.encumbrance === 'variant'}(encumbered over {5 * unit} lb, heavily over {10 * unit} lb){/if}
-    {/if}
-  </p>
+<p class="carry">
+  Attuned: <strong class="num">{sheet.attunedCount} of {ATTUNEMENT_LIMIT}</strong>
   {#if settings.encumbrance !== 'off'}
-    <p class:error={sheet.carrying.encumbrance !== 'none'} role="status">{STATUS[sheet.carrying.encumbrance]}</p>
+    · Carrying <strong class="num">{lb(sheet.carrying.weight)} lb</strong> of <span class="num">{sheet.carrying.capacity}</span> lb
+    {#if settings.encumbrance === 'variant'}<span class="muted">(encumbered over {5 * unit} lb, heavily over {10 * unit} lb)</span>{/if}
   {/if}
+</p>
+{#if settings.encumbrance !== 'off'}
+  <p class="carry" class:error={sheet.carrying.encumbrance !== 'none'} class:muted={sheet.carrying.encumbrance === 'none'} role="status">{STATUS[sheet.carrying.encumbrance]}</p>
+{/if}
 
-  <div class="row">
-    <button type="button" class="primary" aria-expanded={adding} onclick={() => (adding = !adding)}>{adding ? 'Done adding' : 'Add item'}</button>
-    <button type="button" onclick={dawn}>Dawn</button>
-    <span class="muted">Dawn restores the charges of items that recharge at dawn.</span>
-  </div>
+<div class="row tools">
+  <button type="button" class="primary" aria-expanded={adding} onclick={() => (adding = !adding)}>{adding ? 'Done adding' : 'Add item'}</button>
+  <button type="button" onclick={dawn}>Dawn</button>
+  <span class="muted small">Dawn restores the charges of items that recharge at dawn.</span>
+</div>
 
-  {#if adding}
+{#if adding}
+  <div class="picker">
     {#if pool}
       <ItemPicker {pool} viewer={app.viewer} onpick={(entry) => update((x) => ({ ...x, inventory: [...x.inventory, entry] }))} />
     {:else if error}<p role="alert" class="error">{error}</p>
     {:else}<p class="muted">Loading items…</p>{/if}
-  {/if}
+  </div>
+{/if}
 
-  {#if c.inventory.length}
-    <ul class="plain">
-      {#each c.inventory as e (e.id)}
-        <EntryRow
-          entry={e} viewer={app.viewer} gear {targets} moveLabel="Transfer to…"
-          warnAttune={e.attuned ? sheet.attunedCount > ATTUNEMENT_LIMIT : sheet.attunedCount >= ATTUNEMENT_LIMIT}
-          canRefresh={!!pool && !!e.sourceId && !!latestItem(pool, e.sourceId)}
-          onchange={(fn) => replace(e.id, fn)}
-          onremove={() => update((x) => ({ ...x, inventory: x.inventory.filter((y) => y.id !== e.id) }))}
-          onrefresh={() => {
-            const latest = pool && e.sourceId ? latestItem(pool, e.sourceId) : undefined;
-            if (latest) { replace(e.id, (x) => refreshEntry(x, latest)); toast("Updated from the source item."); }
-          }}
-          onmove={(target, qty) => ontransfer(e.id, qty, target).then(loadOthers)}
-        />
-      {/each}
-    </ul>
-  {:else}
-    <p class="muted">Nothing carried yet.</p>
-  {/if}
-</section>
+{#if c.inventory.length}
+  <ul class="plain">
+    {#each c.inventory as e (e.id)}
+      <EntryRow
+        entry={e} viewer={app.viewer} gear {targets} moveLabel="Transfer to…"
+        warnAttune={e.attuned ? sheet.attunedCount > ATTUNEMENT_LIMIT : sheet.attunedCount >= ATTUNEMENT_LIMIT}
+        canRefresh={!!pool && !!e.sourceId && !!latestItem(pool, e.sourceId)}
+        onchange={(fn) => replace(e.id, fn)}
+        onremove={() => update((x) => ({ ...x, inventory: x.inventory.filter((y) => y.id !== e.id) }))}
+        onrefresh={() => {
+          const latest = pool && e.sourceId ? latestItem(pool, e.sourceId) : undefined;
+          if (latest) { replace(e.id, (x) => refreshEntry(x, latest)); toast("Updated from the source item."); }
+        }}
+        onmove={(target, qty) => ontransfer(e.id, qty, target).then(loadOthers)}
+      />
+    {/each}
+  </ul>
+{:else}
+  <p class="muted">Nothing carried yet.</p>
+{/if}
 
 <style>
   .coins {
-    border: 1px solid var(--border);
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 0.5rem;
+    margin: 0 0 0.6rem;
+    padding: 0;
+    border: 0;
   }
 
-  .coins .field {
-    margin: 0;
+  .coins legend {
+    padding: 0;
+    margin-bottom: 0.3rem;
   }
 
-  .coins input {
-    width: 5.5rem;
+  .coin {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    min-width: 0;
+  }
+
+  .coin span {
+    color: var(--label);
+    font-size: 0.72rem;
+    letter-spacing: 0.13em;
+  }
+
+  .coin input {
+    width: 100%;
+  }
+
+  .carry {
+    margin: 0.3rem 0;
+  }
+
+  .carry strong {
+    color: var(--text-strong);
+  }
+
+  .tools {
+    margin: 0.6rem 0;
+  }
+
+  .small {
+    font-size: 0.85rem;
+  }
+
+  .picker {
+    margin: 0.5rem 0 0.75rem;
+    padding: 0.5rem 0 0.5rem 0.75rem;
+    border-left: 2px solid var(--accent);
   }
 </style>

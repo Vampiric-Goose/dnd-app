@@ -62,7 +62,7 @@
       {@const ids = cl.picked[s.list]}
       {@const n = count(ids, s.cantrip)}
       {@const v = visible(s, ids)}
-      <fieldset class="card">
+      <fieldset class="list-set">
         <legend>{s.title}: <span class:error={n > s.max && !s.extra}>{n} / {s.max}</span></legend>
         {#if n < Math.min(s.max, s.pool.length)}<p class="muted">Pick {Math.min(s.max, s.pool.length) - n} more.</p>{/if}
         <div class="row">
@@ -94,7 +94,7 @@
 {/each}
 
 <style>
-  legend { font-weight: 600; padding: 0 0.25rem; }
+  .list-set { margin: 0.75rem 0; }
   .list { max-height: 24rem; overflow-y: auto; }
   .check { margin: 0.2rem 0; }
 </style>

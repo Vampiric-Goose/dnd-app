@@ -18,18 +18,29 @@
     gap: 0.3rem;
   }
 
+  /* Available = a filled teal dot, spent = an empty dashed ring. */
   .pip {
-    width: 2.1rem;
-    min-height: 2.1rem;
-    height: 2.1rem;
+    width: 1.75rem;
+    min-height: 1.75rem;
+    height: 1.75rem;
     padding: 0;
     border-radius: 50%;
     color: var(--accent);
+    font-size: 0.85rem;
     line-height: 1;
   }
 
   .pip[aria-pressed='true'] {
     border-style: dashed;
+    border-color: var(--line-strong);
     background: transparent;
+  }
+
+  @media (max-width: 767px) {
+    .pip {
+      width: 44px;
+      min-height: 44px;
+      height: 44px;
+    }
   }
 </style>

@@ -82,17 +82,10 @@
 </dialog>
 
 <style>
+  /* Colours, border and backdrop come from the global dialog style. */
   dialog {
     width: min(26rem, calc(100vw - 2rem));
     box-sizing: border-box;
-    background: var(--surface);
-    color: var(--text);
-    border: 1px solid var(--border);
-    border-radius: 0.5rem;
-  }
-
-  dialog::backdrop {
-    background: rgb(0 0 0 / 0.5);
   }
 
   h2 {

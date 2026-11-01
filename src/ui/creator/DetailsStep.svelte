@@ -87,19 +87,13 @@
 {/each}
 
 <style>
-  textarea {
-    font: inherit;
-    color: inherit;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 0.35rem;
-    padding: 0.4rem 0.7rem;
-    max-width: 100%;
-    box-sizing: border-box;
+  /* Inputs and textareas use the global control style. */
+  .field {
+    max-width: 40rem;
   }
 
   img {
-    border-radius: 0.35rem;
+    border-radius: var(--radius);
     margin-top: 0.5rem;
   }
 </style>
