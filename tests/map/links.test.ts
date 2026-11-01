@@ -5,7 +5,7 @@ import { monsterCombatant, newCombat } from '../../src/lib/combat/combat.ts';
 import { db, resetDb } from '../../src/lib/db.ts';
 import { footprint } from '../../src/lib/map/grid.ts';
 import { addTokens, newScene, tokensFromCombat } from '../../src/lib/map/scene.ts';
-import { addTokensToCombat, combatantsFromTokens, endCombatWriteBack, placeCombatants } from '../../src/lib/map/store.ts';
+import { addTokensToCombat, combatantsFromTokens, endCombatWriteBack, placeCombatants, removeCombatant } from '../../src/lib/map/store.ts';
 import type { MonsterDef, Pack, Scene, Sheet } from '../../src/lib/types.ts';
 import { camp, char } from '../fixtures/records.ts';
 
@@ -105,5 +105,10 @@ describe('with the database', () => {
     await db.combat.update('c1', (c) => ({ ...c!, combatants: c!.combatants.map((x) => (x.id === g1.id ? { ...x, hp: 2 } : x)) }));
     await endCombatWriteBack('c1');
     expect((await db.scenes.get(s.id))!.tokens.find((t) => t.name === 'Goblin 1')!.hp).toBe(2);
+    // final M2: removed mid-fight, it keeps the fight's HP on its token
+    await db.combat.update('c1', (c) => ({ ...c!, combatants: c!.combatants.map((x) => (x.id === g1.id ? { ...x, hp: 1 } : x)) }));
+    await removeCombatant('c1', g1.id);
+    expect((await db.combat.get('c1'))!.combatants.some((x) => x.id === g1.id)).toBe(false);
+    expect((await db.scenes.get(s.id))!.tokens.find((t) => t.name === 'Goblin 1')!.hp).toBe(1);
   });
 });

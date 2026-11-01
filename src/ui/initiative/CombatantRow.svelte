@@ -12,6 +12,12 @@
   import { rollTo } from '../sheet/roll.ts';
   import { reorder } from './order.ts';
 
+  /** Final M2: a linked token first takes the combatant's HP (the map chunk loads only here); a failed write-back still removes it. */
+  async function removeLinked(id: string) {
+    const m = await import('../../lib/map/store.ts').catch((e) => void console.warn(e));
+    return m ? m.removeCombatant(cid, id) : remove(cid, id);
+  }
+
   let { x, i, count, combatants, current, ch, monster, index, settings, cid, edit, run }: {
     x: Combatant; i: number; count: number; combatants: Combatant[]; current: boolean; ch: Character | undefined; monster: MonsterDef | undefined;
     index: ContentIndex | undefined; settings: CampaignSettings; cid: string;
@@ -93,7 +99,7 @@
     <button type="button" aria-label="Move {x.name} up" disabled={i === 0 || current} onclick={() => edit((c) => reorder(c, x.id, i - 1))}>↑</button>
     <button type="button" aria-label="Move {x.name} down" disabled={i === count - 1 || current} onclick={() => edit((c) => reorder(c, x.id, i + 1))}>↓</button>
     <label class="check"><input type="checkbox" checked={!!x.hidden} onchange={(e) => patch({ hidden: e.currentTarget.checked })} /> Hidden from players</label>
-    <button type="button" class="danger" aria-label="Remove {x.name}" onclick={() => run(() => remove(cid, x.id))}>Remove</button>
+    <button type="button" class="danger" aria-label="Remove {x.name}" onclick={() => run(() => removeLinked(x.id))}>Remove</button>
   </div>
 
   {#if mods.hp && x.kind !== 'lair'}

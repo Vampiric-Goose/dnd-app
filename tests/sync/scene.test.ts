@@ -138,6 +138,16 @@ describe('moveProblem (Review Focus 2)', () => {
     expect(check({}, 'A1', null)).toEqual({ error: 'not your turn', violation: false });
     expect(check({}, 'A1', fight({ round: 0 }))).toEqual({ error: 'not your turn', violation: false });
   });
+  test('final I1: the turn players see, so a hidden turn is not revealed', () => {
+    const withHidden = (turn: string, thorinHidden = false) => fight({ turn, combatants: [
+      cb({ id: 'pc:thorin', kind: 'pc', name: 'Thorin', characterId: 'thorin', init: 17, ...(thorinHidden && { hidden: true }) }),
+      cb({ id: 'x1', kind: 'monster', name: 'Assassin', init: 15, hidden: true }),
+      cb({ id: 'g1', kind: 'monster', name: 'Goblin 1', init: 12 }),
+    ] });
+    expect(check({}, 'A1', withHidden('x1'))).toBeUndefined(); // players still see Thorin's turn: his move is allowed
+    expect(check({}, 'A1', withHidden('g1'))).toEqual({ error: 'not your turn', violation: false });
+    expect(check({}, 'A1', withHidden('pc:thorin', true))).toEqual({ error: 'not your turn', violation: false }); // players don't see it as his turn
+  });
   test('ownership', () => {
     expect(check({}, 'A2')).toEqual({ error: 'not their token', violation: true });
     expect(check({ tokenId: 't-gob' })).toEqual({ error: 'not their token', violation: true });

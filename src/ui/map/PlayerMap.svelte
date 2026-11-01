@@ -21,6 +21,8 @@
   let selected: string[] = $state([]);
   /** The optimistic drop, until the next scene from the DM. */
   let pending: { of: PlayerScene; id: string; at: Pt } | undefined = $state.raw();
+  /** Final M3: a drop while offline snaps back (nothing is sent), and the status line says so until the next drop. */
+  let unsent = $state(false);
 
   async function reload() {
     const cid = campaign.id;
@@ -44,7 +46,7 @@
   const actor = $derived(currentActor(session.tracker));
   const owned = $derived(view?.tokens.filter((t) => mine(t.characterId)) ?? []);
   const myTurn = $derived(owned.some((t) => t.characterId === actor));
-  const status = $derived(!owned.length ? '' : settings.freeMovement ? 'Free movement is on.' : myTurn ? 'Your turn: drag your token.' : 'Wait for your turn to move.');
+  const status = $derived(!owned.length ? '' : unsent && session.status !== 'online' ? "You're offline: that move wasn't sent." : settings.freeMovement ? 'Free movement is on.' : myTurn ? 'Your turn: drag your token.' : 'Wait for your turn to move.');
 
   const tokenOf = (id: string) => view?.tokens.find((t) => t.id === id);
   const canDrag = (id: string) => {
@@ -59,6 +61,8 @@
   const onmove = (_ids: string[], primary: string, to: Pt) => {
     const t = tokenOf(primary);
     if (!base || !t || !canDrag(primary)) return;
+    unsent = session.status !== 'online';
+    if (unsent) return;
     pending = { of: base, id: primary, at: snap(base.grid, to, t.size) };
     sendMove(base.id, primary, to);
   };

@@ -142,7 +142,8 @@
   });
   $effect(() => {
     void rev;
-    untrack(() => { for (const b of bitmaps.values()) if (typeof b !== 'string') b.close(); bitmaps.clear(); schedule(); });
+    // final M1: blobs are content-addressed, so only images that failed (not stored yet) are tried again; decoded ones stay
+    untrack(() => { for (const [h, b] of bitmaps) if (b === 'failed') bitmaps.delete(h); schedule(); });
   });
   // M2: a 4096 px background is ~64 MB decoded: freed when the canvas goes (a scene switch remounts it), not left to the GC
   let gone = false;

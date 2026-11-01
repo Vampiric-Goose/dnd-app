@@ -1,6 +1,6 @@
 // The map's db helpers (lazy: reached from the map page only). Token builders that need the combat engine live here, not in scene.ts.
 import { addCombatants, monsterCombatant, pcCombatant } from '../combat/combat.ts';
-import { updateCombat } from '../combat/store.ts';
+import { remove, updateCombat } from '../combat/store.ts';
 import { db } from '../db.ts';
 import type { CampaignSettings, Character, Combat, Combatant, MonsterDef, Scene, Sheet, Size } from '../types.ts';
 import { addTokens, patchToken, tokensFromCombat, type NewToken } from './scene.ts';
@@ -82,6 +82,12 @@ export async function placeCombatants(cid: string, added: Combatant[], lookup: (
     return out;
   });
   return placed < wanted ? { placed, why: 'full' } : { placed };
+}
+
+/** Final M2: a combatant removed mid-fight first leaves its HP on its linked tokens (the link drops once it is gone); a failed write-back still removes it. */
+export async function removeCombatant(cid: string, combatantId: string): ReturnType<typeof remove> {
+  try { await endCombatWriteBack(cid); } catch (e) { console.warn(e); }
+  return remove(cid, combatantId);
 }
 
 /** Before a fight ends: every scene of the campaign takes the fight's HP onto its linked tokens. */

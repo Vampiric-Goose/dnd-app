@@ -6,7 +6,7 @@ import { liveHp } from '../map/scene.ts';
 import { isRec, sceneProblem } from '../recordShape.ts';
 import { computeSheet } from '../rules/sheet.ts';
 import type { CampaignSettings, Character, Combat, Grid, Scene, Size } from '../types.ts';
-import { healthStatus, type HealthStatus } from './project.ts';
+import { currentActor, healthStatus, trackerForPlayers, type HealthStatus } from './project.ts';
 import { HASH } from './protocol.ts';
 
 export interface PlayerToken { id: string; name: string; x: number; y: number; size: Size; color: string; portrait?: string; characterId?: string; conditions: string[]; health?: HealthStatus }
@@ -59,8 +59,9 @@ export function moveProblem(s: Scene | undefined, m: { sceneId: string; tokenId:
   if (!t || t.hidden || fogged(s, t, settings)) return { error: 'no such token', violation: false }; // it may have just been hidden or fogged
   const ch = t.characterId === undefined ? undefined : characters.find((c) => c.id === t.characterId);
   if (!ch || ch.ownerId !== playerId || ch.campaignId !== s.campaignId) return { error: 'not their token', violation: true };
-  const turn = combat && combat.round > 0 ? combat.combatants.find((x) => x.id === combat.turn) : undefined;
-  if (!settings.freeMovement && turn?.characterId !== ch.id) return { error: 'not your turn', violation: false }; // a drag dropped just late
+  // Final I1: the turn players see (S4-R4 keeps a hidden turn on the last visible one), so the host and the player's screen agree
+  // and a refusal never reveals that something hidden is acting
+  if (!settings.freeMovement && currentActor(trackerForPlayers(combat, characters, settings)) !== ch.id) return { error: 'not your turn', violation: false };
   const p = snap(s.grid, m, t.size);
   if (!(p.x >= 0 && p.x <= s.width && p.y >= 0 && p.y <= s.height)) return { error: 'off the map', violation: false };
 }
