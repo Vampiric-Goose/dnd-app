@@ -2,7 +2,7 @@
 import { describe, expect, test } from 'vitest';
 import { currentRun, newCombat, next, prev, removeStep, start } from '../../src/lib/combat/combat.ts';
 import {
-  addDash, budgetApplies, clampMove, combatantForToken, effectiveSpeed, recordMove, remainingFeet, resetMovement, undoDash,
+  addDash, budgetApplies, clampMove, combatantForToken, dashRun, effectiveSpeed, recordMove, remainingFeet, resetMovement, undoDash,
 } from '../../src/lib/combat/movement.ts';
 import { cellAt, cellCenter, feetBetween, snap } from '../../src/lib/map/grid.ts';
 import type { Combat, Combatant, Grid } from '../../src/lib/types.ts';
@@ -57,6 +57,16 @@ describe('records', () => {
     const none = fight({ movement: { B: mv(5) } });
     expect(undoDash(none, 'B', 30)).toBe(none);
     expect(resetMovement(c, 'B').movement).toEqual({});
+  });
+});
+
+describe('Dash on a grouped monster turn (the turn bar Dashes the whole run)', () => {
+  test('dashRun gives every member of the run a Dash, so each grouped token gets the doubled budget', () => {
+    const cs = [cb('A', 20), cb('g1', 15, { group: 'gob' }), cb('g2', 15, { group: 'gob' })];
+    const c = next(start(fight({ combatants: cs })).combat).combat;
+    const d = dashRun(c, currentRun(c));
+    expect(d.movement).toEqual({ g1: mv(0, 1), g2: mv(0, 1) });
+    expect(remainingFeet(30, d.movement!.g2)).toBe(60);
   });
 });
 

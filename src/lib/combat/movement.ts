@@ -31,6 +31,9 @@ export const recordMove = (c: Combat, combatantId: string, feet: number): Combat
 
 export const addDash = (c: Combat, combatantId: string): Combat => withEntry(c, combatantId, { ...entry(c, combatantId), dashes: entry(c, combatantId).dashes + 1 });
 
+/** The DM's turn-bar Dash: one for every combatant of the current run (a grouped monster turn moves as one, each token on its own budget). */
+export const dashRun = (c: Combat, ids: Iterable<string>): Combat => { for (const id of ids) c = addDash(c, id); return c; };
+
 /** Takes back a mistaken Dash, only while its extra movement is unused; otherwise returns `c`. */
 export function undoDash(c: Combat, combatantId: string, speed: number): Combat {
   const m = c.movement?.[combatantId];
