@@ -2,7 +2,7 @@
   // The map panel's turn view (turn panel spec): the turn strip, HP, conditions and what they do now, movement, the three pips, the
   // primary action card and End turn / Next. "All actions" opens a pop-up with everything, grouped by what it costs. The page decides
   // what a use does (a player sends it to the DM's device, the DM applies it); this only checks what is greyed out and rolls.
-  import { CONDITION_TEXT, type Cost } from '../../lib/combat/economy.ts';
+  import { CONDITION_TEXT } from '../../lib/combat/economy.ts';
   import { primaryAction, problemOf, type TurnAction } from '../../lib/combat/turnActions.ts';
   import { richToPlain } from '../../lib/content/richtext.ts';
   import { rollParts } from '../../lib/monsters/library.ts';
@@ -52,8 +52,13 @@
   // The pop-up's sections; each entry says what it costs.
   type Section = 'attacks' | 'utility' | 'unique' | 'spells';
   const SECTIONS: [Section, string][] = [['attacks', 'Attacks'], ['utility', 'Utility'], ['unique', 'Unique'], ['spells', 'Spells']];
-  const COSTS: Cost[] = ['action', 'bonus', 'reaction', 'none'];
-  const COST_LABEL: Record<Cost, string> = { action: 'Action', bonus: 'Bonus', reaction: 'Reaction', none: 'Free' };
+  // Separate lists: Actions (what costs an Action, then free things such as Action Surge), Bonus actions, Reactions. A Bonus action is
+  // never in Actions.
+  type Kind = 'action' | 'bonus' | 'reaction';
+  const KINDS: [Kind, string][] = [['action', 'Actions'], ['bonus', 'Bonus actions'], ['reaction', 'Reactions']];
+  const inKind = (a: TurnAction, k: Kind) => (k === 'action' ? a.cost === 'action' || a.cost === 'none' : a.cost === k);
+  let kind: Kind = $state('action');
+  const kindLabel = $derived(KINDS.find(([k]) => k === kind)![1]);
   /** Attacks: weapons, off-hand, a monster's attacks (a to-hit roll, or Multiattack); Utility: the standard actions; Spells; the rest
    * (class and race features, resources, a monster's traits, reactions and legendary actions) is Unique. */
   function sectionOf(a: TurnAction): Section {
@@ -132,7 +137,9 @@
   {#if primary}<div class="card">{@render entry(primary, false)}</div>{/if}
   {#if primary?.attack}<label class="check small" class:on={crit}><input type="checkbox" bind:checked={crit} /> Critical hit (next damage doubles its dice)</label>{/if}
   <div class="row btns">
-    <button type="button" onclick={() => dialog?.showModal()}>All actions</button>
+    {#each KINDS as [k, label]}
+      {#if actions.some((a) => inKind(a, k))}<button type="button" onclick={() => { kind = k; dialog?.showModal(); }}>{label}</button>{/if}
+    {/each}
     {#if canEnd}<button type="button" class="primary" onclick={onend}>{endLabel}</button>{/if}
   </div>
 </section>
@@ -140,11 +147,11 @@
 <dialog bind:this={dialog} class="actions" aria-labelledby="actions-title" onclick={(ev) => { if (ev.target === dialog) dialog?.close(); }}>
   <div class="body">
   <div class="head">
-    <h2 id="actions-title">{name}: actions</h2>
+    <h2 id="actions-title">{name}: {kindLabel.toLowerCase()}</h2>
     <button type="button" aria-label="Close" onclick={() => dialog?.close()}>✕</button>
   </div>
   {#each SECTIONS as [sec, label]}
-    {@const list = actions.filter((a) => sectionOf(a) === sec).sort((p, q) => COSTS.indexOf(p.cost) - COSTS.indexOf(q.cost))}
+    {@const list = actions.filter((a) => inKind(a, kind) && sectionOf(a) === sec).sort((p, q) => Number(p.cost === 'none') - Number(q.cost === 'none'))}
     {#if list.length}
       {@const shared = list.every((a) => problem(a) === problem(list[0])) ? problem(list[0]) : undefined}
       <h3>{label}{#if shared}<span class="small">{` · ${shared}`}</span>{/if}</h3>
@@ -172,7 +179,7 @@
   {@const parts = a.group === 'monster' && a.text ? rollParts(richToPlain(a.text)).filter((p) => 'expr' in p) : []}
   <div class="what">
     <strong>{a.name}</strong>
-    {#if full}<span class="cost small">{a.legendary ? `Legendary ×${a.legendary}` : COST_LABEL[a.cost]}</span>{/if}
+    {#if full && a.cost === 'none'}<span class="cost small">{a.legendary ? `Legendary ×${a.legendary}` : 'Free'}</span>{/if}
     {#if a.uses}<span class="muted small"><span class="num">{a.uses.left}</span>/<span class="num">{a.uses.max}</span> left</span>{/if}
     {#if a.legendary}<span class="muted small">{x.legendary ? `${x.legendary.max - x.legendary.used} legendary left` : ''}</span>{/if}
     {#if a.attack && a.cost === 'action' && perAction > 1 && inAttack}<span class="muted small">Attack <span class="num">{e.attacks + 1}</span> of <span class="num">{perAction}</span></span>{/if}
