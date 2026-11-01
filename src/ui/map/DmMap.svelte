@@ -22,8 +22,14 @@
   import GridForm from './GridForm.svelte';
   import { detectSquareGrid } from '../../lib/map/detectGrid.ts';
   import MapCanvas from './MapCanvas.svelte';
+  import SelectedTokens from './SelectedTokens.svelte';
   import TokenList from './TokenList.svelte';
   import MonsterSearch from '../initiative/MonsterSearch.svelte';
+  import Drawer from '../kit/Drawer.svelte';
+  import Menu, { type MenuItem } from '../kit/Menu.svelte';
+  import Tabs from '../kit/Tabs.svelte';
+  import Workspace from '../kit/Workspace.svelte';
+  import { untrack } from 'svelte';
 
   let { campaign }: { campaign: Campaign } = $props();
 
@@ -93,7 +99,20 @@
     if (fileInput) fileInput.value = '';
     await reload();
     pick(s.id);
+    newDialog?.close();
   }); };
+
+  // --- layout: the panel's tab, the phone sheet, the New scene dialog ---
+  let tab = $state('tokens');
+  let sheet = $state(false); // phones: the panel opened without a selection
+  let newDialog: HTMLDialogElement | undefined = $state();
+  // A new pick on the map or in the list shows it.
+  $effect(() => { if (selected.length) untrack(() => (tab = 'selected')); });
+  const sceneItems = $derived<MenuItem[]>([
+    ...scenes.map((s) => ({ label: `${s.name}${s.shown ? ' (shown)' : ''}`, checked: s.id === scene?.id, onselect: () => pick(s.id) })),
+    { separator: true },
+    { label: 'New scene…', onselect: () => setTimeout(() => newDialog?.showModal()) }, // after the menu has closed
+  ]);
 
 
   const rename = (name: string) => { const n = name.trim().slice(0, 100); if (n && n !== scene?.name) void edit((s) => ({ ...s, name: n })); };
@@ -213,136 +232,279 @@
     // M6: a character token follows the character's current portrait unless the DM gave the token its own
     return { ...t, ...(pc ?? liveHp(t, combat)), ...(c && !t.portrait && c.details.portrait && { portrait: c.details.portrait }) };
   }));
+  const GRID_NAMES = { square: 'Square', 'hex-flat': 'Hex (flat)', 'hex-pointy': 'Hex (pointy)' } as const;
 </script>
 
-{#if error}<p role="alert" class="error">{error}</p>{/if}
-{#if notice}<p class="muted" role="status">{notice}</p>{/if}
-
-<section aria-label="Scenes">
-  {#if scenes.length}
-    <div class="row">
-      <label>Scene
-        <select value={scene?.id} onchange={(e) => pick((e.currentTarget as HTMLSelectElement).value)}>
-          {#each scenes as s (s.id)}<option value={s.id}>{s.name}{s.shown ? ' (shown)' : ''}</option>{/each}
-        </select>
-      </label>
-      {#if scene?.shown}
-        <span class="badge">Shown to players</span>
-        <button type="button" disabled={busy} onclick={() => show(false)}>Stop showing</button>
-      {:else if scene}
-        <button type="button" class="primary" disabled={busy} onclick={() => show(true)}>Show to players</button>
-      {/if}
-      <label class="check"><input type="checkbox" checked={settings.freeMovement} onchange={(e) => setFreeMovement((e.currentTarget as HTMLInputElement).checked)} /> Free movement</label>
-    </div>
+<!-- The canvas fills the workspace; the scene picker floats top-right on it; tokens and scene settings live in the panel's tabs. -->
+<Workspace fill panelLabel="Scene and tokens" panel={scene ? side : undefined} open={selected.length > 0 || sheet}
+  onclose={() => { selected = []; sheet = false; }}>
+  {#if scene}
+    {#key scene.id}
+      <MapCanvas
+        width={scene.width}
+        height={scene.height}
+        image={scene.image}
+        grid={scene.grid}
+        tokens={canvasTokens}
+        dm={true}
+        diagonal={settings.diagonal}
+        {selected}
+        canDrag={() => true}
+        {speedOf}
+        onselect={(ids) => (selected = ids)}
+        {onmove}
+        fog={settings.fog ? scene.fog ?? encodeFog(newFog(scene.width, scene.height, false)) : undefined}
+        onfog={settings.fog ? onfog : undefined}
+        {corner}
+      />
+    {/key}
+    <button type="button" class="sheet-btn" onclick={() => (sheet = true)}>Tokens and scene</button>
   {:else}
-    <p class="muted">No scenes yet. Make one below.</p>
-  {/if}
-  <details open={!scenes.length}>
-    <summary>New scene</summary>
-    <form class="row" onsubmit={create}>
-      <label>Name <input maxlength="100" bind:value={newName} required /></label>
-      <label>Image (optional) <input type="file" accept="image/*" bind:this={fileInput} onchange={(e) => (newFile = (e.currentTarget as HTMLInputElement).files?.[0])} /></label>
-      <button class="primary" disabled={busy || !newName.trim()}>New scene</button>
-    </form>
-    <p class="muted">A scene's image is fixed once made: make a new scene for a new image.</p>
-  </details>
-</section>
-
-{#if scene}
-  {#key scene.id}
-    <MapCanvas
-      width={scene.width}
-      height={scene.height}
-      image={scene.image}
-      grid={scene.grid}
-      tokens={canvasTokens}
-      dm={true}
-      diagonal={settings.diagonal}
-      {selected}
-      canDrag={() => true}
-      {speedOf}
-      onselect={(ids) => (selected = ids)}
-      {onmove}
-      fog={settings.fog ? scene.fog ?? encodeFog(newFog(scene.width, scene.height, false)) : undefined}
-      onfog={settings.fog ? onfog : undefined}
-    />
-  {/key}
-  {#if selected.length}
-    <div class="row">
-      <span>{selected.length} selected</span>
-      <button type="button" disabled={busy} onclick={addToCombat}>Add to combat</button>
+    <div class="empty">
+      <h2>No scenes yet</h2>
+      <p class="muted">Make one below.</p>
+      {@render sceneForm()}
     </div>
   {/if}
+  <div class="msgs">
+    {#if error}<p role="alert" class="error">{error}</p>{/if}
+    {#if notice}<p role="status">{notice}</p>{/if}
+  </div>
+</Workspace>
 
-  <details>
-    <summary>Scene and grid</summary>
-    <div class="row">
-      <label>Scene name <input maxlength="100" value={scene.name} onchange={(e) => rename((e.currentTarget as HTMLInputElement).value)} /></label>
-      <button type="button" class="danger" disabled={busy} onclick={remove}>Delete scene</button>
-    </div>
-    {#if scene.image}<button type="button" disabled={busy} onclick={detectGrid}>Detect grid from the image</button>{/if}
-    <GridForm grid={scene.grid} onchange={(p) => edit((s) => regrid(s, p))} />
-  </details>
-
-  <details open>
-    <summary>Tokens ({scene.tokens.length})</summary>
-    <div class="adder">
-      <div class="row">
-        <button type="button" disabled={busy || !offChars.length} onclick={addParty}>Add party ({offChars.length})</button>
-      </div>
-      <div class="row">
-        <label class="row"><span>Character</span>
-          <select bind:value={charId} disabled={!offChars.length}>
-            <option value="">{offChars.length ? 'Choose a character' : 'Everyone is on the map'}</option>
-            {#each offChars as c (c.id)}<option value={c.id}>{c.name}{owner(c)}</option>{/each}
-          </select>
-        </label>
-        <button type="button" disabled={busy || !charId} onclick={addCharacter}>Add</button>
-      </div>
-      <MonsterSearch {pool} label="Add monster tokens" onadd={addMonster} />
-    </div>
-    <TokenList tokens={scene.tokens.map((t) => (t.combatantId ? { ...t, ...liveHp(t, combat) } : t))} {selected} onselect={(ids) => (selected = ids)} onpatch={patch} onremove={removeIds} onportrait={portrait} />
-  </details>
+{#if scenes.length}
+  <dialog bind:this={newDialog} aria-labelledby="new-scene-title">
+    <h2 id="new-scene-title">New scene</h2>
+    {@render sceneForm()}
+  </dialog>
 {/if}
 
+{#snippet sceneForm()}
+  <form class="newscene" onsubmit={create}>
+    {#if error && scenes.length}<p class="error">{error}</p>{/if}
+    <label class="field">Name <input maxlength="100" bind:value={newName} required /></label>
+    <label class="field">Image (optional) <input type="file" accept="image/*" bind:this={fileInput} onchange={(e) => (newFile = (e.currentTarget as HTMLInputElement).files?.[0])} /></label>
+    <p class="muted note">A scene's image is fixed once made: make a new scene for a new image.</p>
+    <div class="row">
+      <button class="primary" disabled={busy || !newName.trim()}>New scene</button>
+      {#if scenes.length}<button type="button" onclick={() => newDialog?.close()}>Cancel</button>{/if}
+    </div>
+  </form>
+{/snippet}
+
+{#snippet corner()}
+  {#if scene}
+    <div class="scenebar">
+      <Menu label={scene.name} ariaLabel="Scene: {scene.name}" items={sceneItems} align="end" />
+      {#if scene.shown}
+        <span class="shown"><span class="dot" aria-hidden="true">●</span> Shown<span class="sr-only"> to players</span></span>
+        <button type="button" disabled={busy} onclick={() => show(false)}>Stop showing</button>
+      {:else}
+        <button type="button" class="primary" disabled={busy} onclick={() => show(true)}>Show to players</button>
+      {/if}
+    </div>
+  {/if}
+{/snippet}
+
+{#snippet side()}
+  {#if scene}
+    <Tabs label="Map panel" bind:value={tab} tabs={[
+      { id: 'selected', label: 'Selected', ...(selected.length > 0 && { count: selected.length }) },
+      { id: 'tokens', label: 'Tokens', count: scene.tokens.length },
+      { id: 'scene', label: 'Scene' },
+    ]}>
+      {#snippet panel(id)}
+        {#if id === 'selected'}
+          <SelectedTokens tokens={canvasTokens.filter((t) => selected.includes(t.id))} {busy} onselect={(ids) => (selected = ids)}
+            onpatch={patch} onremove={removeIds} onportrait={portrait} oncombat={addToCombat} />
+        {:else if id === 'tokens'}
+          <div class="addbar">
+            <Menu label="+ Add" primary items={[{ label: `Add party (${offChars.length})`, disabled: busy || !offChars.length, onselect: addParty }]}>
+              {#snippet children()}
+                <div class="row addchar">
+                  <label class="field">Character
+                    <select bind:value={charId} disabled={!offChars.length}>
+                      <option value="">{offChars.length ? 'Choose a character' : 'Everyone is on the map'}</option>
+                      {#each offChars as c (c.id)}<option value={c.id}>{c.name}{owner(c)}</option>{/each}
+                    </select>
+                  </label>
+                  <button type="button" disabled={busy || !charId} onclick={addCharacter}>Add</button>
+                </div>
+                <MonsterSearch {pool} label="Add monster tokens" onadd={addMonster} />
+              {/snippet}
+            </Menu>
+          </div>
+          <TokenList tokens={canvasTokens} {selected} onselect={(ids) => (selected = ids)} />
+        {:else}
+          <label class="field">Scene name <input maxlength="100" value={scene.name} onchange={(e) => rename((e.currentTarget as HTMLInputElement).value)} /></label>
+          <Drawer title="Grid" open>
+            {#snippet summary()}{GRID_NAMES[scene!.grid.type]} · <span class="num">{scene!.grid.size}</span> px · <span class="num">{scene!.grid.feet}</span> ft{/snippet}
+            {#if scene.image}<button type="button" class="detect" disabled={busy} onclick={detectGrid}>Detect grid from the image</button>{/if}
+            <GridForm grid={scene.grid} onchange={(p) => edit((s) => regrid(s, p))} />
+          </Drawer>
+          <div class="rule">
+            <label class="check"><input type="checkbox" checked={settings.freeMovement} onchange={(e) => setFreeMovement((e.currentTarget as HTMLInputElement).checked)} /> Free movement</label>
+          </div>
+          <div class="rule">
+            <button type="button" class="danger" disabled={busy} onclick={remove}>Delete scene</button>
+          </div>
+        {/if}
+      {/snippet}
+    </Tabs>
+  {/if}
+{/snippet}
+
 <style>
-  section {
-    margin-bottom: 0.5rem;
+  .empty {
+    padding: 1.5rem var(--page-pad, 1rem);
+    max-width: 32rem;
   }
 
-  .badge {
-    padding: 0.15rem 0.5rem;
-    border-radius: 999px;
-    background: var(--accent);
-    color: var(--surface);
-    font-size: 0.8rem;
+  .empty h2 {
+    margin: 0 0 0.25rem;
   }
 
-  details {
-    margin: 0.5rem 0;
-  }
-
-  summary {
-    cursor: pointer;
-    font-weight: 600;
-    padding: 0.25rem 0;
-  }
-
-  label {
+  .newscene .note {
     font-size: 0.9rem;
+    margin: 0 0 0.75rem;
   }
 
-  input[type='file'] {
-    max-width: 14rem;
-  }
-
-  .adder select {
+  .newscene input[type='file'] {
     max-width: 100%;
   }
 
-  .check {
+  dialog {
+    width: min(26rem, calc(100vw - 2rem));
+    box-sizing: border-box;
+  }
+
+  dialog h2 {
+    margin: 0 0 0.25rem;
+    font-size: 1.1rem;
+  }
+
+  /* the scene picker and the Show toggle, one floating group like the tool switcher */
+  .scenebar {
+    display: inline-flex;
+    align-items: stretch;
+    max-width: 100%;
+    background: color-mix(in srgb, var(--rail) 92%, transparent);
+    border: 1px solid var(--line-strong);
+    border-radius: 7px;
+    overflow: hidden;
+  }
+
+  .scenebar > :global(button) {
+    border: 0;
+    border-radius: 0;
+    border-left: 1px solid var(--line);
+    padding: 0.3rem 0.75rem;
+    min-height: 2.1rem;
+  }
+
+  .scenebar > :global(.trigger) {
+    border-left: 0;
+    background: transparent;
+    min-width: 0;
+    max-width: 12rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .shown {
     display: inline-flex;
     align-items: center;
     gap: 0.3rem;
+    padding: 0 0.6rem;
+    border-left: 1px solid var(--line);
+    color: var(--accent);
+    white-space: nowrap;
+  }
+
+  .shown .dot {
+    font-size: 0.7em;
+  }
+
+  .msgs {
+    position: absolute;
+    left: 0.5rem;
+    bottom: 0.5rem;
+    max-width: min(28rem, calc(100% - 7rem));
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    pointer-events: none;
+  }
+
+  .msgs p {
+    margin: 0;
+    padding: 0.35rem 0.6rem;
+    background: color-mix(in srgb, var(--rail) 92%, transparent);
+    border: 1px solid var(--line-strong);
+    border-left: 2px solid var(--accent);
+    border-radius: 5px;
+    pointer-events: auto;
+  }
+
+  .msgs p.error {
+    border-left-color: var(--danger);
+  }
+
+  .sheet-btn {
+    display: none;
+  }
+
+  .addbar {
+    margin-bottom: 0.5rem;
+  }
+
+  .addchar {
+    align-items: flex-end;
+    margin-bottom: 0.25rem;
+  }
+
+  .addchar .field {
+    flex: 1 1 10rem;
+    margin: 0;
+  }
+
+  .addchar select {
+    max-width: 100%;
+  }
+
+  .detect {
+    margin-bottom: 0.6rem;
+  }
+
+  .rule {
+    border-top: 1px solid var(--line);
+    padding: 0.6rem 0;
+  }
+
+  .rule .check {
+    margin: 0;
+  }
+
+  /* Phones: a floating button opens the sheet when nothing is selected; messages sit above it */
+  @media (max-width: 767px) {
+    .sheet-btn {
+      display: block;
+      position: absolute;
+      left: 0.5rem;
+      bottom: 0.5rem;
+      background: color-mix(in srgb, var(--rail) 92%, transparent);
+    }
+
+    .msgs {
+      bottom: calc(0.5rem + 52px);
+    }
+
+    .scenebar > :global(button) {
+      min-height: 44px;
+    }
+
+    .scenebar > :global(.trigger) {
+      max-width: 9rem;
+    }
   }
 </style>
