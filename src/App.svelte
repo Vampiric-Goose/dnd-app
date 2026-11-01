@@ -42,6 +42,7 @@
     ['characters/new', 'Creator', () => import('./ui/creator/Creator.svelte')],
     ['characters/:id', 'Sheet', () => import('./ui/sheet/Sheet.svelte')],
     ['characters/:id/level-up', 'LevelUp', () => import('./ui/creator/LevelUp.svelte')],
+    ['combat', 'Initiative', () => import('./ui/pages/Initiative.svelte')],
     ['compendium', 'Compendium', () => import('./ui/pages/Compendium.svelte')],
     ['monsters', 'Monsters', () => import('./ui/pages/Monsters.svelte')],
     ['monsters/new', 'MonsterEditor', () => import('./ui/pages/Monsters.svelte')], // `?from=<id>` starts from a copy (Duplicate)
@@ -59,6 +60,7 @@
   const nav = $derived<[label: string, segment: string][]>([
     ['Campaigns', ''],
     ['Characters', 'characters'],
+    ['Combat', 'combat'],
     ['Compendium', 'compendium'],
     ...(app.viewer === 'dm' ? [['Monsters', 'monsters'] as [string, string]] : []),
     ['Items', 'items'],
@@ -98,7 +100,7 @@
 
   <nav aria-label="Main">
     {#each nav as [label, segment]}
-      <a href="#/{segment}" aria-current={(router.path[0] ?? '') === segment ? 'page' : undefined}>{label}</a>
+      <a href="#/{segment}" class:side-only={segment === 'about'} aria-current={(router.path[0] ?? '') === segment ? 'page' : undefined}>{label}</a>
     {/each}
   </nav>
 
@@ -165,6 +167,11 @@
     border-top: 1px solid var(--border);
   }
 
+  /* nine labels don't fit the 375px bottom bar: About stays in the side nav, and the Campaigns page links to it */
+  nav a.side-only {
+    display: none;
+  }
+
   nav a {
     flex: 1 1 auto; /* size by label so all eight labels fit at 375px */
     padding: 0.9rem 0.05rem;
@@ -196,7 +203,9 @@
       border-right: 1px solid var(--border);
     }
 
-    nav a {
+    nav a,
+    nav a.side-only {
+      display: block;
       flex: none;
       padding: 0.75rem 1.25rem;
       text-align: left;

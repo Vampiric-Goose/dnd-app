@@ -4,6 +4,7 @@
   import { CONDITIONS } from '../../lib/rules/constants.ts';
   import type { Character, OverrideKey, Recharge, Sheet } from '../../lib/types.ts';
   import { signed } from '../creator/labels.ts';
+  import HpControls from '../HpControls.svelte';
   import OverrideNumber from './OverrideNumber.svelte';
   import Pips from './Pips.svelte';
   import { rollD20, rollTo } from './roll.ts';
@@ -22,36 +23,8 @@
   // PHB p.291
   const EXHAUSTION = ['', 'Disadvantage on ability checks', 'Speed halved', 'Disadvantage on attack rolls and saving throws', 'Hit point maximum halved', 'Speed reduced to 0', 'Death'];
 
-  let amount: number | null = $state(null);
-  let temp: number | null = $state(null);
-  let crit = $state(false);
-
   const life = $derived(deathState(c.state));
-  // The engine only reads the crit flag at 0 HP (2 death-save failures), so the box exists only then.
   const atZero = $derived(c.state.hp === 0 && !c.state.dead);
-  $effect(() => { if (!atZero) crit = false; });
-  const whole = (n: number | null): n is number => typeof n === 'number' && Number.isInteger(n) && n >= 0;
-
-  function damage() {
-    if (!whole(amount) || !amount) return;
-    const n = amount;
-    update((x) => applyDamage(x, n, sheet, crit));
-    amount = null;
-    crit = false;
-  }
-
-  function heal() {
-    if (!whole(amount) || !amount) return;
-    const n = amount;
-    update((x) => applyHealing(x, n, sheet));
-    amount = null;
-  }
-
-  function setTemp() {
-    if (!whole(temp)) return;
-    patch({ tempHp: temp });
-    temp = null;
-  }
 
   function deathSave() {
     const r = rollTo('Death save', '1d20');
@@ -101,18 +74,10 @@
       <span class="muted">Temp HP <strong data-testid="hp-temp">{c.state.tempHp}</strong></span>
     </p>
 
-    <div class="row">
-      <label class="row"><span>Amount</span><input type="number" min="0" step="1" inputmode="numeric" bind:value={amount} /></label>
-      <button type="button" class="danger" disabled={!whole(amount) || !amount || c.state.dead} onclick={damage}>Damage</button>
-      <button type="button" disabled={!whole(amount) || !amount || c.state.dead} onclick={heal}>Heal</button>
-      {#if atZero}
-        <label class="check"><input type="checkbox" bind:checked={crit} /> Critical hit (2 failed death saves)</label>
-      {/if}
-    </div>
-    <div class="row">
-      <label class="row"><span>Temp HP</span><input type="number" min="0" step="1" inputmode="numeric" bind:value={temp} /></label>
-      <button type="button" disabled={!whole(temp)} onclick={setTemp}>Set temp HP</button>
-    </div>
+    <HpControls label={c.name || 'Character'} dead={c.state.dead} {atZero}
+      ondamage={(n, crit) => update((x) => applyDamage(x, n, sheet, crit))}
+      onheal={(n) => update((x) => applyHealing(x, n, sheet))}
+      ontemp={(n) => patch({ tempHp: n })} />
 
     <div role="status" class="life">
       {#if life === 'dying'}
@@ -223,14 +188,6 @@
   .now {
     font-size: 1.8rem;
     line-height: 1;
-  }
-
-  .hp input {
-    width: 5rem;
-  }
-
-  .hp .row {
-    margin: 0.4rem 0;
   }
 
   .life p {
