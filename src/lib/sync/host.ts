@@ -9,15 +9,15 @@ import { toBase64 } from '../base64.ts';
 import { addDash, budgetApplies, combatantForToken, PLAYER_DASHES, recordMove } from '../combat/movement.ts';
 import { moveTokens } from '../map/scene.ts';
 import { ActionBoard, actionProblem, actionsForPlayers, expiry, type ActionRequest, type DeclaredAction, type PlayerAction } from '../map/actions.ts';
-import type { Campaign, CampaignSync, Character, Combat, Pack, PackMeta, Scene } from '../types.ts';
+import type { Campaign, CampaignSettings, CampaignSync, Character, Combat, Pack, PackMeta, Scene } from '../types.ts';
 import { newJoinCode, nextPlayerId, sha256Text } from './code.ts';
 import { hlcNow, hlcReceive, MAX_AHEAD } from './hlc.ts';
 import type { Link } from './link.ts';
 import { canon, latestClock, mergeCharacter, type Synced } from './merge.ts';
 import { campaignForPlayers, characterForPlayer, currentActor, packForPlayers, rosterEntry, trackerForPlayers, unprojectCharacter, type TrackerView } from './project.ts';
 import { uid } from '../uid.ts';
-import { BLOB_CHUNK, cleanRoll, IMAGE_TYPES, MAX_BLOB, MAX_CHUNK, MAX_MESSAGE, MAX_PACK, parseGuestMessage, size, type GuestMsg, type HostMsg, type PackOffer } from './protocol.ts';
-import { moveCost, moveProblem, sceneBlobs, sceneForPlayers, type PlayerScene } from './scene.ts';
+import { BLOB_CHUNK, cleanRoll, IMAGE_TYPES, MAX_BLOB, MAX_CHUNK, MAX_MESSAGE, MAX_PACK, parseGuestMessage, size, type GuestMsg, type HostMsg, type PackOffer, type Preview } from './protocol.ts';
+import { moveCost, moveProblem, previewVisible, sceneBlobs, sceneForPlayers, type PlayerScene } from './scene.ts';
 
 export interface HostDeps {
   /** The hosted campaign (its `sync.role` is 'dm'). */
@@ -51,6 +51,8 @@ export interface HostDeps {
   updateScene?(id: string, fn: (s: Scene) => Scene): Promise<Scene | undefined>;
   /** Stage 5: a stored image (db.blobs). */
   loadBlob?(hash: string): Promise<{ type: string; data: ArrayBuffer } | undefined>;
+  /** A player's live drag preview for the DM's map (checked; never stored). */
+  onDrag?(p: Preview): void;
   /** Declared actions: the DM's board changed (every action, for the DM's own map). */
   onActions?(list: DeclaredAction[]): void;
   /** The connected players changed. */
@@ -280,7 +282,40 @@ export class Host {
       case 'dash': return this.#dash(c, c.playerId, msg.characterId);
       case 'action': return this.#action(c, c.playerId, msg.action);
       case 'clearAction': return this.#actionsChanged(this.#board.clear(c.playerId));
+      case 'drag': return this.#drag(c, c.playerId, msg.sceneId, { tokenId: msg.tokenId, at: { x: msg.x, y: msg.y } });
+      case 'dragEnd': return this.#drag(c, c.playerId, msg.sceneId, { tokenId: msg.tokenId });
     }
+  }
+
+  /**
+   * A player's live drag preview: checked as a move (own token, visible, shown scene, their turn) without the budget; a crafted one is a
+   * violation, a stale one is ignored. Goes to the DM's map and to the other players who see the token there. Never stored.
+   */
+  async #drag(c: Conn, pid: string, sceneId: string, p: Preview): Promise<void> {
+    const camp = await this.#deps.loadCampaign();
+    const s = await this.#deps.loadScene?.();
+    if (!camp || !s) return;
+    const t = s.tokens.find((x) => x.id === p.tokenId);
+    const chars = (await this.#deps.loadCharacters()).filter((ch) => ch.campaignId === camp.id);
+    const why = moveProblem(s, { sceneId, tokenId: p.tokenId, ...(p.at ?? (t ? { x: t.x, y: t.y } : { x: 0, y: 0 })) }, pid, chars, await this.#deps.loadCombat?.(), camp.settings, false);
+    if (why?.violation) return this.#violation(c, why.error);
+    if (why) return;
+    this.#deps.onDrag?.(p);
+    this.#preview(s, camp.settings, p, c);
+  }
+
+  /** A preview to every player but `except` who sees the token there (previewVisible). */
+  #preview(s: Scene, settings: CampaignSettings, p: Preview, except?: Conn): void {
+    if (!previewVisible(s, p.tokenId, p.at, settings)) return;
+    const msg: HostMsg = p.at ? { t: 'drag', tokenId: p.tokenId, x: p.at.x, y: p.at.y } : { t: 'dragEnd', tokenId: p.tokenId };
+    for (const x of this.#conns) if (x.playerId && x !== except) this.#send(x, msg);
+  }
+
+  /** The DM drags a token on `sceneId` (`at` undefined: the drag ended): players who see it there get the preview. */
+  async dmDrag(sceneId: string, p: Preview): Promise<void> {
+    if (![...this.#conns].some((c) => c.playerId)) return;
+    const [camp, s] = await Promise.all([this.#deps.loadCampaign(), this.#deps.loadScene?.()]);
+    if (camp && s?.id === sceneId) this.#preview(s, camp.settings, p);
   }
 
   /** Only the owner's (else a violation), on their turn as players see it while a budget applies, at most PLAYER_DASHES a turn, checked on the fresh combat; else ignored. */

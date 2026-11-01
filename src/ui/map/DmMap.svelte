@@ -19,7 +19,7 @@
   import { computeSheet } from '../../lib/rules/sheet.ts';
   import { getIndex, saveCampaign } from '../../lib/store.svelte.ts';
   import { MAX_BLOB } from '../../lib/sync/protocol.ts';
-  import { clearDeclared, declareAction, session } from '../../lib/sync/session.svelte.ts';
+  import { clearDeclared, declareAction, sendDrag, session } from '../../lib/sync/session.svelte.ts';
   import type { Campaign, Character, Combat, Combatant, MonsterDef, RaceDef, Scene, Sheet, Size, Token } from '../../lib/types.ts';
   import GridForm from './GridForm.svelte';
   import { detectSquareGrid } from '../../lib/map/detectGrid.ts';
@@ -265,7 +265,7 @@
     const c = t.characterId ? chars.find((x) => x.id === t.characterId) : undefined;
     const pc = c && { hp: c.state.hp, maxHp: sheets.get(c.id)?.maxHp, conditions: c.state.conditions };
     // M6: a character token follows the character's current portrait unless the DM gave the token its own
-    return { ...t, ...(pc ?? liveHp(t, combat)), ...(c && !t.portrait && c.details.portrait && { portrait: c.details.portrait }) };
+    return { ...t, ...(pc ?? liveHp(t, combat)), ...(c && !t.portrait && c.details.portrait && { portrait: c.details.portrait }), ...session.drags[t.id] }; // a player's live drag: where it is now
   }));
   // Declared actions: the DM sees and may clear every arrow, and may point from any token, on the shown scene (arrows are table state:
   // another scene ends them). The DM's no-token arrow is --text-strong.
@@ -302,6 +302,7 @@
         {arrows}
         ondeclare={scene.shown ? ondeclare : undefined}
         onclear={(id) => clearDeclared(id)}
+        ondrag={(id, at) => { if (scene?.shown) sendDrag(scene.id, id, at); }}
       />
     {/key}
     <button type="button" class="sheet-btn" onclick={() => (sheet = true)}>Tokens and scene</button>

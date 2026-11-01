@@ -23,13 +23,14 @@
   // limitOf: a token's movement this turn: the turn's origin (none yet: the token) and its budget; with `clamp` the drag ghost stays within
   // the budget of the origin, without, the label turns red past it.
   // arrows: declared actions to draw; ondeclare: a right-drag (touch: long-press then drag) drew one (unset = no arrow gesture);
-  // onclear: the ✕ on a clearable arrow's head was tapped.
-  let { width, height, image, grid, tokens, dm, diagonal, selected, canDrag, speedOf, limitOf, onselect, onmove, rev = 0, fog, fogStyle = dm ? 'shade' : 'black', onfog, corner, arrows = [], ondeclare, onclear }: {
+  // onclear: the ✕ on a clearable arrow's head was tapped. ondrag: the dragged token's ghost moved to a new cell (`at` undefined: the drag ended).
+  let { width, height, image, grid, tokens, dm, diagonal, selected, canDrag, speedOf, limitOf, onselect, onmove, rev = 0, fog, fogStyle = dm ? 'shade' : 'black', onfog, corner, arrows = [], ondeclare, onclear, ondrag }: {
     width: number; height: number; image?: string; grid: Grid; tokens: CanvasToken[]; dm: boolean; diagonal: '5-5-5' | '5-10-5'; selected: string[];
     canDrag: (id: string) => boolean; speedOf?: (id: string) => number | undefined; limitOf?: (id: string) => { from?: Pt; budget: number; clamp: boolean } | undefined;
     onselect: (ids: string[]) => void; onmove: (ids: string[], primary: string, to: Pt) => void; rev?: number;
     fog?: string; fogStyle?: 'black' | 'shade'; onfog?: (e: FogEdit) => void; corner?: Snippet;
     arrows?: Arrow[]; ondeclare?: (d: { from: Pt; fromToken?: string; to: Pt; toToken?: string }) => void; onclear?: (id: string) => void;
+    ondrag?: (id: string, at: Pt | undefined) => void;
   } = $props();
 
   let tool: 'select' | 'box' | 'ruler' | 'fog' | 'template' = $state('select');
@@ -569,8 +570,9 @@
       case 'drag': {
         const t = tokens.find((x) => x.id === (mode as { id: string }).id);
         if (!t) { mode = { k: 'none' }; break; }
-        const to = { x: w.x - mode.grab.x, y: w.y - mode.grab.y }, lim = limitOf?.(t.id);
+        const to = { x: w.x - mode.grab.x, y: w.y - mode.grab.y }, lim = limitOf?.(t.id), was = mode.ghost;
         mode.ghost = lim?.clamp ? clampMove(grid, t, to, t.size, lim.budget, diagonal, lim.from) : snap(grid, to, t.size);
+        if (mode.ghost.x !== was.x || mode.ghost.y !== was.y) ondrag?.(t.id, mode.ghost); // a live preview for whoever sees the token
         break;
       }
       case 'pan':
@@ -606,6 +608,7 @@
     if (!pointers.delete(e.pointerId)) return;
     clearTimeout(hold);
     const m = mode;
+    if (m.k === 'drag') ondrag?.(m.id, undefined); // the preview ends (a drop's move follows)
     mode = { k: 'none' }; // after a pinch the remaining finger does nothing until it lifts
     if (cancel && m.k === 'brush') strokeBits = undefined;
     if (cancel || m.k === 'pinch') { schedule(); return; }

@@ -48,13 +48,19 @@ export function sceneForPlayers(s: Scene | undefined, characters: Character[], c
 const fogged = (s: Scene, p: { x: number; y: number }, settings: CampaignSettings) =>
   settings.fog && !isRevealed(s.fog === undefined ? undefined : decodeFog(s.fog, s.width, s.height), s.width, s.height, p);
 
+/** Players may see a live drag preview of the token: it is on the shown scene, not hidden, and neither it nor the preview point is fogged (sceneForPlayers' rules). */
+export function previewVisible(s: Scene | undefined, tokenId: string, at: { x: number; y: number } | undefined, settings: CampaignSettings): boolean {
+  const t = s?.shown ? s.tokens.find((x) => x.id === tokenId) : undefined;
+  return !!t && !t.hidden && !fogged(s!, t, settings) && (!at || !fogged(s!, at, settings));
+}
+
 /** The blobs a player may ask for: the scene image and visible portraits, each once. */
 export const sceneBlobs = (v: PlayerScene | undefined): string[] =>
   v ? [...new Set([v.image, ...v.tokens.map((t) => t.portrait)])].filter((h): h is string => typeof h === 'string' && HASH.test(h)) : [];
 
-/** Why a player's move is refused (undefined = allowed). `violation` only for a crafted one; the rest can come from a stale view. */
+/** Why a player's move (or, `budget` false, drag preview) is refused (undefined = allowed). `violation` only for a crafted one; the rest can come from a stale view. */
 export function moveProblem(s: Scene | undefined, m: { sceneId: string; tokenId: string; x: number; y: number }, playerId: string,
-  characters: Character[], combat: Combat | undefined, settings: CampaignSettings): { error: string; violation: boolean } | undefined {
+  characters: Character[], combat: Combat | undefined, settings: CampaignSettings, budget = true): { error: string; violation: boolean } | undefined {
   if (!s?.shown || s.id !== m.sceneId) return { error: 'not the shown scene', violation: false };
   const t = s.tokens.find((x) => x.id === m.tokenId);
   if (!t || t.hidden || fogged(s, t, settings)) return { error: 'no such token', violation: false }; // it may have just been hidden or fogged
@@ -65,7 +71,7 @@ export function moveProblem(s: Scene | undefined, m: { sceneId: string; tokenId:
   if (!settings.freeMovement && currentActor(trackerForPlayers(combat, characters, settings)) !== ch.id) return { error: 'not your turn', violation: false };
   const p = snap(s.grid, m, t.size);
   if (!(p.x >= 0 && p.x <= s.width && p.y >= 0 && p.y <= s.height)) return { error: 'off the map', violation: false };
-  const cost = moveCost(s, m, ch, combat, settings);
+  const cost = budget ? moveCost(s, m, ch, combat, settings) : undefined; // a drag preview (budget false) needs no budget check
   if (cost && cost.feet > cost.budget) return { error: 'too far', violation: false }; // spec 1: the player's screen snaps back
 }
 

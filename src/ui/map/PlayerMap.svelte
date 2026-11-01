@@ -9,7 +9,7 @@
   import { computeSheet } from '../../lib/rules/sheet.ts';
   import { currentActor } from '../../lib/sync/project.ts';
   import { sceneForPlayers, type PlayerScene } from '../../lib/sync/scene.ts';
-  import { clearDeclared, declareAction, sendDash, sendMove, session } from '../../lib/sync/session.svelte.ts';
+  import { clearDeclared, declareAction, sendDash, sendDrag, sendMove, session } from '../../lib/sync/session.svelte.ts';
   import { budgetFeet, effectiveSpeed, originOf, PLAYER_DASHES, remainingFeet } from '../../lib/combat/movement.ts';
   import type { Campaign, Character } from '../../lib/types.ts';
   import MapCanvas from './MapCanvas.svelte';
@@ -96,6 +96,9 @@
     sendMove(base.id, primary, to);
   };
 
+  // Live drag previews from others (the DM, other players): the token drawn where it is being dragged.
+  const dragged = $derived(view ? view.tokens.map((t) => (session.drags[t.id] ? { ...t, ...session.drags[t.id] } : t)) : []);
+
   // Declared actions: only what players may see (on the DM's device in Player view the list holds everything); a player clears their
   // own, points from their own token or a point, and only while online (as moves).
   const me = $derived(campaign.sync?.playerId);
@@ -122,7 +125,7 @@
         height={view.height}
         image={view.image}
         grid={view.grid}
-        tokens={view.tokens}
+        tokens={dragged}
         fog={view.fog}
         dm={false}
         diagonal={settings.diagonal}
@@ -136,6 +139,7 @@
         {arrows}
         {ondeclare}
         onclear={() => clearDeclared()}
+        ondrag={(id, at) => { if (joined && base && (at ? canDrag(id) : !!mine(tokenOf(id)?.characterId))) sendDrag(base.id, id, at); }}
       />
     {/key}
     {#snippet panel()}
