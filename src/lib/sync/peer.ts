@@ -4,6 +4,7 @@
 // anything over ~16 KB, and its size is checked before any of it is parsed.
 import { Peer, type DataConnection, type PeerOptions } from 'peerjs';
 import { frames, unframer, type Link, type Listener, type Transport } from './link.ts';
+import { note, watchIce } from './netlog.svelte.ts';
 import { MAX_CHUNK, MAX_MESSAGE } from './protocol.ts';
 
 const OPTIONS: PeerOptions = { config: { iceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] }] } };
@@ -91,14 +92,16 @@ export const transport: Transport = {
       peer?.destroy();
       const p = (peer = new Peer(peerId, OPTIONS));
       const down = (e?: unknown) => { if (!stopped && p === peer) on.status(false, e === undefined ? SERVER_DOWN : why(e)); };
-      p.on('open', () => { if (!stopped && p === peer) on.status(true); });
+      p.on('open', () => { note('host: registered with the sync server'); if (!stopped && p === peer) on.status(true); });
       p.on('connection', (conn) => {
+        note('host: a player is connecting');
+        watchIce(conn.peerConnection, 'host');
         if (stopped || conn.serialization !== 'json') return void conn.close(); // only our own JSON channel has the size guard
         const link = wrap(conn);
         conn.on('open', () => (stopped ? link.close() : on.link(link)));
       });
       p.on('disconnected', () => down());
-      p.on('error', (e) => { if (p.destroyed || p.disconnected) down(e); }); // errors of one connection don't stop hosting
+      p.on('error', (e) => { note(`host: error ${(e as { type?: string }).type ?? ''} ${why(e)}`); if (p.destroyed || p.disconnected) down(e); }); // errors of one connection don't stop hosting
     };
     start();
     return {
@@ -125,16 +128,20 @@ export const transport: Transport = {
         done = true;
         clearTimeout(timer);
         peer.destroy();
+        note(`join: failed (${(e as { type?: string })?.type ?? step}): ${why(e)}`);
         reject(new Error(why(e)));
       };
       // Which step stalled decides the message: the server, the DM's answer, or the direct path between the networks.
       let step: 'server' | 'dm' | 'path' = 'server';
       const timer = setTimeout(() => fail(new Error(step === 'server' ? SERVER_DOWN : step === 'path' ? NO_PATH : 'Your DM did not answer. Check that they are hosting.')), DIAL_TIMEOUT);
       peer.on('error', fail);
+      note('join: contacting the sync server');
       peer.on('open', () => {
+        note('join: sync server reached; calling the DM');
         step = 'dm';
         const conn = peer.connect(peerId, CONNECT);
         const pc = conn.peerConnection;
+        watchIce(pc, 'join');
         if (pc) pc.addEventListener('iceconnectionstatechange', () => {
           if (pc.iceConnectionState === 'checking') step = 'path';
           if (pc.iceConnectionState === 'failed') fail(new Error(NO_PATH));
@@ -145,6 +152,7 @@ export const transport: Transport = {
           if (done) return link.close();
           done = true;
           clearTimeout(timer);
+          note('join: connected to the DM');
           resolve(link);
         });
       });

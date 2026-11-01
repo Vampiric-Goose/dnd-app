@@ -3,6 +3,7 @@
   import { app, setCampaign } from '../../lib/store.svelte.ts';
   import { codeFrom } from '../../lib/sync/code.ts';
   import { join, leaveJoin, session } from '../../lib/sync/session.svelte.ts';
+  import NetLog from '../sync/NetLog.svelte';
   import RetryNow from '../sync/RetryNow.svelte';
 
   let { params }: { params: { code?: string } } = $props();
@@ -114,6 +115,7 @@
   {/if}
   {#if packs?.error}<p role="alert" class="error">{packs.error}</p>{/if}
   {#if session.status === 'rejected'}<button onclick={() => (started = false)}>Back</button>{/if}
+  <NetLog />
 {/if}
 
 <style>
