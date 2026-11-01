@@ -12,7 +12,7 @@
   import { soundMonster } from '../../lib/monsters/homebrew.ts';
   import { router } from '../../lib/router.svelte.ts';
   import { computeSheet } from '../../lib/rules/sheet.ts';
-  import { getIndex } from '../../lib/store.svelte.ts';
+  import { getIndex, saveCampaign } from '../../lib/store.svelte.ts';
   import { MAX_BLOB } from '../../lib/sync/protocol.ts';
   import { session } from '../../lib/sync/session.svelte.ts';
   import type { Campaign, Character, Combat, Grid, MonsterDef, RaceDef, Scene, Sheet, Size, Token } from '../../lib/types.ts';
@@ -105,6 +105,11 @@
     await reload();
     if (scenes[0]) pick(scenes[0].id);
   });
+  /** The same field the Settings page edits; from the stored campaign, so a quick second toggle does not undo another edit. */
+  const setFreeMovement = (on: boolean) => run(async () => {
+    const fresh = await db.campaigns.get(cid);
+    if (fresh) await saveCampaign({ ...fresh, settings: { ...fresh.settings, freeMovement: on } });
+  });
   const show = (on: boolean) => run(async () => {
     if (!scene) return;
     await db.scenes.show(cid, on ? scene.id : undefined);
@@ -182,6 +187,7 @@
       {:else if scene}
         <button type="button" class="primary" disabled={busy} onclick={() => show(true)}>Show to players</button>
       {/if}
+      <label class="check"><input type="checkbox" checked={settings.freeMovement} onchange={(e) => setFreeMovement((e.currentTarget as HTMLInputElement).checked)} /> Free movement</label>
     </div>
   {:else}
     <p class="muted">No scenes yet. Make one below.</p>
@@ -285,5 +291,11 @@
 
   .count {
     width: 4rem;
+  }
+
+  .check {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
   }
 </style>
