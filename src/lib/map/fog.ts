@@ -63,3 +63,13 @@ export function applyFog<T extends Pt, P extends { tokens: T[] }>(p: P, s: { wid
   const f = s.fog === undefined ? undefined : decodeFog(s.fog, s.width, s.height);
   return { ...p, tokens: p.tokens.filter((t) => isRevealed(f, s.width, s.height, t)), fog: f ? s.fog! : encodeFog(newFog(s.width, s.height, false)) };
 }
+
+/** One DM fog edit: reveal or hide everything, a rectangle, or a brush stroke (its pointer samples). */
+export type FogEdit = { reveal: boolean } & ({ k: 'all' } | { k: 'rect'; a: Pt; b: Pt } | { k: 'brush'; points: Pt[]; radius: number });
+
+/** The scene's fog string after the edit (a missing or damaged fog starts all fogged). */
+export function paintFog(fog: string | undefined, w: number, h: number, e: FogEdit): string {
+  if (e.k === 'all') return encodeFog(newFog(w, h, e.reveal));
+  const f = (fog === undefined ? undefined : decodeFog(fog, w, h)) ?? newFog(w, h, false);
+  return encodeFog(e.k === 'rect' ? paintRect(f, w, h, e.a, e.b, e.reveal) : e.points.reduce((x, p) => paintBrush(x, w, h, p, e.radius, e.reveal), f));
+}

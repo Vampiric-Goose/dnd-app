@@ -8,18 +8,41 @@
   // asks for one frame. Pan, wheel zoom, pinch, drag with a snapped ghost, tap and box select, and a ruler.
   import { untrack } from 'svelte';
   import { db } from '../../lib/db.ts';
-  import { cellsIn, feetBetween, hexCorners, snap, type Pt } from '../../lib/map/grid.ts';
+  import { decodeFog, FOG_CELL, fogSize, newFog, paintBrush, paintRect, type FogEdit } from '../../lib/map/fog.ts';
+  import { cellCenter, cellsIn, feetBetween, hexCorners, snap, type Cell, type Pt } from '../../lib/map/grid.ts';
   import { initials, radius, tokenAt, tokensInRect } from '../../lib/map/scene.ts';
+  import { affectedCells, tokensInTemplate, type Shape, type Template } from '../../lib/map/templates.ts';
   import { fit, pinch, toScreen, toWorld, zoomAt, type View } from '../../lib/map/view.ts';
   import type { Grid, Scene } from '../../lib/types.ts';
 
-  let { width, height, image, grid, tokens, dm, diagonal, selected, canDrag, speedOf, onselect, onmove, rev = 0 }: {
+  // fog: drawn only when set (the caller passes it only with the Fog of war setting on); black for players, a shade for the DM.
+  // onfog: the DM's fog tools, shown only when it is set; one call per stroke, rectangle or Reveal all / Hide all.
+  let { width, height, image, grid, tokens, dm, diagonal, selected, canDrag, speedOf, onselect, onmove, rev = 0, fog, fogStyle = dm ? 'shade' : 'black', onfog }: {
     width: number; height: number; image?: string; grid: Grid; tokens: CanvasToken[]; dm: boolean; diagonal: '5-5-5' | '5-10-5'; selected: string[];
     canDrag: (id: string) => boolean; speedOf?: (id: string) => number | undefined;
     onselect: (ids: string[]) => void; onmove: (ids: string[], primary: string, to: Pt) => void; rev?: number;
+    fog?: string; fogStyle?: 'black' | 'shade'; onfog?: (e: FogEdit) => void;
   } = $props();
 
-  let tool: 'select' | 'box' | 'ruler' = $state('select');
+  let tool: 'select' | 'box' | 'ruler' | 'fog' | 'template' = $state('select');
+  $effect(() => { if (!onfog && tool === 'fog') tool = 'select'; });
+
+  // Fog tools
+  let fogTool = $state<'brush' | 'rect'>('brush');
+  let brush = $state(48);
+  let reveal = $state(true);
+  // Templates: local to this device, never synced.
+  const SHAPES: [Shape, string][] = [['cone', 'Cone'], ['sphere', 'Sphere / circle'], ['cube', 'Cube'], ['line', 'Line'], ['cylinder', 'Cylinder']];
+  let shape = $state<Shape>('cone');
+  let tplFeet = $state(20);
+  let lineWidth = $state(5);
+  let tplAt: { origin: Pt; aim: Pt } | undefined = $state.raw();
+  const ft = (n: number, lo: number, hi: number, d: number) => (Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : d);
+  const template = $derived<Template | undefined>(tplAt && { shape, ...tplAt, feet: ft(tplFeet, 1, 1000, 20), ...(shape === 'line' && { width: ft(lineWidth, 1, 100, 5) }) });
+  const inside = $derived(template ? new Set(tokensInTemplate(template, grid, tokens)) : new Set<string>());
+  const insideNames = $derived(tokens.filter((t) => inside.has(t.id)).map((t) => t.name));
+  let tplCells: Cell[] = [];
+  $effect(() => { tplCells = template ? affectedCells(template, grid, width, height) : []; untrack(schedule); });
   let wrap: HTMLDivElement;
   let canvas: HTMLCanvasElement;
 
@@ -36,8 +59,51 @@
     | { k: 'drag'; id: string; ids: string[]; grab: Pt; ghost: Pt }
     | { k: 'box'; a: Pt; b: Pt; shift: boolean }
     | { k: 'ruler' }
-    | { k: 'pinch'; a0: Pt; b0: Pt; view0: View };
+    | { k: 'pinch'; a0: Pt; b0: Pt; view0: View }
+    | { k: 'brush'; points: Pt[] }
+    | { k: 'fogRect'; a: Pt; b: Pt }
+    | { k: 'template' };
   let mode: Mode = { k: 'none' };
+
+  // Fog: the decoded bits (a stroke paints a local copy at once; it is dropped when the fog prop next changes), drawn from a cols×rows
+  // canvas, one pixel per fog cell, rebuilt only when the bits change.
+  let fogBits: Uint8Array | undefined;
+  let strokeBits: Uint8Array | undefined;
+  let fogCanvas: HTMLCanvasElement | undefined;
+  let fogBuilt: Uint8Array | undefined;
+  let brushAt: Pt | undefined;
+  $effect(() => {
+    const f = fog, w = width, h = height;
+    untrack(() => {
+      fogBits = f === undefined ? undefined : decodeFog(f, w, h) ?? newFog(w, h, false); // damaged: all fogged
+      strokeBits = undefined;
+      schedule();
+    });
+  });
+
+  function fogImage(bits: Uint8Array): HTMLCanvasElement {
+    if (fogCanvas && fogBuilt === bits) return fogCanvas;
+    const { cols, rows } = fogSize(width, height);
+    fogCanvas ??= document.createElement('canvas');
+    fogCanvas.width = cols;
+    fogCanvas.height = rows;
+    const c = fogCanvas.getContext('2d')!, img = c.createImageData(cols, rows);
+    for (let i = 0; i < cols * rows; i++) if (!((bits[i >> 3] >> (i & 7)) & 1)) img.data[i * 4 + 3] = 255; // fogged: opaque black
+    c.putImageData(img, 0, 0);
+    fogBuilt = bits;
+    return fogCanvas;
+  }
+
+  /** Adds a brush sample, filling gaps so a fast stroke leaves no holes. */
+  function brushTo(m: { points: Pt[] }, p: Pt) {
+    const last = m.points[m.points.length - 1], step = brush / 2;
+    const d = last ? Math.hypot(p.x - last.x, p.y - last.y) : 0, n = Math.floor(d / step);
+    for (let i = 1; i <= n; i++) m.points.push({ x: last.x + ((p.x - last.x) * i * step) / d, y: last.y + ((p.y - last.y) * i * step) / d });
+    m.points.push(p);
+    let f = strokeBits ?? fogBits ?? newFog(width, height, false);
+    for (const q of m.points.slice(-(n + 1))) f = paintBrush(f, width, height, q, brush, reveal);
+    strokeBits = f;
+  }
   let ruler: { a: Pt; b: Pt } | undefined;
   let hover: string | undefined;
 
@@ -208,9 +274,52 @@
       }
     }
 
-    // screen-space overlays: box, ruler, drag label
+    // fog, scaled up from one pixel per fog cell with smoothing off
+    const bits = strokeBits ?? fogBits;
+    if (bits) {
+      const { cols, rows } = fogSize(width, height);
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, 0, width, height);
+      ctx.clip();
+      ctx.imageSmoothingEnabled = false;
+      ctx.globalAlpha = fogStyle === 'black' ? 1 : 0.5;
+      ctx.drawImage(fogImage(bits), 0, 0, cols * FOG_CELL, rows * FOG_CELL);
+      ctx.restore();
+    }
+    if (tool === 'fog' && fogTool === 'brush' && brushAt) {
+      ctx.beginPath();
+      ctx.arc(brushAt.x, brushAt.y, brush, 0, Math.PI * 2);
+      ctx.lineWidth = 2 * px;
+      ctx.strokeStyle = reveal ? '#ffffff' : '#000000';
+      ctx.stroke();
+    }
+
+    // the template: affected cells tinted, and the aim
+    if (template) {
+      ctx.save();
+      ctx.fillStyle = 'rgba(230, 110, 20, 0.35)';
+      ctx.beginPath();
+      for (const c of tplCells) {
+        if (grid.type === 'square') { const p = cellCenter(grid, c); ctx.rect(p.x - grid.size / 2, p.y - grid.size / 2, grid.size, grid.size); continue; }
+        const [first, ...rest] = hexCorners(grid, c);
+        ctx.moveTo(first.x, first.y);
+        for (const p of rest) ctx.lineTo(p.x, p.y);
+        ctx.closePath();
+      }
+      ctx.fill();
+      ctx.strokeStyle = 'rgb(200, 80, 0)';
+      ctx.lineWidth = 2 * px;
+      ctx.beginPath();
+      ctx.arc(template.origin.x, template.origin.y, 4 * px, 0, Math.PI * 2);
+      if (template.shape !== 'sphere' && template.shape !== 'cylinder') { ctx.moveTo(template.origin.x, template.origin.y); ctx.lineTo(template.aim.x, template.aim.y); }
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // screen-space overlays: box, fog rectangle, ruler, drag label
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    if (mode.k === 'box') {
+    if (mode.k === 'box' || mode.k === 'fogRect') {
       const a = toScreen(view, mode.a), b = toScreen(view, mode.b);
       ctx.fillStyle = 'rgba(80, 140, 220, 0.15)';
       ctx.strokeStyle = 'rgb(80, 140, 220)';
@@ -260,6 +369,7 @@
     if (pointers.size === 2) {
       const [a0, b0] = [...pointers.values()];
       if (mode.k === 'ruler') ruler = undefined; // the first finger started a ruler: it was a pinch
+      if (mode.k === 'brush') strokeBits = undefined; // ... or a fog stroke
       mode = { k: 'pinch', a0, b0, view0: view };
       schedule();
       return;
@@ -268,6 +378,18 @@
     const w = toWorld(view, p), shift = e.shiftKey || e.ctrlKey || e.metaKey;
     if (ruler) { ruler = undefined; schedule(); } // the next tap clears the ruler
     if (tool === 'ruler') { ruler = { a: w, b: w }; mode = { k: 'ruler' }; return; }
+    if (tool === 'fog') {
+      if (fogTool === 'brush') { const m: Mode = { k: 'brush', points: [] }; brushTo(m, w); brushAt = w; mode = m; }
+      else mode = { k: 'fogRect', a: w, b: w };
+      schedule();
+      return;
+    }
+    if (tool === 'template') { // the origin on a grid intersection (a hex centre on hex grids)
+      const o = snap(grid, w, 'L');
+      tplAt = { origin: o, aim: { x: o.x + 1, y: o.y } };
+      mode = { k: 'template' };
+      return;
+    }
     const hit = tool === 'select' ? tokenAt(scene(), w, dm) : undefined;
     if (hit) mode = { k: 'press', from: p, id: hit.id, grab: { x: w.x - hit.x, y: w.y - hit.y }, shift };
     else if (tool === 'box' || (e.shiftKey && e.pointerType === 'mouse')) mode = { k: 'box', a: w, b: w, shift };
@@ -277,6 +399,7 @@
   function move(e: PointerEvent) {
     const p = local(e);
     if (!pointers.has(e.pointerId)) { // hover (mouse, no button)
+      if (tool === 'fog' && fogTool === 'brush') { brushAt = toWorld(view, p); schedule(); return; }
       if (!dm || e.pointerType !== 'mouse') return;
       const id = tokenAt(scene(), toWorld(view, p), dm)?.id;
       if (id !== hover) { hover = id; schedule(); }
@@ -316,6 +439,16 @@
       case 'ruler':
         if (ruler) ruler.b = w;
         break;
+      case 'brush':
+        brushTo(mode, w);
+        brushAt = w;
+        break;
+      case 'fogRect':
+        mode.b = w;
+        break;
+      case 'template':
+        if (tplAt) tplAt = { origin: tplAt.origin, aim: w };
+        break;
       default:
         return;
     }
@@ -326,7 +459,13 @@
     if (!pointers.delete(e.pointerId)) return;
     const m = mode;
     mode = { k: 'none' }; // after a pinch the remaining finger does nothing until it lifts
+    if (cancel && m.k === 'brush') strokeBits = undefined;
     if (cancel || m.k === 'pinch') { schedule(); return; }
+    if (m.k === 'brush') onfog?.({ k: 'brush', points: m.points, radius: brush, reveal }); // one write per stroke
+    else if (m.k === 'fogRect') {
+      strokeBits = paintRect(strokeBits ?? fogBits ?? newFog(width, height, false), width, height, m.a, m.b, reveal);
+      onfog?.({ k: 'rect', a: m.a, b: m.b, reveal });
+    }
     if (m.k === 'press') onselect(m.shift ? (selected.includes(m.id) ? selected.filter((x) => x !== m.id) : [...selected, m.id]) : [m.id]);
     else if (m.k === 'drag') {
       const t = tokens.find((x) => x.id === m.id);
@@ -352,7 +491,32 @@
     <button type="button" onclick={() => zoomBy(1.25)}>Zoom in</button>
     <button type="button" onclick={() => zoomBy(0.8)}>Zoom out</button>
     <button type="button" onclick={fitView}>Fit</button>
+    {#if onfog}<button type="button" aria-pressed={tool === 'fog'} onclick={() => (tool = 'fog')}>Fog</button>{/if}
+    <button type="button" aria-pressed={tool === 'template'} onclick={() => (tool = 'template')}>Template</button>
   </div>
+  {#if tool === 'fog' && onfog}
+    <div class="tools" role="group" aria-label="Fog">
+      <button type="button" aria-pressed={fogTool === 'brush'} onclick={() => (fogTool = 'brush')}>Brush</button>
+      <button type="button" aria-pressed={fogTool === 'rect'} onclick={() => (fogTool = 'rect')}>Rectangle</button>
+      {#if fogTool === 'brush'}<label class="opt">Brush size <input type="range" min="16" max="256" step="8" bind:value={brush} /></label>{/if}
+      <button type="button" aria-pressed={reveal} onclick={() => (reveal = true)}>Reveal</button>
+      <button type="button" aria-pressed={!reveal} onclick={() => (reveal = false)}>Hide</button>
+      <button type="button" onclick={() => confirm('Reveal the whole scene to players?') && onfog({ k: 'all', reveal: true })}>Reveal all</button>
+      <button type="button" onclick={() => confirm('Hide the whole scene under fog?') && onfog({ k: 'all', reveal: false })}>Hide all</button>
+    </div>
+  {/if}
+  {#if tool === 'template' || template}
+    <div class="tools" role="group" aria-label="Template">
+      <label class="opt">Shape
+        <select bind:value={shape}>{#each SHAPES as [v, name] (v)}<option value={v}>{name}</option>{/each}</select>
+      </label>
+      <label class="opt">Size (ft) <input class="ft" type="number" min="1" max="1000" bind:value={tplFeet} /></label>
+      {#if shape === 'line'}<label class="opt">Width (ft) <input class="ft" type="number" min="1" max="100" bind:value={lineWidth} /></label>{/if}
+      {#if template}<button type="button" onclick={() => (tplAt = undefined)}>Clear template</button>{/if}
+    </div>
+    {#if template}<p class="inside" role="status">Inside: {insideNames.length ? insideNames.join(', ') : 'none'}</p>
+    {:else}<p class="inside muted">Drag on the map from the origin toward the aim.</p>{/if}
+  {/if}
   <div class="frame" bind:this={wrap}>
     <canvas
       bind:this={canvas}
@@ -361,7 +525,7 @@
       onpointermove={move}
       onpointerup={(e) => up(e)}
       onpointercancel={(e) => up(e, true)}
-      onpointerleave={() => { if (hover) { hover = undefined; schedule(); } }}
+      onpointerleave={() => { if (hover || brushAt) { hover = brushAt = undefined; schedule(); } }}
     ></canvas>
   </div>
 </div>
@@ -376,6 +540,26 @@
 
   .tools button {
     padding: 0.35rem 0.55rem;
+    font-size: 0.85rem;
+  }
+
+  .opt {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-size: 0.85rem;
+  }
+
+  .opt input[type='range'] {
+    width: 6rem;
+  }
+
+  .ft {
+    width: 4.5rem;
+  }
+
+  .inside {
+    margin: 0 0 0.25rem;
     font-size: 0.85rem;
   }
 

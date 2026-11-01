@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { MAX_MESSAGE } from '../../src/lib/sync/protocol.ts';
-import { applyFog, cleanFog, decodeFog, encodeFog, fogSize, isRevealed, newFog, paintBrush, paintRect } from '../../src/lib/map/fog.ts';
+import { applyFog, cleanFog, decodeFog, encodeFog, fogSize, isRevealed, newFog, paintBrush, paintFog, paintRect } from '../../src/lib/map/fog.ts';
 
 const W = 100, H = 40;
 const rev = (f: Uint8Array, x: number, y: number) => isRevealed(f, W, H, { x, y });
@@ -43,6 +43,14 @@ describe('fog bitset', () => {
     expect(cleanFog(encodeFog(newFog(200, 40, true)), W, H)).toBe(encodeFog(newFog(W, H, false)));
     expect(cleanFog(42, W, H)).toBe(encodeFog(newFog(W, H, false)));
   });
+});
+
+test('paintFog: one DM edit on the scene\'s fog string', () => {
+  const brushed = paintFog(undefined, W, H, { k: 'brush', points: [{ x: 10, y: 10 }, { x: 50, y: 20 }], radius: 10, reveal: true });
+  const f = decodeFog(brushed, W, H)!;
+  expect([rev(f, 10, 10), rev(f, 52, 20), rev(f, 90, 30)]).toEqual([true, true, false]);
+  expect(rev(decodeFog(paintFog(brushed, W, H, { k: 'rect', a: { x: 0, y: 0 }, b: { x: 100, y: 40 }, reveal: false }), W, H)!, 10, 10)).toBe(false);
+  expect(paintFog('bad', W, H, { k: 'all', reveal: true })).toBe(encodeFog(newFog(W, H, true)));
 });
 
 describe('applyFog (the players\' projection)', () => {

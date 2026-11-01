@@ -5,6 +5,7 @@
   import type { ContentIndex } from '../../lib/content/index.ts';
   import { db } from '../../lib/db.ts';
   import { resizeImage } from '../../lib/images.ts';
+  import { encodeFog, newFog, paintFog, type FogEdit } from '../../lib/map/fog.ts';
   import { snap, type Pt } from '../../lib/map/grid.ts';
   import { addTokens, liveHp, MAX_SIDE, MAX_TOKENS, moveTokens, newScene, patchToken, removeTokens, type NewToken } from '../../lib/map/scene.ts';
   import { editScene, tokenForCharacter, tokenForMonster } from '../../lib/map/store.ts';
@@ -154,6 +155,8 @@
   });
 
   const onmove = (ids: string[], primary: string, to: Pt) => edit((s) => moveTokens(s, ids, primary, to));
+  /** One stroke, rectangle or Reveal all / Hide all: one write, painted onto the fresh record's fog. */
+  const onfog = (e: FogEdit) => edit((s) => ({ ...s, fog: paintFog(s.fog, s.width, s.height, e) }));
   const speedOf = (id: string) => {
     const t = scene?.tokens.find((x) => x.id === id);
     if (t?.characterId) return sheets.get(t.characterId)?.speed.walk;
@@ -214,6 +217,8 @@
       onselect={(ids) => (selected = ids)}
       {onmove}
       {rev}
+      fog={settings.fog ? scene.fog ?? encodeFog(newFog(scene.width, scene.height, false)) : undefined}
+      onfog={settings.fog ? onfog : undefined}
     />
   {/key}
 
