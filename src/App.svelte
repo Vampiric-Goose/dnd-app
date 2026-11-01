@@ -81,6 +81,9 @@
   $effect(() => {
     if (topH) document.documentElement.style.setProperty('--topbar-h', `${topH}px`);
   });
+  // The backup reminder strip's height (0 when hidden), so a full-height Workspace (the map) still fits the screen.
+  let bannerH = $state(0);
+  $effect(() => { document.documentElement.style.setProperty('--banner-h', `${bannerH}px`); });
 
   function match(key: string) {
     const path = key.split('/').filter(Boolean);
@@ -128,7 +131,7 @@
   </nav>
 
   <main>
-    <BackupBanner />
+    <div bind:clientHeight={bannerH}><BackupBanner /></div>
     {#if app.error && key !== ''}<p role="alert" class="error">{app.error}</p>{/if}<!-- the Campaigns page shows it itself -->
     {#if !current}
       <h1>Page not found</h1>

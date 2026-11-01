@@ -66,7 +66,7 @@
   }
 
   .fill {
-    height: calc(100dvh - var(--topbar-h) - var(--bottombar-h));
+    height: calc(100dvh - var(--topbar-h) - var(--bottombar-h) - var(--banner-h, 0px));
     min-height: 0;
   }
 

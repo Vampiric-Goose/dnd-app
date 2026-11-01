@@ -49,12 +49,13 @@
   const edit = (fn: (c: Combat) => Combat) => run(() => updateCombat(cid, fn));
   const pcs = (cs: Character[]) => cs.map((c) => pcCombatant(c, computeSheet(c, { settings, viewer: 'dm' })));
 
+  // Toggles save one after another, each from the stored campaign, so quick toggles never overwrite each other.
+  let moduleSaves: Promise<unknown> = Promise.resolve();
   function setModule(k: Mod, on: boolean) {
-    // Final M3: from the stored campaign, so a second quick toggle does not undo the first.
-    void act(async () => {
+    moduleSaves = moduleSaves.then(() => act(async () => {
       const fresh = await db.campaigns.get(cid);
       if (fresh) await saveCampaign({ ...fresh, settings: { ...fresh.settings, initiativeModules: { ...fresh.settings.initiativeModules, [k]: on } } });
-    });
+    }));
   }
 
   const rollUnrolled = () => edit((c) => {
