@@ -6,14 +6,21 @@
   import { computeSheet } from '../../lib/rules/sheet.ts';
   import { saveCampaign } from '../../lib/store.svelte.ts';
   import { toast } from '../../lib/toast.svelte.ts';
-  import type { Campaign, CampaignSettings, Character, Combat, MonsterDef } from '../../lib/types.ts';
+  import type { Campaign, CampaignSettings, Character, Combat, Encounter, MonsterDef } from '../../lib/types.ts';
+  import Drawer from '../kit/Drawer.svelte';
+  import Menu, { type MenuItem } from '../kit/Menu.svelte';
+  import Tabs from '../kit/Tabs.svelte';
+  import Workspace from '../kit/Workspace.svelte';
   import { act } from './act.ts';
+  import CombatantPanel from './CombatantPanel.svelte';
   import CombatantRow from './CombatantRow.svelte';
+  import Encounters from './Encounters.svelte';
   import MonsterSearch from './MonsterSearch.svelte';
   import { currentRun, reorder, sortAround } from './order.ts';
 
-  let { campaign, combat, chars, pool, index, reload }: {
-    campaign: Campaign; combat: Combat | undefined; chars: Character[]; pool: MonsterDef[]; index: ContentIndex | undefined; reload: () => Promise<void>;
+  let { campaign, combat, chars, pool, index, encounters, reload }: {
+    campaign: Campaign; combat: Combat | undefined; chars: Character[]; pool: MonsterDef[]; index: ContentIndex | undefined; encounters: Encounter[];
+    reload: () => Promise<void>;
   } = $props();
 
   type Mod = keyof CampaignSettings['initiativeModules'];
@@ -67,87 +74,213 @@
 
   // Native drag and drop for the mouse (Move up / Move down are the keyboard and touch way).
   let dragged: string | undefined;
+
+  // The row shown in the panel, and the panel tab. Phones: the sheet shows while a row is picked or Encounters was asked for.
+  let selectedId: string | undefined = $state();
+  let tab = $state('combatant');
+  let sheet = $state(false);
+  const sel = $derived(list.find((x) => x.id === selectedId));
+  const select = (id: string) => { selectedId = id; tab = 'combatant'; };
+
+  // A concentration prompt (Con save DC after damage, or "ends at 0 HP") stays with its combatant while another row is picked.
+  type Prompt = { dc?: number; lost?: boolean };
+  let prompts: Record<string, Prompt> = $state({});
+  const setPrompt = (id: string, p: Prompt) => { prompts[id] = p; };
+
+  const addItems = $derived<MenuItem[]>([
+    { label: 'Add party', disabled: !outside.length || full, onselect: () => void edit((c) => addCombatants(c, pcs(outside))) },
+    ...(mods.lair && !list.some((x) => x.kind === 'lair')
+      ? [{ label: 'Add lair actions', disabled: full, onselect: () => void edit((c) => addCombatants(c, [lairCombatant()])) }]
+      : []),
+  ]);
+
+  const moreItems = $derived<MenuItem[]>([
+    { label: 'Group identical monsters', checked: combat?.groupMonsters ?? false, onselect: () => { const on = !(combat?.groupMonsters ?? false); void edit((c) => ({ ...c, groupMonsters: on })); } },
+    { label: 'Sort', disabled: list.length < 2, onselect: () => void edit(sortAround) },
+    { label: 'Roll unrolled', disabled: !list.some((x) => x.kind !== 'pc' && x.init === undefined), onselect: () => void rollUnrolled() },
+    { label: 'Encounters', onselect: () => { tab = 'encounters'; sheet = true; } },
+    ...(combat ? [{ separator: true } as const, { label: 'End combat', danger: true, onselect: end }] : []),
+  ]);
 </script>
 
-<section aria-labelledby="tracker-h">
-  <h2 id="tracker-h">{round === 0 ? 'Setup' : `Round ${round}`}</h2>
-  <p class="sr-only" aria-live="polite">{status}</p>
+<Workspace panelLabel={tab === 'encounters' ? 'Encounters' : sel?.name ?? 'Combatant'} open={sel !== undefined || sheet}
+  onclose={() => { selectedId = undefined; sheet = false; }}>
+  <section aria-labelledby="tracker-h">
+    <div class="turnbar">
+      <h2 id="tracker-h" class="round">
+        {#if round === 0}<span class="caption">Setup</span>{:else}<span class="caption">Round</span> <span class="num">{round}</span>{/if}
+      </h2>
+      <span class="who">{turnName && round ? `${turnName}'s turn` : `${list.length} ${list.length === 1 ? 'combatant' : 'combatants'}`}</span>
+      <div class="acts">
+        {#if round === 0}
+          <button type="button" class="primary" disabled={!list.length} onclick={() => run(() => turn(cid, 'start'))}>Start</button>
+        {:else}
+          <button type="button" aria-label="Previous turn" onclick={() => edit(prev)}>◀ Prev</button>
+          <button type="button" class="primary" aria-label="Next turn" onclick={() => run(() => turn(cid, 'next'))}>Next turn ▶</button>
+        {/if}
+        <Menu label="+ Add" ariaLabel="Add combatants" items={addItems} align="end">
+          {#snippet children()}
+            <div class="add">
+              {#if full}<p class="muted">A fight holds at most {MAX_COMBATANTS} combatants.</p>{/if}
+              <label class="fld"><span class="caption">Character</span>
+                <select bind:value={pickChar} disabled={!outside.length}>
+                  <option value="">Choose…</option>
+                  {#each outside as c (c.id)}<option value={c.id}>{c.name || 'Unnamed'}</option>{/each}
+                </select>
+              </label>
+              <button type="button" disabled={!pickChar || full} onclick={() => { const c = charById.get(pickChar); pickChar = ''; if (c) void edit((x) => addCombatants(x, pcs([c]))); }}>Add character</button>
+              <MonsterSearch {pool} label="Add monster" onadd={(m, count) => edit((c) => addMonsters(c, [{ monster: m, count }], settings.monsterHp))} />
+            </div>
+          {/snippet}
+        </Menu>
+        <Menu label="⋯" ariaLabel="More combat actions" caret={false} align="end" items={moreItems}>
+          {#snippet children()}
+            <Drawer title="Modules">
+              {#snippet summary()}<span class="num">{MODULES.filter(([k]) => mods[k]).length}</span> on{/snippet}
+              {#each MODULES as [k, label] (k)}
+                <label class="check"><input type="checkbox" checked={mods[k]} onchange={(e) => setModule(k, e.currentTarget.checked)} /> {label}</label>
+              {/each}
+            </Drawer>
+          {/snippet}
+        </Menu>
+      </div>
+    </div>
+    <p class="sr-only" aria-live="polite">{status}</p>
 
-  <div class="row">
-    {#if round === 0}
-      <button type="button" class="primary" disabled={!list.length} onclick={() => run(() => turn(cid, 'start'))}>Start</button>
+    {#if list.length}
+      <ol class="list">
+        {#each list as x, i (x.id)}
+          <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions (the name button is the keyboard way) -->
+          <li draggable="true" class:current={current.has(x.id)} class:selected={x.id === selectedId} aria-current={current.has(x.id) ? 'true' : undefined}
+            onclick={() => select(x.id)}
+            ondragstart={(e) => { dragged = x.id; e.dataTransfer?.setData('text/plain', x.id); }}
+            ondragover={(e) => e.preventDefault()}
+            ondrop={(e) => { e.preventDefault(); const id = dragged; dragged = undefined; if (id && id !== x.id) void edit((c) => reorder(c, id, i)); }}>
+            <CombatantRow {x} {i} count={list.length} current={current.has(x.id)} selected={x.id === selectedId}
+              ch={x.characterId ? charById.get(x.characterId) : undefined} {settings} prompt={prompts[x.id]} {edit} onselect={() => select(x.id)} />
+          </li>
+        {/each}
+      </ol>
     {:else}
-      <button type="button" onclick={() => edit(prev)}>Previous turn</button>
-      <button type="button" class="primary" onclick={() => run(() => turn(cid, 'next'))}>Next turn</button>
+      <p class="muted empty">No combatants yet. Use “+ Add” to bring in the party and monsters.</p>
     {/if}
-    {#if combat}<button type="button" class="danger" onclick={end}>End combat</button>{/if}
-  </div>
+  </section>
 
-  <div class="row">
-    <details class="modules">
-      <summary>Modules</summary>
-      {#each MODULES as [k, label] (k)}
-        <label class="check"><input type="checkbox" checked={mods[k]} onchange={(e) => setModule(k, e.currentTarget.checked)} /> {label}</label>
-      {/each}
-    </details>
-    <label class="check"><input type="checkbox" checked={combat?.groupMonsters ?? false} onchange={(e) => { const on = e.currentTarget.checked; void edit((c) => ({ ...c, groupMonsters: on })); }} /> Group identical monsters</label>
-  </div>
-  <div class="row">
-    <button type="button" disabled={list.length < 2} onclick={() => edit(sortAround)}>Sort</button>
-    <button type="button" disabled={!list.some((x) => x.kind !== 'pc' && x.init === undefined)} onclick={rollUnrolled}>Roll unrolled</button>
-  </div>
-
-  <h3>Add combatants</h3>
-  {#if full}<p class="muted">A fight holds at most {MAX_COMBATANTS} combatants.</p>{/if}
-  <div class="row">
-    <button type="button" disabled={!outside.length || full} onclick={() => edit((c) => addCombatants(c, pcs(outside)))}>Add party</button>
-    <label class="row"><span>Character</span>
-      <select bind:value={pickChar} disabled={!outside.length}>
-        <option value="">Choose…</option>
-        {#each outside as c (c.id)}<option value={c.id}>{c.name || 'Unnamed'}</option>{/each}
-      </select>
-    </label>
-    <button type="button" disabled={!pickChar || full} onclick={() => { const c = charById.get(pickChar); pickChar = ''; if (c) void edit((x) => addCombatants(x, pcs([c]))); }}>Add character</button>
-    {#if mods.lair && !list.some((x) => x.kind === 'lair')}
-      <button type="button" disabled={full} onclick={() => edit((c) => addCombatants(c, [lairCombatant()]))}>Add lair actions</button>
-    {/if}
-  </div>
-  <MonsterSearch {pool} label="Add monster" onadd={(m, count) => edit((c) => addMonsters(c, [{ monster: m, count }], settings.monsterHp))} />
-
-  {#if list.length}
-    <ol class="plain list">
-      {#each list as x, i (x.id)}
-        <li draggable="true"
-          ondragstart={(e) => { dragged = x.id; e.dataTransfer?.setData('text/plain', x.id); }}
-          ondragover={(e) => e.preventDefault()}
-          ondrop={(e) => { e.preventDefault(); const id = dragged; dragged = undefined; if (id && id !== x.id) void edit((c) => reorder(c, id, i)); }}>
-          <CombatantRow {x} {i} count={list.length} combatants={list} current={current.has(x.id)} ch={x.characterId ? charById.get(x.characterId) : undefined}
-            monster={x.monsterId ? monById.get(x.monsterId) : undefined} {index} {settings} {cid} {edit} {run} />
-        </li>
-      {/each}
-    </ol>
-  {:else}
-    <p class="muted">No combatants yet.</p>
-  {/if}
-</section>
+  {#snippet panel()}
+    <Tabs label="Combat panel" tabs={[{ id: 'combatant', label: sel?.name ?? 'Combatant' }, { id: 'encounters', label: 'Encounters', count: encounters.length }]} bind:value={tab}>
+      {#snippet panel(id)}
+        {#if id === 'encounters'}
+          <Encounters {campaign} {encounters} {pool} {reload} />
+        {:else if sel}
+          {#key sel.id}
+            <CombatantPanel x={sel} i={list.indexOf(sel)} count={list.length} combatants={list} current={current.has(sel.id)}
+              ch={sel.characterId ? charById.get(sel.characterId) : undefined} monster={sel.monsterId ? monById.get(sel.monsterId) : undefined}
+              {index} {settings} {cid} {edit} {run} prompt={prompts[sel.id]} {setPrompt} />
+          {/key}
+        {:else}
+          <p class="muted">Pick a combatant to see its hit points, conditions and notes.</p>
+        {/if}
+      {/snippet}
+    </Tabs>
+  {/snippet}
+</Workspace>
 
 <style>
-  .modules {
-    border: 1px solid var(--border);
-    border-radius: 0.4rem;
-    padding: 0.3rem 0.6rem;
+  .turnbar {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 0.9rem;
+    margin: 0 0 0.5rem;
+    padding: 0.55rem 0;
+    background: var(--bg);
+    border-bottom: 1px solid var(--line);
   }
 
-  .modules[open] {
+  .round {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 400;
+  }
+
+  .round .num {
+    font-size: 1.35rem;
+    color: var(--text-strong);
+  }
+
+  .who {
+    flex: 1 1 8rem;
+    min-width: 0;
+    color: var(--text-strong);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .acts {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  .add {
     display: flex;
     flex-direction: column;
+    gap: 0.5rem;
+    width: 18rem;
+    max-width: 100%;
+  }
+
+  .add p {
+    margin: 0;
+  }
+
+  .fld {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
   }
 
   .list {
-    margin: 0.75rem 0;
+    list-style: none;
+    margin: 0;
+    padding: 0;
   }
 
-  h3 {
-    margin: 1rem 0 0.3rem;
+  li {
+    border-bottom: 1px solid var(--line);
+    border-radius: var(--radius);
+    cursor: pointer;
+  }
+
+  li:hover {
+    background: color-mix(in srgb, var(--raised) 45%, transparent);
+  }
+
+  li.current {
+    background: var(--raised);
+    box-shadow: inset 2px 0 var(--accent);
+  }
+
+  li.selected {
+    outline: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+    outline-offset: -1px;
+  }
+
+  .empty {
+    margin: 1.5rem 0;
+  }
+
+  @media (min-width: 768px) {
+    .turnbar {
+      top: var(--topbar-h);
+    }
   }
 </style>

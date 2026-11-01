@@ -23,34 +23,45 @@
 </script>
 
 <div class="search" role="group" aria-label={label}>
-  <label class="row"><span>Search monsters</span><input type="search" bind:value={q} placeholder="Name" /></label>
-  <p class="muted small" id="{id}-n" aria-live="polite">{hits.length} {hits.length === 1 ? 'match' : 'matches'}{hits.length > 20 ? ', first 20 shown' : ''}</p>
+  <label class="fld"><span class="caption">Search monsters</span><input type="search" bind:value={q} placeholder="Name" /></label>
+  <p class="muted small" id="{id}-n" aria-live="polite"><span class="num">{hits.length}</span> {hits.length === 1 ? 'match' : 'matches'}{hits.length > 20 ? ', first 20 shown' : ''}</p>
+  <label class="fld"><span class="caption">Monster</span>
+    <select bind:value={picked} aria-describedby="{id}-n" disabled={!shown.length}>
+      {#each shown as m (m.id)}<option value={m.id}>{m.name} (CR {m.cr}{m.source === 'SRD' ? '' : `, ${m.source}`})</option>{/each}
+    </select>
+  </label>
   <div class="row">
-    <label class="row"><span>Monster</span>
-      <select bind:value={picked} aria-describedby="{id}-n" disabled={!shown.length}>
-        {#each shown as m (m.id)}<option value={m.id}>{m.name} (CR {m.cr}{m.source === 'SRD' ? '' : `, ${m.source}`})</option>{/each}
-      </select>
-    </label>
-    <label class="row"><span>Count</span><input type="number" min="1" max="99" step="1" inputmode="numeric" bind:value={count} /></label>
+    <label class="row"><span class="caption">Count</span><input type="number" class="num" min="1" max="99" step="1" inputmode="numeric" bind:value={count} /></label>
     <button type="button" disabled={!ok} onclick={add}>Add</button>
   </div>
 </div>
 
 <style>
   .search {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
     margin: 0.5rem 0;
+    max-width: 22rem;
   }
 
-  select {
-    max-width: 14rem;
+  .fld {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+  }
+
+  select,
+  input[type='search'] {
+    width: 100%;
   }
 
   input[type='number'] {
-    width: 4rem;
+    width: 4.5rem;
   }
 
   .small {
     font-size: 0.85rem;
-    margin: 0.2rem 0;
+    margin: 0;
   }
 </style>

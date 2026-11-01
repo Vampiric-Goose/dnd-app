@@ -1,258 +1,173 @@
 <script lang="ts">
-  import { INIT_MAX, INIT_MIN, initOk, patchCombatant, rollInit, setInit } from '../../lib/combat/combat.ts';
-  import { changeHp, deathSave, remove, setCondition } from '../../lib/combat/store.ts';
+  // One slim tracker row: initiative, name, HP bar, condition chips (and Move up / down on wider screens; phones get them in the
+  // panel). Every other control is in CombatantPanel, shown for the picked row.
   import { deathState } from '../../lib/character/play.ts';
-  import type { ContentIndex } from '../../lib/content/index.ts';
-  import { CONDITIONS } from '../../lib/rules/constants.ts';
   import { computeSheet } from '../../lib/rules/sheet.ts';
-  import type { CampaignSettings, Character, Combat, Combatant, Duration, MonsterDef } from '../../lib/types.ts';
-  import { signed } from '../creator/labels.ts';
-  import HpControls from '../HpControls.svelte';
-  import StatBlock from '../monsters/StatBlock.svelte';
-  import { rollTo } from '../sheet/roll.ts';
+  import type { CampaignSettings, Character, Combat, Combatant } from '../../lib/types.ts';
+  import Bar from '../kit/Bar.svelte';
+  import Pill from '../kit/Pill.svelte';
   import { reorder } from './order.ts';
 
-  /** Final M2: a linked token first takes the combatant's HP (the map chunk loads only here); a failed write-back still removes it. */
-  async function removeLinked(id: string) {
-    const m = await import('../../lib/map/store.ts').catch((e) => void console.warn(e));
-    return m ? m.removeCombatant(cid, id) : remove(cid, id);
-  }
-
-  let { x, i, count, combatants, current, ch, monster, index, settings, cid, edit, run }: {
-    x: Combatant; i: number; count: number; combatants: Combatant[]; current: boolean; ch: Character | undefined; monster: MonsterDef | undefined;
-    index: ContentIndex | undefined; settings: CampaignSettings; cid: string;
-    edit: (fn: (c: Combat) => Combat) => Promise<void>; run: (op: () => Promise<unknown>) => Promise<void>;
+  let { x, i, count, current, selected, ch, settings, prompt, edit, onselect }: {
+    x: Combatant; i: number; count: number; current: boolean; selected: boolean; ch: Character | undefined; settings: CampaignSettings;
+    prompt: { dc?: number; lost?: boolean } | undefined; edit: (fn: (c: Combat) => Combat) => Promise<void>; onselect: () => void;
   } = $props();
 
+  // The same HP, conditions and life state as the panel shows.
   const mods = $derived(settings.initiativeModules);
   const pc = $derived(x.kind === 'pc');
   const sheet = $derived(ch ? computeSheet(ch, { settings, viewer: 'dm' }) : undefined);
   const hp = $derived(ch ? { now: ch.state.hp, max: sheet?.maxHp, temp: ch.state.tempHp } : { now: x.hp, max: x.maxHp, temp: x.tempHp ?? 0 });
   const conditions = $derived(pc ? ch?.state.conditions ?? [] : x.conditions ?? []);
   const life = $derived(ch ? deathState(ch.state) : 'ok');
-  const patch = (p: Partial<Combatant>) => edit((c) => patchCombatant(c, x.id, p));
-
-  let concDc: number | undefined = $state();
-  let concLost = $state(false);
-  let statOpen = $state(false);
-
-  function hpOp(op: Parameters<typeof changeHp>[2]) {
-    void run(async () => {
-      const r = await changeHp(cid, x.id, op, settings);
-      if (r.concentrationDc !== undefined) { concDc = r.concentrationDc; concLost = false; }
-      if (r.concentrationLost) { concDc = undefined; concLost = true; }
-      return r;
-    });
-  }
-
-  function setInitFrom(v: string, el: HTMLInputElement) {
-    const n = v.trim() === '' ? undefined : Number(v);
-    if (n !== undefined && !initOk(n)) { el.value = x.init === undefined ? '' : String(x.init); return; }
-    void edit((c) => setInit(c, x.id, n));
-  }
-
-  // A condition's optional duration (the next one switched on uses it).
-  let rounds: number | null = $state(null);
-  let at: Duration['at'] = $state('end');
-  let of = $state('');
-  $effect(() => { if (!combatants.some((y) => y.id === of)) of = x.id; });
-  function toggle(name: string) {
-    const on = !conditions.includes(name);
-    const duration = on && Number.isInteger(rounds) && rounds! >= 1 ? { rounds: rounds!, at, of } : undefined;
-    void run(() => setCondition(cid, x.id, name, on, duration));
-  }
-
-  // Final M2: from the stored record, so two quick taps both count.
-  const legendary = (d: number) => edit((c) => {
-    const l = c.combatants.find((z) => z.id === x.id)?.legendary;
-    return l ? patchCombatant(c, x.id, { legendary: { ...l, used: Math.max(0, Math.min(l.max, l.used + d)) } }) : c;
-  });
-
-  // Final M8: a monster with special HP gets its HP typed in.
-  function setMax(v: number | null) {
-    if (typeof v === 'number' && Number.isInteger(v) && v >= 1) void patch({ hp: v, maxHp: v });
-  }
-
-  function rollDeath() {
-    const r = rollTo('Death save', '1d20');
-    if (r) void run(() => deathSave(cid, x.id, r.total));
-  }
 </script>
 
-<article class="card" aria-current={current ? 'true' : undefined} aria-label={x.name}>
-  <div class="row top">
-    <input class="name" aria-label="Name of {x.name}" value={x.name} onchange={(e) => { const v = e.currentTarget.value.trim(); if (v) void patch({ name: v }); else e.currentTarget.value = x.name; }} />
-    {#if x.kind !== 'lair'}
-      <label class="row"><span>Init</span>
-        <input type="number" class="init" min={INIT_MIN} max={INIT_MAX} step="1" inputmode="numeric" aria-label="Initiative of {x.name}" value={x.init ?? ''}
-          onchange={(e) => setInitFrom(e.currentTarget.value, e.currentTarget)} />
-      </label>
-      <button type="button" aria-label="Roll initiative for {x.name}" onclick={() => edit((c) => setInit(c, x.id, rollInit(x.initMod)))}>Roll</button>
-    {:else}
-      <span class="muted">Init {x.init}</span>
+<div class="crow">
+  <span class="init num" title="Initiative">{x.init ?? '—'}</span>
+  <button type="button" class="name" aria-pressed={selected} onclick={onselect}>{x.name}</button>
+  <span class="hp">
+    {#if mods.hp && x.kind !== 'lair'}
+      {#if hp.now !== undefined && hp.max !== undefined}
+        <Bar value={hp.now} max={hp.max} temp={hp.temp} label="{x.name} hit points" tone={pc ? 'accent' : 'danger'} />
+      {/if}
+      <span class="hpn num">{hp.now ?? '—'}{#if hp.max !== undefined}<span class="muted">/{hp.max}</span>{/if}</span>
     {/if}
-    {#if x.ac !== undefined}<span>AC {x.ac}</span>{/if}
-    {#if x.hidden}<span class="muted">Hidden</span>{/if}
-  </div>
-
-  <div class="row">
-    <button type="button" aria-label="Move {x.name} up" disabled={i === 0 || current} onclick={() => edit((c) => reorder(c, x.id, i - 1))}>↑</button>
-    <button type="button" aria-label="Move {x.name} down" disabled={i === count - 1 || current} onclick={() => edit((c) => reorder(c, x.id, i + 1))}>↓</button>
-    <label class="check"><input type="checkbox" checked={!!x.hidden} onchange={(e) => patch({ hidden: e.currentTarget.checked })} /> Hidden from players</label>
-    <button type="button" class="danger" aria-label="Remove {x.name}" onclick={() => run(() => removeLinked(x.id))}>Remove</button>
-  </div>
-
-  {#if mods.hp && x.kind !== 'lair'}
-    <p class="hpline">
-      HP <strong>{hp.now ?? '—'}</strong>{#if hp.max !== undefined} / {hp.max}{/if}
-      {#if hp.temp}<span class="muted">Temp {hp.temp}</span>{/if}
-      {#if life !== 'ok'}<strong class="error">{life === 'dying' ? 'Dying' : life === 'stable' ? 'Stable' : 'Dead'}</strong>{/if}
-    </p>
-    {#if x.kind === 'monster' && x.hp === undefined}
-      <label class="row"><span>Max HP of {x.name}</span><input type="number" class="init" min="1" step="1" inputmode="numeric" onchange={(e) => setMax(e.currentTarget.valueAsNumber)} /></label>
-    {/if}
-    <HpControls label={x.name} dead={!!ch?.state.dead} atZero={!!ch && ch.state.hp === 0 && !ch.state.dead}
-      ondamage={(n, crit) => hpOp({ damage: n, crit })} onheal={(n) => hpOp({ heal: n })} ontemp={(n) => hpOp({ temp: n })} />
-  {/if}
-  {#if concDc !== undefined}
-    <div class="row prompt" role="status">
-      <span>Concentration: Con save DC {concDc}</span>
-      <button type="button" onclick={() => rollTo('Concentration save', `1d20${signed(x.conSave)}`, { public: false })}>Roll</button>
-      <button type="button" onclick={() => { concDc = undefined; void patch({ concentrating: false }); }}>Lost concentration</button>
-      <button type="button" aria-label="Dismiss the concentration prompt for {x.name}" onclick={() => (concDc = undefined)}>Kept</button>
-    </div>
-  {/if}
-
-  {#if concLost}
-    <div class="row prompt" role="status">
-      <span>Concentration ends (0 HP)</span>
-      <button type="button" aria-label="Dismiss the concentration notice for {x.name}" onclick={() => (concLost = false)}>OK</button>
-    </div>
-  {/if}
-
-  {#if mods.conditions && x.kind !== 'lair'}
-    <div class="row" role="group" aria-label="Conditions of {x.name}">
+  </span>
+  <span class="chips">
+    {#if mods.hp && life !== 'ok'}<span class="life">{life === 'dying' ? 'Dying' : life === 'stable' ? 'Stable' : 'Dead'}</span>{/if}
+    {#if prompt?.dc !== undefined}<Pill label="Con save DC {prompt.dc}" accent />{/if}
+    {#if mods.conditions && x.kind !== 'lair'}
       {#each conditions as name (name)}
         {@const d = x.durations?.[name]}
-        <button type="button" class="chip on" aria-label="Remove {name} from {x.name}{d ? `, ${d.rounds} ${d.rounds === 1 ? 'round' : 'rounds'} left` : ''}" onclick={() => toggle(name)}>{name}{d ? ` (${d.rounds})` : ''} ×</button>
+        <Pill label="{name}{d ? ` ${d.rounds}` : ''}" />
       {/each}
-    </div>
-    <details>
-      <summary>Add condition</summary>
-      <div class="row">
-        <label class="row"><span>Rounds</span><input type="number" class="init" min="1" step="1" inputmode="numeric" placeholder="—" bind:value={rounds} /></label>
-        <label class="row"><span>Ends at</span><select bind:value={at}><option value="start">start</option><option value="end">end</option></select></label>
-        <label class="row"><span>of turn of</span><select bind:value={of}>{#each combatants as y (y.id)}<option value={y.id}>{y.name}</option>{/each}</select></label>
-      </div>
-      <div class="row" role="group" aria-label="Add a condition to {x.name}">
-        {#each CONDITIONS.filter((n) => !conditions.includes(n)) as name (name)}
-          <button type="button" class="chip" onclick={() => toggle(name)}>{name}</button>
-        {/each}
-      </div>
-    </details>
-  {/if}
-
-  <div class="row">
-    {#if mods.concentration && x.kind !== 'lair'}
-      <label class="check"><input type="checkbox" checked={!!x.concentrating} onchange={(e) => patch({ concentrating: e.currentTarget.checked })} /> Concentrating</label>
     {/if}
-    {#if mods.reactions && x.kind !== 'lair'}
-      <label class="check"><input type="checkbox" checked={!!x.reactionUsed} onchange={(e) => patch({ reactionUsed: e.currentTarget.checked })} /> Reaction used</label>
-    {/if}
-    {#if mods.legendary && x.legendary}
-      {@const l = x.legendary}
-      <span class="row" role="group" aria-label="Legendary actions of {x.name}">
-        <span>Legendary {l.used}/{l.max}</span>
-        <button type="button" aria-label="One fewer legendary action used by {x.name}" disabled={l.used <= 0} onclick={() => legendary(-1)}>−</button>
-        <button type="button" aria-label="One more legendary action used by {x.name}" disabled={l.used >= l.max} onclick={() => legendary(1)}>+</button>
-      </span>
-    {/if}
-  </div>
-
-  {#if mods.deathSaves && ch && life === 'dying'}
-    <div class="row" role="group" aria-label="Death saves of {x.name}">
-      <span>Successes <span class="marks" role="img" aria-label="{ch.state.deathSaves.success} of 3">{'●'.repeat(ch.state.deathSaves.success)}{'○'.repeat(3 - ch.state.deathSaves.success)}</span></span>
-      <span>Failures <span class="marks" role="img" aria-label="{ch.state.deathSaves.fail} of 3">{'●'.repeat(ch.state.deathSaves.fail)}{'○'.repeat(3 - ch.state.deathSaves.fail)}</span></span>
-      <button type="button" onclick={rollDeath}>Roll death save</button>
-    </div>
-  {/if}
-
-  <details>
-    <summary>Notes{monster ? ' and stat block' : ''}</summary>
-    <label class="col"><span>Notes for {x.name} (DM only)</span>
-      <textarea rows="2" value={x.notes ?? ''} onchange={(e) => patch({ notes: e.currentTarget.value })}></textarea>
-    </label>
-    {#if monster}
-      <details bind:open={statOpen}>
-        <summary>Stat block</summary>
-        {#if statOpen}<StatBlock {monster} {index} />{/if}
-      </details>
-    {:else if x.kind === 'monster'}
-      <p class="muted">This monster's stat block is no longer in the campaign.</p>
-    {/if}
-  </details>
-</article>
+    {#if mods.concentration && x.concentrating}<Pill label="Concentrating" accent />{/if}
+    {#if mods.reactions && x.reactionUsed}<Pill label="Reaction used" />{/if}
+    {#if x.hidden}<span class="muted small">Hidden</span>{/if}
+  </span>
+  <span class="move">
+    <button type="button" aria-label="Move {x.name} up" disabled={i === 0 || current} onclick={() => edit((c) => reorder(c, x.id, i - 1))}>↑</button>
+    <button type="button" aria-label="Move {x.name} down" disabled={i === count - 1 || current} onclick={() => edit((c) => reorder(c, x.id, i + 1))}>↓</button>
+  </span>
+</div>
 
 <style>
-  article {
-    margin: 0.5rem 0;
-  }
-
-  article[aria-current='true'] {
-    border-color: var(--accent);
-    box-shadow: inset 4px 0 var(--accent);
-  }
-
-  .top {
+  .crow {
+    display: grid;
+    grid-template-columns: 2.2rem minmax(6rem, 14rem) minmax(5rem, 11rem) minmax(0, 1fr) auto;
     align-items: center;
-  }
-
-  .name {
-    flex: 1 1 8rem;
-    min-width: 0;
-    font-weight: bold;
+    gap: 0.25rem 0.9rem;
+    padding: 0.2rem 0.5rem;
+    min-height: 2.6rem;
   }
 
   .init {
-    width: 4rem;
+    color: var(--text-strong);
+    text-align: right;
   }
 
-  .hpline {
-    margin: 0.4rem 0 0;
+  .name {
+    min-height: 2rem;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--text-strong);
+    text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
-  .prompt {
-    background: var(--surface);
-    padding: 0.3rem;
-  }
-
-  .chip {
-    min-height: 2.2rem;
-    border-radius: 1.2rem;
-  }
-
-  .chip.on {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: var(--bg);
-  }
-
-  .marks {
-    letter-spacing: 0.15em;
+  .name:hover:not(:disabled),
+  .name[aria-pressed='true'] {
+    background: transparent;
+    border: 0;
     color: var(--accent);
   }
 
-  .col {
+  .hp {
     display: flex;
-    flex-direction: column;
-    gap: 0.2rem;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
   }
 
-  textarea {
-    width: 100%;
+  .hp :global(.bar) {
+    flex: 1;
   }
 
-  details {
-    margin: 0.3rem 0;
+  .hpn {
+    flex: none;
+    font-size: 0.85rem;
+  }
+
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.3rem;
+    min-width: 0;
+  }
+
+  .life {
+    color: var(--danger);
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .small {
+    font-size: 0.8rem;
+  }
+
+  .move {
+    display: flex;
+    gap: 0.25rem;
+  }
+
+  .move button {
+    min-height: 1.9rem;
+    min-width: 1.9rem;
+    padding: 0 0.4rem;
+    border-color: transparent;
+    color: var(--muted);
+  }
+
+  .move button:hover:not(:disabled) {
+    color: var(--text-strong);
+  }
+
+  /* Narrower: the chips go on a second line under the name. */
+  @media (max-width: 1199px) {
+    .crow {
+      grid-template-columns: 2.2rem minmax(0, 1fr) minmax(5rem, 9rem) auto;
+    }
+
+    .chips {
+      grid-column: 2 / -1;
+      grid-row: 2;
+    }
+
+    .chips:empty {
+      display: none;
+    }
+  }
+
+  /* Phones: init · name · HP; Move up / down live in the panel. */
+  @media (max-width: 767px) {
+    .crow {
+      grid-template-columns: 2rem minmax(0, 1fr) 6.5rem;
+      padding: 0.15rem 0.4rem;
+    }
+
+    .name {
+      min-height: 44px;
+    }
+
+    .move {
+      display: none;
+    }
   }
 </style>

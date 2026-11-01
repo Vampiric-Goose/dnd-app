@@ -6,7 +6,6 @@
   import { session } from '../../lib/sync/session.svelte.ts';
   import type { Character, Combat, Encounter, MonsterDef } from '../../lib/types.ts';
   import { message } from '../creator/labels.ts';
-  import Encounters from '../initiative/Encounters.svelte';
   import PlayerTracker from '../initiative/PlayerTracker.svelte';
   import Tracker from '../initiative/Tracker.svelte';
 
@@ -53,13 +52,13 @@
   const pool = $derived<MonsterDef[]>(index ? [...homebrew, ...index.all('monster')] : []);
 </script>
 
-<h1>Initiative</h1>
+<!-- The rail already names the page; the heading stays for screen readers. -->
+<h1 class="sr-only">Initiative</h1>
 {#if !campaign}
   <p>Open a campaign to run combat.</p>
 {:else if asPlayer}
   <PlayerTracker {view} own={mine} settings={campaign.settings} />
 {:else}
   {#if error}<p role="alert" class="error">{error}</p>{/if}
-  <Tracker {campaign} {combat} {chars} {pool} {index} reload={load} />
-  <Encounters {campaign} {encounters} {pool} reload={load} />
+  <Tracker {campaign} {combat} {chars} {pool} {index} {encounters} reload={load} />
 {/if}

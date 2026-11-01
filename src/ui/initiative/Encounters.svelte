@@ -71,17 +71,17 @@
 </script>
 
 <section aria-labelledby="enc-h">
-  <h2 id="enc-h">Encounters</h2>
+  <h2 id="enc-h" class="sr-only">Encounters</h2>
   {#if editing}
-    <div class="card">
-      <label class="row"><span>Encounter name</span><input bind:value={editing.name} maxlength="200" /></label>
+    <div class="editor">
+      <label class="fld"><span class="caption">Encounter name</span><input bind:value={editing.name} maxlength="200" /></label>
       {#if editing.lines.length}
-        <ul class="plain">
+        <ul class="plain lines">
           {#each editing.lines as l, i (l.monsterId)}
-            <li class="row">
+            <li>
               <span class="grow">{lineName(l)}</span>
-              <label class="row"><span>Count</span><input type="number" min="1" max="99" step="1" inputmode="numeric" aria-label="Count of {lineName(l)}" bind:value={l.count} /></label>
-              <button type="button" aria-label="Remove {lineName(l)}" onclick={() => editing!.lines.splice(i, 1)}>Remove</button>
+              <label class="row"><span class="sr-only">Count</span><input type="number" class="num" min="1" max="99" step="1" inputmode="numeric" aria-label="Count of {lineName(l)}" bind:value={l.count} /></label>
+              <button type="button" class="x" aria-label="Remove {lineName(l)}" onclick={() => editing!.lines.splice(i, 1)}>Remove</button>
             </li>
           {/each}
         </ul>
@@ -103,11 +103,11 @@
   {/if}
 
   {#if encounters.length}
-    <ul class="plain">
+    <ul class="plain list">
       {#each encounters as e (e.id)}
-        <li class="card">
+        <li>
           <strong>{e.name}</strong>
-          <span class="muted">{e.monsters.map((l) => `${lineName(l)} ×${l.count}`).join(', ') || 'No monsters'}</span>
+          <span class="muted small">{e.monsters.map((l) => `${lineName(l)} ×${l.count}`).join(', ') || 'No monsters'}</span>
           <div class="row">
             <button type="button" class="primary" aria-label="Start {e.name}" disabled={!pool.length || !e.monsters.length} onclick={() => start(e)}>Start</button>
             <button type="button" aria-label="Edit {e.name}" onclick={() => startEdit(e)}>Edit</button>
@@ -122,21 +122,60 @@
 </section>
 
 <style>
-  section {
-    margin-top: 1.5rem;
-  }
-
-  li.card {
+  .editor {
     display: flex;
     flex-direction: column;
-    gap: 0.3rem;
+    gap: 0.5rem;
+    padding-bottom: 0.75rem;
+    margin-bottom: 0.5rem;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .fld {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+  }
+
+  .lines li {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.2rem 0;
+    border-bottom: 1px solid var(--line);
   }
 
   .grow {
-    flex: 1 1 8rem;
+    flex: 1 1 6rem;
+    min-width: 0;
+    color: var(--text-strong);
   }
 
   input[type='number'] {
     width: 4rem;
+  }
+
+  .x {
+    color: var(--muted);
+  }
+
+  .list {
+    margin-top: 0.75rem;
+  }
+
+  .list li {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    padding: 0.6rem 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .list strong {
+    color: var(--text-strong);
+  }
+
+  .small {
+    font-size: 0.85rem;
   }
 </style>
