@@ -10,6 +10,8 @@ import type { Guest, GuestDeps, GuestStatus, PackProgress } from './guest.ts';
 import type { Host, HostDeps } from './host.ts';
 import type { Listener, Transport } from './link.ts';
 import type { RosterEntry, TrackerView } from './project.ts';
+import type { PlayerScene } from './scene.ts';
+import type { Pt } from '../map/grid.ts';
 
 export type SessionStatus = 'off' | 'starting' | 'hosting' | 'retrying' | GuestStatus;
 
@@ -25,6 +27,8 @@ export const session = $state({
   roster: [] as RosterEntry[],
   /** Player: the initiative tracker as the DM last sent it (stage 4). */
   tracker: undefined as TrackerView | undefined,
+  /** Player: the shown battle map scene as the DM last sent it (stage 5). */
+  scene: undefined as PlayerScene | undefined,
   /** Player: pack download progress since the last welcome. */
   packs: undefined as PackProgress | undefined,
   /** Player: the last welcome has been handled (its pack requests are out). */
@@ -73,7 +77,7 @@ export function stopSession(): void {
     r.listener?.close();
   }
   session.confirm?.answer(false);
-  Object.assign(session, { role: undefined, campaignId: undefined, status: 'off', reason: '', online: {}, roster: [], tracker: undefined, packs: undefined, welcomed: false, confirm: undefined });
+  Object.assign(session, { role: undefined, campaignId: undefined, status: 'off', reason: '', online: {}, roster: [], tracker: undefined, scene: undefined, packs: undefined, welcomed: false, confirm: undefined });
 }
 
 function begin(role: Run['role'], code: string, campaignId?: string): Run {
@@ -153,6 +157,9 @@ function hostDeps(r: Run, cid: string): HostDeps {
     packMeta: () => db.packs.listMeta(),
     loadPack: (id) => db.packs.get(id),
     loadCombat: () => db.combat.get(cid),
+    loadScene: () => db.scenes.shown(cid),
+    updateScene: (id, fn) => db.scenes.update(id, fn, { network: true }).then((s) => (changed(r), s)),
+    loadBlob: async (hash) => { const b = await db.blobs.get(hash); return b && { type: b.type, data: await b.arrayBuffer() }; },
     // Dynamic, so the combat store (and the engine) stay out of the first load. applyInitiative checks the fit and reports 'combat'.
     onInitiative: (id, n) => void import('../combat/store.ts').then((m) => m.applyInitiative(cid, id, n)).then(() => changed(r), (e) => console.warn(e)),
     addRoll: (e, from) => void db.characters.list(cid).then((cs) => {
@@ -303,6 +310,9 @@ function guestDeps(r: Run): Omit<GuestDeps, 'code' | 'playerId' | 'name' | 'camp
     onPacks: (p) => { if (live(r)) session.packs = p; },
     onRoster: (x) => { if (live(r)) session.roster = x; },
     onTracker: (t) => { if (live(r)) session.tracker = t; },
+    onScene: (s) => { if (live(r)) session.scene = s; },
+    hasBlob: (hash) => db.blobs.has(hash),
+    saveBlob: (type, d) => save(db.blobs.put(new Blob([d as Uint8Array<ArrayBuffer>], { type }))),
     onRoll: (e, from) => { if (live(r)) addRemoteRoll(e, who(from, session.roster.filter((x) => x.ownerId === from).map((x) => x.name))); },
     onError: (e) => console.warn(e),
   };
@@ -318,7 +328,13 @@ onLocalChange((kind, id) => {
     r.guest?.characterChanged(id);
   } else if (kind === 'campaign' && id === r.campaignId) r.host?.campaignChanged();
   else if (kind === 'combat' && id === r.campaignId) r.host?.trackerChanged();
+  else if (kind === 'scene' && id === r.campaignId) r.host?.sceneChanged();
 });
+
+/** Stage 5: the player's own token, dropped at `to` (the guest checks owner and that it is online; the DM checks the turn). */
+export function sendMove(sceneId: string, tokenId: string, to: Pt): void {
+  run?.guest?.sendMove(sceneId, tokenId, to);
+}
 
 /** Stage 4: the player's own initiative roll, sent to the DM (the guest checks owner, range and that it is online). */
 export function sendInitiative(characterId: string, total: number): void {

@@ -2,11 +2,12 @@
 // delete tombstones), so a test can run a DM and several players in one process.
 import type { RollEntry } from '../../src/lib/rolls.svelte.ts';
 import { Guest, type GuestDeps } from '../../src/lib/sync/guest.ts';
+import { sha256Bytes } from '../../src/lib/sync/code.ts';
 import { Host, type HostDeps } from '../../src/lib/sync/host.ts';
 import { hlcNow, hlcReceive } from '../../src/lib/sync/hlc.ts';
 import { memoryPair, type Link } from '../../src/lib/sync/link.ts';
 import { latestClock, mergeCharacter, rebase, stamp } from '../../src/lib/sync/merge.ts';
-import type { Campaign, CampaignSync, Character, Combat, Pack, PackMeta } from '../../src/lib/types.ts';
+import type { Campaign, CampaignSync, Character, Combat, Pack, PackMeta, Scene } from '../../src/lib/types.ts';
 import { fixtureIndex } from '../fixtures/content.ts';
 
 const clone = <T>(x: T): T => (x === undefined ? x : structuredClone(x));
@@ -17,6 +18,11 @@ export class Device {
   packs = new Map<string, Pack>();
   /** The hosted campaign's live combat (stage 4). */
   combat?: Combat;
+  /** Stage 5: the campaign's one scene (the host sends it while `shown`). The host gets the scene deps only with `map` set (older tests count messages). */
+  scene?: Scene;
+  map = false;
+  /** Stage 5: blobs by hash (images). */
+  blobs = new Map<string, { type: string; data: Uint8Array }>();
   other: unknown[] = []; // records the engine must never read (DM monsters, homebrew items)
   rolls: { e: RollEntry; from?: string }[] = [];
   errors: unknown[] = [];
@@ -81,6 +87,15 @@ export class Device {
       packMeta: async () => this.packMeta(),
       loadPack: async (id) => clone(this.packs.get(id)),
       loadCombat: async () => clone(this.combat),
+      ...(this.map && {
+        loadScene: async () => (this.scene?.shown ? clone(this.scene) : undefined),
+        updateScene: async (id: string, fn: (s: Scene) => Scene) => {
+          if (this.scene?.id !== id) return undefined;
+          this.scene = clone(fn(clone(this.scene)));
+          return clone(this.scene);
+        },
+        loadBlob: async (hash: string) => { const b = this.blobs.get(hash); return b && { type: b.type, data: b.data.slice().buffer }; },
+      }),
       addRoll: (e, from) => { this.rolls.push({ e, from }); },
       onError: (e) => { this.errors.push(e); },
       now: this.wall,
@@ -99,6 +114,8 @@ export class Device {
       dropCharacter: async (c) => { const { campaignId: _c, ...rest } = c; this.putSynced(rest); },
       packMeta: async () => this.packMeta(),
       savePack: async (p) => { this.packs.set(p.id, clone(p)); },
+      hasBlob: async (hash) => this.blobs.has(hash),
+      saveBlob: async (type, data) => { this.blobs.set(await sha256Bytes(data), { type, data: data.slice() }); },
       onRoll: (e, from) => { this.rolls.push({ e, from }); },
       onError: (e) => { this.errors.push(e); },
       now: this.wall,

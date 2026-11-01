@@ -1,17 +1,20 @@
 // Pure (no Svelte/Vite/DOM/PeerJS). A player's side of a campaign session: joins with the code, keeps the local copy of the campaign,
 // and merges the player's characters with the DM's. The DM's device is the authority on what is allowed, but anyone holding the code
 // can stand in for it while the DM is away, so what arrives is still checked (shape, campaign, owner) before it is stored.
+import { fromBase64 } from '../base64.ts';
 import { entityAllowed, packAllowed, patchAllowed, restorablePack } from '../content/sources.ts';
+import type { Pt } from '../map/grid.ts';
 import { characterProblem, isRec, problem, SHAPES } from '../recordShape.ts';
 import type { RollEntry } from '../rolls.svelte.ts';
 import { DEFAULT_SETTINGS } from '../settings.ts';
 import type { Campaign, CampaignSettings, CampaignSync, Character, Pack, PackMeta } from '../types.ts';
-import { newCampaignSync, sha256Text } from './code.ts';
+import { newCampaignSync, sha256Bytes, sha256Text } from './code.ts';
 import { MAX_AHEAD } from './hlc.ts';
 import type { Link } from './link.ts';
 import { canon, latestClock, mergeCharacter, type Synced } from './merge.ts';
 import type { CampaignForPlayers, HealthStatus, RosterEntry, TrackerRow, TrackerView } from './project.ts';
-import { cleanRoll, HLC, INIT_MAX, INIT_MIN, MAX_MESSAGE, MAX_PACK, PLAYER_ID, size, type GuestMsg, type PackOffer } from './protocol.ts';
+import { BLOB_CHUNK, cleanRoll, HLC, IMAGE_TYPES, INIT_MAX, INIT_MIN, MAX_BLOB, MAX_MESSAGE, MAX_PACK, PLAYER_ID, size, type GuestMsg, type PackOffer } from './protocol.ts';
+import { cleanScene, sceneBlobs, type PlayerScene } from './scene.ts';
 
 export type GuestStatus = 'connecting' | 'online' | 'offline' | 'rejected';
 /** Pack download progress: packs finished (stored or refused) of those wanted, and bytes received of their total. */
@@ -52,6 +55,11 @@ export interface GuestDeps {
   onRoll?(e: RollEntry, from?: string): void;
   /** Stage 4: the DM's tracker as players see it (cleanTracker); undefined = no fight. */
   onTracker?(t: TrackerView | undefined): void;
+  /** Stage 5: the shown scene as the DM sent it (cleanScene); undefined = none shown. */
+  onScene?(s: PlayerScene | undefined): void;
+  /** Stage 5: images (db.blobs.has, and db.blobs.put of bytes whose hash was checked). */
+  hasBlob?(hash: string): Promise<boolean>;
+  saveBlob?(type: string, data: Uint8Array): Promise<void>;
   onError?(e: unknown): void;
   now?(): number;
 }
@@ -133,6 +141,11 @@ export class Guest {
   #want = new Map<string, PackOffer>();
   #progress: PackProgress = { done: 0, total: 0, bytes: 0, totalBytes: 0 };
   #chunks?: { id: string; hash: string; total: number; parts: string[]; length: number };
+  #scene?: PlayerScene;
+  /** Stage 5, per link: blobs asked for, those still due, and the one arriving. */
+  #blobAsked = new Set<string>();
+  #blobDue = new Set<string>();
+  #blob?: { hash: string; type: string; size: number; total: number; parts: Uint8Array[]; length: number };
 
   constructor(deps: GuestDeps) {
     this.#deps = deps;
@@ -153,6 +166,9 @@ export class Guest {
   connect(link: Link): void {
     this.#link?.close();
     this.#link = link;
+    this.#blobAsked = new Set();
+    this.#blobDue = new Set();
+    this.#blob = undefined;
     this.#setStatus('connecting');
     link.onMessage((raw) => { if (this.#link === link) void this.#task(() => this.#receive(raw)); });
     // In the queue, after the messages that came before the close: a bye or rejected just read decides the status, not the close.
@@ -192,6 +208,19 @@ export class Guest {
       if (this.#status !== 'online') return;
       const c = await this.#deps.loadCharacter(characterId);
       if (c && c.campaignId === this.#campaignId && c.ownerId === this.#playerId) this.#send({ t: 'initiative', characterId, total });
+    });
+  }
+
+  /** Stage 5: the player's own token, dropped at `to` (kept inside the scene), sent only while online. The DM checks the turn. */
+  sendMove(sceneId: string, tokenId: string, to: Pt): void {
+    if (!Number.isFinite(to.x) || !Number.isFinite(to.y)) return;
+    void this.#task(async () => {
+      const s = this.#scene, t = s?.id === sceneId ? s.tokens.find((x) => x.id === tokenId) : undefined;
+      if (this.#status !== 'online' || !s || !t?.characterId) return;
+      const c = await this.#deps.loadCharacter(t.characterId);
+      if (!c || c.campaignId !== this.#campaignId || c.ownerId !== this.#playerId) return;
+      const x = Math.min(Math.max(to.x, 0), s.width), y = Math.min(Math.max(to.y, 0), s.height);
+      this.#send({ t: 'move', sceneId, tokenId, x, y });
     });
   }
 
@@ -258,7 +287,50 @@ export class Guest {
       }
       case 'packChunk': return this.#packChunk(m);
       case 'tracker': return this.#deps.onTracker?.(m.tracker === null ? undefined : cleanTracker(m.tracker));
+      case 'scene': return this.#onScene(m.scene === null ? undefined : cleanScene(m.scene));
+      case 'blobChunk': return this.#blobChunk(m);
     }
+  }
+
+  /** Stage 5: passes the scene on, then asks once per link for the images it lacks. */
+  async #onScene(s: PlayerScene | undefined): Promise<void> {
+    this.#scene = s;
+    this.#deps.onScene?.(s);
+    if (!this.#deps.hasBlob || !this.#deps.saveBlob) return;
+    const want: string[] = [];
+    for (const h of sceneBlobs(s)) if (!this.#blobAsked.has(h) && !(await this.#deps.hasBlob(h))) want.push(h);
+    if (!want.length) return;
+    for (const h of want) { this.#blobAsked.add(h); this.#blobDue.add(h); }
+    this.#send({ t: 'blobWant', hashes: want });
+  }
+
+  #blobDone(hash: string): void {
+    this.#blobDue.delete(hash);
+    this.#blob = undefined;
+  }
+
+  /** As #packChunk: chunks in order, one image at a time, within the size it claims and MAX_BLOB; stored only when its hash matches. */
+  async #blobChunk(m: Record<string, unknown>): Promise<void> {
+    const { hash, type, size: n, seq, total, data } = m;
+    if (typeof hash !== 'string' || !this.#blobDue.has(hash) || typeof type !== 'string' || !IMAGE_TYPES.includes(type) || typeof data !== 'string'
+      || !Number.isSafeInteger(n) || (n as number) < 0 || (n as number) > MAX_BLOB || !Number.isSafeInteger(seq) || !Number.isSafeInteger(total)
+      || (total as number) < 1 || (total as number) > Math.ceil(MAX_BLOB / BLOB_CHUNK) + 1) return;
+    const cur = this.#blob;
+    if (cur && (cur.hash !== hash || cur.type !== type || cur.size !== n || cur.total !== total || seq !== cur.parts.length)) return this.#blobDone(cur.hash);
+    if (!cur && seq !== 0) return this.#blobDone(hash);
+    let bytes: Uint8Array;
+    try { bytes = fromBase64(data); } catch { return this.#blobDone(hash); }
+    const b = this.#blob = cur ?? { hash, type, size: n as number, total: total as number, parts: [], length: 0 };
+    b.parts.push(bytes);
+    b.length += bytes.length;
+    if (b.length > b.size) return this.#blobDone(hash);
+    if (b.parts.length < b.total) return;
+    this.#blobDone(hash);
+    const all = new Uint8Array(b.length);
+    let at = 0;
+    for (const p of b.parts) { all.set(p, at); at += p.length; }
+    if (b.length !== b.size || (await sha256Bytes(all)) !== hash) return;
+    await this.#deps.saveBlob?.(type, all);
   }
 
   async #welcome(m: Record<string, unknown>): Promise<void> {

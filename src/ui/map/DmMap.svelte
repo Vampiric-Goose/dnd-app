@@ -13,6 +13,7 @@
   import { router } from '../../lib/router.svelte.ts';
   import { computeSheet } from '../../lib/rules/sheet.ts';
   import { getIndex } from '../../lib/store.svelte.ts';
+  import { MAX_BLOB } from '../../lib/sync/protocol.ts';
   import { session } from '../../lib/sync/session.svelte.ts';
   import type { Campaign, Character, Combat, Grid, MonsterDef, RaceDef, Scene, Sheet, Size, Token } from '../../lib/types.ts';
   import GridForm from './GridForm.svelte';
@@ -20,8 +21,6 @@
   import TokenList from './TokenList.svelte';
 
   let { campaign }: { campaign: Campaign } = $props();
-
-  const MAX_BLOB = 8 * 1024 * 1024; // ponytail: Group B moves this to sync/protocol.ts (MAX_BLOB); import it from there then
 
   let scenes: Scene[] = $state.raw([]);
   let chars: Character[] = $state.raw([]);

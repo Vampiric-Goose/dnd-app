@@ -10,6 +10,8 @@ import { peerIdFor } from '../../src/lib/sync/code.ts';
 import { Guest, type GuestDeps } from '../../src/lib/sync/guest.ts';
 import { Host, type HostDeps } from '../../src/lib/sync/host.ts';
 import type { TrackerView } from '../../src/lib/sync/project.ts';
+import type { PlayerScene } from '../../src/lib/sync/scene.ts';
+import { newScene } from '../../src/lib/map/scene.ts';
 import { memoryPair, type Link, type Transport } from '../../src/lib/sync/link.ts';
 import type { Campaign, Combat, ItemDef } from '../../src/lib/types.ts';
 import { rollD20 } from '../../src/ui/sheet/roll.ts';
@@ -19,7 +21,7 @@ import { Device } from './fakes.ts';
 vi.mock('../../src/lib/content/srd.ts', async () => ({ loadSrd: async () => (await import('../fixtures/srdPack.ts')).srdPackFixture }));
 await import('../fixtures/srdPack.ts'); // loaded once here, so the mocked SRD resolves at once inside settle()
 const { app, refreshCampaigns, setCampaign } = await import('../../src/lib/store.svelte.ts');
-const { backoff, follow, hostCampaign, join, rotateCode, sendInitiative, session, stopHosting, stopSession, useTransport } = await import('../../src/lib/sync/session.svelte.ts');
+const { backoff, follow, hostCampaign, join, rotateCode, sendInitiative, sendMove, session, stopHosting, stopSession, useTransport } = await import('../../src/lib/sync/session.svelte.ts');
 
 const CODE = 'ABCDEFGHJKMN';
 const CID = 'c1';
@@ -271,6 +273,21 @@ describe('final review fixes (DM side)', () => {
     await vi.waitFor(() => expect(views.at(-1)?.rows[0].init).toBe(14), SLOW);
   });
 
+  test("stage 5: showing a scene reaches the player, and the player's move lands in the DM's db", async () => {
+    const views: (PlayerScene | undefined)[] = [];
+    const { p, guest } = await hostWithGuest({ onScene: (s) => { views.push(s); } });
+    await db.characters.put({ ...char('ch1', CID), ownerId: 'A1' });
+    await vi.waitFor(() => expect(p.char('ch1')).toBeTruthy(), SLOW);
+    const c = (await db.campaigns.get(CID))!;
+    await db.campaigns.put({ ...c, settings: { ...c.settings, freeMovement: true } });
+    const s = { ...newScene(CID, 'Crypt'), tokens: [{ id: 't1', name: 'ch1', x: 35, y: 35, size: 'M' as const, color: '#123456', characterId: 'ch1' }] };
+    await db.scenes.put(s);
+    await db.scenes.show(CID, s.id); // reported as 'scene': the session sends it
+    await vi.waitFor(() => expect(views.at(-1)?.tokens.map((t) => t.characterId)).toEqual(['ch1']), SLOW);
+    guest.sendMove(s.id, 't1', { x: 100, y: 100 });
+    await vi.waitFor(async () => expect((await db.scenes.get(s.id))!.tokens[0]).toMatchObject({ x: 105, y: 105 }), SLOW);
+  });
+
   test('M2: when hosting cannot start, the session stops and says why (Host again shows)', async () => {
     net.listen = () => { throw new Error('no WebRTC here'); };
     await db.campaigns.put(hosted());
@@ -282,8 +299,7 @@ describe('final review fixes (DM side)', () => {
 
 describe('player', () => {
   /** A DM device with a host engine listening on the fake network. */
-  async function dmDevice(o: Partial<HostDeps> = {}) {
-    const d = new Device();
+  async function dmDevice(o: Partial<HostDeps> = {}, d = new Device()) {
     d.putCampaign(hosted());
     const host = new Host({ ...d.hostDeps(CID), ...o });
     net.listen(await peerIdFor(CODE), { link: (l) => host.accept(l), status: () => {} });
@@ -370,6 +386,25 @@ describe('player', () => {
     expect(calls.length).toBe(1);
     stopSession();
     expect(session.tracker).toBeUndefined();
+  });
+
+  test("stage 5: the shown scene reaches session.scene, the player's move lands, and stopSession clears it", async () => {
+    const map = new Device();
+    map.map = true;
+    const { d, host } = await dmDevice({}, map);
+    d.updateSync(CID, (s) => ({ ...s!, players: { A1: {} } }));
+    d.campaigns.get(CID)!.settings.freeMovement = true;
+    await join({ code: CODE, playerId: 'A1' });
+    await settle(host);
+    await db.characters.put(char('n1', CID));
+    await vi.waitFor(() => expect(d.char('n1')?.ownerId).toBe('A1'), SLOW);
+    d.scene = { ...newScene(CID, 'Crypt'), shown: true, tokens: [{ id: 't1', name: 'n1', x: 35, y: 35, size: 'M', color: '#123456', characterId: 'n1' }] };
+    host.sceneChanged();
+    await vi.waitFor(() => expect(session.scene?.tokens.map((t) => t.characterId)).toEqual(['n1']), SLOW);
+    sendMove(d.scene.id, 't1', { x: 100, y: 100 });
+    await vi.waitFor(() => expect(d.scene!.tokens[0]).toMatchObject({ x: 105, y: 105 }), SLOW);
+    stopSession();
+    expect(session.scene).toBeUndefined();
   });
 
   test('M9: a link join that would take over a campaign joined as another ID asks first; No keeps it', async () => {

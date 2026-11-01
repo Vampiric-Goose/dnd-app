@@ -14,12 +14,15 @@ export function newJoinCode(): string {
   return out;
 }
 
-/** SHA-256 of the text's UTF-8 bytes, lowercase hex. Needs a secure context (https or localhost), as images do. */
-export async function sha256Text(text: string): Promise<string> {
+/** SHA-256 of the bytes, lowercase hex. Needs a secure context (https or localhost), as images do. */
+export async function sha256Bytes(b: ArrayBuffer | Uint8Array): Promise<string> {
   if (!crypto.subtle) throw new Error('Sync needs a secure connection (https): this browser offers no hashing over plain http.');
-  const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
-  return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  const d = await crypto.subtle.digest('SHA-256', b as BufferSource);
+  return [...new Uint8Array(d)].map((x) => x.toString(16).padStart(2, '0')).join('');
 }
+
+/** SHA-256 of the text's UTF-8 bytes, lowercase hex. */
+export const sha256Text = (text: string): Promise<string> => sha256Bytes(new TextEncoder().encode(text));
 
 /** The DM's PeerJS peer id for a join code: 'dndapp-' + the first 32 hex characters of SHA-256(code). */
 export const peerIdFor = async (code: string): Promise<string> => 'dndapp-' + (await sha256Text(code)).slice(0, 32);

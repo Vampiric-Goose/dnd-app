@@ -5,14 +5,17 @@ import { strip2024 } from '../character/strip2024.ts';
 import type { ContentIndex } from '../content/index.ts';
 import { idSource, is2024Source, restorablePack } from '../content/sources.ts';
 import type { RollEntry } from '../rolls.svelte.ts';
-import type { Campaign, CampaignSync, Character, Combat, Pack, PackMeta } from '../types.ts';
+import { toBase64 } from '../base64.ts';
+import { moveTokens } from '../map/scene.ts';
+import type { Campaign, CampaignSync, Character, Combat, Pack, PackMeta, Scene } from '../types.ts';
 import { newJoinCode, nextPlayerId, sha256Text } from './code.ts';
 import { hlcNow, hlcReceive, MAX_AHEAD } from './hlc.ts';
 import type { Link } from './link.ts';
 import { canon, latestClock, mergeCharacter, type Synced } from './merge.ts';
 import { campaignForPlayers, characterForPlayer, packForPlayers, rosterEntry, trackerForPlayers, unprojectCharacter, type TrackerView } from './project.ts';
 import { uid } from '../uid.ts';
-import { cleanRoll, MAX_CHUNK, MAX_MESSAGE, MAX_PACK, parseGuestMessage, size, type GuestMsg, type HostMsg, type PackOffer } from './protocol.ts';
+import { BLOB_CHUNK, cleanRoll, IMAGE_TYPES, MAX_BLOB, MAX_CHUNK, MAX_MESSAGE, MAX_PACK, parseGuestMessage, size, type GuestMsg, type HostMsg, type PackOffer } from './protocol.ts';
+import { moveProblem, sceneBlobs, sceneForPlayers, type PlayerScene } from './scene.ts';
 
 export interface HostDeps {
   /** The hosted campaign (its `sync.role` is 'dm'). */
@@ -38,6 +41,12 @@ export interface HostDeps {
   loadCombat?(): Promise<Combat | undefined>;
   /** Stage 4: a player's initiative roll for their own character in this campaign (shape and owner checked; the store checks the fit). */
   onInitiative?(characterId: string, total: number, from: string): void;
+  /** Stage 5: the campaign's shown scene (db.scenes.shown). Without it no scene is sent. */
+  loadScene?(): Promise<Scene | undefined>;
+  /** Stage 5: a player's move, a read-modify-write of the fresh record (db.scenes.update, a network write: not reported). */
+  updateScene?(id: string, fn: (s: Scene) => Scene): Promise<Scene | undefined>;
+  /** Stage 5: a stored image (db.blobs). */
+  loadBlob?(hash: string): Promise<{ type: string; data: ArrayBuffer } | undefined>;
   /** The connected players changed. */
   onChange?(): void;
   onError?(e: unknown): void;
@@ -45,7 +54,8 @@ export interface HostDeps {
   now?(): number;
 }
 
-interface Conn { link: Link; playerId?: string; name?: string; bad: number; closed: boolean; offered: Set<string>; streamed: Set<string>; packs: Promise<void>; tracker?: string /* JSON of the last tracker sent (M1) */ }
+interface Conn { link: Link; playerId?: string; name?: string; bad: number; closed: boolean; offered: Set<string>; streamed: Set<string>; packs: Promise<void>; tracker?: string /* JSON of the last tracker sent (M1) */;
+  scene?: string /* JSON of the last scene sent */; seen: Set<string> /* blobs offered in any scene sent */; blobs: Set<string> /* blobs streamed */ }
 
 /**
  * Characters of pack JSON per chunk. Worst case a character takes 3 UTF-8 bytes (a quote or backslash escapes to 2, anything else in
@@ -124,7 +134,7 @@ export class Host {
   }
 
   accept(link: Link): void {
-    const conn: Conn = { link, bad: 0, closed: false, offered: new Set(), streamed: new Set(), packs: Promise.resolve() };
+    const conn: Conn = { link, bad: 0, closed: false, offered: new Set(), streamed: new Set(), packs: Promise.resolve(), seen: new Set(), blobs: new Set() };
     setTimeout(() => { if (!conn.playerId && !conn.closed) this.#close(conn); }, HELLO_TIMEOUT);
     this.#conns.add(conn);
     link.onMessage((raw) => {
@@ -175,6 +185,7 @@ export class Host {
       }
       await this.#sendRoster(camp);
       await this.#trackerIfFighting(camp, [id]);
+      await this.#sceneIfLinked(camp, [id]);
     });
   }
 
@@ -186,6 +197,7 @@ export class Host {
       this.#broadcast({ t: 'settings', campaign: forPlayers(camp, await this.#packOffers(camp)) });
       const combat = await this.#deps.loadCombat?.();
       if (combat) await this.#sendTracker(camp, combat);
+      await this.#sendScene(camp);
     });
   }
 
@@ -194,6 +206,15 @@ export class Host {
     void this.#task(async () => {
       const camp = await this.#deps.loadCampaign();
       if (camp && this.#deps.loadCombat) await this.#sendTracker(camp, await this.#deps.loadCombat());
+      if (camp) await this.#sendScene(camp); // health words and conditions follow the fight
+    });
+  }
+
+  /** Stage 5: the shown scene changed (or another is shown, or none): everyone gets the new player scene. */
+  sceneChanged(): void {
+    void this.#task(async () => {
+      const camp = await this.#deps.loadCampaign();
+      if (camp) await this.#sendScene(camp);
     });
   }
 
@@ -245,6 +266,8 @@ export class Host {
         return this.#broadcast({ t: 'roll', entry: msg.entry, from: c.playerId }, c);
       case 'packWant': return this.#packWant(c, msg.ids);
       case 'initiative': return this.#initiative(c, c.playerId, msg.characterId, msg.total);
+      case 'move': return this.#move(c, c.playerId, msg);
+      case 'blobWant': return this.#blobWant(c, msg.hashes);
     }
   }
 
@@ -281,6 +304,7 @@ export class Host {
     for (const ch of await this.#deps.loadCharacters()) if (ch.ownerId === c.playerId) this.#send(c, { t: 'chars', characters: [characterForPlayer(ch)] });
     // I1: always (null with no fight), so a player who was offline when the fight ended drops their stale tracker
     if (this.#deps.loadCombat) this.#sendTrackerTo(c, await this.#tracker(camp, await this.#deps.loadCombat()));
+    if (this.#deps.loadScene) this.#sendSceneTo(c, await this.#scene(camp)); // always (null with none), as the tracker
   }
 
   #reject(c: Conn, reason: string): void {
@@ -335,6 +359,7 @@ export class Host {
     if (rosterChanged) {
       await this.#sendRoster(camp);
       await this.#trackerIfFighting(camp, list.map((ch) => ch.id)); // a player's own HP change shows on everyone's tracker
+      await this.#sceneIfLinked(camp, list.map((ch) => ch.id));
     }
   }
 
@@ -362,6 +387,7 @@ export class Host {
     this.#broadcast({ t: 'deleteChar', id, at: tomb }, c);
     await this.#sendRoster();
     await this.#trackerIfFighting(camp, [id]);
+    await this.#sceneIfLinked(camp, [id]);
   }
 
   /** The campaign's enabled packs that players may have, with the hash and size of what would be sent. Cached per stored pack version. */
@@ -466,5 +492,75 @@ export class Host {
   async #trackerIfFighting(camp: Campaign, ids: string[]): Promise<void> {
     const combat = await this.#deps.loadCombat?.();
     if (combat?.combatants.some((x) => x.characterId !== undefined && ids.includes(x.characterId))) await this.#sendTracker(camp, combat);
+  }
+
+  // ---- Stage 5: the battle map ----
+
+  /** The shown scene as players see it (sceneForPlayers, the allowlist), or undefined. */
+  async #scene(camp: Campaign): Promise<PlayerScene | undefined> {
+    if (!this.#deps.loadScene) return undefined;
+    const s = await this.#deps.loadScene();
+    if (!s) return undefined;
+    const chars = (await this.#deps.loadCharacters()).filter((ch) => ch.campaignId === camp.id);
+    return sceneForPlayers(s, chars, await this.#deps.loadCombat?.(), camp.settings);
+  }
+
+  /** A view identical to the last one this link got is not sent again (a hidden token's change leaves no timing hint), unless forced. */
+  #sendSceneTo(c: Conn, view: PlayerScene | undefined, force = false): void {
+    const json = JSON.stringify(view ?? null);
+    if (c.scene === json && !force) return;
+    c.scene = json;
+    for (const h of sceneBlobs(view)) c.seen.add(h);
+    this.#send(c, { t: 'scene', scene: view ?? null });
+  }
+
+  /** To every admitted link; `force` always gets it (a refused or no-op move snaps its token back). */
+  async #sendScene(camp: Campaign, force?: Conn): Promise<void> {
+    if (!this.#deps.loadScene || ![...this.#conns].some((c) => c.playerId)) return;
+    const view = await this.#scene(camp);
+    for (const c of this.#conns) if (c.playerId) this.#sendSceneTo(c, view, c === force);
+  }
+
+  /** Re-sends the scene when the shown one has a token of any of these characters (their HP or conditions changed). */
+  async #sceneIfLinked(camp: Campaign, ids: string[]): Promise<void> {
+    const s = await this.#deps.loadScene?.();
+    if (s?.tokens.some((t) => t.characterId !== undefined && ids.includes(t.characterId))) await this.#sendScene(camp);
+  }
+
+  /** Review Focus 2: shape (parse), then moveProblem: a crafted move is a violation; a stale one re-sends the scene to that link only. */
+  async #move(c: Conn, pid: string, m: { sceneId: string; tokenId: string; x: number; y: number }): Promise<void> {
+    const camp = await this.#deps.loadCampaign();
+    if (!camp || !this.#deps.loadScene || !this.#deps.updateScene) return;
+    const chars = (await this.#deps.loadCharacters()).filter((ch) => ch.campaignId === camp.id);
+    const combat = await this.#deps.loadCombat?.();
+    const why = moveProblem(await this.#deps.loadScene(), m, pid, chars, combat, camp.settings);
+    if (why?.violation) return this.#violation(c, why.error);
+    // checked again on the fresh record, in the write (the DM may have hidden the token since)
+    if (!why) await this.#deps.updateScene(m.sceneId, (s) => (moveProblem(s, m, pid, chars, combat, camp.settings) ? s : moveTokens(s, [m.tokenId], m.tokenId, m)));
+    await this.#sendScene(camp, c);
+  }
+
+  /**
+   * Only images of a scene this link was sent: of the current one they stream, of an earlier one (the DM switched scenes meanwhile) they
+   * are ignored; anything else (a hidden token's portrait) is a violation. Each once per link, one at a time on the pack chain.
+   */
+  async #blobWant(c: Conn, hashes: string[]): Promise<void> {
+    if (hashes.some((h) => !c.seen.has(h) || c.blobs.has(h))) return this.#violation(c, 'a blob that was not offered');
+    const camp = await this.#deps.loadCampaign();
+    const now = new Set(camp ? sceneBlobs(await this.#scene(camp)) : []);
+    for (const h of new Set(hashes)) {
+      c.blobs.add(h);
+      if (now.has(h)) c.packs = c.packs.then(() => this.#streamBlob(c, h)).catch((e) => (this.#deps.onError ?? console.warn)(e));
+    }
+  }
+
+  async #streamBlob(c: Conn, hash: string): Promise<void> {
+    const b = await this.#deps.loadBlob?.(hash);
+    if (!b || b.data.byteLength > MAX_BLOB || !IMAGE_TYPES.includes(b.type) || c.closed) return;
+    const bytes = new Uint8Array(b.data), total = Math.max(1, Math.ceil(bytes.length / BLOB_CHUNK));
+    for (let seq = 0; seq < total && !c.closed; seq++) {
+      await this.#drained(c);
+      this.#send(c, { t: 'blobChunk', hash, type: b.type, size: bytes.length, seq, total, data: toBase64(bytes.subarray(seq * BLOB_CHUNK, (seq + 1) * BLOB_CHUNK)) });
+    }
   }
 }

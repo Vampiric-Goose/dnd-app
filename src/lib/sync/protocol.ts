@@ -1,14 +1,21 @@
 // Pure (no Svelte/Vite/DOM). The sync messages. Every message is `{ t: <type>, ... }`. Guest messages are untrusted: the host reads
 // them only through parseGuestMessage, which checks each one against an explicit shape and returns a clean copy of the parts it reads.
 import { INIT_MAX, INIT_MIN } from '../combat/combat.ts';
+import { MAX_SIDE } from '../map/scene.ts';
 import { characterProblem, isRec } from '../recordShape.ts';
 import type { RollEntry } from '../rolls.svelte.ts';
 import type { Character } from '../types.ts';
 import type { Synced } from './merge.ts';
 import type { CampaignForPlayers, RosterEntry, TrackerView } from './project.ts';
+import type { PlayerScene } from './scene.ts';
 
 export const MAX_MESSAGE = 256 * 1024, MAX_CHUNK = 64 * 1024, MAX_PACK = 64 * 1024 * 1024;
 export { INIT_MAX, INIT_MIN } from '../combat/combat.ts'; // one source (M2)
+/** Stage 5: images players get (scene backgrounds, portraits): at most MAX_BLOB bytes, BLOB_CHUNK bytes (60 000 base64 chars) per chunk. */
+export const MAX_BLOB = 8 * 1024 * 1024, BLOB_CHUNK = 45_000;
+export const IMAGE_TYPES: readonly string[] = ['image/webp', 'image/png', 'image/jpeg', 'image/gif'];
+/** A blob's key: SHA-256, lowercase hex. */
+export const HASH = /^[0-9a-f]{64}$/;
 
 export type GuestMsg =
   | { t: 'hello'; code: string; playerId?: string; name?: string }
@@ -16,7 +23,9 @@ export type GuestMsg =
   | { t: 'deleteChar'; id: string; at: string }
   | { t: 'roll'; entry: RollEntry }
   | { t: 'packWant'; ids: string[] }
-  | { t: 'initiative'; characterId: string; total: number /* stage 4: the player's own roll, an integer INIT_MIN–INIT_MAX */ };
+  | { t: 'initiative'; characterId: string; total: number /* stage 4: the player's own roll, an integer INIT_MIN–INIT_MAX */ }
+  | { t: 'move'; sceneId: string; tokenId: string; x: number; y: number /* stage 5: the player's own token, scene px */ }
+  | { t: 'blobWant'; hashes: string[] /* stage 5: images of the current scene it lacks */ };
 
 export interface PackOffer { id: string; hash: string; size: number }
 
@@ -31,6 +40,8 @@ export type HostMsg =
   | { t: 'packChunk'; id: string; hash: string; seq: number; total: number; data: string }
   | { t: 'settings'; campaign: CampaignForPlayers }
   | { t: 'tracker'; tracker: TrackerView | null /* stage 4: trackerForPlayers; null = no fight */ }
+  | { t: 'scene'; scene: PlayerScene | null /* stage 5: sceneForPlayers; null = no scene shown */ }
+  | { t: 'blobChunk'; hash: string; type: string; size: number; seq: number; total: number; data: string /* base64 */ }
   | { t: 'bye'; reason: string };
 
 /** Serialized length (UTF-16 units, close enough to bytes for a limit). */
@@ -82,6 +93,15 @@ export function parseGuestMessage(raw: unknown): GuestMsg | { error: string } {
     case 'initiative': {
       const { characterId: id, total: n } = raw;
       return str(id, 100) && Number.isInteger(n) && (n as number) >= INIT_MIN && (n as number) <= INIT_MAX ? { t: 'initiative', characterId: id, total: n as number } : { error: 'bad initiative' };
+    }
+    case 'move': {
+      const { sceneId, tokenId, x, y } = raw;
+      const at = (v: unknown): v is number => num(v) && v >= 0 && v <= MAX_SIDE;
+      return str(sceneId, 100) && str(tokenId, 100) && at(x) && at(y) ? { t: 'move', sceneId, tokenId, x, y } : { error: 'bad move' };
+    }
+    case 'blobWant': {
+      const h = raw.hashes;
+      return Array.isArray(h) && h.length >= 1 && h.length <= 201 && h.every((x) => typeof x === 'string' && HASH.test(x)) ? { t: 'blobWant', hashes: h as string[] } : { error: 'bad blobWant' };
     }
     default:
       return { error: 'unknown message' };
