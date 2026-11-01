@@ -142,7 +142,8 @@ export interface Combat { campaignId: string; combatants: Combatant[]; round: nu
   /** M1: turn boundaries already applied (`round:e|s:turnId`), so Previous then Next never ticks one twice. */ done?: string[];
   /** Combatant id → its movement this turn (dropped where its own turn starts). */ movement?: Record<string, Movement>;
   /** The saved encounter this fight was resumed from (Group C). */ encounterId?: string;
-  /** This fight's identity: new when a fight is made or resumed, kept by saves (the map's arrows end with it). */ fightId?: string }
+  /** This fight's identity: new when a fight is made or resumed, kept by saves (the map's arrows end with it). */ fightId?: string;
+  /** The map's Start combat: round 1 starts by itself once every initiative is in (the players' rolls). */ autoStart?: true }
 /** Map ↔ combat: where the token stood when its turn's movement began (set by its first move) and Dashes taken this turn. */
 export interface Movement { from?: { x: number; y: number }; dashes: number }
 /** A fight saved into an encounter: the whole combat, plus the shown scene's tokens and fog at save time (none when no scene was shown). */

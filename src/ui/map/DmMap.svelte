@@ -9,7 +9,7 @@
   import { snap, type Pt } from '../../lib/map/grid.ts';
   import { addTokens, liveHp, MAX_SIDE, MAX_TOKENS, moveTokens, newScene, patchToken, regrid, removeTokens, tokenColor, type NewToken } from '../../lib/map/scene.ts';
   import { arrowsOn } from '../../lib/map/actions.ts';
-  import { addTokensToCombat, editScene, tokenForCharacter, tokenForMonster } from '../../lib/map/store.ts';
+  import { addTokensToCombat, editScene, startFight, startNow, tokenForCharacter, tokenForMonster } from '../../lib/map/store.ts';
   import { currentRun, patchCombatant } from '../../lib/combat/combat.ts';
   import { budgetApplies, budgetFeet, combatantForToken, effectiveSpeed, originOf, recordMove } from '../../lib/combat/movement.ts';
   import { editCharacter, turn, updateCombat } from '../../lib/combat/store.ts';
@@ -289,8 +289,20 @@
   };
   // --- the Turn tab (turn panel spec): follows the acting creature (a grouped run: its first, with a switcher among the group) ---
   const fighting = $derived(!!combat && combat.round >= 1);
+  /** A map Start combat waiting for the players' initiative rolls. */
+  const waiting = $derived(combat && combat.round === 0 && combat.autoStart ? combat.combatants.filter((x) => x.init === undefined) : undefined);
+  /** One step: show the scene, everyone on it joins, monsters and the DM's characters roll; round 1 once the players have rolled. */
+  const beginFight = () => run(async () => {
+    if (!scene) return;
+    const r = await startFight(cid, scene.id, {
+      chars, sheetOf: (c) => sheets.get(c.id) ?? computeSheet(c, { settings, viewer: 'dm' }), lookup: (id) => monsterById.get(id), settings,
+    });
+    await reload();
+    if (r.missing.length) toast(`Not in this campaign any more, so left out: ${r.missing.join(', ')}.`, true);
+    toast(r.waiting.length ? `Waiting for initiative from ${r.waiting.join(', ')}.` : 'Round 1.');
+  });
   let viewId: string | undefined = $state();
-  $effect(() => { const on = fighting; untrack(() => { if (on) tab = 'turn'; else if (tab === 'turn') tab = 'tokens'; }); });
+  $effect(() => { const on = fighting || !!waiting; untrack(() => { if (on) tab = 'turn'; else if (tab === 'turn') tab = 'tokens'; }); });
   // A string, so only a new turn resets the view (every reload makes a new combat object).
   const turnKey = $derived(combat ? `${combat.round}:${combat.turn}` : '');
   $effect(() => { void turnKey; untrack(() => (viewId = undefined)); });
@@ -401,6 +413,9 @@
   {#if scene}
     <div class="scenebar">
       <Menu label={scene.name} ariaLabel="Scene: {scene.name}" items={sceneItems} align="end" />
+      {#if !fighting && !waiting && scene.tokens.length}
+        <button type="button" class="primary" disabled={busy} onclick={beginFight}>Start combat</button>
+      {/if}
       {#if scene.shown}
         <span class="shown"><span class="dot" aria-hidden="true">●</span> Shown<span class="sr-only"> to players</span></span>
         <button type="button" disabled={busy} onclick={() => show(false)}>Stop showing</button>
@@ -415,7 +430,7 @@
 {#snippet side()}
   {#if scene}
     <Tabs label="Map panel" bind:value={tab} tabs={[
-      ...(fighting ? [{ id: 'turn', label: 'Turn' }] : []),
+      ...(fighting || waiting ? [{ id: 'turn', label: 'Turn' }] : []),
       { id: 'selected', label: 'Selected', ...(selected.length > 0 && { count: selected.length }) },
       { id: 'tokens', label: 'Tokens', count: scene.tokens.length },
       { id: 'scene', label: 'Scene' },
@@ -435,6 +450,12 @@
               {/if}
             {/snippet}
           </TurnPanel>
+        {:else if id === 'turn' && waiting}
+          <div class="waiting">
+            <h2>Rolling initiative</h2>
+            {#if waiting.length}<p>Waiting for {waiting.map((x) => x.name).join(', ')}. Round 1 starts once they've rolled.</p>{/if}
+            <button type="button" class="primary" disabled={busy} onclick={() => run(async () => { await startNow(cid); await reload(); })}>Start now{waiting.length ? ' (roll for them)' : ''}</button>
+          </div>
         {:else if id === 'turn'}
           <p class="muted">No one is acting.</p>
         {:else if id === 'selected'}
@@ -607,6 +628,15 @@
   }
 
   .switch button {
+    min-height: 44px;
+  }
+
+  .waiting h2 {
+    margin: 0 0 0.3rem;
+    font-size: 1.1rem;
+  }
+
+  .waiting button {
     min-height: 44px;
   }
 

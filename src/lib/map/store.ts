@@ -1,6 +1,7 @@
 // The map's db helpers (lazy: reached from the map page only). Token builders that need the combat engine live here, not in scene.ts.
 import { addCombatants, monsterCombatant, pcCombatant } from '../combat/combat.ts';
-import { fightScene, remove, updateCombat } from '../combat/store.ts';
+import { fightScene, prepareStart, remove, updateCombat } from '../combat/store.ts';
+export { startNow } from '../combat/store.ts';
 import { db } from '../db.ts';
 import type { CampaignSettings, Character, Combat, Combatant, MonsterDef, Scene, Sheet, Size } from '../types.ts';
 import { addTokens, patchToken, tokensFromCombat, type NewToken } from './scene.ts';
@@ -58,6 +59,19 @@ export async function addTokensToCombat(cid: string, sceneId: string, ids: strin
   const linked = r!.scene.tokens.filter((t, i) => t.combatantId !== s.tokens[i].combatantId);
   if (linked.length) await editScene(sceneId, (fresh) => linked.reduce((x, t) => (x.tokens.some((y) => y.id === t.id) ? patchToken(x, t.id, { combatantId: t.combatantId }) : x), fresh));
   return { missing: r!.missing };
+}
+
+/**
+ * The map's Start combat: the scene is shown and every token on it joins the fight; monsters and the DM's own characters roll, and round 1
+ * starts as soon as the players' characters have rolled (at once with none). Returns who it waits for, and tokens it could not add.
+ */
+export async function startFight(cid: string, sceneId: string, o: Parameters<typeof addTokensToCombat>[3]): Promise<{ missing: string[]; waiting: string[] }> {
+  const s = await db.scenes.get(sceneId);
+  if (!s) return { missing: [], waiting: [] };
+  if (!s.shown) await db.scenes.show(cid, sceneId);
+  const { missing } = await addTokensToCombat(cid, sceneId, s.tokens.map((t) => t.id), o);
+  const waiting = await prepareStart(cid, new Set(o.chars.filter((c) => c.ownerId).map((c) => c.id)));
+  return { missing, waiting };
 }
 
 /**

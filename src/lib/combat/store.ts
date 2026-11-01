@@ -5,7 +5,7 @@ import { db, DeletedError } from '../db.ts';
 import { computeSheet } from '../rules/sheet.ts';
 import type { CampaignSettings, Character, Combat, Combatant, Duration, Encounter, MonsterDef, Scene } from '../types.ts';
 import { uid } from '../uid.ts';
-import { addMonsters, concentrationDc, encounterPicks, initOk, monsterHp, newCombat, next, patchCombatant, removeStep, setInit, start, type Expired, type HpOp, type Step } from './combat.ts';
+import { addMonsters, concentrationDc, encounterPicks, initOk, monsterHp, newCombat, next, patchCombatant, removeStep, rollInit, setInit, start, type Expired, type HpOp, type Step } from './combat.ts';
 import { restoreCombat, restoreScene, snapshotFight } from './encounters.ts';
 
 // One operation at a time (per tab): two quick hits each read the character after the other's write, so both land.
@@ -62,7 +62,11 @@ async function clearExpired(step: Step): Promise<Step> {
 }
 
 /** The campaign's combat changed by `fn` (a new one when there is none), with updatedAt stamped. */
-export const updateCombat = (cid: string, fn: (c: Combat) => Combat): Promise<Combat> => serial(() => update(cid, fn));
+export const updateCombat = (cid: string, fn: (c: Combat) => Combat): Promise<Combat> => serial(async () => {
+  const c = await update(cid, fn);
+  await readyStart(cid); // a typed initiative can be the last one a map Start combat waits for
+  return (await db.combat.get(cid)) ?? c;
+});
 
 /**
  * Start the fight, or end the turn and start the next; PC conditions that expire are removed from their characters. `expect`: only
@@ -228,5 +232,39 @@ export const applyInitiative = (cid: string, characterId: string, total: number)
     taken = true;
     return { ...setInit(c, x.id, total), updatedAt: Date.now() };
   });
+  if (taken) await readyStart(cid);
   return taken;
+});
+
+/** An autoStart fight in setup whose initiatives are all in starts round 1 (inside serial). */
+async function readyStart(cid: string): Promise<void> {
+  const c = await db.combat.get(cid);
+  if (!c || c.round !== 0 || !c.autoStart || !c.combatants.length || c.combatants.some((x) => x.init === undefined)) return;
+  let expired: Expired[] = [];
+  const combat = await update(cid, (k) => { const { autoStart: _a, ...rest } = k; const s = start(rest); expired = s.expired; return s.combat; });
+  await clearExpired({ combat, expired });
+}
+
+/**
+ * The map's Start combat, after its tokens joined: everyone without an initiative rolls but the players' characters (`waitFor`), and the
+ * fight starts round 1 by itself once those are in; at once when there are none.
+ */
+export const prepareStart = (cid: string, waitFor: Set<string>): Promise<string[]> => serial(async () => {
+  const c = await update(cid, (k) => {
+    let out = k;
+    for (const x of k.combatants) if (x.init === undefined && !(x.characterId && waitFor.has(x.characterId))) out = setInit(out, x.id, rollInit(x.initMod));
+    return { ...out, autoStart: true };
+  });
+  await readyStart(cid);
+  return c.combatants.filter((x) => x.init === undefined).map((x) => x.name);
+});
+
+/** The DM's Start now: rolls for everyone still missing (players who haven't rolled too) and starts round 1. */
+export const startNow = (cid: string): Promise<void> => serial(async () => {
+  await update(cid, (k) => {
+    let out = k;
+    for (const x of k.combatants) if (x.init === undefined) out = setInit(out, x.id, rollInit(x.initMod));
+    return { ...out, autoStart: true };
+  });
+  await readyStart(cid);
 });
