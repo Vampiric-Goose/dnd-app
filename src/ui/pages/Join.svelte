@@ -73,7 +73,7 @@
     {/if}
     <button class="primary" type="submit" disabled={mode === 'id' && !pidOk}>Join</button>
   </form>
-  <p class="muted">Players on the same Wi-Fi connect reliably; some mobile and school networks block direct connections.</p>
+  <p class="muted">Players can join from anywhere over the internet. A few networks (some mobile carriers, schools and workplaces) block direct connections; if joining fails, try another network.</p>
 {:else}
   {#if session.confirm}
     <div role="alertdialog" aria-label="Confirm joining" class="card">
