@@ -4,6 +4,7 @@
 import { fromBase64 } from '../base64.ts';
 import { entityAllowed, packAllowed, patchAllowed, restorablePack } from '../content/sources.ts';
 import type { Pt } from '../map/grid.ts';
+import { cleanActionRequest, cleanActions, type ActionRequest, type PlayerAction } from '../map/actions.ts';
 import { characterProblem, isRec, problem, SHAPES } from '../recordShape.ts';
 import type { RollEntry } from '../rolls.svelte.ts';
 import { DEFAULT_SETTINGS } from '../settings.ts';
@@ -60,6 +61,8 @@ export interface GuestDeps {
   /** Stage 5: images (db.blobs.has, and db.blobs.put of bytes whose hash was checked). */
   hasBlob?(hash: string): Promise<boolean>;
   saveBlob?(type: string, data: Uint8Array): Promise<void>;
+  /** Declared actions the DM sent (cleanActions). */
+  onActions?(list: PlayerAction[]): void;
   onError?(e: unknown): void;
   now?(): number;
 }
@@ -224,6 +227,17 @@ export class Guest {
     });
   }
 
+  /** Declared actions: the player's arrow (it replaces their last), sent only while online. The DM checks the source and visibility. */
+  sendAction(r: ActionRequest): void {
+    const action = cleanActionRequest(r);
+    if (action && this.#status === 'online') this.#send({ t: 'action', action });
+  }
+
+  /** Declared actions: the player's arrow goes. */
+  clearAction(): void {
+    if (this.#status === 'online') this.#send({ t: 'clearAction' });
+  }
+
   stop(): void {
     const l = this.#link;
     this.#link = undefined;
@@ -289,6 +303,7 @@ export class Guest {
       case 'tracker': return this.#deps.onTracker?.(m.tracker === null ? undefined : cleanTracker(m.tracker));
       case 'scene': return this.#onScene(m.scene === null ? undefined : cleanScene(m.scene));
       case 'blobChunk': return this.#blobChunk(m);
+      case 'actions': return this.#deps.onActions?.(cleanActions(m.actions));
     }
   }
 

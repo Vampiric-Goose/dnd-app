@@ -7,6 +7,7 @@ import { idSource, is2024Source, restorablePack } from '../content/sources.ts';
 import type { RollEntry } from '../rolls.svelte.ts';
 import { toBase64 } from '../base64.ts';
 import { moveTokens } from '../map/scene.ts';
+import { ActionBoard, actionProblem, actionsForPlayers, expiry, type ActionRequest, type DeclaredAction, type PlayerAction } from '../map/actions.ts';
 import type { Campaign, CampaignSync, Character, Combat, Pack, PackMeta, Scene } from '../types.ts';
 import { newJoinCode, nextPlayerId, sha256Text } from './code.ts';
 import { hlcNow, hlcReceive, MAX_AHEAD } from './hlc.ts';
@@ -47,6 +48,8 @@ export interface HostDeps {
   updateScene?(id: string, fn: (s: Scene) => Scene): Promise<Scene | undefined>;
   /** Stage 5: a stored image (db.blobs). */
   loadBlob?(hash: string): Promise<{ type: string; data: ArrayBuffer } | undefined>;
+  /** Declared actions: the DM's board changed (every action, for the DM's own map). */
+  onActions?(list: DeclaredAction[]): void;
   /** The connected players changed. */
   onChange?(): void;
   onError?(e: unknown): void;
@@ -55,7 +58,8 @@ export interface HostDeps {
 }
 
 interface Conn { link: Link; playerId?: string; name?: string; bad: number; closed: boolean; offered: Set<string>; streamed: Set<string>; packs: Promise<void>; tracker?: string /* JSON of the last tracker sent (M1) */;
-  scene?: string /* JSON of the last scene sent */; seen: Set<string> /* blobs offered in any scene sent */; blobs: Set<string> /* blobs streamed */ }
+  scene?: string /* JSON of the last scene sent */; seen: Set<string> /* blobs offered in any scene sent */; blobs: Set<string> /* blobs streamed */;
+  actions?: string /* JSON of the last declared actions sent */ }
 
 /**
  * Characters of pack JSON per chunk. Worst case a character takes 3 UTF-8 bytes (a quote or backslash escapes to 2, anything else in
@@ -206,6 +210,7 @@ export class Host {
     void this.#task(async () => {
       const camp = await this.#deps.loadCampaign();
       if (camp && this.#deps.loadCombat) await this.#sendTracker(camp, await this.#deps.loadCombat());
+      if (camp && this.#board.onCombat(await this.#deps.loadCombat?.())) this.#deps.onActions?.(this.#board.list()); // a turn ended: its arrows go
       if (camp) await this.#sendScene(camp); // health words and conditions follow the fight
     });
   }
@@ -214,6 +219,7 @@ export class Host {
   sceneChanged(): void {
     void this.#task(async () => {
       const camp = await this.#deps.loadCampaign();
+      if (camp && this.#board.onScene((await this.#deps.loadScene?.())?.id)) this.#deps.onActions?.(this.#board.list());
       if (camp) await this.#sendScene(camp);
     });
   }
@@ -268,6 +274,8 @@ export class Host {
       case 'initiative': return this.#initiative(c, c.playerId, msg.characterId, msg.total);
       case 'move': return this.#move(c, c.playerId, msg);
       case 'blobWant': return this.#blobWant(c, msg.hashes);
+      case 'action': return this.#action(c, c.playerId, msg.action);
+      case 'clearAction': return this.#actionsChanged(this.#board.clear(c.playerId));
     }
   }
 
@@ -304,7 +312,11 @@ export class Host {
     for (const ch of await this.#deps.loadCharacters()) if (ch.ownerId === c.playerId) this.#send(c, { t: 'chars', characters: [characterForPlayer(ch)] });
     // I1: always (null with no fight), so a player who was offline when the fight ended drops their stale tracker
     if (this.#deps.loadCombat) this.#sendTrackerTo(c, await this.#tracker(camp, await this.#deps.loadCombat()));
-    if (this.#deps.loadScene) this.#sendSceneTo(c, await this.#scene(camp)); // always (null with none), as the tracker
+    if (this.#deps.loadScene) {
+      const view = await this.#scene(camp);
+      this.#sendSceneTo(c, view); // always (null with none), as the tracker
+      this.#sendActionsTo(c, actionsForPlayers(this.#board.list(), view)); // always ([] with none), so stale arrows go
+    }
   }
 
   #reject(c: Conn, reason: string): void {
@@ -519,6 +531,8 @@ export class Host {
     if (!this.#deps.loadScene || ![...this.#conns].some((c) => c.playerId)) return;
     const view = await this.#scene(camp);
     for (const c of this.#conns) if (c.playerId) this.#sendSceneTo(c, view, c === force);
+    const actions = actionsForPlayers(this.#board.list(), view); // what players see of them follows the view
+    for (const c of this.#conns) if (c.playerId) this.#sendActionsTo(c, actions);
   }
 
   /** Re-sends the scene when the shown one has a token of any of these characters (their HP or conditions changed). */
@@ -562,5 +576,59 @@ export class Host {
       await this.#drained(c);
       this.#send(c, { t: 'blobChunk', hash, type: b.type, size: bytes.length, seq, total, data: toBase64(bytes.subarray(seq * BLOB_CHUNK, (seq + 1) * BLOB_CHUNK)) });
     }
+  }
+
+  // ---- Declared actions (intent arrows) ----
+
+  #board = new ActionBoard();
+
+  /** The DM's own arrow, from any token or a point on the shown scene (it replaces the DM's last from the same token). */
+  setDmAction(r: ActionRequest): void {
+    void this.#task(async () => {
+      const s = await this.#deps.loadScene?.();
+      if (!s || s.id !== r.sceneId) return;
+      const combat = await this.#deps.loadCombat?.();
+      this.#board.onCombat(combat); // the board knows the current turn before an arrow joins it
+      this.#board.set({ ...r, id: uid(), by: 'dm', ...expiry(r, s, combat), at: this.#deps.now?.() ?? Date.now() });
+      await this.#actionsChanged(true);
+    });
+  }
+
+  /** The DM clears one arrow, or every arrow. */
+  clearAction(id?: string): void {
+    void this.#task(() => this.#actionsChanged(this.#board.clear('dm', id)));
+  }
+
+  /** A player's arrow: from their own visible token or a point, at what they can see. A foreign token is crafted; the rest is stale. */
+  async #action(c: Conn, pid: string, r: ActionRequest): Promise<void> {
+    const camp = await this.#deps.loadCampaign();
+    const s = await this.#deps.loadScene?.();
+    if (!camp || !s) return;
+    const chars = (await this.#deps.loadCharacters()).filter((ch) => ch.campaignId === camp.id);
+    const combat = await this.#deps.loadCombat?.();
+    const mine = new Set(chars.filter((ch) => ch.ownerId === pid).map((ch) => ch.id));
+    const own = new Set(s.tokens.filter((t) => t.characterId !== undefined && mine.has(t.characterId)).map((t) => t.id));
+    const from = 'tokenId' in r.from ? r.from.tokenId : undefined;
+    if (r.sceneId === s.id && from !== undefined && s.tokens.some((t) => t.id === from) && !own.has(from)) return this.#violation(c, 'not their token');
+    if (actionProblem(r, sceneForPlayers(s, chars, combat, camp.settings), own)) return; // stale: hidden, fogged or another scene now
+    this.#board.onCombat(combat);
+    this.#board.set({ ...r, id: uid(), by: pid, ...expiry(r, s, combat), at: this.#deps.now?.() ?? Date.now() });
+    await this.#actionsChanged(true);
+  }
+
+  /** The board changed: the DM's map, then every link (through the scene send, which filters them by the view). */
+  async #actionsChanged(changed: boolean): Promise<void> {
+    if (!changed) return;
+    this.#deps.onActions?.(this.#board.list());
+    const camp = await this.#deps.loadCampaign();
+    if (camp) await this.#sendScene(camp);
+  }
+
+  /** As #sendSceneTo: a list identical to the last one this link got is not sent again. */
+  #sendActionsTo(c: Conn, actions: PlayerAction[]): void {
+    const json = JSON.stringify(actions);
+    if (c.actions === json) return;
+    c.actions = json;
+    this.#send(c, { t: 'actions', actions });
   }
 }

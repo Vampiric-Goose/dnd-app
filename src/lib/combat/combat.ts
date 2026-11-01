@@ -167,6 +167,12 @@ function runAt(cs: Combatant[], i: number): [number, number] {
 }
 const idsOf = (cs: Combatant[], [a, b]: [number, number]) => new Set(cs.slice(a, b + 1).map((x) => x.id));
 
+/** The combatant ids acting on the current turn (a grouped run is several); empty in round 0 or with no turn. */
+export function currentRun(c: Combat): Set<string> {
+  const i = c.round > 0 ? c.combatants.findIndex((x) => x.id === c.turn) : -1;
+  return i < 0 ? new Set() : idsOf(c.combatants, runAt(c.combatants, i));
+}
+
 /** Ticks the durations triggered at `at` of the combatants in `run`; an ended one goes (with a monster's condition) and is listed. */
 function tick(cs: Combatant[], run: Set<string>, at: Duration['at'], expired: Expired[]): Combatant[] {
   return cs.map((x) => {
