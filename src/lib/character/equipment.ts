@@ -51,8 +51,11 @@ export function itemsInCategory(items: ItemDef[], category: string): ItemDef[] {
     : a ? i.armor?.category === a[1]
     : category === 'shields' ? i.armor?.category === 'shield'
     : i.category === category;
-  return items.filter(i => !i.magic && ok(i)).sort((x, y) => x.name.localeCompare(y.name));
+  return items.filter(i => isMundane(i) && ok(i)).sort((x, y) => x.name.localeCompare(y.name));
 }
+
+/** A plain base item: not magic, no rarity, no bonuses, not wondrous, and not made from another item (a +1 or adamantine variant). */
+export const isMundane = (i: ItemDef): boolean => !i.magic && !i.rarity && !i.baseItemId && !i.bonuses && i.type !== 'wondrous';
 
 /** Reads a starting-gold text such as '5d4 × 10 gp' or '2d4 gp' into dice and a multiplier. */
 export function goldFormula(text: string | undefined): { dice: string; times: number } | undefined {

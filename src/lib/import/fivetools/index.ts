@@ -312,7 +312,8 @@ export async function import5etools(
 
   // 5. Magic variants against every base item in the batch or the index.
   const inBatch = new Set(bases.map(b => b.def.id));
-  for (const d of index.all('item')) if (!d.magic && !inBatch.has(d.id)) bases.push({ view: viewOf(d), def: d });
+  // A stored item made from a base (an earlier import's "Adamantine Longsword", rarity "unknown" so not magic) is no base itself.
+  for (const d of index.all('item')) if (!d.magic && !d.baseItemId && !inBatch.has(d.id)) bases.push({ view: viewOf(d), def: d });
   for (const { key, r, file, label } of live) {
     if (key !== 'magicvariant' || !r.requires) continue; // ponytail: generic variants ("+1 Weapon") aren't items themselves
     try {

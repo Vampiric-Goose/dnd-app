@@ -2,6 +2,7 @@
   import { skillOptions, type Problem } from '../../lib/character/build.ts';
   import type { PendingChoice } from '../../lib/character/choices.ts';
   import { choiceSummary } from '../../lib/character/choiceSummary.ts';
+  import { isMundane } from '../../lib/character/equipment.ts';
   import { fold } from '../../lib/content/ids.ts';
   import type { ContentIndex } from '../../lib/content/index.ts';
   import { ABILITIES, SKILL_ABILITY } from '../../lib/rules/constants.ts';
@@ -35,7 +36,7 @@
       case 'skill': return plain(skillOptions(ch, taken, picked));
       case 'expertise': return plain(uniq([...Object.entries(sheet.skills).filter(([, s]) => s.proficient).map(([k]) => k), ...sheet.proficiencies.tools, ...picked]));
       case 'language': return free(ch.from ?? LANGUAGES).map((l) => ({ value: l, label: l }));
-      case 'tool': return plain(ch.from ?? uniq(index.all('item').filter((i) => i.type === 'tool' && !i.magic).map((i) => i.name.toLowerCase())).sort());
+      case 'tool': return plain(ch.from ?? uniq(index.all('item').filter((i) => i.type === 'tool' && isMundane(i)).map((i) => i.name.toLowerCase())).sort());
       case 'ability': return ch.from.map((x) => ({ value: x, label: ABILITY_NAMES[x] }));
       case 'optionalFeature': return index.optionalFeatures(ch.featureTypes).sort(byName).map(ofEntity);
       case 'option': return ch.options.map((t) => ({ value: t.name, label: t.name, text: t.text }));

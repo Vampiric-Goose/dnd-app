@@ -14,6 +14,16 @@ const items = [
 ];
 const names = (cat: string) => itemsInCategory(items, cat).map(i => i.name);
 
+test('category options are mundane base items only: no rarity, variants, wondrous or bonus items', () => {
+  const sword = (name: string, extra: Partial<ItemDef>) => ({ ...weapon(name, 'martial', false), ...extra });
+  const odd = [
+    sword('Adamantine Longsword', { baseItemId: 'item:longsword@SRD' }), // a generated material variant (rarity "unknown", so magic: false)
+    sword('+3 Adamantine Adamantine Longsword', { baseItemId: 'item:adamantine-longsword@XGE', bonuses: { attack: 3, damage: 3 } }),
+    sword('Rare Blade', { rarity: 'rare' }), sword('Wondrous Blade', { type: 'wondrous' }), sword('Plus Blade', { bonuses: { attack: 1 } }),
+  ];
+  expect(itemsInCategory([...items, ...odd], 'martial-weapons').map(i => i.name)).toEqual(['Longbow', 'Shortsword']);
+});
+
 test('category options match weapon/armor data and ItemDef.category, never magic items', () => {
   expect(names('martial-weapons')).toEqual(['Longbow', 'Shortsword']);
   expect(names('martial-melee-weapons')).toEqual(['Shortsword']);

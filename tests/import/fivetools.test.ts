@@ -2,7 +2,10 @@ import { expect, test } from 'vitest';
 import { richToPlain } from '../../src/lib/content/richtext.ts';
 import { mergePack } from '../../src/lib/import/fivetools/index.ts';
 import type { BackgroundDef, FeatDef, ItemDef, Pack, RaceDef, SpellDef, SubraceDef } from '../../src/lib/types.ts';
-import { readFixture, run } from '../fixtures/import.ts';
+import { ContentIndex } from '../../src/lib/content/index.ts';
+import { import5etools } from '../../src/lib/import/fivetools/index.ts';
+import { asTst, readFixture, run } from '../fixtures/import.ts';
+import { srdPackFixture } from '../fixtures/srdPack.ts';
 
 test('races, subraces, choices', async () => {
   const r = await run({ 'races.json': readFixture('races.json') });
@@ -114,6 +117,20 @@ test('magic variants expand; excludes respected', async () => {
   expect(ok.find(e => e.name === '+1 Testsword')).toMatchObject({ bonuses: { attack: 1, damage: 1 }, rarity: 'uncommon', magic: true });
   const no = (await run({ 'b.json': { baseitem: [base] }, 'v.json': variant({ name: ['Testsword'] }) })).packs.flatMap(p => p.entities);
   expect(no.some(e => e.name === '+1 Testsword')).toBe(false);
+});
+
+test('a generated variant is never a base for another variant (no "Adamantine Adamantine Longsword")', async () => {
+  const base = { name: 'Testsword', source: 'TST', type: 'M', weapon: true, weaponCategory: 'martial', dmg1: '1d8', dmgType: 'S' };
+  const adamantine = { name: 'Adamantine Weapon', requires: [{ weapon: true }], inherits: { namePrefix: 'Adamantine ', source: 'TST', rarity: 'unknown', entries: ['Hard.'] } };
+  const plus3 = { name: '+3 Weapon', requires: [{ weapon: true }], inherits: { namePrefix: '+3 ', source: 'TST', rarity: 'very rare', bonusWeapon: '+3', entries: ['Sharp.'] } };
+  const first = await run({ 'b.json': { baseitem: [base] }, 'v.json': { magicvariant: [adamantine] } });
+  expect(first.packs.flatMap(p => p.entities).find(e => e.name === 'Adamantine Testsword')).toMatchObject({ magic: false, baseItemId: 'item:testsword@TST' });
+  // Importing again (another book, or the same one) runs the variants against the stored items too.
+  const index = new ContentIndex([srdPackFixture, ...first.packs]);
+  const again = await import5etools([{ name: 'v.json', json: asTst({ magicvariant: [adamantine, plus3] }) }], { index, rawLookup: async () => undefined });
+  const names = again.packs.flatMap(p => p.entities).map(e => e.name);
+  expect(names).toContain('+3 Testsword');
+  expect(names.filter(n => /Adamantine.*Adamantine|\+3 Adamantine/.test(n))).toEqual([]);
 });
 
 test('magic variant details: text, base stats, index bases, type requirement', async () => {
