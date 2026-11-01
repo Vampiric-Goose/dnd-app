@@ -1,5 +1,5 @@
 import { slug } from '../content/ids.ts';
-import type { CampaignSettings, Character, Choice, ChoiceAnswer, ClassDef, Entity, EntityKind, EntityOfKind, FeatureDef, SubclassDef } from '../types.ts';
+import type { CampaignSettings, Character, Choice, ChoiceAnswer, ClassDef, Entity, EntityKind, EntityOfKind, FeatureDef, RaceDef, SubclassDef, SubraceDef } from '../types.ts';
 
 // Pure (no Svelte/Vite/DOM): shared with Node scripts.
 
@@ -15,6 +15,25 @@ export function getKind<K extends EntityKind>(lookup: Lookup, id: string | undef
   if (!id) return undefined;
   const e = lookup(id);
   return e?.kind === kind ? (e as EntityOfKind<K>) : undefined;
+}
+
+const CHOICE_OF: Partial<Record<string, Choice['type']>> = { ability: 'ability', skills: 'skill', languages: 'language', tools: 'tool' };
+
+/**
+ * The race and subrace as the character has them. A race field the subrace overwrites is emptied (ability bonuses, a
+ * proficiency list, the traits it replaces by name); `dropped` lists the race choice types that go with it.
+ */
+export function raceParts(c: Character, lookup: Lookup): { race?: RaceDef; sub?: SubraceDef; dropped: Set<Choice['type']> } {
+  const r = getKind(lookup, c.build.raceId, 'race'), sub = getKind(lookup, c.build.subraceId, 'subrace');
+  const ow = sub?.overwrite ?? [], gone = sub?.overwriteTraits ?? [];
+  const dropped = new Set(ow.flatMap(k => CHOICE_OF[k] ?? []));
+  const race = r && (ow.length || gone.length) ? {
+    ...r,
+    abilityBonuses: ow.includes('ability') ? {} : r.abilityBonuses,
+    proficiencies: { ...r.proficiencies, ...Object.fromEntries(ow.filter(k => k !== 'ability').map(k => [k, []])) },
+    traits: r.traits.filter(t => !gone.includes(t.name)),
+  } : r;
+  return { race, sub, dropped };
 }
 
 export interface LevelStep { level: number; classId: string; classLevel: number; cls?: ClassDef; sub?: SubclassDef; features: FeatureDef[] }
@@ -45,9 +64,10 @@ const MAX_DEPTH = 8;
  */
 export function enumerateChoices(c: Character, lookup: Lookup, settings: CampaignSettings): PendingChoice[] {
   const out: PendingChoice[] = [];
-  const add = (level: number, sourceId: string, sourceName: string, choices: Choice[] | undefined, seen = new Set<string>(), depth = 0): void => {
+  const add = (level: number, sourceId: string, sourceName: string, choices: Choice[] | undefined, seen = new Set<string>(), depth = 0, drop?: Set<Choice['type']>): void => {
     if (depth > MAX_DEPTH) return;
     choices?.forEach((choice, i) => {
+      if (drop?.has(choice.type)) return; // a subrace overwrites it; the rest keep their index keys
       const key = choiceKey(level, sourceId, i);
       const answer = c.build.choices[key];
       out.push({ key, level, sourceId, sourceName, choice, ...(answer && { answer }) });
@@ -69,9 +89,10 @@ export function enumerateChoices(c: Character, lookup: Lookup, settings: Campaig
     });
   };
 
-  for (const r of [getKind(lookup, c.build.raceId, 'race'), getKind(lookup, c.build.subraceId, 'subrace')]) {
+  const { race, sub, dropped } = raceParts(c, lookup);
+  for (const r of [race, sub]) {
     if (!r) continue;
-    add(0, r.id, r.name, r.choices);
+    add(0, r.id, r.name, r.choices, undefined, 0, r === race ? dropped : undefined);
     for (const t of r.traits) add(0, `${r.id}/trait:${slug(t.name)}`, t.name, t.choices);
   }
   const bg = getKind(lookup, c.build.backgroundId, 'background');

@@ -1,7 +1,10 @@
 import type { RaceDef, Size, SubraceDef } from '../../types.ts';
-import { ABILITIES, abilities, arr, base, proficiencies, speeds, traits, type Ctx, type Raw } from './common.ts';
+import { ABILITIES, abilities, arr, base, proficiencies, speeds, table, traits, type Ctx, type Raw } from './common.ts';
 
 const SIZES = new Set(['T', 'S', 'M', 'L', 'H', 'G']);
+const OVERWRITE = table<NonNullable<SubraceDef['overwrite']>[number]>({
+  ability: 'ability', skillProficiencies: 'skills', languageProficiencies: 'languages', toolProficiencies: 'tools', weaponProficiencies: 'weapons', armorProficiencies: 'armor',
+});
 
 /** 5etools names subraces without their race ("Hill" of "Dwarf"); ours read "Hill Dwarf", like the SRD. */
 export const subraceName = (r: Raw): string | undefined =>
@@ -27,5 +30,15 @@ export const race = (r: Raw, ctx: Ctx, id: string, name: string): RaceDef => {
 
 export const subrace = (r: Raw, ctx: Ctx, id: string, name: string): SubraceDef => {
   const speed = speeds(r.speed);
-  return { ...base('subrace', id, name, r), raceId: ctx.ref('race', r.raceName, r.raceSource ?? r.source), ...(speed && { speed }), ...shared(r, ctx) };
+  // 5etools keeps PHB Human's +1s on its nameless "standard" subrace, not the race: a sibling's own bonuses are its whole bonus,
+  // so it replaces what our race carries (the SRD Human's +1s).
+  const parent = ctx.rawRace?.(r.raceName, r.raceSource ?? r.source);
+  const implicit = r.ability !== undefined && parent && parent.ability === undefined && !parent.lineage && !parent._copy;
+  const explicit = Object.entries(r.overwrite ?? {}).filter(([, v]) => v).map(([k]) => OVERWRITE[k]).filter(Boolean);
+  const overwrite = [...new Set([...(implicit ? ['ability' as const] : []), ...explicit])];
+  const overwriteTraits = arr(r.entries).map(e => e?.data?.overwrite).filter((x): x is string => typeof x === 'string');
+  return {
+    ...base('subrace', id, name, r), raceId: ctx.ref('race', r.raceName, r.raceSource ?? r.source), ...(speed && { speed }), ...shared(r, ctx),
+    ...(overwrite.length && { overwrite }), ...(overwriteTraits.length && { overwriteTraits }),
+  };
 };

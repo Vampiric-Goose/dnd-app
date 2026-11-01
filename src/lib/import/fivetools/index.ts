@@ -261,8 +261,15 @@ export async function import5etools(
     const g = r.legendaryGroup, k = key === 'monster' && g ? rawKey('legendaryGroup', String(g.name), String(g.source)) : undefined;
     if (k && !groups.has(k)) groups.set(k, await side('legendaryGroup', g, m => warnings.push(`${file}: ${label}: ${m}`)));
   }
+  const rawRaces = new Map<string, Raw | undefined>();
+  for (const { key, r } of live) if (key === 'race' && r.name !== undefined && r.source) rawRaces.set(rawKey('race', r.name, r.source), r);
+  for (const { key, r } of live) {
+    const k = key === 'subrace' && r.name !== undefined && r.raceName ? rawKey('race', r.raceName, r.raceSource ?? r.source) : undefined;
+    if (k && !rawRaces.has(k)) rawRaces.set(k, await stored(k).catch(() => undefined));
+  }
   const conv: Ctx = {
     index,
+    rawRace: (name, source) => rawRaces.get(rawKey('race', name, source)),
     listed: source => { const v = classifySource(source, allDeclared); return v === 'official' || v === 'homebrew'; },
     ref: (kind, name, source) => refs.get(refKey(kind, name, source)) ?? index.find(kind, name, source)?.id
       ?? (isCore(source) ? index.find(kind, name, 'SRD')?.id : undefined) ?? entityId(kind, name, source),

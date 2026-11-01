@@ -29,6 +29,18 @@ test('race details: speed, proficiencies, traits; nameless subrace skipped', asy
   expect(r.errors).toEqual([]);
 });
 
+test('subrace overwrite: explicit (5etools `overwrite`, trait `data.overwrite`) and implicit (the race has no ability of its own, like PHB Human)', async () => {
+  const r = await run({ 'races.json': readFixture('races-human.json') });
+  const subs = r.packs.flatMap(p => p.entities).filter(e => e.kind === 'subrace') as SubraceDef[];
+  const by = (name: string) => subs.find(s => s.name === name)!;
+  expect(subs.map(s => s.name).sort()).toEqual(['Testelf (Variant; Testdrow Descent)', 'Testhuman (Variant; Mark of Testing)', 'Variant Testhuman', 'Wood Testelf']);
+  expect(by('Variant Testhuman')).toMatchObject({ overwrite: ['ability'], choices: [{ type: 'ability', count: 2, amount: 1 }, { type: 'skill', count: 1 }] });
+  expect(by('Testhuman (Variant; Mark of Testing)')).toMatchObject({ overwrite: ['ability', 'languages'], overwriteTraits: ['Languages'], abilityBonuses: { con: 1, wis: 2 } });
+  expect(by('Testelf (Variant; Testdrow Descent)')).toMatchObject({ overwrite: ['ability', 'skills'], overwriteTraits: ['Skill Versatility'], speed: { walk: 35 } });
+  expect(by('Wood Testelf').overwrite).toBeUndefined();
+  expect(r.errors).toEqual([]);
+});
+
 test('SRD overlap becomes a patch; 2024 is dropped', async () => {
   const r = await run({ 'x.json': { race: [{ name: 'Dwarf', source: 'PHB', srd: true, size: ['M'], speed: 25, entries: ['Full text.'] }], spell: [{ name: 'Fireball', source: 'XPHB', level: 3 }] } });
   const phb = r.packs.find(p => p.source === 'PHB')!;

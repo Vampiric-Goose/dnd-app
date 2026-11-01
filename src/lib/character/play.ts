@@ -1,5 +1,5 @@
 import type { CampaignSettings, Character, RichText, SpellDef } from '../types.ts';
-import { enumerateChoices, getKind, walkLevels } from './choices.ts';
+import { enumerateChoices, getKind, raceParts, walkLevels } from './choices.ts';
 
 // Pure (no Svelte/Vite/DOM): view helpers for the character sheet.
 
@@ -15,7 +15,8 @@ export function featureList(c: Character, settings: CampaignSettings): FeatureIt
   const lookup = (id: string) => c.embedded[id];
   const out: FeatureItem[] = [];
   // N12: a race's text repeats its traits; list the traits, or the race text when it has none.
-  for (const r of [getKind(lookup, c.build.raceId, 'race'), getKind(lookup, c.build.subraceId, 'subrace')]) {
+  const { race, sub } = raceParts(c, lookup);
+  for (const r of [race, sub]) {
     if (!r) continue;
     if (r.traits.length) for (const t of r.traits) out.push({ source: r.name, name: t.name, text: t.text });
     else if (r.text.length) out.push({ source: 'Race', name: r.name, text: r.text });

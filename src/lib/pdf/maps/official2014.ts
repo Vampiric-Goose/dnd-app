@@ -112,7 +112,7 @@ export const official2014: FieldMap = {
       const v = int(SCORE_FIELD[a], 1, 30);
       if (v === undefined) continue;
       shown[a] = v;
-      c.build.baseScores[a] = Math.max(1, v - (origin?.abilityBonuses[a] ?? 0) - (sub?.abilityBonuses[a] ?? 0));
+      c.build.baseScores[a] = Math.max(1, v - (sub?.overwrite?.includes('ability') ? 0 : origin?.abilityBonuses[a] ?? 0) - (sub?.abilityBonuses[a] ?? 0));
     }
 
     // Levels, e.g. "Fighter 3 / Wizard 2": one addLevel per level, in order. Problems (multiclass prerequisites) are only noted.

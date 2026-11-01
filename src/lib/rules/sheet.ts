@@ -1,5 +1,5 @@
 import { slug } from '../content/ids.ts';
-import { getKind } from '../character/choices.ts';
+import { getKind, raceParts } from '../character/choices.ts';
 import { attunedCount, carriedWeight } from '../items/inventory.ts';
 import type { Ability, Attack, Character, ClassDef, ItemDef, OverrideKey, Proficiencies, Recharge, Scores, Sheet, Skill, Speeds, Spellcasting, When } from '../types.ts';
 import { ABILITIES, ATTUNEMENT_LIMIT, SKILL_ABILITY, abilityMod, averageHp, profBonus } from './constants.ts';
@@ -30,8 +30,7 @@ export function computeSheet(c: Character, opts: SheetOpts): Sheet {
     return o;
   };
 
-  const race = getKind(lookup, c.build.raceId, 'race');
-  const sub = getKind(lookup, c.build.subraceId, 'subrace');
+  const { race, sub } = raceParts(c, lookup);
   const bg = getKind(lookup, c.build.backgroundId, 'background');
   const totalLevel = c.build.levels.length;
   const classLevel: Record<string, number> = {};
