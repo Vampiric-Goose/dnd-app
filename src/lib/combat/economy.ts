@@ -16,6 +16,7 @@ export const CONDITION_TEXT: Record<string, string> = {
   Deafened: "can't hear",
   Frightened: "disadvantage while the source is in sight; can't move closer to it",
   Grappled: 'speed 0',
+  Hasted: 'speed doubled, +2 AC, advantage on Dex saves; the extra Action is only one weapon attack, Dash, Disengage, Hide or Use an Object',
   Incapacitated: 'no actions or reactions',
   Invisible: 'your attacks have advantage, attacks against you disadvantage',
   Paralyzed: 'no actions, reactions or movement; hits within 5 ft are critical',

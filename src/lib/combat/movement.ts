@@ -23,7 +23,7 @@ export const usedFeet = (m: Movement | undefined, at: Pt | undefined, g: Grid | 
 };
 
 /** Budget = speed × (1 + Dashes). */
-export const budgetFeet = (speed: number, m: Movement | undefined): number => speed * (1 + (m?.dashes ?? 0));
+export const budgetFeet = (speed: number, m: Movement | undefined): number => speed * (m?.mult ?? 1) * (1 + (m?.dashes ?? 0));
 
 /** The budget less the movement used (token at `at` on grid `g`; without them none is counted as used). */
 export const remainingFeet = (speed: number, m: Movement | undefined, at?: Pt, g?: Grid, diagonal: '5-5-5' | '5-10-5' = '5-5-5'): number =>
@@ -38,8 +38,8 @@ export const budgetApplies = (c: Combat | undefined, settings: { freeMovement: b
 
 /** The entry rebuilt from its known fields (an old `feet` goes). */
 const entry = (c: Combat, id: string): Movement => {
-  const m = c.movement?.[id], from = originOf(m), dashes = m?.dashes;
-  return { ...(from && { from }), dashes: typeof dashes === 'number' && dashes >= 0 ? dashes : 0 };
+  const m = c.movement?.[id], from = originOf(m), dashes = m?.dashes, mult = m?.mult;
+  return { ...(from && { from }), dashes: typeof dashes === 'number' && dashes >= 0 ? dashes : 0, ...(mult === 0 || mult === 2 ? { mult } : {}) };
 };
 const withEntry = (c: Combat, id: string, m: Movement): Combat => ({ ...c, movement: { ...c.movement, [id]: m } });
 

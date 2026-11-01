@@ -32,7 +32,7 @@
     busy?: boolean;
     dm?: boolean; canEnd: boolean; endLabel?: string;
     /** false: not sent (offline), so nothing rolls. */
-    onuse: (a: TurnAction, slot?: number) => boolean | void; onend: () => void;
+    onuse: (a: TurnAction, slot?: number, target?: string) => boolean | void; onend: () => void;
     /** DM: set or clear a pip. */
     onpip?: (pip: Pip, used: boolean) => void;
     /** DM: show another creature from the strip. */
@@ -52,18 +52,20 @@
   const GROUPS: [Cost, string][] = [['action', 'Action'], ['bonus', 'Bonus action'], ['reaction', 'Reaction'], ['none', 'No cost']];
   const freeSlots = (a: TurnAction) => slots.flatMap((n, i) => (n > 0 && i + 1 >= a.spell!.level ? [i + 1] : []));
   let slotFor: Record<string, number> = $state({});
+  /** Who a spell that needs a target goes to (default: the creature shown). */
+  let targetFor: Record<string, string> = $state({});
   const problem = (a: TurnAction) => problemOf(x, a, conditions, onTurn, perAction) ?? (a.spell && a.spell.level > 0 && !freeSlots(a).length ? 'no slot left' : undefined);
   const inAttack = $derived(e.attacks > 0 && e.attacks < perAction);
 
   let dialog: HTMLDialogElement | undefined = $state();
   let crit = $state(false);
-  $effect(() => { void self; untrack(() => { slotFor = {}; crit = false; }); }); // another creature: its own slot picks, no carried crit
+  $effect(() => { void self; untrack(() => { slotFor = {}; targetFor = {}; crit = false; }); }); // another creature: its own slot picks, no carried crit
   /** The slot picked for it while still free, else the lowest free one. */
   const slotOf = (a: TurnAction) => (freeSlots(a).includes(slotFor[a.id]) ? slotFor[a.id] : freeSlots(a)[0]);
 
   function use(a: TurnAction): boolean {
     if (a.spell?.concentration && concentrating && !confirm('Casting this ends your concentration on the current spell. Go on?')) return false;
-    return onuse(a, a.spell && a.spell.level > 0 ? slotOf(a) : undefined) !== false;
+    return onuse(a, a.spell && a.spell.level > 0 ? slotOf(a) : undefined, a.target ? targetFor[a.id] ?? self : undefined) !== false;
   }
   function attack(a: TurnAction) {
     if (!use(a)) return;
@@ -168,6 +170,11 @@
       {#if a.attack.versatile}<button type="button" onclick={() => damage(`${a.attack!.name} damage (two-handed)`, a.attack!.versatile!)}>Two-handed <span class="num">{a.attack.versatile}</span></button>{/if}
     {:else}
       {#each parts as p}{#if 'expr' in p}<button type="button" aria-label="Roll {a.name} {p.hit ? 'attack' : 'damage'}, {p.t}" onclick={() => rollTo(`${name}: ${a.name} ${p.hit ? 'attack' : 'damage'}`, p.expr!, { public: false })}>{p.t}</button>{/if}{/each}
+      {#if a.target}
+        <select aria-label="{a.name} target" value={targetFor[a.id] ?? self} onchange={(ev) => (targetFor[a.id] = (ev.currentTarget as HTMLSelectElement).value)}>
+          {#each order as r (r.id)}<option value={r.id}>{r.name}</option>{/each}
+        </select>
+      {/if}
       {#if a.spell && a.spell.level > 0 && freeSlots(a).length > 1}
         <select aria-label="{a.name} slot level" value={slotOf(a)} onchange={(ev) => (slotFor[a.id] = Number((ev.currentTarget as HTMLSelectElement).value))}>
           {#each freeSlots(a) as l}<option value={l}>Level {l}</option>{/each}

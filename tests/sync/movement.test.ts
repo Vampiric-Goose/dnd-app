@@ -60,6 +60,8 @@ test('the parse: use and endTurn; the old dash message is gone', () => {
   expect(parseGuestMessage({ t: 'use', characterId: 'thorin', action: 'spell:x', slot: 3 })).toEqual({ t: 'use', characterId: 'thorin', action: 'spell:x', slot: 3 });
   for (const slot of [0, 10, 1.5, '2']) expect(parseGuestMessage({ t: 'use', characterId: 'thorin', action: 'a', slot })).toEqual({ error: 'bad use' });
   expect(parseGuestMessage({ t: 'use', characterId: 5, action: 'a' })).toEqual({ error: 'bad use' });
+  expect(parseGuestMessage({ t: 'use', characterId: 'thorin', action: 'a', target: 'g1' })).toEqual({ t: 'use', characterId: 'thorin', action: 'a', target: 'g1' });
+  expect(parseGuestMessage({ t: 'use', characterId: 'thorin', action: 'a', target: 5 })).toEqual({ error: 'bad use' });
   expect(parseGuestMessage({ t: 'endTurn', characterId: 'thorin' })).toEqual({ t: 'endTurn', characterId: 'thorin' });
   expect(parseGuestMessage({ t: 'endTurn' })).toEqual({ error: 'bad endTurn' });
 });

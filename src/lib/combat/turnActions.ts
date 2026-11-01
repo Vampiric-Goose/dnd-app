@@ -4,7 +4,7 @@ import { spellList } from '../character/play.ts';
 import { getKind } from '../character/choices.ts';
 import { richToPlain } from '../content/richtext.ts';
 import type { Attack, Character, Combat, Combatant, MonsterDef, RichText, Sheet } from '../types.ts';
-import { BLOCKING, grantAction, spend, useProblem, type Cost } from './economy.ts';
+import { actionsLeft, BLOCKING, grantAction, spend, useProblem, type Cost } from './economy.ts';
 import { addDash } from './movement.ts';
 
 export interface TurnAction {
@@ -17,6 +17,8 @@ export interface TurnAction {
   grants?: 'action' | 'dash';
   /** A legendary action: the legendary uses it costs (taken at the end of another creature's turn). */
   legendary?: number;
+  /** Casting it needs a target, which gets this condition (Haste: its text grants "an additional action on each of its turns"). */
+  target?: 'haste';
 }
 
 /** The cost a feature's text states: "as a bonus action" / "use a bonus action", "as an action" / "use your action", a reaction; else none. */
@@ -76,7 +78,8 @@ export function pcActions(c: Character, sheet: Sheet, features: { name: string; 
       const cost = castingCost(spell.castingTime);
       if (!cost || seen.has(spell.id) || !(spell.level === 0 || prepared || knownCaster)) continue;
       seen.add(spell.id);
-      out.push({ id: `spell:${spell.id}`, name: spell.name, cost, group: 'spell', text: spell.text, spell: { id: spell.id, level: spell.level, concentration: spell.concentration } });
+      out.push({ id: `spell:${spell.id}`, name: spell.name, cost, group: 'spell', text: spell.text, spell: { id: spell.id, level: spell.level, concentration: spell.concentration },
+        ...(/\badditional action on each of its turns\b/i.test(richToPlain(spell.text)) && { target: 'haste' as const }) });
     }
   }
   for (const r of sheet.resources) {
@@ -103,12 +106,22 @@ export function monsterActions(m: MonsterDef): TurnAction[] {
 /** An attack that is part of the Attack action (Extra Attack counts it); undefined for anything else. */
 export const attackOf = (a: TurnAction, perAction: number) => (a.group === 'attack' && a.cost === 'action' ? { perAction } : undefined);
 
-/** Why the creature can't use it now (its pip, a use left, legendary uses), or undefined. Slots are `payment`'s check. */
+const HASTE_OK = new Set(['std:dash', 'std:disengage', 'std:hide', 'std:use-an-object']);
+/** It would take the Hasted creature's last Action, its extra one (ponytail: the Haste Action counts as the one taken last). */
+function onHasteAction(x: Combatant, a: TurnAction, perAction: number): boolean {
+  const e = x.economy;
+  return !!e?.haste && a.cost === 'action' && actionsLeft(x) === 1 && !(attackOf(a, perAction) && e.attacks > 0 && e.attacks < perAction);
+}
+
+/** Why the creature can't use it now (its pip, a use left, legendary uses, the Hasted limits), or undefined. Slots are `payment`'s check. */
 export function problemOf(x: Combatant, a: TurnAction, conditions: readonly string[], onTurn: boolean, perAction = 1): string | undefined {
   if (a.uses && a.uses.left < 1) return `no ${a.name} left`;
   if (a.grants === 'action' && !onTurn) return 'not your turn';
   if (a.grants === 'action' && x.economy?.surged) return 'once a turn';
   if (a.id.startsWith('offhand:') && !x.economy?.light) return 'attack with a light melee weapon first';
+  if (onHasteAction(x, a, perAction) && !(HASTE_OK.has(a.id) || a.id.startsWith('attack:') || (a.group === 'monster' && a.text && /weapon attack/i.test(richToPlain(a.text))))) {
+    return 'Hasted: the extra Action is only one weapon attack, Dash, Disengage, Hide or Use an Object';
+  }
   if (a.legendary === undefined) return useProblem(x, a.cost, conditions, onTurn, attackOf(a, perAction));
   if (onTurn) return "only at the end of another creature's turn";
   const block = conditions.find((c) => BLOCKING.includes(c.toLowerCase()));
@@ -137,14 +150,22 @@ export function payment(a: TurnAction, sheet: Sheet, c: Character, slot?: number
   return (sheet.slots[level - 1] ?? 0) - (c.state.slotsUsed[level - 1] ?? 0) > 0 ? { level } : { level, pact: true };
 }
 
-/** The fight after the use (check problemOf first): its pip, an extra Action, concentration, a Dash's movement, legendary uses. */
-export function applyUse(k: Combat, x: Combatant, a: TurnAction, perAction = 1): Combat {
-  let y = spend(x, a.cost, attackOf(a, perAction));
+/**
+ * The fight after the use (check problemOf first): its pip, an extra Action, concentration, a Dash's movement, legendary uses; a new
+ * concentration spell ends the caster's Haste; Haste makes `target` (a combatant id) Hasted.
+ */
+export function applyUse(k: Combat, x: Combatant, a: TurnAction, perAction = 1, target?: string): Combat {
+  const haste = onHasteAction(x, a, perAction);
+  let y = spend(x, a.cost, attackOf(a, haste ? 1 : perAction));
+  if (haste && attackOf(a, perAction) && y.economy) y = { ...y, economy: { ...y.economy, attacks: perAction } }; // one weapon attack only
   if (attackOf(a, perAction) && lightMelee(a.attack!) && y.economy) y = { ...y, economy: { ...y.economy, light: true } };
   if (a.grants === 'action') { y = grantAction(y); y = { ...y, economy: { ...y.economy!, surged: true } }; }
   if (a.spell?.concentration) y = { ...y, concentrating: true };
   if (a.legendary && y.legendary) y = { ...y, legendary: { ...y.legendary, used: y.legendary.used + a.legendary } };
-  const next = { ...k, combatants: k.combatants.map((z) => (z.id === x.id ? y : z)) };
+  let cs = k.combatants.map((z) => (z.id === x.id ? y : z));
+  if (a.spell?.concentration) cs = cs.map((z) => (z.hasted?.by === x.id ? { ...z, hasted: { ...z.hasted, ended: true as const } } : z));
+  if (a.target === 'haste' && target !== undefined) cs = cs.map((z) => (z.id === target ? { ...z, hasted: { by: x.id, round: k.round } } : z));
+  const next = { ...k, combatants: cs };
   return a.grants === 'dash' ? addDash(next, x.id) : next;
 }
 

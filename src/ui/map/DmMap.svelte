@@ -320,7 +320,7 @@
     return { x, name: x.name, hp: x.hp, maxHp: x.maxHp, tempHp: x.tempHp, conditions: x.conditions ?? [], actions: m ? monsterActions(m) : [], perAction: 1 };
   });
   /** The DM's use: pips and what it pays, no turn checks (the panel greys out what the rules don't allow). */
-  const useAction = (a: TurnAction, slot?: number) => run(async () => {
+  const useAction = (a: TurnAction, slot?: number, target?: string) => run(async () => {
     const v = view;
     if (!v || !combat) return;
     const pay = v.ch && v.sheet ? payment(a, v.sheet, v.ch, slot) : {};
@@ -329,7 +329,7 @@
     await updateCombat(cid, (k) => { // checked again on the fresh fight: a quick second tap spends nothing
       const y = k.combatants.find((z) => z.id === v.x.id);
       why = y ? problemOf(y, a, v.ch ? v.conditions : y.conditions ?? [], currentRun(k).has(y.id), v.perAction) : 'not in the fight';
-      return y && !why ? applyUse(k, y, a, v.perAction) : k;
+      return y && !why ? applyUse(k, y, a, v.perAction, target) : k;
     });
     if (why) throw new Error(`Not done: ${why}.`);
     if (v.ch && (pay.level !== undefined || a.resource)) await editCharacter(v.ch.id, (c) => spendOn(c, pay.level, a.resource, pay.pact));
@@ -438,9 +438,9 @@
       {#snippet panel(id)}
         {#if id === 'turn' && view && combat}
           <TurnPanel dm name={view.name} order={combat.combatants} self={view.x.id} current={combat.turn} round={combat.round}
-            hp={view.hp} maxHp={view.maxHp} tempHp={view.tempHp} tone={view.ch ? 'accent' : 'danger'} conditions={view.conditions}
+            hp={view.hp} maxHp={view.maxHp} tempHp={view.tempHp} tone={view.ch ? 'accent' : 'danger'} conditions={[...view.conditions, ...(view.x.hasted && !view.x.hasted.ended ? ['Hasted'] : [])]}
             x={view.x} perAction={view.perAction} onTurn={turnIds.has(view.x.id)} actions={view.actions} slots={view.slots}
-            concentrating={!!view.x.concentrating} {busy} canEnd={!busy} endLabel="Next turn ▶" onuse={(a, slot) => void useAction(a, slot)} onend={nextTurn} {onpip}
+            concentrating={!!view.x.concentrating} {busy} canEnd={!busy} endLabel="Next turn ▶" onuse={(a, slot, target) => void useAction(a, slot, target)} onend={nextTurn} {onpip}
             onstrip={(id) => (viewId = id)}>
             {#snippet top()}
               {#if runList.length > 1}

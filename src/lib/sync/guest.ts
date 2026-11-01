@@ -125,10 +125,10 @@ export function cleanTracker(v: unknown): TrackerView | undefined {
     return [{ id: r.id, name: r.name, ...(s(r.characterId, 100) && { characterId: r.characterId }), ...(fin(r.init) && { init: r.init as number }),
       ...(fin(r.hp) && { hp: r.hp as number }), ...(fin(r.maxHp) && { maxHp: r.maxHp as number }),
       ...(typeof r.health === 'string' && HEALTH.includes(r.health) && { health: r.health as HealthStatus }),
-      ...(isRec(r.moved) && fin(r.moved.dashes) && (r.moved.dashes as number) >= 0 && { moved: { dashes: r.moved.dashes as number,
+      ...(isRec(r.moved) && fin(r.moved.dashes) && (r.moved.dashes as number) >= 0 && { moved: { dashes: r.moved.dashes as number, ...((r.moved.mult === 0 || r.moved.mult === 2) && { mult: r.moved.mult as number }),
         ...(isRec(r.moved.from) && fin(r.moved.from.x) && fin(r.moved.from.y) && { from: { x: r.moved.from.x as number, y: r.moved.from.y as number } }) } }),
       ...(isRec(r.econ) && [r.econ.used, r.econ.extra, r.econ.attacks, r.econ.perAction].every((v) => fin(v) && (v as number) >= 0 && (v as number) <= 20)
-        && { econ: { used: r.econ.used as number, extra: r.econ.extra as number, attacks: r.econ.attacks as number, perAction: r.econ.perAction as number, bonus: r.econ.bonus === true, light: r.econ.light === true, surged: r.econ.surged === true, reaction: r.econ.reaction === true, conc: r.econ.conc === true } })}];
+        && { econ: { used: r.econ.used as number, extra: r.econ.extra as number, attacks: r.econ.attacks as number, perAction: r.econ.perAction as number, bonus: r.econ.bonus === true, light: r.econ.light === true, surged: r.econ.surged === true, haste: r.econ.haste === true, hasted: r.econ.hasted === true, reaction: r.econ.reaction === true, conc: r.econ.conc === true } })}];
   })).slice(0, MAX_ROWS);
   const current = rows.some((r) => r.id === v.current) ? v.current as string : undefined;
   return { round: v.round as number, ...(current !== undefined && { current }), rows, ...(v.ask === true && v.round === 0 && { ask: true as const }) };
@@ -223,8 +223,8 @@ export class Guest {
   }
 
   /** Turn panel: the player's own character uses an action (or ends its turn), sent only while online. The DM's device checks it. */
-  sendUse(characterId: string, action: string, slot?: number): void {
-    this.#own(characterId, () => this.#send({ t: 'use', characterId, action, ...(slot !== undefined && { slot }) }));
+  sendUse(characterId: string, action: string, slot?: number, target?: string): void {
+    this.#own(characterId, () => this.#send({ t: 'use', characterId, action, ...(slot !== undefined && { slot }), ...(target !== undefined && { target }) }));
   }
   sendEndTurn(characterId: string): void { this.#own(characterId, () => this.#send({ t: 'endTurn', characterId })); }
   #own(characterId: string, send: () => void): void {

@@ -82,18 +82,18 @@
     if (!r?.econ || !c) return undefined;
     try {
       const sheet = computeSheet(c, { settings, viewer: 'player' });
-      const { used, extra, bonus, attacks, light, surged, reaction } = r.econ;
-      return { r, c, econ: r.econ, sheet, actions: pcActions(c, sheet, featureList(c, settings)), x: { economy: { used, extra, bonus, attacks, light, surged }, reactionUsed: reaction } as Combatant };
+      const { used, extra, bonus, attacks, light, surged, haste, reaction } = r.econ;
+      return { r, c, econ: r.econ, sheet, actions: pcActions(c, sheet, featureList(c, settings)), x: { economy: { used, extra, bonus, attacks, light, surged, haste }, reactionUsed: reaction } as Combatant };
     } catch { return undefined; }
   });
   /** The tracker a use was sent under: its buttons stay off until the next tracker arrives or 3 s pass (a double tap sends one use). */
   let sentUnder: object | undefined = $state.raw();
   let sentTimer: ReturnType<typeof setTimeout> | undefined;
   const offline = () => { if (session.status === 'online') return false; toast("You're offline: that wasn't sent.", true); return true; };
-  function useAction(a: TurnAction, slot?: number): boolean {
+  function useAction(a: TurnAction, slot?: number, target?: string): boolean {
     if (!turn || offline()) return false;
     sentUnder = session.tracker;
-    sendUse(turn.c.id, a.id, slot);
+    sendUse(turn.c.id, a.id, slot, target);
     clearTimeout(sentTimer);
     sentTimer = setTimeout(() => (sentUnder = undefined), 3000);
     return true;
@@ -177,7 +177,7 @@
       {#if !joined}<p class="muted note">Player view: read-only</p>{/if}
       {#if turn && fight}
         <TurnPanel name={turn.c.name} order={fight.rows} self={turn.r.id} current={fight.current} round={fight.round}
-          hp={turn.c.state.hp} maxHp={turn.sheet.maxHp} tempHp={turn.c.state.tempHp} conditions={turn.c.state.conditions}
+          hp={turn.c.state.hp} maxHp={turn.sheet.maxHp} tempHp={turn.c.state.tempHp} conditions={[...turn.c.state.conditions, ...(turn.econ.hasted ? ['Hasted'] : [])]}
           moveLeft={turn.c.id === actor ? turnBudget?.left : undefined} x={turn.x} perAction={turn.econ.perAction} onTurn={turn.c.id === actor}
           actions={turn.actions} slots={slotsLeft(turn.sheet, turn.c)} concentrating={turn.econ.conc}
           busy={!!sentUnder && sentUnder === session.tracker} canEnd={turn.c.id === actor} onuse={useAction} onend={() => { if (!offline()) sendEndTurn(turn!.c.id); }}>

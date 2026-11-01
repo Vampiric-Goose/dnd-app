@@ -350,7 +350,9 @@ export class Host {
       const x = k.round >= 1 ? combatantForToken(k, { characterId: ch.id }) : undefined;
       why = x && problemOf(x, a, ch.state.conditions, k.turn === x.id, per); // the real turn: a hidden creature's turn is not theirs (final review)
       if (!x || why) { why ??= 'not in the fight'; return k; }
-      return applyUse(k, x, a, per);
+      const t = a.target && m.target !== undefined ? k.combatants.find((z) => !z.hidden && (z.id === m.target || this.#aliases.get(z.id) === m.target)) : undefined;
+      if (a.target && !t) { why = 'pick a target'; return k; }
+      return applyUse(k, x, a, per, t?.id);
     });
     if (why) return refuse(why);
     if ((level !== undefined || a.resource) && !(await this.#deps.editCharacter!(ch.id, (x) => spendOn(x, level, a.resource, pact)).catch(() => false))) {

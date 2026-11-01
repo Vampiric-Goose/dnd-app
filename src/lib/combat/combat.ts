@@ -200,6 +200,23 @@ export const freshTurn = (x: Combatant): Combatant => {
   return { ...y, reactionUsed: false, ...(x.legendary && { legendary: { ...x.legendary, used: 0 } }) };
 };
 
+/**
+ * Haste (2014) where a Hasted creature's turn starts (after its movement reset): while the caster still concentrates on it, for at most
+ * 10 rounds, one extra Action (the Hasted condition limits it) and doubled speed; once it has ended, no moving or acting this turn.
+ */
+function hasteStart(c: Combat, ids: Set<string>): Combat {
+  let out = c;
+  for (const id of ids) {
+    const x = out.combatants.find((z) => z.id === id);
+    if (!x?.hasted) continue;
+    const on = !x.hasted.ended && !!out.combatants.find((z) => z.id === x.hasted!.by)?.concentrating && out.round - x.hasted.round < 10;
+    const { hasted: _h, ...gone } = x;
+    const y: Combatant = on ? { ...x, economy: { used: 0, extra: 1, bonus: false, attacks: 0, haste: true } } : { ...gone, economy: { used: 1, extra: 0, bonus: true, attacks: 0 } };
+    out = { ...out, combatants: out.combatants.map((z) => (z.id === id ? y : z)), movement: { ...out.movement, [id]: { dashes: 0, mult: on ? 2 : 0 } } };
+  }
+  return out;
+}
+
 function startTurn(cs: Combatant[], r: [number, number], expired: Expired[]): Combatant[] {
   const run = idsOf(cs, r);
   const reset = cs.map((x) => (run.has(x.id) ? freshTurn(x) : x));
@@ -217,7 +234,7 @@ function pass(c: Combat, cs: Combatant[], j: number, expired: Expired[]): Combat
   const done = (c.done ?? []).filter((k) => parseInt(k, 10) >= round - 1);
   const fresh = !done.includes(key);
   if (!fresh) return { ...c, combatants: cs, round, turn, done };
-  return dropMoves({ ...c, combatants: startTurn(cs, runAt(cs, at), expired), round, turn, done: [...done, key] }, idsOf(cs, runAt(cs, at)));
+  return hasteStart(dropMoves({ ...c, combatants: startTurn(cs, runAt(cs, at), expired), round, turn, done: [...done, key] }, idsOf(cs, runAt(cs, at))), idsOf(cs, runAt(cs, at)));
 }
 
 /** Round 1, the first combatant's turn (with its start-of-turn effects). Sorts first, unless the DM reordered by hand (S4-R2). */
@@ -225,7 +242,7 @@ export function start(c: Combat): Step {
   const cs = c.reordered ? c.combatants : sortCombatants(c.combatants);
   if (!cs.length) return { combat: { ...c, combatants: cs }, expired: [] };
   const expired: Expired[] = [];
-  return { combat: dropMoves({ ...c, combatants: startTurn(cs, runAt(cs, 0), expired), round: 1, turn: cs[0].id, done: [`1:s:${cs[0].id}`] }, idsOf(cs, runAt(cs, 0))), expired };
+  return { combat: hasteStart(dropMoves({ ...c, combatants: startTurn(cs, runAt(cs, 0), expired), round: 1, turn: cs[0].id, done: [`1:s:${cs[0].id}`] }, idsOf(cs, runAt(cs, 0))), idsOf(cs, runAt(cs, 0))), expired };
 }
 
 /** Ends the current turn (its end-of-turn durations tick, once: M1), then starts the next (wrapping to a new round). */

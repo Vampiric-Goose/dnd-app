@@ -27,7 +27,7 @@ export type GuestMsg =
   | { t: 'initiative'; characterId: string; total: number /* stage 4: the player's own roll, an integer INIT_MIN–INIT_MAX */ }
   | { t: 'move'; sceneId: string; tokenId: string; x: number; y: number /* stage 5: the player's own token, scene px */ }
   | { t: 'blobWant'; hashes: string[] /* stage 5: images of the current scene it lacks */ }
-  | { t: 'use'; characterId: string; action: string; slot?: number /* turn panel: the player's own character does something (a TurnAction id) */ }
+  | { t: 'use'; characterId: string; action: string; slot?: number; target?: string /* turn panel: the player's own character does something (a TurnAction id) */ }
   | { t: 'endTurn'; characterId: string /* the player's own character ends its turn */ }
   | { t: 'action'; action: ActionRequest /* declared action: the player's arrow (replaces their last) */ }
   | { t: 'clearAction' /* the player's arrow goes */ }
@@ -117,9 +117,10 @@ export function parseGuestMessage(raw: unknown): GuestMsg | { error: string } {
       return Array.isArray(h) && h.length >= 1 && h.length <= 201 && h.every((x) => typeof x === 'string' && HASH.test(x)) ? { t: 'blobWant', hashes: h as string[] } : { error: 'bad blobWant' };
     }
     case 'use': {
-      const { characterId, action, slot } = raw;
+      const { characterId, action, slot, target } = raw;
       return str(characterId, 100) && str(action, 200) && (slot === undefined || (Number.isInteger(slot) && (slot as number) >= 1 && (slot as number) <= 9))
-        ? { t: 'use', characterId, action, ...(slot !== undefined && { slot: slot as number }) } : { error: 'bad use' };
+        && (target === undefined || str(target, 100))
+        ? { t: 'use', characterId, action, ...(slot !== undefined && { slot: slot as number }), ...(target !== undefined && { target: target as string }) } : { error: 'bad use' };
     }
     case 'endTurn':
       return str(raw.characterId, 100) ? { t: 'endTurn', characterId: raw.characterId } : { error: 'bad endTurn' };

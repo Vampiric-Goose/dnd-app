@@ -134,7 +134,8 @@ export interface Combatant {
   conditions?: string[];                 // monsters only (a PC's are character.state.conditions)
   durations?: Record<string, Duration>;  // condition name → when it ends (PCs too)
   concentrating?: boolean; legendary?: { max: number; used: number }; reactionUsed?: boolean; notes?: string;
-  economy?: { used: number; extra: number; bonus: boolean; attacks: number; light?: boolean; surged?: boolean }; // this turn: Actions used, extra Actions, Bonus action, attacks in the Attack action, attacked with a light melee weapon (two-weapon fighting), Action Surge used (absent: fresh)
+  economy?: { used: number; extra: number; bonus: boolean; attacks: number; light?: boolean; surged?: boolean; haste?: boolean }; // this turn: Actions used, extra Actions, Bonus action, attacks in the Attack action, attacked with a light melee weapon (two-weapon fighting), Action Surge used, one extra Action is Haste's (absent: fresh)
+  hasted?: { by: string; round: number; ended?: true }; // the Hasted condition: the caster's combatant id and the round cast; ended: the caster cast another concentration spell
 }
 /** The live fight of a campaign. `combatants` is the order; round 0 = setup; `turn` = the current combatant's id. */
 export interface Combat { campaignId: string; combatants: Combatant[]; round: number; turn?: string; groupMonsters: boolean; updatedAt: number;
@@ -146,7 +147,7 @@ export interface Combat { campaignId: string; combatants: Combatant[]; round: nu
   /** The map's Start combat: round 1 starts by itself once every initiative is in (the players' rolls). */ autoStart?: true;
   /** The DM asked the party to roll initiative: players get a pop-up during setup. */ askInit?: true }
 /** Map ↔ combat: where the token stood when its turn's movement began (set by its first move) and Dashes taken this turn. */
-export interface Movement { from?: { x: number; y: number }; dashes: number }
+export interface Movement { from?: { x: number; y: number }; dashes: number; /** speed multiplier this turn: 2 Hasted, 0 after Haste ends */ mult?: number }
 /** A fight saved into an encounter: the whole combat, plus the shown scene's tokens and fog at save time (none when no scene was shown). */
 export interface SavedFight { combat: Combat; map?: { sceneId: string; tokens: Token[]; fog?: string }; savedAt: number }
 /** A prepared encounter (at most 50 lines, each count 1–99), or a saved fight (`fight`, with `monsters` empty). */
