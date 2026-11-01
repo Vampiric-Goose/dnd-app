@@ -378,7 +378,7 @@ describe('property: three replicas converge', () => {
       const addOrder = ids(fin).filter((id) => added.has(id));
       expect(addOrder).toEqual([...addOrder].sort((p, q) => hlcCompare(added.get(p)!, added.get(q)!)));
     }
-  });
+  }, 60_000); // ~4 s locally; shared CI runners are several times slower
 });
 
 describe('N3: crafted state maps', () => {

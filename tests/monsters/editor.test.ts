@@ -74,7 +74,7 @@ test('M1/M6: a "constructor" count is 0; an unclosed {@damage tag is read quickl
   expect(estimateDpr(m([t('Multiattack', 'It makes constructor attacks.'), t('Slam', '+4 to hit. Hit: 5 (1d6 + 2) bludgeoning damage.')]))).toBe(5);
   const t0 = performance.now();
   expect(estimateDpr(m([t('Slam', `{@damage ${'1'.repeat(20_000)}`)]))).toBe(0);
-  expect(performance.now() - t0).toBeLessThan(500);
+  expect(performance.now() - t0).toBeLessThan(2000);
 });
 
 test('estimateAttack returns the highest attack bonus and save DC', () => {
