@@ -3,8 +3,8 @@ import { restorablePack } from './content/sources.ts';
 import { db, sha256Hex, type BlobRecord, type Snapshot, type TrashEntry } from './db.ts';
 import { playerCharacter } from './items/playerView.ts';
 import { soundMonster } from './monsters/homebrew.ts';
-import { campaignProblem, characterProblem, isRec, problem, SHAPES, type Rec } from './recordShape.ts';
-import type { Campaign, Character, Pack, StoredItem, StoredMonster } from './types.ts';
+import { campaignProblem, characterProblem, encounterProblem, isRec, problem, SHAPES, type Rec } from './recordShape.ts';
+import type { Campaign, Character, Encounter, Pack, StoredItem, StoredMonster } from './types.ts';
 import { uid } from './uid.ts';
 
 const MY_SPELLS_PACK = 'pack:MYSPELLS'; // R3: the pasted spells (SpellEditor)
@@ -69,8 +69,8 @@ function trashRecords(o: Rec): Record<string, TrashEntry[]> {
 }
 
 /**
- * Whole library, or one campaign (its characters, items and monsters, plus the packs it enables when
- * includePacks). Images and the "My spells" pack always travel with it.
+ * Whole library, or one campaign (its characters, items, monsters and prepared encounters, plus the packs it enables when
+ * includePacks). Images and the "My spells" pack always travel with it. The live combat does not.
  */
 export async function exportBackup(opts: { campaignId?: string; includePacks: boolean }): Promise<Blob> {
   let campaigns: Campaign[], characters: Character[], items: StoredItem[], monsters: StoredMonster[], packIds: string[];
@@ -97,15 +97,16 @@ export async function exportBackup(opts: { campaignId?: string; includePacks: bo
   // R9: the Deleted characters of each campaign travel too.
   const trash: Record<string, TrashEntry[]> = {};
   for (const c of campaigns) { const t = await db.trash.list(c.id); if (t.length) trash[c.id] = t; }
+  const encounters = (await Promise.all(campaigns.map((c) => db.encounters.list(c.id)))).flat(); // stage 4
   const exportedAt = Date.now();
-  const file = json({ format: 'dnd-app-backup', version: 1, exportedAt, campaigns, characters, items, monsters, packs, blobs, trash });
+  const file = json({ format: 'dnd-app-backup', version: 1, exportedAt, campaigns, characters, items, monsters, encounters, packs, blobs, trash });
   // The built file must not be lost over a bookkeeping write (a full disk is when you need a backup most).
   // Only a whole-library export counts as "backed up": one campaign's file leaves the rest unprotected.
   if (opts.campaignId === undefined) await db.meta.set('lastBackupAt', exportedAt).catch((err) => console.warn('Could not record backup time', err));
   return file;
 }
 
-export type BackupCounts = { campaigns: number; characters: number; items: number; monsters: number; packs: number; skippedPacks?: string[]; skippedItems?: string[]; skippedMonsters?: string[] };
+export type BackupCounts = { campaigns: number; characters: number; items: number; monsters: number; encounters: number; packs: number; skippedPacks?: string[]; skippedItems?: string[]; skippedMonsters?: string[] };
 /** A validated backup waiting for the user's yes (R57). `replaced`: records stored here it would overwrite; `newer`: how many of those are newer than the file's copy. */
 export interface BackupPlan { snapshot: Snapshot; counts: BackupCounts; replaced: number; newer: number }
 
@@ -119,6 +120,7 @@ export async function readBackup(file: Blob): Promise<BackupPlan> {
     characters: records<Character>(o, 'characters', characterProblem),
     items: records<StoredItem>(o, 'items', (r) => problem(r, SHAPES.item)),
     monsters: records<StoredMonster>(o, 'monsters', (r) => problem(r, SHAPES.monster)), // missing in backups from before monsters
+    encounters: records<Encounter>(o, 'encounters', encounterProblem), // missing in backups from before stage 4
     packs: records<Pack>(o, 'packs', (r) => problem(r, SHAPES.pack)),
     blobs: await blobRecords(o),
     trash: trashRecords(o),
@@ -132,7 +134,7 @@ export async function readBackup(file: Blob): Promise<BackupPlan> {
   // R60: and the same for monsters: a 2024 one, or one the stat block could not read.
   const skippedMonsters = snapshot.monsters.filter((m) => is2024(m) || !soundMonster(m)).map((m) => m.id);
   snapshot.monsters = snapshot.monsters.filter((m) => !is2024(m) && soundMonster(m));
-  const counts = { campaigns: snapshot.campaigns.length, characters: snapshot.characters.length, items: snapshot.items.length, monsters: snapshot.monsters.length, packs: snapshot.packs.length,
+  const counts = { campaigns: snapshot.campaigns.length, characters: snapshot.characters.length, items: snapshot.items.length, monsters: snapshot.monsters.length, encounters: snapshot.encounters.length, packs: snapshot.packs.length,
     ...(skippedPacks.length && { skippedPacks }), ...(skippedItems.length && { skippedItems }), ...(skippedMonsters.length && { skippedMonsters }) };
   return { snapshot, counts, ...(await db.countReplaced(snapshot)) };
 }

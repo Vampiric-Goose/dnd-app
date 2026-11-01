@@ -31,5 +31,5 @@ test('a normal backup of a library with the cached SRD does not carry the SRD', 
   await db.packs.put(pack('pack:PHB', 'PHB'));
   const o = JSON.parse(await (await exportBackup({ includePacks: true })).text());
   expect(o.packs.map((p: Pack) => p.id)).toEqual(['pack:PHB']);
-  expect(await importBackup(new Blob([JSON.stringify(o)]))).toEqual({ campaigns: 0, characters: 0, items: 0, monsters: 0, packs: 1 });
+  expect(await importBackup(new Blob([JSON.stringify(o)]))).toEqual({ campaigns: 0, characters: 0, items: 0, monsters: 0, encounters: 0, packs: 1 });
 });

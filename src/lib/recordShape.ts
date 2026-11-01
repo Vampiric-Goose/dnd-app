@@ -76,5 +76,13 @@ export function characterListProblem(r: unknown): string | undefined {
   if (!isRec(c.embedded)) return 'has no embedded';
 }
 
+/** Stage 4: a prepared encounter: string ids and name, at most 50 lines of `{ monsterId: string, count: integer 1–99 }`. */
+export function encounterProblem(r: unknown): string | undefined {
+  if (!isRec(r) || typeof r.id !== 'string' || typeof r.campaignId !== 'string' || typeof r.name !== 'string') return 'is incomplete';
+  if (!Array.isArray(r.monsters) || r.monsters.length > 50) return 'has a damaged monster list';
+  const i = r.monsters.findIndex((l) => !isRec(l) || typeof l.monsterId !== 'string' || !Number.isInteger(l.count) || (l.count as number) < 1 || (l.count as number) > 99);
+  return i < 0 ? undefined : `has a damaged monster line (${i + 1})`;
+}
+
 /** A campaign, with its loot entries checked like a character's inventory. */
 export const campaignProblem = (r: unknown): string | undefined => problem(r, SHAPES.campaign) ?? entriesProblem((r as Rec).loot as unknown[], 'loot');

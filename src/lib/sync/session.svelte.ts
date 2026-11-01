@@ -310,7 +310,7 @@ onLocalChange((kind, id) => {
   if (kind === 'character') {
     r.host?.characterChanged(id); // a restore from Deleted characters too: the owner's devices get it back
     r.guest?.characterChanged(id);
-  } else if (id === r.campaignId) r.host?.campaignChanged();
+  } else if (kind === 'campaign' && id === r.campaignId) r.host?.campaignChanged(); // 'combat': the tracker message (stage 4, Task 3)
 });
 
 rollHooks.public = (e) => {

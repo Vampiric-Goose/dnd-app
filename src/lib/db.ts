@@ -5,7 +5,7 @@ import { newNode } from './sync/code.ts';
 import { hlcNow, hlcReceive } from './sync/hlc.ts';
 import { latestClock, mergeCharacter, rebase, stamp as stampSync } from './sync/merge.ts';
 import type { Hlc } from './sync/hlc.ts';
-import type { Campaign, CampaignSync, Character, Pack, PackMeta, StoredItem, StoredMonster } from './types.ts';
+import type { Campaign, CampaignSync, Character, Combat, Encounter, Pack, PackMeta, StoredItem, StoredMonster } from './types.ts';
 
 export class StorageError extends Error {
   override name = 'StorageError';
@@ -24,6 +24,7 @@ interface Schema extends DBSchema {
   characters: { key: string; value: Character; indexes: { campaignId: string } };
   items: { key: string; value: StoredItem; indexes: { campaignId: string } };
   monsters: { key: string; value: StoredMonster; indexes: { campaignId: string } };
+  encounters: { key: string; value: Encounter; indexes: { campaignId: string } };
   packMeta: { key: string; value: PackMeta };
   packs: { key: string; value: Pack };
   raw5e: { key: string; value: unknown };
@@ -38,16 +39,21 @@ let onBlocked: (() => void) | undefined;
 /** Called when opening is held up by another tab on an older version; the open itself finishes once that tab closes. */
 export const onUpgradeBlocked = (fn: (() => void) | undefined): void => { onBlocked = fn; };
 
-let onChange: ((kind: 'character' | 'campaign', id: string) => void) | undefined;
+type ChangeKind = 'character' | 'campaign' | 'combat';
+let onChange: ((kind: ChangeKind, id: string) => void) | undefined;
 /**
  * Stage 3: told after every local write of a character (save, delete, restore from the trash) or campaign, so the sync session can
  * send it. Writes from the sync engine itself (putSynced, deletes with `network`, updateSync) are not reported: no echo.
+ * Stage 4: also a campaign's live combat ('combat', campaign id).
  */
 export const onLocalChange = (fn: typeof onChange): void => { onChange = fn; };
-const changed = (kind: 'character' | 'campaign', id: string) => { try { onChange?.(kind, id); } catch (e) { console.warn(e); } };
+const changed = (kind: ChangeKind, id: string) => { try { onChange?.(kind, id); } catch (e) { console.warn(e); } };
+
+/** Stage 4: a campaign's live combat, in the meta store (device-local, not in backups). */
+export const combatKey = (campaignId: string) => `combat:${campaignId}`;
 
 function open() {
-  return (conn ??= openDB<Schema>(NAME, 2, {
+  return (conn ??= openDB<Schema>(NAME, 3, {
     upgrade(d, oldVersion) {
       if (oldVersion < 1) {
         d.createObjectStore('campaigns', { keyPath: 'id' });
@@ -60,6 +66,7 @@ function open() {
         d.createObjectStore('meta');
       }
       if (oldVersion < 2) d.createObjectStore('monsters', { keyPath: 'id' }).createIndex('campaignId', 'campaignId'); // stage 2: the DM's own monsters
+      if (oldVersion < 3) d.createObjectStore('encounters', { keyPath: 'id' }).createIndex('campaignId', 'campaignId'); // stage 4: prepared encounters
     },
     // An older tab holds the old version open: the upgrade waits (and still completes by itself once that tab closes).
     blocked() { onBlocked?.(); },
@@ -229,6 +236,7 @@ async function restoreFromTrash(campaignId: string, id: string): Promise<boolean
 
 export interface Snapshot {
   campaigns: Campaign[]; characters: Character[]; items: StoredItem[]; monsters?: StoredMonster[] /* absent in old backups */; packs: Pack[]; blobs: BlobRecord[];
+  encounters?: Encounter[]; // stage 4 (absent in old backups)
   /** Deleted characters per campaign id (R9; absent in old backups). */
   trash?: Record<string, TrashEntry[]>;
 }
@@ -256,9 +264,9 @@ export const db = {
     }),
     /**
      * Removes the campaign and its items and monsters; its characters stay, unassigned. Stage 3: also the packs its DM shared with this
-     * device (`sharedBy`), its Deleted characters (trash) and its hosting switch.
+     * device (`sharedBy`), its Deleted characters (trash) and its hosting switch. Stage 4: its encounters and its live combat.
      */
-    delete: (id: string) => write(['campaigns', 'characters', 'items', 'monsters', 'packs', 'packMeta', 'meta'], async (tx) => {
+    delete: (id: string) => write(['campaigns', 'characters', 'items', 'monsters', 'encounters', 'packs', 'packMeta', 'meta'], async (tx) => {
       await tx.objectStore('campaigns').delete(id);
       for (const m of await tx.objectStore('packMeta').getAll()) {
         if (m.sharedBy !== id) continue;
@@ -267,6 +275,9 @@ export const db = {
       }
       await tx.objectStore('meta').delete(trashKey(id));
       await tx.objectStore('meta').delete(hostOffKey(id));
+      await tx.objectStore('meta').delete(combatKey(id));
+      const encounters = tx.objectStore('encounters');
+      for (const k of await encounters.index('campaignId').getAllKeys(id)) await encounters.delete(k);
       const items = tx.objectStore('items');
       for (const k of await items.index('campaignId').getAllKeys(id)) await items.delete(k);
       const monsters = tx.objectStore('monsters');
@@ -343,6 +354,34 @@ export const db = {
     put: (m: StoredMonster) => write(['monsters'], (tx) => tx.objectStore('monsters').put({ ...m, updatedAt: Date.now() })),
     delete: (id: string) => write(['monsters'], (tx) => tx.objectStore('monsters').delete(id)),
   },
+  /** Stage 4: prepared encounters, per campaign (in backups). */
+  encounters: {
+    list: async (campaignId: string): Promise<Encounter[]> => (await open()).getAllFromIndex('encounters', 'campaignId', campaignId),
+    get: async (id: string): Promise<Encounter | undefined> => (await open()).get('encounters', id),
+    put: (e: Encounter) => write(['encounters'], (tx) => tx.objectStore('encounters').put({ ...e, updatedAt: Date.now() })),
+    delete: (id: string) => write(['encounters'], (tx) => tx.objectStore('encounters').delete(id)),
+  },
+  /** Stage 4: a campaign's live combat (meta key combatKey; not in backups: a fight in progress is not worth the format change). */
+  combat: {
+    get: async (campaignId: string) => (await (await open()).get('meta', combatKey(campaignId))) as Combat | undefined,
+    /**
+     * One transaction on meta: `fn` gets the stored combat and returns the new one, or undefined to end it. Reports ('combat', id) to
+     * onLocalChange. Returning the very object it was given writes nothing and reports nothing.
+     */
+    update: async (campaignId: string, fn: (c: Combat | undefined) => Combat | undefined): Promise<Combat | undefined> => {
+      let out: Combat | undefined, wrote = false;
+      await write(['meta'], async (tx) => {
+        const store = tx.objectStore('meta'), key = combatKey(campaignId);
+        const had = (await store.get(key)) as Combat | undefined;
+        out = fn(had);
+        if (out === had) return;
+        wrote = true;
+        await (out === undefined ? store.delete(key) : store.put(out, key));
+      });
+      if (wrote) changed('combat', campaignId);
+      return out;
+    },
+  },
   packs: {
     listMeta: async (): Promise<PackMeta[]> => (await open()).getAll('packMeta'),
     get: async (id: string) => (await open()).get('packs', id),
@@ -413,13 +452,13 @@ export const db = {
     return out;
   },
   /**
-   * R57: what a backup import would overwrite here. `replaced`: stored records with the same key (campaigns, characters, items, packs,
-   * blobs); `newer`: those of them with a later updatedAt than the file's copy. A record with no numeric updatedAt counts only as replaced.
+   * R57: what a backup import would overwrite here. `replaced`: stored records with the same key (campaigns, characters, items, monsters,
+   * encounters, packs, blobs); `newer`: those of them with a later updatedAt than the file's copy. A record with no numeric updatedAt counts only as replaced.
    */
   countReplaced: async (s: Snapshot): Promise<{ replaced: number; newer: number }> => {
-    const tx = (await open()).transaction(['campaigns', 'characters', 'items', 'monsters', 'packs', 'blobs']);
+    const tx = (await open()).transaction(['campaigns', 'characters', 'items', 'monsters', 'encounters', 'packs', 'blobs']);
     let replaced = 0, newer = 0;
-    for (const name of ['campaigns', 'characters', 'items', 'monsters', 'packs'] as const) {
+    for (const name of ['campaigns', 'characters', 'items', 'monsters', 'encounters', 'packs'] as const) {
       for (const r of (s[name] ?? []) as Stamped[]) {
         const had = (await tx.objectStore(name).get(r.id)) as Stamped | undefined;
         if (!had) continue;
@@ -440,7 +479,7 @@ export const db = {
   },
 };
 
-const restoreSnapshot = (s: Snapshot) => write(['campaigns', 'characters', 'items', 'monsters', 'packs', 'packMeta', 'blobs', 'meta'], async (tx) => {
+const restoreSnapshot = (s: Snapshot) => write(['campaigns', 'characters', 'items', 'monsters', 'encounters', 'packs', 'packMeta', 'blobs', 'meta'], async (tx) => {
     // B7: a character the file or the store holds is live: no tombstone or trash entry for it survives the restore.
     const inFile = new Set(s.characters.map((c) => c.id));
     const live = async (id: string) => inFile.has(id) || (await tx.objectStore('characters').getKey(id)) !== undefined;
@@ -472,6 +511,7 @@ const restoreSnapshot = (s: Snapshot) => write(['campaigns', 'characters', 'item
     for (const c of advanced.values()) await tx.objectStore('campaigns').put(c);
     for (const r of s.items.filter((i) => !is2024(i))) await tx.objectStore('items').put(r); // R60
     for (const r of (s.monsters ?? []).filter((m) => !is2024(m))) await tx.objectStore('monsters').put(r); // R60
+    for (const r of s.encounters ?? []) await tx.objectStore('encounters').put(r);
     for (const p of s.packs.filter(restorablePack)) { // the built-in SRD always comes from the shipped asset (R52)
       await tx.objectStore('packs').put(p);
       await tx.objectStore('packMeta').put(packMeta(p));
