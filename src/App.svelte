@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, untrack, type Component } from 'svelte';
   import { requestPersistence } from './lib/db.ts';
-  import { router } from './lib/router.svelte.ts';
+  import { dmOnly, router } from './lib/router.svelte.ts';
   import { app, startup } from './lib/store.svelte.ts';
   import { follow } from './lib/sync/session.svelte.ts';
   import { rollViewer } from './lib/rolls.svelte.ts';
@@ -57,19 +57,19 @@
     ['map', 'Map', () => import('./ui/pages/Map.svelte')], // stage 5; `?scene=<id>` picks the scene
   ];
 
-  // Monsters are DM information (R2): no link in Player view.
-  const nav = $derived<[label: string, segment: string][]>([
+  // Compendium, Monsters and Items are DM information (R2): no link in Player view (always Player in a joined campaign).
+  const nav = $derived(([
     ['Campaigns', ''],
     ['Characters', 'characters'],
     ['Combat', 'combat'],
     ['Map', 'map'],
     ['Compendium', 'compendium'],
-    ...(app.viewer === 'dm' ? [['Monsters', 'monsters'] as [string, string]] : []),
+    ['Monsters', 'monsters'],
     ['Items', 'items'],
     ['Packs', 'packs'],
     ['Settings', 'settings'],
     ['About', 'about'],
-  ]);
+  ] as [label: string, segment: string][]).filter(([, g]) => !dmOnly(app.viewer, g)));
 
   // The phone bottom bar's tabs; everything else is under More.
   const PRIMARY = new Set(['characters', 'combat', 'map', 'items']);
@@ -104,6 +104,9 @@
   // Keyed by the joined path so a query-only change (such as a tab switch) keeps the page mounted.
   const key = $derived(router.path.join('/'));
   const current = $derived(match(key));
+  // A typed address still lands: a notice instead. The DM's page stays mounted (hidden) so toggling to Player can't lose its
+  // unsaved edits; a joined campaign never had a DM there, so nothing mounts.
+  const blocked = $derived(dmOnly(app.viewer, here));
 </script>
 
 <div class="shell">
@@ -137,13 +140,21 @@
       <h1>Page not found</h1>
       <p><a href="#/">Back to Campaigns</a></p>
     {:else if current.load}
-      {#await current.load()}
-        <!-- the page chunk is loading -->
-      {:then { default: Page }}
-        <Page params={current.params} />
-      {:catch}
-        <p role="alert">Could not load this page. Check your connection and reload.</p>
-      {/await}
+      {#if blocked}
+        <h1>Not available to players</h1>
+        <p><a href="#/characters">Go to Characters</a></p>
+      {/if}
+      {#if !blocked || app.campaign?.sync?.role !== 'player'}
+        <div class="page" style:display={blocked ? 'none' : 'contents'}>
+          {#await current.load()}
+            <!-- the page chunk is loading -->
+          {:then { default: Page }}
+            <Page params={current.params} />
+          {:catch}
+            <p role="alert">Could not load this page. Check your connection and reload.</p>
+          {/await}
+        </div>
+      {/if}
     {:else}
       <h1>{current.name}</h1>
       <p>Not built yet.</p>
