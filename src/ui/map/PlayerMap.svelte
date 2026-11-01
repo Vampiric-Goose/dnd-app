@@ -4,10 +4,12 @@
   // DM's device in Player view (R12) the same player scene is built locally, read-only.
   import { db } from '../../lib/db.ts';
   import { snap, type Pt } from '../../lib/map/grid.ts';
+  import { actionsForPlayers, arrowsOn, type DeclaredAction } from '../../lib/map/actions.ts';
+  import { tokenColor } from '../../lib/map/scene.ts';
   import { computeSheet } from '../../lib/rules/sheet.ts';
   import { currentActor } from '../../lib/sync/project.ts';
   import { sceneForPlayers, type PlayerScene } from '../../lib/sync/scene.ts';
-  import { sendMove, session } from '../../lib/sync/session.svelte.ts';
+  import { clearDeclared, declareAction, sendMove, session } from '../../lib/sync/session.svelte.ts';
   import type { Campaign, Character } from '../../lib/types.ts';
   import MapCanvas from './MapCanvas.svelte';
   import Drawer from '../kit/Drawer.svelte';
@@ -68,6 +70,19 @@
     pending = { of: base, id: primary, at: snap(base.grid, to, t.size) };
     sendMove(base.id, primary, to);
   };
+
+  // Declared actions: only what players may see (on the DM's device in Player view the list holds everything); a player clears their
+  // own, points from their own token or a point, and only while online (as moves).
+  const me = $derived(campaign.sync?.playerId);
+  const strong = getComputedStyle(document.documentElement).getPropertyValue('--text-strong').trim() || '#eafffb';
+  const actions = $derived(base ? actionsForPlayers(session.actions as DeclaredAction[], base) : []);
+  const arrows = $derived(view ? arrowsOn(actions, view.id, view.tokens, (a) => joined && a.by === me, (by) => (by === 'dm' ? strong : tokenColor(by))) : []);
+  const myArrow = $derived(joined && actions.some((a) => a.by === me));
+  const ondeclare = $derived(joined && session.status === 'online' ? (d: { from: Pt; fromToken?: string; to: Pt; toToken?: string }) => {
+    if (!base) return;
+    const own = d.fromToken !== undefined && !!mine(tokenOf(d.fromToken)?.characterId);
+    void declareAction({ sceneId: base.id, from: own ? { tokenId: d.fromToken! } : d.from, to: d.toToken ? { tokenId: d.toToken } : d.to, kind: 'intent' });
+  } : undefined);
 </script>
 
 {#if !view}
@@ -92,6 +107,9 @@
         onselect={(ids) => (selected = ids)}
         {onmove}
         rev={session.rev}
+        {arrows}
+        {ondeclare}
+        onclear={() => clearDeclared()}
       />
     {/key}
     {#snippet panel()}
@@ -99,6 +117,7 @@
       <h2 class="scene-name">{view.name}</h2>
       {#if !joined}<p class="muted note">Player view: read-only</p>{/if}
       <p class="status" role="status" aria-live="polite">{status}</p>
+      {#if myArrow}<button type="button" class="clear-arrow" onclick={() => clearDeclared()}>Clear arrow</button>{/if}
       {#if owned.length}
         <div class="caption">Your tokens</div>
         <ul class="plain tokens">{#each owned as t (t.id)}{@render row(t)}{/each}</ul>
@@ -135,6 +154,10 @@
 
   .tokens {
     margin: 0.25rem 0 0.75rem;
+  }
+
+  .clear-arrow {
+    margin: -0.5rem 0 0.9rem;
   }
 
   .tokens li {

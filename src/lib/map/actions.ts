@@ -116,6 +116,24 @@ export function actionProblem(r: ActionRequest, view: PlayerScene | undefined, o
   if (!shows(view, r.to)) return 'the target is not visible';
 }
 
+/** An arrow as the map canvas draws it. */
+export interface Arrow { id: string; from: Pt; to: Pt; color: string; target?: string /* token id to ring */; clearable: boolean }
+
+/**
+ * The actions on scene `sceneId` as arrows: each end at its token's centre or its point (an arrow whose token is gone is skipped), in
+ * the source token's colour, else the drawer's (`noToken`: the DM's, else tokenColor of the player ID).
+ */
+export function arrowsOn(list: PlayerAction[], sceneId: string, tokens: { id: string; x: number; y: number; color: string }[],
+  clearable: (a: PlayerAction) => boolean, noToken: (by: string) => string): Arrow[] {
+  const byId = new Map(tokens.map((t) => [t.id, t]));
+  const at = (e: ActionEnd): Pt | undefined => { const t = 'tokenId' in e ? byId.get(e.tokenId) : e; return t && { x: t.x, y: t.y }; };
+  return list.flatMap((a): Arrow[] => {
+    const from = at(a.from), to = at(a.to), src = tokenOf(a.from), target = tokenOf(a.to);
+    if (a.sceneId !== sceneId || !from || !to) return [];
+    return [{ id: a.id, from, to, color: (src !== undefined && byId.get(src)?.color) || noToken(a.by), ...(target !== undefined && { target }), clearable: clearable(a) }];
+  });
+}
+
 /** What players get: actions on the shown scene whose ends they can all see, without the DM's bookkeeping. */
 export function actionsForPlayers(list: DeclaredAction[], view: PlayerScene | undefined): PlayerAction[] {
   if (!view) return [];

@@ -1,7 +1,7 @@
 // Group D, Task D1: declared actions (intent arrows): the record's validation, the board's rules and what players get.
 import { describe, expect, test } from 'vitest';
 import { next, prev } from '../../src/lib/combat/combat.ts';
-import { ActionBoard, actionProblem, actionsForPlayers, cleanActionRequest, cleanActions, expiry, MAX_ACTIONS, type ActionRequest, type DeclaredAction } from '../../src/lib/map/actions.ts';
+import { ActionBoard, actionProblem, actionsForPlayers, arrowsOn, cleanActionRequest, cleanActions, expiry, MAX_ACTIONS, type ActionRequest, type DeclaredAction } from '../../src/lib/map/actions.ts';
 import { paintFog } from '../../src/lib/map/fog.ts';
 import { DEFAULT_GRID } from '../../src/lib/map/scene.ts';
 import type { PlayerScene } from '../../src/lib/sync/scene.ts';
@@ -162,6 +162,22 @@ describe('actionProblem (the player check)', () => {
     const fog = paintFog(undefined, 700, 700, { k: 'rect', a: { x: 0, y: 0 }, b: { x: 200, y: 200 }, reveal: true });
     expect(actionProblem(req({ to: { x: 100, y: 100 } }), view({ fog }), own)).toBeUndefined();
     expect(actionProblem(req({ to: { x: 500, y: 500 } }), view({ fog }), own)).toBeDefined();
+  });
+});
+
+describe('arrowsOn (Task D2: what the pages draw)', () => {
+  test('ends at token centres or points, source colour or the drawer colour, gone tokens skipped', () => {
+    const toks = view().tokens;
+    const list = [
+      act({ id: 'tok', by: 'A1', to: { tokenId: 't-gob' } }),
+      act({ id: 'pt', by: 'A2', from: { x: 5, y: 6 } }),
+      act({ id: 'gone', by: 'dm', from: { tokenId: 't-gone' } }),
+      act({ id: 'other', by: 'A2', sceneId: 's2' }),
+    ];
+    expect(arrowsOn(list, 's1', toks, (a) => a.by === 'A1', (by) => `c:${by}`)).toEqual([
+      { id: 'tok', from: { x: 35, y: 35 }, to: { x: 105, y: 35 }, color: '#c0392b', target: 't-gob', clearable: true },
+      { id: 'pt', from: { x: 5, y: 6 }, to: { x: 100, y: 100 }, color: 'c:A2', clearable: false },
+    ]);
   });
 });
 

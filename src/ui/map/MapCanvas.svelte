@@ -8,6 +8,7 @@
   // asks for one frame. Pan, wheel zoom, pinch, drag with a snapped ghost, tap and box select, and a ruler.
   import { untrack, type Snippet } from 'svelte';
   import { db } from '../../lib/db.ts';
+  import type { Arrow } from '../../lib/map/actions.ts';
   import { decodeFog, FOG_CELL, fogSize, newFog, paintBrush, paintRect, type FogEdit } from '../../lib/map/fog.ts';
   import { cellCenter, cellsIn, feetBetween, hexCorners, snap, type Cell, type Pt } from '../../lib/map/grid.ts';
   import { initials, radius, tokenAt, tokensInRect } from '../../lib/map/scene.ts';
@@ -18,11 +19,14 @@
   // fog: drawn only when set (the caller passes it only with the Fog of war setting on); black for players, a shade for the DM.
   // onfog: the DM's fog tools, shown only when it is set; one call per stroke, rectangle or Reveal all / Hide all.
   // corner: extra controls floated top-right, beside the tool switcher (the DM's scene picker).
-  let { width, height, image, grid, tokens, dm, diagonal, selected, canDrag, speedOf, onselect, onmove, rev = 0, fog, fogStyle = dm ? 'shade' : 'black', onfog, corner }: {
+  // arrows: declared actions to draw; ondeclare: a right-drag (touch: long-press then drag) drew one (unset = no arrow gesture);
+  // onclear: the ✕ on a clearable arrow's head was tapped.
+  let { width, height, image, grid, tokens, dm, diagonal, selected, canDrag, speedOf, onselect, onmove, rev = 0, fog, fogStyle = dm ? 'shade' : 'black', onfog, corner, arrows = [], ondeclare, onclear }: {
     width: number; height: number; image?: string; grid: Grid; tokens: CanvasToken[]; dm: boolean; diagonal: '5-5-5' | '5-10-5'; selected: string[];
     canDrag: (id: string) => boolean; speedOf?: (id: string) => number | undefined;
     onselect: (ids: string[]) => void; onmove: (ids: string[], primary: string, to: Pt) => void; rev?: number;
     fog?: string; fogStyle?: 'black' | 'shade'; onfog?: (e: FogEdit) => void; corner?: Snippet;
+    arrows?: Arrow[]; ondeclare?: (d: { from: Pt; fromToken?: string; to: Pt; toToken?: string }) => void; onclear?: (id: string) => void;
   } = $props();
 
   let tool: 'select' | 'box' | 'ruler' | 'fog' | 'template' = $state('select');
@@ -63,8 +67,11 @@
     | { k: 'pinch'; a0: Pt; b0: Pt; view0: View }
     | { k: 'brush'; points: Pt[] }
     | { k: 'fogRect'; a: Pt; b: Pt }
-    | { k: 'template' };
+    | { k: 'template' }
+    | { k: 'arrow'; a: Pt; b: Pt; fromToken?: string };
   let mode: Mode = { k: 'none' };
+  /** Touch: the long-press timer that turns a still press or pan into an arrow. */
+  let hold: ReturnType<typeof setTimeout> | undefined;
 
   // Fog: the decoded bits (a stroke paints a local copy at once; it is dropped when the fog prop next changes), drawn from a cols×rows
   // canvas, one pixel per fog cell, rebuilt only when the bits change.
@@ -135,7 +142,7 @@
   }
 
   // Redraw on any prop change; refit when the scene's sides or image change; reload images when rev bumps.
-  $effect(() => { void [width, height, image, grid, tokens, selected, dm]; untrack(schedule); });
+  $effect(() => { void [width, height, image, grid, tokens, selected, dm, arrows]; untrack(schedule); });
   let fitKey = '';
   $effect(() => {
     const k = `${width}x${height}:${image ?? ''}`;
@@ -333,6 +340,13 @@
       ctx.stroke();
     }
 
+    // declared actions: above tokens (and fog: they only join visible things), below the template and the ruler
+    for (const a of arrows) drawArrow(ctx, pal, a, px);
+    if (mode.k === 'arrow') {
+      const m = mode, t = tokenAt(scene(), m.b, dm);
+      drawArrow(ctx, pal, { id: '', from: m.a, to: t ?? m.b, color: pal.strong, ...(t && { target: t.id }), clearable: false }, px);
+    }
+
     // the template: affected cells tinted, and the aim
     if (template) {
       ctx.save();
@@ -390,6 +404,68 @@
     }
   }
 
+  /** Where an arrow's head ends (at the ring of a target token) and where its ✕ disc sits, in scene units. */
+  function arrowGeometry(a: Arrow, px: number) {
+    const t = a.target === undefined ? undefined : tokens.find((x) => x.id === a.target);
+    const dx = a.to.x - a.from.x, dy = a.to.y - a.from.y, len = Math.hypot(dx, dy);
+    const ux = len ? dx / len : 1, uy = len ? dy / len : 0, ring = t ? radius(grid, t.size) + 5 * px : 0;
+    const tip = { x: a.to.x - ux * ring, y: a.to.y - uy * ring };
+    return { ux, uy, ring, tip, len: len - ring, disc: { x: tip.x - ux * 22 * px, y: tip.y - uy * 22 * px } };
+  }
+
+  function drawArrow(ctx: CanvasRenderingContext2D, pal: ReturnType<typeof palette>, a: Arrow, px: number) {
+    const g = arrowGeometry(a, px), head = 12 * px;
+    ctx.save();
+    ctx.globalAlpha = 0.85;
+    ctx.lineCap = 'round';
+    if (g.ring) { ctx.beginPath(); ctx.arc(a.to.x, a.to.y, g.ring, 0, Math.PI * 2); ctx.lineWidth = 2 * px; ctx.strokeStyle = a.color; ctx.stroke(); }
+    if (g.len > head) {
+      const base = { x: g.tip.x - g.ux * head, y: g.tip.y - g.uy * head };
+      ctx.beginPath();
+      ctx.moveTo(a.from.x, a.from.y);
+      ctx.lineTo(base.x, base.y);
+      ctx.strokeStyle = pal.rail; // a dark halo keeps it readable on busy map art
+      ctx.lineWidth = 5 * px;
+      ctx.stroke();
+      ctx.strokeStyle = a.color;
+      ctx.lineWidth = 2.5 * px;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(g.tip.x, g.tip.y);
+      ctx.lineTo(base.x - g.uy * 5 * px, base.y + g.ux * 5 * px);
+      ctx.lineTo(base.x + g.uy * 5 * px, base.y - g.ux * 5 * px);
+      ctx.closePath();
+      ctx.fillStyle = a.color;
+      ctx.fill();
+      ctx.lineWidth = 1.5 * px;
+      ctx.strokeStyle = pal.rail;
+      ctx.stroke();
+      if (a.clearable) {
+        const c = g.disc, r = 8 * px, k = 3.5 * px;
+        ctx.globalAlpha = 1;
+        ctx.beginPath();
+        ctx.arc(c.x, c.y, r, 0, Math.PI * 2);
+        ctx.fillStyle = pal.rail;
+        ctx.fill();
+        ctx.lineWidth = 1.5 * px;
+        ctx.strokeStyle = a.color;
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(c.x - k, c.y - k); ctx.lineTo(c.x + k, c.y + k);
+        ctx.moveTo(c.x + k, c.y - k); ctx.lineTo(c.x - k, c.y + k);
+        ctx.strokeStyle = pal.strong;
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+
+  /** Arrow mode from scene point `a`, with the token under it (the same visibility as a tap) as the source. */
+  function startArrow(a: Pt) {
+    mode = { k: 'arrow', a, b: a, fromToken: tokenAt(scene(), a, dm)?.id };
+    schedule();
+  }
+
   function label(ctx: CanvasRenderingContext2D, pal: ReturnType<typeof palette>, text: string, at: Pt) {
     ctx.font = '600 14px ui-monospace, Consolas, monospace';
     ctx.textAlign = 'left';
@@ -416,6 +492,7 @@
     try { canvas.setPointerCapture(e.pointerId); } catch { /* a pointer that is no longer active */ }
     const p = local(e);
     pointers.set(e.pointerId, p);
+    clearTimeout(hold);
     if (pointers.size === 2) {
       const [a0, b0] = [...pointers.values()];
       if (mode.k === 'ruler') ruler = undefined; // the first finger started a ruler: it was a pinch
@@ -426,6 +503,10 @@
     }
     if (pointers.size > 2) return;
     const w = toWorld(view, p), shift = e.shiftKey || e.ctrlKey || e.metaKey;
+    if (e.button === 2) { mode = { k: 'none' }; if (ondeclare) startArrow(w); return; } // the right button points, in any tool
+    const px = 1 / view.scale, reach = (e.pointerType === 'mouse' ? 10 : 22) * px; // ✕ discs: a 44 px target on touch
+    const x = onclear && arrows.find((a) => { if (!a.clearable) return false; const g = arrowGeometry(a, px); return g.len > 12 * px && Math.hypot(g.disc.x - w.x, g.disc.y - w.y) <= reach; });
+    if (x) { mode = { k: 'none' }; onclear!(x.id); return; }
     if (ruler) { ruler = undefined; schedule(); } // the next tap clears the ruler
     if (tool === 'ruler') { ruler = { a: w, b: w }; mode = { k: 'ruler' }; return; }
     if (tool === 'fog') {
@@ -444,6 +525,13 @@
     if (hit) mode = { k: 'press', from: p, id: hit.id, grab: { x: w.x - hit.x, y: w.y - hit.y }, shift };
     else if (tool === 'box' || (e.shiftKey && e.pointerType === 'mouse')) mode = { k: 'box', a: w, b: w, shift };
     else mode = { k: 'pan', from: p, view0: view, moved: false, shift };
+    // Touch: held still for 500 ms, the press or pan becomes an arrow from where it started (a second finger cancels it: a pinch)
+    const m0 = mode;
+    if (ondeclare && e.pointerType !== 'mouse') hold = setTimeout(() => {
+      if (mode !== m0 || pointers.size !== 1 || (m0.k === 'pan' && m0.moved) || (m0.k !== 'press' && m0.k !== 'pan')) return;
+      if (m0.k === 'pan') view = m0.view0;
+      startArrow(toWorld(view, m0.from));
+    }, 500);
   }
 
   function move(e: PointerEvent) {
@@ -499,6 +587,9 @@
       case 'template':
         if (tplAt) tplAt = { origin: tplAt.origin, aim: w };
         break;
+      case 'arrow':
+        mode.b = w;
+        break;
       default:
         return;
     }
@@ -507,10 +598,14 @@
 
   function up(e: PointerEvent, cancel = false) {
     if (!pointers.delete(e.pointerId)) return;
+    clearTimeout(hold);
     const m = mode;
     mode = { k: 'none' }; // after a pinch the remaining finger does nothing until it lifts
     if (cancel && m.k === 'brush') strokeBits = undefined;
     if (cancel || m.k === 'pinch') { schedule(); return; }
+    if (m.k === 'arrow' && Math.hypot(m.b.x - m.a.x, m.b.y - m.a.y) >= grid.size) { // a drag under one cell is ignored
+      ondeclare?.({ from: m.a, fromToken: m.fromToken, to: m.b, toToken: tokenAt(scene(), m.b, dm)?.id });
+    }
     if (m.k === 'brush') onfog?.({ k: 'brush', points: m.points, radius: brush, reveal }); // one write per stroke
     else if (m.k === 'fogRect') {
       strokeBits = paintRect(strokeBits ?? fogBits ?? newFog(width, height, false), width, height, m.a, m.b, reveal);
@@ -542,6 +637,7 @@
       onpointermove={move}
       onpointerup={(e) => up(e)}
       onpointercancel={(e) => up(e, true)}
+      oncontextmenu={(e) => e.preventDefault()}
       onpointerleave={() => { if (hover || brushAt) { hover = brushAt = undefined; schedule(); } }}
     ></canvas>
   </div>
@@ -561,7 +657,7 @@
     {#if tool === 'select' || tool === 'box'}
       <div class="strip" role="group" aria-label="Select">
         <button type="button" aria-pressed={tool === 'box'} onclick={() => (tool = tool === 'box' ? 'select' : 'box')}>Box select</button>
-        <span class="hint">{tool === 'box' ? 'Drag on empty map · Shift adds' : 'Tap a token · Shift-click adds'}</span>
+        <span class="hint">{tool === 'box' ? 'Drag on empty map · Shift adds' : 'Tap a token · Shift-click adds'}{#if ondeclare} · Right-drag or long-press to point{/if}</span>
       </div>
     {:else if tool === 'ruler'}
       <div class="strip"><span class="hint">Drag to measure · tap again to clear</span></div>
