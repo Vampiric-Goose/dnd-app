@@ -633,9 +633,10 @@
 
   /** Delete / Backspace, unless the focus is somewhere that types. */
   function key(e: KeyboardEvent) {
-    if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+    if ((e.key !== 'Delete' && e.key !== 'Backspace') || e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey) return;
     const el = e.target as HTMLElement | null;
-    if (el?.isContentEditable || el?.matches?.('input, textarea, select')) return;
+    // typing, or a dialog/menu has focus: the key is theirs, not the map's
+    if (el?.isContentEditable || el?.matches?.('input, textarea, select') || el?.closest?.('dialog[open], [popover]')) return;
     const a = arrow === undefined ? undefined : arrows.find((x) => x.id === arrow);
     if (a) { e.preventDefault(); if (a.clearable && onclear) { onclear(a.id); arrow = undefined; } return; }
     if (ondelete && selected.length) { e.preventDefault(); ondelete([...selected]); }

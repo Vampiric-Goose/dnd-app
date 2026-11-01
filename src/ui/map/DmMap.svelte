@@ -273,7 +273,7 @@
   const arrows = $derived(scene ? arrowsOn(session.actions, scene.id, scene.tokens, () => true, (by) => (by === 'dm' ? strong : tokenColor(by))) : []);
   /** The arrow picked on the map: a Delete arrow button under the scene bar (phones have no Delete key). */
   let picked: string | undefined = $state();
-  const ondeclare = (d:{ from: Pt; fromToken?: string; to: Pt; toToken?: string }) => {
+  const ondeclare = (d: { from: Pt; fromToken?: string; to: Pt; toToken?: string }) => {
     if (scene) void declareAction({ sceneId: scene.id, from: d.fromToken ? { tokenId: d.fromToken } : d.from, to: d.toToken ? { tokenId: d.toToken } : d.to, kind: 'intent' });
   };
   const GRID_NAMES = { square: 'Square', 'hex-flat': 'Hex (flat)', 'hex-pointy': 'Hex (pointy)' } as const;
