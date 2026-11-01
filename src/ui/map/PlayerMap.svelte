@@ -75,7 +75,7 @@
   <p class="muted">The DM isn't showing a map right now.</p>
 {:else}
   <!-- The same canvas as the DM's; the panel (a sheet on phones, always up) holds the player's own tokens and the turn status. -->
-  <Workspace fill panelLabel="Your tokens" open={true}>
+  <Workspace fill panelLabel="Scene and tokens" open={true}>
     {#key view.id}
       <MapCanvas
         width={view.width}

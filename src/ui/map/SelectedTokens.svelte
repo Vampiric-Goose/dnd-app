@@ -39,7 +39,7 @@
 
     {#if t.hp !== undefined || t.monsterId}
       <div class="caption">Hit points</div>
-      <p class="hpline"><span class="num now">{t.hp ?? '—'}</span>{#if t.maxHp}<span class="num muted"> / {t.maxHp}</span>{/if}</p>
+      <p class="hpline"><span class="num now">{t.hp ?? '—'}</span>{#if t.maxHp}<span class="num muted">&nbsp;/ {t.maxHp}</span>{/if}</p>
       {#if t.hp !== undefined && t.maxHp}<Bar value={t.hp} max={t.maxHp} label="{t.name} hit points" tone={t.monsterId ? 'danger' : 'accent'} />{/if}
     {/if}
     {#if t.monsterId}

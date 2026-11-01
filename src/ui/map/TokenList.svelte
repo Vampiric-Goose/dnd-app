@@ -19,7 +19,7 @@
         <span class="dot" style:background={t.color} aria-hidden="true"></span>
         <span class="name"><span class="sr-only">Select </span>{t.name}</span>
         {#if t.hidden}<span class="tag">hidden</span>{/if}
-        {#if t.hp !== undefined}<span class="num hp">{t.hp}{#if t.maxHp}<span class="muted"> / {t.maxHp}</span>{/if}</span>{/if}
+        {#if t.hp !== undefined}<span class="num hp">{t.hp}{#if t.maxHp}<span class="muted">&nbsp;/ {t.maxHp}</span>{/if}</span>{/if}
       </button>
     </li>
   {/each}
