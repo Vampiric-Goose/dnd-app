@@ -2,8 +2,8 @@
   import { app } from '../lib/store.svelte.ts';
 </script>
 
-<!-- Only with a campaign open: a DM runs the table, and without a campaign nothing is ever hidden. -->
-{#if app.campaign}
+<!-- Only with a campaign open: a DM runs the table, and without a campaign nothing is ever hidden. A joined campaign is always Player. -->
+{#if app.campaign && app.campaign.sync?.role !== 'player'}
   <fieldset class="viewer">
     <legend class="sr-only">View as</legend>
     <span class="muted" aria-hidden="true">View as</span>

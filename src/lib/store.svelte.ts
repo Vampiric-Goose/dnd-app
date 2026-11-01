@@ -21,13 +21,19 @@ export async function refreshCampaigns(): Promise<void> {
   app.campaigns = (await db.campaigns.list()).sort((a, b) => a.name.localeCompare(b.name));
   const id = app.campaign?.id;
   app.campaign = app.campaigns.find((c) => c.id === id);
-  if (!app.campaign) app.viewer = 'dm'; // the toggle shows only with a campaign, so nothing may stay hidden without one
+  pinViewer();
+}
+
+/** The toggle shows only with a campaign, so nothing may stay hidden without one; a joined campaign is always seen as a player. */
+function pinViewer(): void {
+  if (!app.campaign) app.viewer = 'dm';
+  else if (app.campaign.sync?.role === 'player') app.viewer = 'player';
 }
 
 /** Opens a campaign (or none) and remembers the choice. */
 export async function setCampaign(id: string | undefined): Promise<void> {
   app.campaign = app.campaigns.find((c) => c.id === id);
-  if (!app.campaign) app.viewer = 'dm';
+  pinViewer();
   await db.meta.set('currentCampaign', app.campaign?.id ?? null);
 }
 
@@ -46,6 +52,7 @@ export async function startup(): Promise<void> {
     app.campaigns = (await db.campaigns.list()).sort((a, b) => a.name.localeCompare(b.name));
     const id = await db.meta.get<string>('currentCampaign');
     app.campaign = app.campaigns.find((c) => c.id === id);
+    pinViewer();
     app.lastBackupAt = await db.meta.get<number>('lastBackupAt');
     if (app.error === BLOCKED) app.error = undefined;
   } catch (e) {
