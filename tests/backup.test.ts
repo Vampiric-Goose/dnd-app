@@ -11,7 +11,7 @@ afterEach(() => vi.restoreAllMocks());
 
 test('backup round-trip incl. blobs', async () => {
   const hash = await db.blobs.put(new Blob([new Uint8Array([1, 2, 3])], { type: 'image/webp' }));
-  await db.campaigns.put(camp('c1')); await db.characters.put(char('a', 'c1'));
+  await db.campaigns.put(camp('c1')); await db.characters.put({ ...char('a', 'c1'), details: { ...char('a').details, portrait: hash } }); // referenced (stage 5 I2)
   const file = await exportBackup({ includePacks: true });
   await resetDb();
   expect(await importBackup(file)).toEqual({ campaigns: 1, characters: 1, items: 0, monsters: 0, encounters: 0, scenes: 0, packs: 0 });

@@ -16,7 +16,7 @@ export function tokenForMonster(m: MonsterDef, name: string, hpMode: 'average' |
 }
 
 export const tokenForCharacter = (c: Character, size: Size): NewToken =>
-  ({ name: c.name, size, characterId: c.id, ...(c.details.portrait && { portrait: c.details.portrait }) });
+  ({ name: c.name, size, characterId: c.id }); // M6: no portrait copy: the token shows the character's current one
 
 /**
  * Pure. A PC token adds its character (addCombatants skips one already in); a monster token already linked to a live combatant is skipped;

@@ -73,7 +73,17 @@ export function moveTokens(s: Scene, ids: string[], primary: string, to: Pt): Sc
   return off || (dx === 0 && dy === 0) ? s : { ...s, tokens };
 }
 
-export const patchToken = (s: Scene, id: string, patch: Partial<Token>): Scene => ({ ...s, tokens: s.tokens.map((t) => (t.id === id ? { ...t, ...patch, id } : t)) });
+/**
+ * I3: a grid change. Tokens re-snap only when the grid's type changes (each stays put if its new spot would leave the scene): lining up
+ * size and offsets step by step must not pile tokens together. They snap to the new grid on their next move anyway.
+ */
+export function regrid(s: Scene, p: Partial<Grid>): Scene {
+  const grid = { ...s.grid, ...p };
+  if (grid.type === s.grid.type) return { ...s, grid };
+  return { ...s, grid, tokens: s.tokens.map((t) => { const at = snap(grid, t, t.size); return inside(s, at) ? { ...t, ...at } : t; }) };
+}
+
+export const patchToken =(s: Scene, id: string, patch: Partial<Token>): Scene => ({ ...s, tokens: s.tokens.map((t) => (t.id === id ? { ...t, ...patch, id } : t)) });
 
 export function removeTokens(s: Scene, ids: string[]): Scene {
   const gone = new Set(ids);

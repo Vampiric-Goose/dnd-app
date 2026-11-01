@@ -1,10 +1,20 @@
 import { describe, expect, test } from 'vitest';
 import { cellAt, cellCenter, footprint } from '../../src/lib/map/grid.ts';
-import { addTokens, DEFAULT_GRID, initials, liveHp, MAX_TOKENS, moveTokens, newScene, patchToken, removeTokens, tokenAt, tokenColor, tokensInRect } from '../../src/lib/map/scene.ts';
+import { addTokens, DEFAULT_GRID, initials, liveHp, MAX_TOKENS, moveTokens, newScene, patchToken, regrid, removeTokens, tokenAt, tokenColor, tokensInRect } from '../../src/lib/map/scene.ts';
 import type { Combat, Scene, Token } from '../../src/lib/types.ts';
 
 const tok = (id: string, x: number, y: number, o: Partial<Token> = {}): Token => ({ id, name: id, x, y, size: 'M', color: '#336699', ...o });
 const scene = (tokens: Token[], o: Partial<Scene> = {}): Scene => ({ ...newScene('c1', 'S'), tokens, ...o });
+
+test('I3: regrid re-snaps tokens only when the grid type changes', () => {
+  const s = scene([tok('a', 35, 35), tok('b', 105, 35)]);
+  const bigger = regrid(s, { size: 200, offsetX: 7, opacity: 0.5 });
+  expect(bigger.grid).toMatchObject({ size: 200, offsetX: 7, opacity: 0.5 });
+  expect(bigger.tokens).toEqual(s.tokens); // they do not pile together
+  const hexed = regrid(s, { type: 'hex-pointy' });
+  expect(hexed.tokens.map((t) => [t.x, t.y])).not.toEqual(s.tokens.map((t) => [t.x, t.y]));
+  for (const t of hexed.tokens) expect(cellCenter(hexed.grid, cellAt(hexed.grid, t))).toEqual({ x: t.x, y: t.y });
+});
 
 test('initials', () => {
   expect(initials('Goblin 1')).toBe('G1');

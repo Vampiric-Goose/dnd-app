@@ -96,5 +96,10 @@ describe('footprints', () => {
     const g = hex('hex-pointy', 50);
     expect(footprint(g, { x: 0, y: 0, size: 'M' })).toHaveLength(1);
     expect(footprint(g, { x: 0, y: 0, size: 'L' })).toHaveLength(7);
+    // M1: Huge is bigger than Large on hex too; Tiny and Gargantuan as before
+    expect(footprint(g, { x: 0, y: 0, size: 'H' })).toHaveLength(13);
+    expect(footprint(g, { x: 0, y: 0, size: 'G' })).toHaveLength(19);
+    expect(footprint(g, { x: 0, y: 0, size: 'T' })).toHaveLength(1);
+    expect(footprint(hex('hex-flat', 50), { x: 0, y: 0, size: 'H' })).toHaveLength(13);
   });
 });

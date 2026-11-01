@@ -83,7 +83,7 @@ export function snap(g: Grid, p: Pt, size: Size): Pt {
   return cellCenter(g, cellAt(g, p));
 }
 
-/** The cells a token covers. Square: the n×n block around its centre; hex: hexes whose centre is within n·size/2. */
+/** The cells a token covers. Square: the n×n block around its centre; hex: hexes whose centre is within n·size/2 + size/4. */
 export function footprint(g: Grid, t: Pt & { size: Size }): Cell[] {
   const n = SIZE_CELLS[t.size];
   if (g.type === 'square') {
@@ -93,6 +93,6 @@ export function footprint(g: Grid, t: Pt & { size: Size }): Cell[] {
     for (let r = r0; r < r0 + n; r++) for (let q = q0; q < q0 + n; q++) out.push({ q, r });
     return out;
   }
-  const rad = (n * g.size) / 2 + EPS;
+  const rad = (n * g.size) / 2 + g.size / 4 + EPS; // M1: + a quarter hex, so H (13 hexes) differs from L (7); G stays 19
   return cellsIn(g, t.x - rad, t.y - rad, t.x + rad, t.y + rad).filter((c) => { const p = cellCenter(g, c); return Math.hypot(p.x - t.x, p.y - t.y) <= rad; });
 }

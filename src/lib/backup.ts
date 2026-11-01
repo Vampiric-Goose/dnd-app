@@ -85,13 +85,15 @@ export async function exportBackup(opts: { campaignId?: string; includePacks: bo
   // I5: "My spells" holds spells typed in on this device, which can't be imported again, so it always travels (when it exists).
   const wanted = packIds.filter((id) => opts.includePacks || id === MY_SPELLS_PACK);
   const packs = (await Promise.all(wanted.map((id) => db.packs.get(id)))).filter((p): p is Pack => !!p && restorablePack(p)); // never the cached SRD
-  // ponytail: every blob, even for one campaign; filter by referenced hashes once maps make this heavy
-  const blobs = (await db.blobs.all()).map(({ hash, type, data }) => ({ hash, type, base64: toBase64(data) }));
   // R9: the Deleted characters of each campaign travel too.
   const trash: Record<string, TrashEntry[]> = {};
   for (const c of campaigns) { const t = await db.trash.list(c.id); if (t.length) trash[c.id] = t; }
   const encounters = (await Promise.all(campaigns.map((c) => db.encounters.list(c.id)))).flat(); // stage 4
   const scenes = (await Promise.all(campaigns.map((c) => db.scenes.list(c.id)))).flat(); // stage 5
+  // Stage 5 I2: only images something exported refers to (map images left by deleted scenes, or received from a DM, stay home).
+  const refs = new Set([...characters, ...Object.values(trash).flat().map((e) => e.character)].map((c) => c.details.portrait)
+    .concat(scenes.flatMap((s) => [s.image, ...s.tokens.map((t) => t.portrait)])));
+  const blobs = (await db.blobs.all()).filter((b) => refs.has(b.hash)).map(({ hash, type, data }) => ({ hash, type, base64: toBase64(data) }));
   const exportedAt = Date.now();
   const file = json({ format: 'dnd-app-backup', version: 1, exportedAt, campaigns, characters, items, monsters, encounters, scenes, packs, blobs, trash });
   // The built file must not be lost over a bookkeeping write (a full disk is when you need a backup most).

@@ -112,6 +112,21 @@ describe('backups carry scenes', () => {
     expect((await db.scenes.get('a'))?.tokens.map((t) => t.name)).toEqual(['Orc']);
     expect(await db.scenes.get('other')).toBeUndefined();
   });
+  test('I2: only referenced images are exported (a deleted scene\'s image is not)', async () => {
+    await db.campaigns.put({ ...camp('c1'), sync: { role: 'dm', code: 'ABCDEFGHJKMN', node: 'dmnode01' } }); // hosted: deletes go to the trash
+    const put = (n: number) => db.blobs.put(new Blob([new Uint8Array([n])], { type: 'image/png' }));
+    const [kept, gone, token, face, trashed, stray] = await Promise.all([1, 2, 3, 4, 5, 6].map(put));
+    await db.scenes.put({ ...scene('a'), image: kept, tokens: [{ id: 't', name: 'Orc', x: 35, y: 35, size: 'M', color: '#000000', portrait: token }] });
+    await db.scenes.put({ ...scene('b'), image: gone });
+    await db.scenes.delete('b');
+    await db.characters.put({ ...char('p', 'c1'), details: { ...char('p').details, portrait: face } });
+    await db.characters.put({ ...char('q', 'c1'), details: { ...char('q').details, portrait: trashed } });
+    await db.characters.delete('q');
+    const hashes = JSON.parse(await (await exportBackup({ includePacks: false })).text()).blobs.map((b: { hash: string }) => b.hash).sort();
+    expect(hashes).toEqual([kept, token, face, trashed].sort());
+    expect(hashes).not.toContain(gone);
+    expect(hashes).not.toContain(stray);
+  });
   test('an old backup without scenes restores', async () => {
     expect(await importBackup(backup({ campaigns: [camp('c1')] }))).toMatchObject({ campaigns: 1, scenes: 0 });
   });
@@ -119,6 +134,12 @@ describe('backups carry scenes', () => {
     await expect(importBackup(backup({ scenes: [{ ...scene('a'), width: 5000 }] }))).rejects.toThrow('Backup file is damaged');
     await expect(importBackup(backup({ scenes: [{ ...scene('a'), grid: { ...scene('a').grid, color: 'red' } }] }))).rejects.toThrow('Backup file is damaged');
     await expect(importBackup(backup({ scenes: [{ ...scene('a'), tokens: [{ id: 't', name: 'x', x: 'NaN', y: 0, size: 'M', color: '#000000' }] }] }))).rejects.toThrow('Backup file is damaged');
+    // M4: the limits and optional field types
+    const t = { id: 't', name: 'x', x: 0, y: 0, size: 'M', color: '#000000' };
+    for (const bad of [{ name: 'n'.repeat(101) }, { image: 5 }, { shown: 'yes' }, { tokens: [{ ...t, name: 'n'.repeat(101) }] }, { tokens: [{ ...t, portrait: {} }] },
+      { tokens: [{ ...t, hidden: 1 }] }, { tokens: [{ ...t, hp: 'x' }] }, { tokens: [{ ...t, characterId: 3 }] }]) {
+      await expect(importBackup(backup({ scenes: [{ ...scene('a'), ...bad }] }))).rejects.toThrow('Backup file is damaged');
+    }
     expect(await db.scenes.list('c1')).toEqual([]);
   });
 });
@@ -139,5 +160,5 @@ test('blobs.has', async () => {
 test('token builders', () => {
   expect(tokenForMonster(goblin, 'Goblin 1', 'average')).toEqual({ name: 'Goblin 1', size: 'S', monsterId: 'monster:goblin@SRD', hp: 7, maxHp: 7 });
   const c = { ...char('p', 'c1'), details: { ...char('p').details, portrait: 'abc' } };
-  expect(tokenForCharacter(c, 'M')).toEqual({ name: 'p', size: 'M', characterId: 'p', portrait: 'abc' });
+  expect(tokenForCharacter(c, 'M')).toEqual({ name: 'p', size: 'M', characterId: 'p' }); // M6: the portrait follows the character
 });

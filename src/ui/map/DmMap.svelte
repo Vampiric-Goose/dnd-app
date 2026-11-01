@@ -7,7 +7,7 @@
   import { resizeImage } from '../../lib/images.ts';
   import { encodeFog, newFog, paintFog, type FogEdit } from '../../lib/map/fog.ts';
   import { snap, type Pt } from '../../lib/map/grid.ts';
-  import { addTokens, liveHp, MAX_SIDE, MAX_TOKENS, moveTokens, newScene, patchToken, removeTokens, type NewToken } from '../../lib/map/scene.ts';
+  import { addTokens, liveHp, MAX_SIDE, MAX_TOKENS, moveTokens, newScene, patchToken, regrid, removeTokens, type NewToken } from '../../lib/map/scene.ts';
   import { addTokensToCombat, editScene, tokenForCharacter, tokenForMonster } from '../../lib/map/store.ts';
   import { patchCombatant } from '../../lib/combat/combat.ts';
   import { updateCombat } from '../../lib/combat/store.ts';
@@ -19,7 +19,7 @@
   import { getIndex, saveCampaign } from '../../lib/store.svelte.ts';
   import { MAX_BLOB } from '../../lib/sync/protocol.ts';
   import { session } from '../../lib/sync/session.svelte.ts';
-  import type { Campaign, Character, Combat, Grid, MonsterDef, RaceDef, Scene, Sheet, Size, Token } from '../../lib/types.ts';
+  import type { Campaign, Character, Combat, MonsterDef, RaceDef, Scene, Sheet, Size, Token } from '../../lib/types.ts';
   import GridForm from './GridForm.svelte';
   import MapCanvas from './MapCanvas.svelte';
   import TokenList from './TokenList.svelte';
@@ -35,7 +35,6 @@
   let error = $state('');
   let notice = $state('');
   let busy = $state(false);
-  let rev = $state(0);
 
   const cid = $derived(campaign.id);
   const settings = $derived(campaign.settings);
@@ -78,8 +77,10 @@
     if (!name) return;
     let image: { hash: string; width: number; height: number } | undefined;
     if (newFile) {
-      const blob = await resizeImage(newFile, MAX_SIDE);
-      if (blob.size > MAX_BLOB) throw new Error('That image is too big, even shrunk (over 8 MB). Try a smaller file or a JPEG/WebP.');
+      let blob = await resizeImage(newFile, MAX_SIDE);
+      // I1: Safari can't encode WebP (it falls back to a huge PNG): JPEG then
+      if (blob.size > MAX_BLOB || blob.type !== 'image/webp') blob = await resizeImage(newFile, MAX_SIDE, 'image/jpeg', 0.85);
+      if (blob.size > MAX_BLOB) throw new Error('That image is too big, even shrunk (over 8 MB). Try a smaller image.');
       const bmp = await createImageBitmap(blob);
       image = { hash: await db.blobs.put(blob), width: bmp.width, height: bmp.height };
       bmp.close();
@@ -93,14 +94,6 @@
     pick(s.id);
   }); };
 
-  /** A grid change; tokens re-snap to the new grid (each stays put if its snapped spot would leave the scene). */
-  function regrid(s: Scene, p: Partial<Grid>): Scene {
-    const grid = { ...s.grid, ...p };
-    return { ...s, grid, tokens: s.tokens.map((t) => {
-      const at = snap(grid, t, t.size);
-      return at.x >= 0 && at.x <= s.width && at.y >= 0 && at.y <= s.height ? { ...t, ...at } : t;
-    }) };
-  }
 
   const rename = (name: string) => { const n = name.trim().slice(0, 100); if (n && n !== scene?.name) void edit((s) => ({ ...s, name: n })); };
   const remove = () => run(async () => {
@@ -180,8 +173,7 @@
   const portrait = (id: string, file: File) => run(async () => {
     const hash = await db.blobs.put(await resizeImage(file, 256));
     if (scene) await editScene(scene.id, (s) => patchToken(s, id, { portrait: hash }));
-    await reload();
-    rev++;
+    await reload(); // a new hash: MapCanvas loads it without re-decoding the background (M2)
   });
 
   const onmove = (ids: string[], primary: string, to: Pt) => edit((s) => moveTokens(s, ids, primary, to));
@@ -195,7 +187,8 @@
   const canvasTokens = $derived((scene?.tokens ?? []).map((t) => {
     const c = t.characterId ? chars.find((x) => x.id === t.characterId) : undefined;
     const pc = c && { hp: c.state.hp, maxHp: sheets.get(c.id)?.maxHp, conditions: c.state.conditions };
-    return { ...t, ...(pc ?? liveHp(t, combat)) };
+    // M6: a character token follows the character's current portrait unless the DM gave the token its own
+    return { ...t, ...(pc ?? liveHp(t, combat)), ...(c && !t.portrait && c.details.portrait && { portrait: c.details.portrait }) };
   }));
 </script>
 
@@ -247,7 +240,6 @@
       {speedOf}
       onselect={(ids) => (selected = ids)}
       {onmove}
-      {rev}
       fog={settings.fog ? scene.fog ?? encodeFog(newFog(scene.width, scene.height, false)) : undefined}
       onfog={settings.fog ? onfog : undefined}
     />

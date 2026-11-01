@@ -121,7 +121,7 @@
       bitmaps.set(hash, 'loading');
       db.blobs.get(hash)
         .then((blob) => (blob ? createImageBitmap(blob) : undefined))
-        .then((bmp) => { bitmaps.set(hash, bmp ?? 'failed'); schedule(); }, () => bitmaps.set(hash, 'failed'));
+        .then((bmp) => { if (gone) return bmp?.close(); bitmaps.set(hash, bmp ?? 'failed'); schedule(); }, () => bitmaps.set(hash, 'failed'));
       return undefined;
     }
     return typeof b === 'string' ? undefined : b;
@@ -144,6 +144,9 @@
     void rev;
     untrack(() => { for (const b of bitmaps.values()) if (typeof b !== 'string') b.close(); bitmaps.clear(); schedule(); });
   });
+  // M2: a 4096 px background is ~64 MB decoded: freed when the canvas goes (a scene switch remounts it), not left to the GC
+  let gone = false;
+  $effect(() => () => { gone = true; for (const b of bitmaps.values()) if (typeof b !== 'string') b.close(); bitmaps.clear(); });
 
   $effect(() => {
     const ro = new ResizeObserver(([e]) => {
@@ -157,7 +160,13 @@
     });
     ro.observe(wrap);
     // wheel must be non-passive to stop the page scrolling
-    const wheel = (e: WheelEvent) => { e.preventDefault(); view = zoomAt(view, local(e), e.deltaY < 0 ? 1.1 : 1 / 1.1); schedule(); };
+    // M3: a horizontal swipe does nothing; trackpad pinches (many small ctrl+wheel events) zoom smoothly
+    const wheel = (e: WheelEvent) => {
+      e.preventDefault();
+      if (!e.deltaY) return;
+      view = zoomAt(view, local(e), Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015)));
+      schedule();
+    };
     canvas.addEventListener('wheel', wheel, { passive: false });
     return () => { ro.disconnect(); canvas.removeEventListener('wheel', wheel); };
   });
@@ -341,7 +350,10 @@
     }
     if (drag && primary) {
       const feet = feetBetween(grid, primary, drag.ghost, diagonal), speed = speedOf?.(drag.id);
-      label(ctx, speed !== undefined && feet > speed ? `${feet} ft · past speed ${speed} ft` : `${feet} ft`, toScreen(view, drag.ghost));
+      // M5: the drop would be refused (any moved token would leave the scene)
+      const off = tokens.some((t) => (t.id === drag.id || drag.ids.includes(t.id)) && !(t.x + dx >= 0 && t.x + dx <= width && t.y + dy >= 0 && t.y + dy <= height));
+      const text = speed !== undefined && feet > speed ? `${feet} ft · past speed ${speed} ft` : `${feet} ft`;
+      label(ctx, off ? `${text} · off the map` : text, toScreen(view, drag.ghost));
     }
   }
 
