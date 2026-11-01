@@ -14,7 +14,7 @@
   import { budgetApplies, budgetFeet, combatantForToken, effectiveSpeed, originOf, recordMove } from '../../lib/combat/movement.ts';
   import { editCharacter, turn, updateCombat } from '../../lib/combat/store.ts';
   import { setPip } from '../../lib/combat/economy.ts';
-  import { applyUse, attacksPerAction, monsterActions, payment, pcActions, problemOf, slotsLeft, spendOn, type TurnAction } from '../../lib/combat/turnActions.ts';
+  import { applyUse, attacksPerAction, characterEffect, editsCharacter, monsterActions, payment, pcActions, problemOf, slotsLeft, spendOn, type TurnAction } from '../../lib/combat/turnActions.ts';
   import { featureList } from '../../lib/character/play.ts';
   import TurnPanel from '../turn/TurnPanel.svelte';
   import { toast } from '../../lib/toast.svelte.ts';
@@ -332,7 +332,7 @@
       return y && !why ? applyUse(k, y, a, v.perAction, target) : k;
     });
     if (why) throw new Error(`Not done: ${why}.`);
-    if (v.ch && (pay.level !== undefined || a.resource)) await editCharacter(v.ch.id, (c) => spendOn(c, pay.level, a.resource, pay.pact));
+    if (v.ch && editsCharacter(a, pay.level)) await editCharacter(v.ch.id, (c) => characterEffect(spendOn(c, pay.level, a.resource, pay.pact), a, target));
     await reload();
   });
   const onpip = (pip: 'action' | 'bonus' | 'reaction', used: boolean) => run(async () => {

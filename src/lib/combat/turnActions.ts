@@ -4,8 +4,9 @@ import { spellList } from '../character/play.ts';
 import { getKind } from '../character/choices.ts';
 import { richToPlain } from '../content/richtext.ts';
 import type { Attack, Character, Combat, Combatant, MonsterDef, RichText, Sheet } from '../types.ts';
+import { abilityMod } from '../rules/constants.ts';
 import { actionsLeft, BLOCKING, grantAction, spend, useProblem, type Cost } from './economy.ts';
-import { addDash } from './movement.ts';
+import { addDash, standUp } from './movement.ts';
 
 export interface TurnAction {
   id: string; name: string; cost: Cost;
@@ -19,6 +20,12 @@ export interface TurnAction {
   legendary?: number;
   /** Casting it needs a target, which gets this condition (Haste: its text grants "an additional action on each of its turns"). */
   target?: 'haste';
+  /** Ability checks it rolls instead of an attack (Grapple, Shove, escaping a grapple). */
+  check?: { label: string; bonus: number }[];
+  /** Only offered while it applies: grappled, prone, or standing. */
+  when?: 'grappled' | 'prone' | 'standing';
+  /** Picks it needs (Swap weapon: a carried weapon to draw); the pick goes as the use's target. */
+  options?: { id: string; name: string }[];
 }
 
 /** The cost a feature's text states: "as a bonus action" / "use a bonus action", "as an action" / "use your action", a reaction; else none. */
@@ -60,6 +67,27 @@ export function attacksPerAction(features: { name: string }[]): number {
 export const offhandDamage = (damage: string): string => damage.replace(/\+\d+$/, '');
 
 const STANDARD = ['Dash', 'Disengage', 'Dodge', 'Help', 'Hide', 'Ready', 'Search', 'Use an Object'];
+const p = (s: string): RichText => [{ p: s }];
+
+/**
+ * What every creature can do in combat (2014 basic rules, SRD 5.1 "Combat"): the standard actions; Grapple and Shove, each an Athletics
+ * check in place of one attack of the Attack action; escaping a grapple (an action); dropping prone (free) and standing up (half the
+ * speed); an Opportunity Attack and the readied action as reactions. `melee`: the weapon an Opportunity Attack uses.
+ */
+function basics(athletics: number, acrobatics: number, melee?: Attack): TurnAction[] {
+  const out: TurnAction[] = STANDARD.map((name) => ({ id: `std:${id(name)}`, name, cost: 'action', group: 'standard', ...(name === 'Dash' && { grants: 'dash' as const }) }));
+  const ath = { label: 'Athletics', bonus: athletics };
+  out.push(
+    { id: 'special:grapple', name: 'Grapple', cost: 'action', group: 'attack', check: [ath], text: p('In place of one attack: Athletics against the target\'s Athletics or Acrobatics. It must be no more than one size larger than you and within reach. On a win it is grappled.') },
+    { id: 'special:shove', name: 'Shove', cost: 'action', group: 'attack', check: [ath], text: p('In place of one attack: Athletics against the target\'s Athletics or Acrobatics. On a win, knock it prone or push it 5 feet away.') },
+    { id: 'std:escape', name: 'Escape a grapple', cost: 'action', group: 'standard', when: 'grappled', check: [ath, { label: 'Acrobatics', bonus: acrobatics }], text: p('Athletics or Acrobatics against the grappler\'s Athletics.') },
+    { id: 'free:prone', name: 'Drop prone', cost: 'none', group: 'standard', when: 'standing' },
+    { id: 'free:stand', name: 'Stand up', cost: 'none', group: 'standard', when: 'prone', text: p('Costs half your speed.') },
+    { id: 'react:opportunity', name: 'Opportunity Attack', cost: 'reaction', group: 'attack', ...(melee && { attack: melee }), text: p('When a hostile creature you can see moves out of your reach: one melee attack against it.') },
+    { id: 'react:readied', name: 'Readied action', cost: 'reaction', group: 'standard', text: p('The action you readied with Ready, when its trigger happens.') },
+  );
+  return out;
+}
 const id = (name: string) => name.toLowerCase().replace(/\s+/g, '-');
 const lightMelee = (a: Attack) => a.properties.includes('light') && !a.properties.includes('ammunition');
 
@@ -68,7 +96,10 @@ export function pcActions(c: Character, sheet: Sheet, features: { name: string; 
   const out: TurnAction[] = sheet.attacks.map((a) => ({ id: `attack:${a.entryId}`, name: a.name, cost: 'action', group: 'attack', attack: a }));
   const light = sheet.attacks.filter(lightMelee);
   if (light.length >= 2) for (const a of light) out.push({ id: `offhand:${a.entryId}`, name: `Off-hand: ${a.name}`, cost: 'bonus', group: 'attack', attack: { ...a, damage: offhandDamage(a.damage) } });
-  for (const name of STANDARD) out.push({ id: `std:${id(name)}`, name, cost: 'action', group: 'standard', ...(name === 'Dash' && { grants: 'dash' as const }) });
+  out.push(...basics(sheet.skills?.athletics?.bonus ?? 0, sheet.skills?.acrobatics?.bonus ?? 0, sheet.attacks.find((a) => !a.ranged)));
+  const spare = c.inventory?.filter((e) => e.item.weapon && !e.equipped) ?? [];
+  if (spare.length) out.push({ id: 'free:swap', name: 'Swap weapon', cost: 'none', group: 'standard', options: spare.map((e) => ({ id: e.id, name: e.item.name })),
+    text: p('Draw a carried weapon in place of your first equipped one: your free object interaction this turn, after that it takes an Action.') });
   const names = new Set(features.map((f) => f.name));
   if (names.has('Cunning Action')) for (const name of ['Dash', 'Disengage', 'Hide']) out.push({ id: `cunning:${id(name)}`, name: `Cunning Action: ${name}`, cost: 'bonus', group: 'feature', ...(name === 'Dash' && { grants: 'dash' as const }) });
   const seen = new Set<string>();
@@ -100,7 +131,30 @@ export function monsterActions(m: MonsterDef): TurnAction[] {
   const traits = m.traits.flatMap((t, i): TurnAction[] => { const cost = traitCost(richToPlain(t.text)); return cost === 'none' ? [] : [{ id: `mon:trait:${i}`, name: t.name, cost, group: 'monster', text: t.text }]; });
   const legendary = m.legendary.map((t, i): TurnAction => ({ id: `mon:legendary:${i}`, name: t.name, cost: 'none', group: 'monster', text: t.text,
     legendary: Number(/costs (\d) actions/i.exec(t.name)?.[1] ?? 1) }));
-  return [...of(m.actions, 'action', 'action'), ...of(m.bonusActions, 'bonus', 'bonus'), ...traits, ...of(m.reactions, 'reaction', 'reaction'), ...legendary];
+  const basic = basics(m.skills.athletics ?? abilityMod(m.scores.str), m.skills.acrobatics ?? abilityMod(m.scores.dex));
+  return [...of(m.actions, 'action', 'action'), ...of(m.bonusActions, 'bonus', 'bonus'), ...traits, ...of(m.reactions, 'reaction', 'reaction'), ...legendary, ...basic];
+}
+
+/** Whether it applies now (Escape only while grappled, Stand up only while prone, Drop prone only while standing). */
+export function visible(a: TurnAction, conditions: readonly string[]): boolean {
+  const has = (n: string) => conditions.some((c) => c.toLowerCase() === n);
+  return a.when === 'grappled' ? has('grappled') : a.when === 'prone' ? has('prone') : a.when === 'standing' ? !has('prone') : true;
+}
+
+/** Its cost now: a second object interaction in a turn takes an Action (SRD 5.1). */
+const costOf = (x: Combatant, a: TurnAction): Cost => (a.id === 'free:swap' && x.economy?.object ? 'action' : a.cost);
+
+/** It changes the character record (paid for, or a swap or Prone) rather than only the fight. */
+export const editsCharacter = (a: TurnAction, level?: number): boolean => level !== undefined || !!a.resource || ['free:swap', 'free:prone', 'free:stand'].includes(a.id);
+
+/** The character after the use's own effect: Swap weapon draws `pick` (an unequipped weapon) in place of the first equipped weapon; Prone. */
+export function characterEffect(c: Character, a: TurnAction, pick?: string): Character {
+  const prone = (on: boolean) => ({ ...c, state: { ...c.state, conditions: [...c.state.conditions.filter((n) => n.toLowerCase() !== 'prone'), ...(on ? ['Prone'] : [])] } });
+  if (a.id === 'free:prone') return prone(true);
+  if (a.id === 'free:stand') return prone(false);
+  if (a.id !== 'free:swap' || !c.inventory.some((e) => e.id === pick && e.item.weapon && !e.equipped)) return c;
+  const out = c.inventory.find((e) => e.item.weapon && e.equipped)?.id;
+  return { ...c, inventory: c.inventory.map((e) => (e.id === pick ? { ...e, equipped: true } : e.id === out ? { ...e, equipped: false } : e)) };
 }
 
 /** An attack that is part of the Attack action (Extra Attack counts it); undefined for anything else. */
@@ -110,19 +164,21 @@ const HASTE_OK = new Set(['std:dash', 'std:disengage', 'std:hide', 'std:use-an-o
 /** It would take the Hasted creature's last Action, its extra one (ponytail: the Haste Action counts as the one taken last). */
 function onHasteAction(x: Combatant, a: TurnAction, perAction: number): boolean {
   const e = x.economy;
-  return !!e?.haste && a.cost === 'action' && actionsLeft(x) === 1 && !(attackOf(a, perAction) && e.attacks > 0 && e.attacks < perAction);
+  return !!e?.haste && costOf(x, a) === 'action' && actionsLeft(x) === 1 && !(attackOf(a, perAction) && e.attacks > 0 && e.attacks < perAction);
 }
 
 /** Why the creature can't use it now (its pip, a use left, legendary uses, the Hasted limits), or undefined. Slots are `payment`'s check. */
 export function problemOf(x: Combatant, a: TurnAction, conditions: readonly string[], onTurn: boolean, perAction = 1): string | undefined {
   if (a.uses && a.uses.left < 1) return `no ${a.name} left`;
+  if (!visible(a, conditions)) return 'not now';
+  if (a.id === 'react:readied' && !x.economy?.readied) return 'nothing readied';
   if (a.grants === 'action' && !onTurn) return 'not your turn';
   if (a.grants === 'action' && x.economy?.surged) return 'once a turn';
   if (a.id.startsWith('offhand:') && !x.economy?.light) return 'attack with a light melee weapon first';
-  if (onHasteAction(x, a, perAction) && !(HASTE_OK.has(a.id) || a.id.startsWith('attack:') || (a.group === 'monster' && a.text && /weapon attack/i.test(richToPlain(a.text))))) {
+  if (onHasteAction(x, a, perAction) && !(HASTE_OK.has(a.id) || a.id === 'free:swap' || a.id.startsWith('attack:') || (a.group === 'monster' && a.text && /weapon attack/i.test(richToPlain(a.text))))) {
     return 'Hasted: the extra Action is only one weapon attack, Dash, Disengage, Hide or Use an Object';
   }
-  if (a.legendary === undefined) return useProblem(x, a.cost, conditions, onTurn, attackOf(a, perAction));
+  if (a.legendary === undefined) return useProblem(x, costOf(x, a), conditions, onTurn, attackOf(a, perAction));
   if (onTurn) return "only at the end of another creature's turn";
   const block = conditions.find((c) => BLOCKING.includes(c.toLowerCase()));
   if (block) return block;
@@ -156,9 +212,15 @@ export function payment(a: TurnAction, sheet: Sheet, c: Character, slot?: number
  */
 export function applyUse(k: Combat, x: Combatant, a: TurnAction, perAction = 1, target?: string): Combat {
   const haste = onHasteAction(x, a, perAction);
-  let y = spend(x, a.cost, attackOf(a, haste ? 1 : perAction));
-  if (haste && attackOf(a, perAction) && y.economy) y = { ...y, economy: { ...y.economy, attacks: perAction } }; // one weapon attack only
-  if (attackOf(a, perAction) && lightMelee(a.attack!) && y.economy) y = { ...y, economy: { ...y.economy, light: true } };
+  let y = spend(x, costOf(x, a), attackOf(a, haste ? 1 : perAction));
+  const mark = (e: Partial<NonNullable<Combatant['economy']>>) => ({ ...y, economy: { used: 0, extra: 0, bonus: false, attacks: 0, ...y.economy, ...e } });
+  if (haste && attackOf(a, perAction) && y.economy) y = mark({ attacks: perAction }); // one weapon attack only
+  if (attackOf(a, perAction) && a.attack && lightMelee(a.attack)) y = mark({ light: true });
+  if (a.id === 'free:swap') y = mark({ object: true });
+  if (a.id === 'std:ready') y = mark({ readied: true });
+  if (x.kind !== 'pc' && (a.id === 'free:prone' || a.id === 'free:stand')) { // a PC's conditions live on the character (characterEffect)
+    y = { ...y, conditions: [...(y.conditions ?? []).filter((n) => n.toLowerCase() !== 'prone'), ...(a.id === 'free:prone' ? ['Prone'] : [])] };
+  }
   if (a.grants === 'action') { y = grantAction(y); y = { ...y, economy: { ...y.economy!, surged: true } }; }
   if (a.spell?.concentration) y = { ...y, concentrating: true };
   if (a.legendary && y.legendary) y = { ...y, legendary: { ...y.legendary, used: y.legendary.used + a.legendary } };
@@ -166,6 +228,7 @@ export function applyUse(k: Combat, x: Combatant, a: TurnAction, perAction = 1, 
   if (a.spell?.concentration) cs = cs.map((z) => (z.hasted?.by === x.id ? { ...z, hasted: { ...z.hasted, ended: true as const } } : z));
   if (a.target === 'haste' && target !== undefined) cs = cs.map((z) => (z.id === target ? { ...z, hasted: { by: x.id, round: k.round } } : z));
   const next = { ...k, combatants: cs };
+  if (a.id === 'free:stand') return standUp(next, x.id);
   return a.grants === 'dash' ? addDash(next, x.id) : next;
 }
 

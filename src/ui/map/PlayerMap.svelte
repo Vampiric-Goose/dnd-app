@@ -82,8 +82,8 @@
     if (!r?.econ || !c) return undefined;
     try {
       const sheet = computeSheet(c, { settings, viewer: 'player' });
-      const { used, extra, bonus, attacks, light, surged, haste, reaction } = r.econ;
-      return { r, c, econ: r.econ, sheet, actions: pcActions(c, sheet, featureList(c, settings)), x: { economy: { used, extra, bonus, attacks, light, surged, haste }, reactionUsed: reaction } as Combatant };
+      const { used, extra, bonus, attacks, light, surged, haste, object, readied, reaction } = r.econ;
+      return { r, c, econ: r.econ, sheet, actions: pcActions(c, sheet, featureList(c, settings)), x: { economy: { used, extra, bonus, attacks, light, surged, haste, object, readied }, reactionUsed: reaction } as Combatant };
     } catch { return undefined; }
   });
   /** The tracker a use was sent under: its buttons stay off until the next tracker arrives or 3 s pass (a double tap sends one use). */

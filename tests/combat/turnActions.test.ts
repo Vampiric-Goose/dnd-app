@@ -80,7 +80,7 @@ describe('pcActions', () => {
 test('monsterActions: a goblin attacks with its Action', () => {
   const list = monsterActions(goblin);
   expect(list.map((a) => a.name)).toEqual(expect.arrayContaining(['Scimitar', 'Shortbow']));
-  expect(list.every((a) => a.cost === 'action' || a.cost === 'bonus' || a.cost === 'reaction')).toBe(true);
+  expect(list.filter((a) => a.group === 'monster').every((a) => a.cost === 'action' || a.cost === 'bonus' || a.cost === 'reaction')).toBe(true);
   expect(list.find((a) => a.name === 'Scimitar')?.cost).toBe('action');
 });
 

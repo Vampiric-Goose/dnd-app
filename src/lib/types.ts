@@ -134,7 +134,7 @@ export interface Combatant {
   conditions?: string[];                 // monsters only (a PC's are character.state.conditions)
   durations?: Record<string, Duration>;  // condition name → when it ends (PCs too)
   concentrating?: boolean; legendary?: { max: number; used: number }; reactionUsed?: boolean; notes?: string;
-  economy?: { used: number; extra: number; bonus: boolean; attacks: number; light?: boolean; surged?: boolean; haste?: boolean }; // this turn: Actions used, extra Actions, Bonus action, attacks in the Attack action, attacked with a light melee weapon (two-weapon fighting), Action Surge used, one extra Action is Haste's (absent: fresh)
+  economy?: { used: number; extra: number; bonus: boolean; attacks: number; light?: boolean; surged?: boolean; haste?: boolean; object?: boolean; readied?: boolean }; // this turn: Actions used, extra Actions, Bonus action, attacks in the Attack action, attacked with a light melee weapon (two-weapon fighting), Action Surge used, one extra Action is Haste's, the free object interaction used, an action readied (absent: fresh)
   hasted?: { by: string; round: number; ended?: true }; // the Hasted condition: the caster's combatant id and the round cast; ended: the caster cast another concentration spell
 }
 /** The live fight of a campaign. `combatants` is the order; round 0 = setup; `turn` = the current combatant's id. */
@@ -147,12 +147,13 @@ export interface Combat { campaignId: string; combatants: Combatant[]; round: nu
   /** The map's Start combat: round 1 starts by itself once every initiative is in (the players' rolls). */ autoStart?: true;
   /** The DM asked the party to roll initiative: players get a pop-up during setup. */ askInit?: true }
 /** Map ↔ combat: where the token stood when its turn's movement began (set by its first move) and Dashes taken this turn. */
-export interface Movement { from?: { x: number; y: number }; dashes: number; /** speed multiplier this turn: 2 Hasted, 0 after Haste ends */ mult?: number }
+export interface Movement { from?: { x: number; y: number }; dashes: number; /** speed multiplier this turn: 2 Hasted, 0 after Haste ends */ mult?: number;
+  /** stood up from prone this turn: half the speed spent */ stood?: true }
 /** A fight saved into an encounter: the whole combat, plus the shown scene's tokens and fog at save time (none when no scene was shown). */
 export interface SavedFight { combat: Combat; map?: { sceneId: string; tokens: Token[]; fog?: string }; savedAt: number }
 /** A prepared encounter (at most 50 lines, each count 1–99), or a saved fight (`fight`, with `monsters` empty). */
 export interface Encounter { id: string; campaignId: string; name: string; monsters: { monsterId: string; name?: string /* when prepared, to name it once it is gone */; count: number }[]; fight?: SavedFight; updatedAt: number }
-export interface Attack { entryId: string; name: string; toHit: number; damage: string; damageType: string; versatile?: string; properties: string[] }
+export interface Attack { entryId: string; name: string; toHit: number; damage: string; damageType: string; versatile?: string; properties: string[]; ranged?: true }
 export interface Sheet {
   totalLevel: number; prof: number; scores: Scores; mods: Scores;
   saves: Record<Ability, { bonus: number; proficient: boolean }>;

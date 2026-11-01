@@ -3,7 +3,7 @@
   // primary action card and End turn / Next. "All actions" opens a pop-up with everything, grouped by what it costs. The page decides
   // what a use does (a player sends it to the DM's device, the DM applies it); this only checks what is greyed out and rolls.
   import { CONDITION_TEXT } from '../../lib/combat/economy.ts';
-  import { primaryAction, problemOf, type TurnAction } from '../../lib/combat/turnActions.ts';
+  import { primaryAction, problemOf, visible, type TurnAction } from '../../lib/combat/turnActions.ts';
   import { richToPlain } from '../../lib/content/richtext.ts';
   import { rollParts } from '../../lib/monsters/library.ts';
   import { natD20 } from '../../lib/rolls.svelte.ts';
@@ -59,6 +59,7 @@
   const inKind = (a: TurnAction, k: Kind) => (k === 'action' ? a.cost === 'action' || a.cost === 'none' : a.cost === k);
   let kind: Kind = $state('action');
   const kindLabel = $derived(KINDS.find(([k]) => k === kind)![1]);
+  const shown = $derived(actions.filter((a) => visible(a, conditions))); // Escape only while grappled, Stand up only while prone
   /** Attacks: weapons, off-hand, a monster's attacks (a to-hit roll, or Multiattack); Utility: the standard actions; Spells; the rest
    * (class and race features, resources, a monster's traits, reactions and legendary actions) is Unique. */
   function sectionOf(a: TurnAction): Section {
@@ -83,7 +84,8 @@
 
   function use(a: TurnAction): boolean {
     if (a.spell?.concentration && concentrating && !confirm('Casting this ends your concentration on the current spell. Go on?')) return false;
-    return onuse(a, a.spell && a.spell.level > 0 ? slotOf(a) : undefined, a.target ? targetFor[a.id] ?? self : undefined) !== false;
+    const pick = a.target ? targetFor[a.id] ?? self : a.options ? targetFor[a.id] ?? a.options[0].id : undefined;
+    return onuse(a, a.spell && a.spell.level > 0 ? slotOf(a) : undefined, pick) !== false;
   }
   function attack(a: TurnAction) {
     if (!use(a)) return;
@@ -138,7 +140,7 @@
   {#if primary?.attack}<label class="check small" class:on={crit}><input type="checkbox" bind:checked={crit} /> Critical hit (next damage doubles its dice)</label>{/if}
   <div class="row btns">
     {#each KINDS as [k, label]}
-      {#if actions.some((a) => inKind(a, k))}<button type="button" onclick={() => { kind = k; dialog?.showModal(); }}>{label}</button>{/if}
+      {#if shown.some((a) => inKind(a, k))}<button type="button" onclick={() => { kind = k; dialog?.showModal(); }}>{label}</button>{/if}
     {/each}
     {#if canEnd}<button type="button" class="primary" onclick={onend}>{endLabel}</button>{/if}
   </div>
@@ -151,7 +153,7 @@
     <button type="button" aria-label="Close" onclick={() => dialog?.close()}>✕</button>
   </div>
   {#each SECTIONS as [sec, label]}
-    {@const list = actions.filter((a) => inKind(a, kind) && sectionOf(a) === sec).sort((p, q) => Number(p.cost === 'none') - Number(q.cost === 'none'))}
+    {@const list = shown.filter((a) => inKind(a, kind) && sectionOf(a) === sec).sort((p, q) => Number(p.cost === 'none') - Number(q.cost === 'none'))}
     {#if list.length}
       {@const shared = list.every((a) => problem(a) === problem(list[0])) ? problem(list[0]) : undefined}
       <h3>{label}{#if shared}<span class="small">{` · ${shared}`}</span>{/if}</h3>
@@ -189,8 +191,17 @@
       <button type="button" disabled={!!why || busy} aria-label="Roll {a.name} attack, {signed(a.attack.toHit)}" onclick={() => attack(a)}>Attack <span class="num">{signed(a.attack.toHit)}</span></button>
       <button type="button" aria-label="Roll {a.name} damage, {a.attack.damage}" onclick={() => damage(`${a.attack!.name} damage`, a.attack!.damage)}>Damage <span class="num">{a.attack.damage}</span></button>
       {#if a.attack.versatile}<button type="button" onclick={() => damage(`${a.attack!.name} damage (two-handed)`, a.attack!.versatile!)}>Two-handed <span class="num">{a.attack.versatile}</span></button>{/if}
+    {:else if a.check}
+      {#each a.check as c (c.label)}
+        <button type="button" disabled={!!why || busy} aria-label="Roll {a.name}, {c.label} {signed(c.bonus)}" onclick={() => { if (use(a)) rollD20(`${name}: ${a.name} (${c.label})`, c.bonus); }}>{c.label} <span class="num">{signed(c.bonus)}</span></button>
+      {/each}
     {:else}
       {#each parts as p}{#if 'expr' in p}<button type="button" aria-label="Roll {a.name} {p.hit ? 'attack' : 'damage'}, {p.t}" onclick={() => rollTo(`${name}: ${a.name} ${p.hit ? 'attack' : 'damage'}`, p.expr!, { public: false })}>{p.t}</button>{/if}{/each}
+      {#if a.options}
+        <select aria-label="{a.name}: which" value={targetFor[a.id] ?? a.options[0].id} onchange={(ev) => (targetFor[a.id] = (ev.currentTarget as HTMLSelectElement).value)}>
+          {#each a.options as o (o.id)}<option value={o.id}>{o.name}</option>{/each}
+        </select>
+      {/if}
       {#if a.target}
         <select aria-label="{a.name} target" value={targetFor[a.id] ?? self} onchange={(ev) => (targetFor[a.id] = (ev.currentTarget as HTMLSelectElement).value)}>
           {#each order as r (r.id)}<option value={r.id}>{r.name}</option>{/each}

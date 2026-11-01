@@ -179,7 +179,7 @@ export function computeSheet(c: Character, opts: SheetOpts): Sheet {
     return {
       entryId: entry.id, name: item.name, damageType: w.damageType, properties: w.properties,
       toHit: mod + (proficient ? prof : 0) + (on ? (item.bonuses?.attack ?? 0) : 0) + bonus(`attack.${kind}`),
-      damage: die(w.damage), ...(w.versatile && { versatile: die(w.versatile) }),
+      damage: die(w.damage), ...(w.versatile && { versatile: die(w.versatile) }), ...(w.ranged && { ranged: true as const }),
     };
   });
   const unarmedMod = ma ? Math.max(mods.str, mods.dex) : mods.str, unarmedDmg = unarmedMod + bonus('damage.melee');

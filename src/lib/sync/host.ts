@@ -7,7 +7,7 @@ import { idSource, is2024Source, restorablePack } from '../content/sources.ts';
 import type { RollEntry } from '../rolls.svelte.ts';
 import { toBase64 } from '../base64.ts';
 import { budgetApplies, combatantForToken, recordMove } from '../combat/movement.ts';
-import { applyUse, attacksPerAction, payment, pcActions, problemOf, spendOn } from '../combat/turnActions.ts';
+import { applyUse, attacksPerAction, characterEffect, editsCharacter, payment, pcActions, problemOf, spendOn } from '../combat/turnActions.ts';
 import { featureList } from '../character/play.ts';
 import { computeSheet } from '../rules/sheet.ts';
 import { moveTokens } from '../map/scene.ts';
@@ -343,7 +343,9 @@ export class Host {
     if (!a) return refuse('that action is not available');
     const { level, pact, problem } = payment(a, sheet, ch, m.slot);
     if (problem) return refuse(problem);
-    if ((level !== undefined || a.resource) && !this.#deps.editCharacter) return refuse('this device cannot spend it');
+    if (a.options && !a.options.some((o) => o.id === m.target)) return refuse('pick one');
+    const edits = editsCharacter(a, level);
+    if (edits && !this.#deps.editCharacter) return refuse('this device cannot spend it');
     const per = attacksPerAction(features);
     let why: string | undefined = 'not in the fight';
     await this.#deps.updateCombat((k) => {
@@ -355,7 +357,7 @@ export class Host {
       return applyUse(k, x, a, per, t?.id);
     });
     if (why) return refuse(why);
-    if ((level !== undefined || a.resource) && !(await this.#deps.editCharacter!(ch.id, (x) => spendOn(x, level, a.resource, pact)).catch(() => false))) {
+    if (edits && !(await this.#deps.editCharacter!(ch.id, (x) => characterEffect(spendOn(x, level, a.resource, pact), a, m.target)).catch(() => false))) {
       refuse('the character could not be updated, so nothing was paid');
     }
   }
