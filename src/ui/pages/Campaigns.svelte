@@ -152,6 +152,8 @@
   </ul>
 {/if}
 
+<p><a href="#/packs">Packs</a> · <a href="#/about">About</a></p>
+
 <h2>Import a backup</h2>
 <p class="muted">Restores campaigns, characters, items, monsters, books and images from a backup file. Matching records are overwritten.</p>
 <div class="field">
@@ -161,7 +163,7 @@
 {#if plan}
   {@const n = plan.counts}
   <div role="alertdialog" aria-label="Confirm backup import" class="card">
-    <p>This backup holds {n.campaigns} {n.campaigns === 1 ? 'campaign' : 'campaigns'}, {n.characters} {n.characters === 1 ? 'character' : 'characters'}, {n.items} {n.items === 1 ? 'item' : 'items'}, {n.monsters} {n.monsters === 1 ? 'monster' : 'monsters'}, {n.encounters} {n.encounters === 1 ? 'encounter' : 'encounters'} and {n.packs} {n.packs === 1 ? 'book' : 'books'}. Matching records are overwritten.</p>
+    <p>This backup holds {n.campaigns} {n.campaigns === 1 ? 'campaign' : 'campaigns'}, {n.characters} {n.characters === 1 ? 'character' : 'characters'}, {n.items} {n.items === 1 ? 'item' : 'items'}, {n.monsters} {n.monsters === 1 ? 'monster' : 'monsters'}, {n.encounters} {n.encounters === 1 ? 'encounter' : 'encounters'}, {n.scenes} {n.scenes === 1 ? 'map scene' : 'map scenes'} and {n.packs} {n.packs === 1 ? 'book' : 'books'}. Matching records are overwritten.</p>
     {#if plan.replaced}<p class="error">{plan.replaced} {plan.replaced === 1 ? 'record on this device' : 'records on this device'} will be replaced ({plan.newer} of them newer).</p>{/if}
     {#if n.skippedItems}<p class="muted">{n.skippedItems.length} {n.skippedItems.length === 1 ? 'item is' : 'items are'} from the 2024 rules and will be left out.</p>{/if}
     {#if n.skippedMonsters}<p class="muted">{n.skippedMonsters.length} {n.skippedMonsters.length === 1 ? 'monster is' : 'monsters are'} from the 2024 rules or damaged and will be left out.</p>{/if}
@@ -171,5 +173,3 @@
     </div>
   </div>
 {/if}
-
-<p><a href="#/about">About this app</a></p>

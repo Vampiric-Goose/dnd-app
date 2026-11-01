@@ -54,6 +54,7 @@
     ['settings', 'CampaignSettings', () => import('./ui/pages/CampaignSettings.svelte')],
     ['about', 'About', () => import('./ui/pages/About.svelte')],
     ['join/:code', 'Join', () => import('./ui/pages/Join.svelte')],
+    ['map', 'Map', () => import('./ui/pages/Map.svelte')], // stage 5; `?scene=<id>` picks the scene
   ];
 
   // Monsters are DM information (R2): no link in Player view.
@@ -61,6 +62,7 @@
     ['Campaigns', ''],
     ['Characters', 'characters'],
     ['Combat', 'combat'],
+    ['Map', 'map'],
     ['Compendium', 'compendium'],
     ...(app.viewer === 'dm' ? [['Monsters', 'monsters'] as [string, string]] : []),
     ['Items', 'items'],
@@ -100,7 +102,7 @@
 
   <nav aria-label="Main">
     {#each nav as [label, segment]}
-      <a href="#/{segment}" class:side-only={segment === 'about'} aria-current={(router.path[0] ?? '') === segment ? 'page' : undefined}>{label}</a>
+      <a href="#/{segment}" class:wide-only={segment === 'packs' || segment === 'about'} aria-current={(router.path[0] ?? '') === segment ? 'page' : undefined}>{label}</a>
     {/each}
   </nav>
 
@@ -167,11 +169,6 @@
     border-top: 1px solid var(--border);
   }
 
-  /* nine labels don't fit the 375px bottom bar: About stays in the side nav, and the Campaigns page links to it */
-  nav a.side-only {
-    display: none;
-  }
-
   nav a {
     flex: 1 1 auto; /* size by label so all eight labels fit at 375px */
     padding: 0.9rem 0.05rem;
@@ -184,6 +181,13 @@
   nav a[aria-current='page'] {
     color: var(--accent);
     box-shadow: inset 0 3px var(--accent);
+  }
+
+  /* Stage 5: below 768 px Packs and About leave the bottom bar (the Campaigns page links to both) so the labels still fit at 375 px. */
+  @media (max-width: 767.98px) {
+    nav a.wide-only {
+      display: none;
+    }
   }
 
   @media (min-width: 768px) {
@@ -203,8 +207,7 @@
       border-right: 1px solid var(--border);
     }
 
-    nav a,
-    nav a.side-only {
+    nav a {
       display: block;
       flex: none;
       padding: 0.75rem 1.25rem;

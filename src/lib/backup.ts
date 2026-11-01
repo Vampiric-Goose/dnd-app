@@ -1,10 +1,11 @@
 import { is2024, strip2024 } from './character/strip2024.ts';
 import { restorablePack } from './content/sources.ts';
+import { fromBase64, toBase64 } from './base64.ts';
 import { db, sha256Hex, type BlobRecord, type Snapshot, type TrashEntry } from './db.ts';
 import { playerCharacter } from './items/playerView.ts';
 import { soundMonster } from './monsters/homebrew.ts';
-import { campaignProblem, characterProblem, encounterProblem, isRec, problem, SHAPES, type Rec } from './recordShape.ts';
-import type { Campaign, Character, Encounter, Pack, StoredItem, StoredMonster } from './types.ts';
+import { campaignProblem, characterProblem, encounterProblem, isRec, problem, sceneProblem, SHAPES, type Rec } from './recordShape.ts';
+import type { Campaign, Character, Encounter, Pack, Scene, StoredItem, StoredMonster } from './types.ts';
 import { uid } from './uid.ts';
 
 const MY_SPELLS_PACK = 'pack:MYSPELLS'; // R3: the pasted spells (SpellEditor)
@@ -17,14 +18,6 @@ const parse = async (file: Blob): Promise<Rec | undefined> => {
     return undefined;
   }
 };
-
-const toBase64 = (buf: ArrayBuffer) => {
-  const u = new Uint8Array(buf);
-  let s = '';
-  for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode(...u.subarray(i, i + 0x8000)); // chunked: spread has an argument limit
-  return btoa(s);
-};
-const fromBase64 = (b64: string) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)).buffer;
 
 const damaged = (why: string) => new Error('Backup file is damaged: ' + why);
 
@@ -46,7 +39,7 @@ async function blobRecords(o: Rec): Promise<BlobRecord[]> {
   return Promise.all(list.map(async (b: unknown, i): Promise<BlobRecord> => {
     if (!isRec(b) || typeof b.hash !== 'string' || typeof b.type !== 'string' || typeof b.base64 !== 'string') throw damaged(`blobs[${i}] is incomplete`);
     let data: ArrayBuffer;
-    try { data = fromBase64(b.base64); } catch { throw damaged(`blobs[${i}] is not valid base64`); }
+    try { data = fromBase64(b.base64).buffer; } catch { throw damaged(`blobs[${i}] is not valid base64`); }
     if ((await sha256Hex(data)) !== b.hash) throw damaged(`blobs[${i}] does not match its hash`);
     return { hash: b.hash, type: b.type, data };
   }));
@@ -98,15 +91,16 @@ export async function exportBackup(opts: { campaignId?: string; includePacks: bo
   const trash: Record<string, TrashEntry[]> = {};
   for (const c of campaigns) { const t = await db.trash.list(c.id); if (t.length) trash[c.id] = t; }
   const encounters = (await Promise.all(campaigns.map((c) => db.encounters.list(c.id)))).flat(); // stage 4
+  const scenes = (await Promise.all(campaigns.map((c) => db.scenes.list(c.id)))).flat(); // stage 5
   const exportedAt = Date.now();
-  const file = json({ format: 'dnd-app-backup', version: 1, exportedAt, campaigns, characters, items, monsters, encounters, packs, blobs, trash });
+  const file = json({ format: 'dnd-app-backup', version: 1, exportedAt, campaigns, characters, items, monsters, encounters, scenes, packs, blobs, trash });
   // The built file must not be lost over a bookkeeping write (a full disk is when you need a backup most).
   // Only a whole-library export counts as "backed up": one campaign's file leaves the rest unprotected.
   if (opts.campaignId === undefined) await db.meta.set('lastBackupAt', exportedAt).catch((err) => console.warn('Could not record backup time', err));
   return file;
 }
 
-export type BackupCounts = { campaigns: number; characters: number; items: number; monsters: number; encounters: number; packs: number; skippedPacks?: string[]; skippedItems?: string[]; skippedMonsters?: string[] };
+export type BackupCounts = { campaigns: number; characters: number; items: number; monsters: number; encounters: number; scenes: number; packs: number; skippedPacks?: string[]; skippedItems?: string[]; skippedMonsters?: string[] };
 /** A validated backup waiting for the user's yes (R57). `replaced`: records stored here it would overwrite; `newer`: how many of those are newer than the file's copy. */
 export interface BackupPlan { snapshot: Snapshot; counts: BackupCounts; replaced: number; newer: number }
 
@@ -121,6 +115,7 @@ export async function readBackup(file: Blob): Promise<BackupPlan> {
     items: records<StoredItem>(o, 'items', (r) => problem(r, SHAPES.item)),
     monsters: records<StoredMonster>(o, 'monsters', (r) => problem(r, SHAPES.monster)), // missing in backups from before monsters
     encounters: records<Encounter>(o, 'encounters', encounterProblem), // missing in backups from before stage 4
+    scenes: records<Scene>(o, 'scenes', sceneProblem), // missing in backups from before stage 5
     packs: records<Pack>(o, 'packs', (r) => problem(r, SHAPES.pack)),
     blobs: await blobRecords(o),
     trash: trashRecords(o),
@@ -134,7 +129,7 @@ export async function readBackup(file: Blob): Promise<BackupPlan> {
   // R60: and the same for monsters: a 2024 one, or one the stat block could not read.
   const skippedMonsters = snapshot.monsters.filter((m) => is2024(m) || !soundMonster(m)).map((m) => m.id);
   snapshot.monsters = snapshot.monsters.filter((m) => !is2024(m) && soundMonster(m));
-  const counts = { campaigns: snapshot.campaigns.length, characters: snapshot.characters.length, items: snapshot.items.length, monsters: snapshot.monsters.length, encounters: snapshot.encounters.length, packs: snapshot.packs.length,
+  const counts = { campaigns: snapshot.campaigns.length, characters: snapshot.characters.length, items: snapshot.items.length, monsters: snapshot.monsters.length, encounters: snapshot.encounters.length, scenes: snapshot.scenes.length, packs: snapshot.packs.length,
     ...(skippedPacks.length && { skippedPacks }), ...(skippedItems.length && { skippedItems }), ...(skippedMonsters.length && { skippedMonsters }) };
   return { snapshot, counts, ...(await db.countReplaced(snapshot)) };
 }

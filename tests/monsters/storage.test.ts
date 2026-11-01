@@ -123,7 +123,7 @@ test('a backup with two monsters restores both; its campaign backup carries them
   const one = JSON.parse(await (await exportBackup({ campaignId: 'c1', includePacks: false })).text());
   expect(one.monsters.map((m: StoredMonster) => m.id)).toEqual(['a']);
   await resetDb();
-  expect(await restore(whole)).toEqual({ campaigns: 2, characters: 0, items: 0, monsters: 2, encounters: 0, packs: 0 });
+  expect(await restore(whole)).toEqual({ campaigns: 2, characters: 0, items: 0, monsters: 2, encounters: 0, scenes: 0, packs: 0 });
   expect((await db.monsters.list('c1')).map((m) => m.id)).toEqual(['a']);
   expect((await db.monsters.list('c2')).map((m) => m.id)).toEqual(['b']);
 });
@@ -141,7 +141,7 @@ test('a backup monster from 2024 or unreadable is skipped and reported', async (
 
 test('a backup with no monsters key still restores', async () => {
   const r = await restore(backup({ campaigns: [camp('c1')], characters: [char('a', 'c1')] }));
-  expect(r).toEqual({ campaigns: 1, characters: 1, items: 0, monsters: 0, encounters: 0, packs: 0 });
+  expect(r).toEqual({ campaigns: 1, characters: 1, items: 0, monsters: 0, encounters: 0, scenes: 0, packs: 0 });
   expect(await db.monsters.list('c1')).toEqual([]);
   await expect(restore(backup({ monsters: {} }))).rejects.toThrow('monsters is not a list');
   await expect(restore(backup({ monsters: [{ kind: 'item', id: 'q' }] }))).rejects.toThrow('monsters[0] is not an monster');
@@ -182,8 +182,8 @@ test('opening while an older tab holds version 1 reports it, then completes once
 test('this tab steps aside when a newer version wants to upgrade', async () => {
   await db.monsters.put(mon('a'));
   let blocked = false;
-  const v3 = await openDB('dnd-app', 3, { blocked() { blocked = true; } });
+  const v5 = await openDB('dnd-app', 5, { blocked() { blocked = true; } });
   expect(blocked).toBe(false); // our connection closed on versionchange, so nothing waited
-  v3.close();
+  v5.close();
   await resetDb();
 });
