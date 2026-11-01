@@ -57,7 +57,10 @@
       const added = after.combatants.filter((x) => !before.has(x.id)), cid = campaign.id;
       // Stage 5: the new monsters get tokens on the current scene (the map chunk loads only here).
       void import('../../lib/map/store.ts').then((m) => m.placeCombatants(cid, added, (id) => monById.get(id)))
-        .then((n) => { if (n === 0 && added.length) toast('No scene to place tokens on.'); }, (e) => toast(`Tokens not placed: ${e instanceof Error ? e.message : e}`, true));
+        .then((r) => {
+          if (r.why === 'no scene' && added.length) toast('No scene to place tokens on.');
+          else if (r.why === 'full') toast(`The scene is full (200 tokens): ${r.placed ? `only ${r.placed} placed` : 'no tokens placed'}.`, true);
+        },(e) => toast(`Tokens not placed: ${e instanceof Error ? e.message : e}`, true));
     });
     if (missing.length) {
       const names = missing.map((id) => lineName(e.monsters.find((l) => l.monsterId === id) ?? { monsterId: id, count: 1 }));

@@ -71,13 +71,13 @@ describe('with the database', () => {
   });
 
   test('an encounter\'s monsters are placed', async () => {
-    expect(await placeCombatants('c1', [monsterCombatant(goblin, 'Goblin 1', 'average', half)], lookup)).toBe(0); // no scenes
+    expect(await placeCombatants('c1', [monsterCombatant(goblin, 'Goblin 1', 'average', half)], lookup)).toEqual({ placed: 0, why: 'no scene' });
     const other = { ...newScene('c1', 'Other'), updatedAt: Date.now() + 1000 }, shown = newScene('c1', 'Shown');
     await db.scenes.put(other);
     await db.scenes.put(shown);
     await db.scenes.show('c1', shown.id);
     const added = [1, 2, 3].map((n) => ({ ...monsterCombatant(goblin, `Goblin ${n}`, 'average', half), ...(n === 3 && { hidden: true, hp: 2 }) }));
-    expect(await placeCombatants('c1', added, lookup)).toBe(3);
+    expect(await placeCombatants('c1', added, lookup)).toEqual({ placed: 3 });
     const s = (await db.scenes.get(shown.id))!;
     expect(s.tokens.map((t) => t.combatantId)).toEqual(added.map((x) => x.id));
     expect(s.tokens[2]).toMatchObject({ name: 'Goblin 3', size: 'S', hidden: true, hp: 2, maxHp: 7, monsterId: goblin.id });
@@ -85,7 +85,11 @@ describe('with the database', () => {
     const cells = s.tokens.flatMap((t) => footprint(s.grid, t).map((c) => `${c.q},${c.r}`));
     expect(new Set(cells).size).toBe(cells.length);
     expect((await db.scenes.get(other.id))!.tokens).toEqual([]);
-    expect(await placeCombatants('c1', added, lookup)).toBe(0);
+    expect(await placeCombatants('c1', added, lookup)).toEqual({ placed: 0 }); // all linked already
+    // a full scene (MAX_TOKENS) is told apart from no scene
+    await db.scenes.put(addTokens({ ...(await db.scenes.get(shown.id))!, tokens: [] }, Array.from({ length: 199 }, (_, i) => ({ name: `T${i}`, size: 'M' as const, x: 35, y: 35 }))));
+    const more = [4, 5].map((n) => monsterCombatant(goblin, `Goblin ${n}`, 'average', half));
+    expect(await placeCombatants('c1', more, lookup)).toEqual({ placed: 1, why: 'full' });
   });
 
   test('Add to combat and End combat write back', async () => {

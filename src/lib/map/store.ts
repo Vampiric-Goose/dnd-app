@@ -62,13 +62,14 @@ export async function addTokensToCombat(cid: string, sceneId: string, ids: strin
 
 /**
  * An encounter's new combatants placed on the shown scene (else the most recently updated one): one token per monster combatant that no
- * token links to yet, near the scene's centre. Returns how many were placed (0: no scene; the caller says so).
+ * token links to yet, near the scene's centre. Returns how many were placed, and why not all were: no scene, or the scene is full
+ * (MAX_TOKENS). The caller says so.
  */
-export async function placeCombatants(cid: string, added: Combatant[], lookup: (id: string) => MonsterDef | undefined): Promise<number> {
+export async function placeCombatants(cid: string, added: Combatant[], lookup: (id: string) => MonsterDef | undefined): Promise<{ placed: number; why?: 'no scene' | 'full' }> {
   const scenes = await db.scenes.list(cid);
   const target = scenes.find((s) => s.shown) ?? scenes.sort((a, b) => b.updatedAt - a.updatedAt)[0];
-  if (!target) return 0;
-  let placed = 0;
+  if (!target) return { placed: 0, why: 'no scene' };
+  let placed = 0, wanted = 0;
   await editScene(target.id, (s) => {
     const linked = new Set(s.tokens.map((t) => t.combatantId));
     const list: NewToken[] = added.filter((x) => x.kind === 'monster' && !linked.has(x.id)).map((x) => ({
@@ -77,9 +78,10 @@ export async function placeCombatants(cid: string, added: Combatant[], lookup: (
     }));
     const out = list.length ? addTokens(s, list) : s;
     placed = out.tokens.length - s.tokens.length;
+    wanted = list.length;
     return out;
   });
-  return placed;
+  return placed < wanted ? { placed, why: 'full' } : { placed };
 }
 
 /** Before a fight ends: every scene of the campaign takes the fight's HP onto its linked tokens. */
