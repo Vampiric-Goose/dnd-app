@@ -1,28 +1,50 @@
+/*
+ * Abyssal instrument: the app's one theme (always dark). Spec: docs/superpowers/specs/2026-11-01-abyssal-redesign-design.md.
+ * Use these tokens; never hard-code a colour in a page. Teal (--accent) is the only accent, red (--danger) only for damage,
+ * danger and warnings, amber (--roll-*) only for the sheet's last-roll strip.
+ */
 :root {
-  color-scheme: light dark;
-  --bg: #f7f5f0;
-  --surface: #ffffff;
-  --text: #1c1a17;
-  --muted: #5e5a52;
-  --border: #d9d4c8;
-  --accent: #8a5200;
-  /* The sheet's last-roll strip: gold band, dark text */
-  --roll-bg: #ffe9a8;
-  --roll-fg: #2b1b00;
-  --roll-edge: #8a5200;
+  color-scheme: dark;
+
+  --bg: #0a1113; /* page ground */
+  --rail: #070d0e; /* left navigation, phone bottom bar */
+  --panel: #0c1719; /* right panel, menus, bottom sheet, cards */
+  --raised: #0f2a2b; /* selected row / active nav background */
+  --line: #14272a; /* hairline rules and panel borders */
+  --line-strong: #1d3a3a; /* control borders */
+  --text: #cfe3df;
+  --text-strong: #eafffb; /* names, numbers, headings */
+  /* Both lightened from the spec's #6f8f8b / #5f8783 so they pass AA (4.5:1) on --raised too, not only on --bg:
+     --muted 6.5 on --bg, 5.2 on --raised; --label 5.9 on --bg, 4.7 on --raised. */
+  --muted: #7d9d99;
+  --label: #759590;
+  --accent: #2dd4bf;
+  --on-accent: #04201d; /* text on an accent fill */
+  --danger: #e5484d; /* 4.9:1 on --bg, 4.7 on --panel: fine as text there, use it as a fill or border on --raised */
+  /* The sheet's last-roll strip only: amber retuned to the dark ground */
+  --roll-bg: #2e2208;
+  --roll-fg: #ffe7a3;
+  --roll-edge: #d9a43a;
+
+  --mono: ui-monospace, Consolas, 'Cascadia Mono', Menlo, monospace;
+  --radius: 5px;
+
+  /* Legacy names that existing page styles still use; new code uses the tokens above. */
+  --surface: var(--panel);
+  --border: var(--line-strong);
+
+  /* Set by the shell (App.svelte): the sticky top bar's measured height, and the phone bottom bar's height (0 on desktop). */
+  --topbar-h: 2.75rem;
+  --bottombar-h: 3.25rem;
+
+  scrollbar-color: var(--line-strong) transparent;
+  font-size: 16px; /* phones: 16 px keeps iOS from zooming into a focused input */
 }
 
-@media (prefers-color-scheme: dark) {
+@media (min-width: 768px) {
   :root {
-    --bg: #14161c;
-    --surface: #1d2028;
-    --text: #ebe8e2;
-    --muted: #a9a59c;
-    --border: #2f333d;
-    --accent: #e3b04b;
-    --roll-bg: #4a3608;
-    --roll-fg: #fff3d1;
-    --roll-edge: #e3b04b;
+    --bottombar-h: 0px;
+    font-size: 14px;
   }
 }
 
@@ -31,10 +53,55 @@ body {
   background: var(--bg);
   color: var(--text);
   font: 1rem/1.5 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+  color: var(--text-strong);
+}
+
+h1,
+h2,
+h3,
+h4 {
+  color: var(--text-strong);
+  font-weight: 600;
+  line-height: 1.25;
+  margin: 1.2em 0 0.5em;
+}
+
+h1 {
+  font-size: 1.45rem;
+  letter-spacing: 0.01em;
+}
+
+h2 {
+  font-size: 1.15rem;
+}
+
+h3 {
+  font-size: 1rem;
+}
+
+h4 {
+  font-size: 0.9rem;
 }
 
 a {
   color: var(--accent);
+  text-decoration-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  text-underline-offset: 0.15em;
+}
+
+a:hover {
+  text-decoration-color: currentColor;
+}
+
+hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 1rem 0;
 }
 
 :focus-visible {
@@ -42,56 +109,199 @@ a {
   outline-offset: 2px;
 }
 
-/* Shared form and layout bits used by the pages */
+/* Controls. Desktop 2.5rem (35 px); phones get 44 px touch targets (below). */
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
-  color: inherit;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 0.35rem;
-  padding: 0.4rem 0.7rem;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  padding: 0.35rem 0.7rem;
   min-height: 2.5rem;
   max-width: 100%;
   box-sizing: border-box;
 }
 
+input,
+select,
+textarea {
+  background: var(--rail);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--accent);
+}
+
+option,
+optgroup {
+  background: var(--panel);
+  color: var(--text);
+}
+
 button {
   cursor: pointer;
+  transition: background-color 0.12s, border-color 0.12s;
+}
+
+button:hover:not(:disabled) {
+  background-color: var(--raised);
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--line-strong));
 }
 
 button.primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: var(--bg);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+
+button.primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 82%, white);
+  border-color: color-mix(in srgb, var(--accent) 82%, white);
 }
 
 button.danger {
-  border-color: #b3261e;
-  color: #b3261e;
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--line-strong));
+  color: var(--danger);
 }
 
-@media (prefers-color-scheme: dark) {
-  button.danger {
-    border-color: #f2938c;
-    color: #f2938c;
-  }
+button.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  border-color: var(--danger);
 }
 
-button:disabled {
-  opacity: 0.55;
+/* A pressed toggle (segmented controls, tabs built from buttons) uses the selected style. Pages may override. */
+button[aria-pressed='true'] {
+  background: var(--raised);
+  border-color: var(--accent);
+  color: var(--text-strong);
+}
+
+button:disabled,
+input:disabled,
+select:disabled,
+textarea:disabled {
+  opacity: 0.45;
   cursor: default;
 }
 
 input[type='checkbox'],
 input[type='radio'] {
   min-height: 0;
-  width: 1.2rem;
-  height: 1.2rem;
+  width: 1.15rem;
+  height: 1.15rem;
+  margin: 0.15rem 0;
+  padding: 0;
+  flex: none;
   accent-color: var(--accent);
 }
 
+input[type='range'] {
+  accent-color: var(--accent);
+  background: transparent;
+  border: 0;
+  padding: 0;
+}
+
+input[type='color'] {
+  padding: 0.15rem;
+  width: 3rem;
+}
+
+input[type='file'] {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  min-height: 0;
+}
+
+input[type='file']::file-selector-button {
+  font: inherit;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  padding: 0.35rem 0.7rem;
+  margin-right: 0.6rem;
+  min-height: 2.5rem;
+  cursor: pointer;
+}
+
+textarea {
+  line-height: 1.45;
+}
+
+fieldset {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  margin: 0.75rem 0;
+  padding: 0.5rem 0.75rem 0.75rem;
+}
+
+legend {
+  padding: 0 0.3rem;
+  color: var(--label);
+  font-size: 0.75rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+/* A plain <details> fold: accent chevron. Kit Drawer.svelte is the styled version. */
+summary {
+  cursor: pointer;
+}
+
+summary::marker {
+  color: var(--accent);
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--label);
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid var(--line);
+}
+
+td {
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, var(--bg));
+  vertical-align: top;
+}
+
+dialog {
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  box-shadow: 0 16px 40px rgb(0 0 0 / 0.55);
+  max-width: min(36rem, calc(100vw - 2rem));
+}
+
+dialog::backdrop {
+  background: rgb(2 6 7 / 0.7);
+}
+
+/* Shared form and layout bits used by the pages */
 .row {
   display: flex;
   flex-wrap: wrap;
@@ -100,9 +310,9 @@ input[type='radio'] {
 }
 
 .card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 0.5rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
   padding: 0.75rem 1rem;
   margin: 0.75rem 0;
 }
@@ -121,24 +331,43 @@ input[type='radio'] {
 .field {
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
+  gap: 0.25rem;
   margin: 0.75rem 0;
 }
 
-.error {
-  color: #b3261e;
+.field > label {
+  color: var(--muted);
+  font-size: 0.875rem;
 }
 
-@media (prefers-color-scheme: dark) {
-  .error {
-    color: #f2938c;
-  }
+.error {
+  color: var(--danger);
 }
 
 ul.plain {
   list-style: none;
   padding: 0;
   margin: 0;
+}
+
+/* Small uppercase caption ("HIT POINTS"), as in the mockups */
+.caption {
+  color: var(--label);
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+/* Every number a player reads at a glance: scores, modifiers, HP, AC, initiative, dice totals, counts */
+.num {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Prose-only pages (About, long help text): a readable measure instead of the full width */
+.prose {
+  max-width: 46rem;
 }
 
 .sr-only {
@@ -151,4 +380,19 @@ ul.plain {
   clip-path: inset(50%);
   white-space: nowrap;
   border: 0;
+}
+
+/* Phones: 44 px touch targets */
+@media (max-width: 767px) {
+  button,
+  input:not([type='checkbox'], [type='radio'], [type='range'], [type='file']),
+  select,
+  input[type='file']::file-selector-button {
+    min-height: 44px;
+  }
+
+  .check {
+    min-height: 44px;
+    align-items: center;
+  }
 }

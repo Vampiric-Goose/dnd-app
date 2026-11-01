@@ -51,21 +51,33 @@
     align-items: center;
     gap: 0.6rem;
     max-width: min(32rem, 100%);
-    padding: 0.4rem 0.4rem 0.4rem 0.8rem;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 0.5rem;
-    box-shadow: 0 4px 16px rgb(0 0 0 / 0.35);
+    padding: 0.35rem 0.35rem 0.35rem 0.8rem;
+    color: var(--text);
+    background: var(--panel);
+    border: 1px solid var(--line-strong);
+    border-left: 3px solid var(--accent);
+    border-radius: 5px;
+    box-shadow: 0 10px 24px rgb(0 0 0 / 0.5);
     overflow-wrap: anywhere;
   }
 
   .toast.error {
-    border-color: currentColor;
+    border-left-color: var(--danger);
+    color: var(--text-strong);
   }
 
   button {
     flex: none;
     min-height: 2rem;
     padding: 0 0.6rem;
+    border-color: transparent;
+    color: var(--muted);
+  }
+
+  @media (max-width: 767px) {
+    button {
+      min-height: 44px;
+      min-width: 44px;
+    }
   }
 </style>

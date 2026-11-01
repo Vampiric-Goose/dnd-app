@@ -36,8 +36,8 @@
 
 <svelte:window {onkeydown} />
 
-<button bind:this={toggle} class="fab primary" aria-expanded={open} aria-controls="dice-tray" onclick={() => (open = !open)}>
-  <span aria-hidden="true">🎲</span> Dice
+<button bind:this={toggle} class="fab" aria-expanded={open} aria-controls="dice-tray" onclick={() => (open = !open)}>
+  <span class="glyph" aria-hidden="true">d20</span> Dice
 </button>
 
 {#if open}
@@ -53,7 +53,7 @@
 
     <div class="row dice" role="group" aria-label="Quick dice">
       {#each DICE as n}
-        <button type="button" onclick={() => go('d' + n, '1d' + n)}>d{n}</button>
+        <button type="button" class="num" onclick={() => go('d' + n, '1d' + n)}>d{n}</button>
       {/each}
     </div>
 
@@ -69,7 +69,7 @@
       {#each shownRolls(rollLog, app.viewer) as r (r.id)}
         {@const nat = natD20(r.detail)}
         <li class:nat20={nat === 'nat20'} class:nat1={nat === 'nat1'}>
-          <strong class="total">{r.total}</strong>
+          <strong class="total num">{r.total}</strong>
           <span>
             {#if r.from}<span class="from">{r.from}: </span>{/if}{r.label}{#if nat === 'nat20'} <b>Natural 20!</b>{:else if nat === 'nat1'} <b>Natural 1</b>{/if}
             {#if !r.public}<span class="muted">(private)</span>{/if}
@@ -84,32 +84,65 @@
 {/if}
 
 <style>
+  /*
+   * Phones: bottom right, above the tab bar; hidden while a kit Workspace bottom sheet is open and unfolded,
+   * lifted above it while folded. Desktop: at the right end of the sticky top bar, out of the way of the right panel.
+   */
   .fab {
     position: fixed;
     right: 1rem;
-    bottom: 4.5rem; /* clear the fixed bottom tab bar */
+    bottom: calc(var(--bottombar-h) + 0.75rem);
     z-index: 20;
-    border-radius: 2rem;
-    box-shadow: 0 2px 8px rgb(0 0 0 / 0.3);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    background: var(--panel);
+    border-color: var(--accent);
+    color: var(--accent);
+    font-weight: 600;
+    box-shadow: 0 6px 18px rgb(0 0 0 / 0.45);
+  }
+
+  .fab[aria-expanded='true'] {
+    background: var(--accent);
+    color: var(--on-accent);
+  }
+
+  .glyph {
+    font-family: var(--mono);
+    font-size: 0.75em;
+    padding: 0 0.25rem;
+    border: 1px solid currentColor;
+    border-radius: 3px;
   }
 
   .tray {
     position: fixed;
     right: 1rem;
-    bottom: 8rem;
+    bottom: calc(var(--bottombar-h) + 4.25rem);
     z-index: 20;
     width: min(22rem, calc(100vw - 2rem));
-    max-height: calc(100vh - 10rem);
+    max-height: calc(100dvh - var(--bottombar-h) - 6rem);
     overflow-y: auto;
     box-sizing: border-box;
-    padding: 0.75rem 1rem;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 0.5rem;
-    box-shadow: 0 4px 16px rgb(0 0 0 / 0.35);
+    padding: 0.75rem 0.9rem;
+    background: var(--panel);
+    border: 1px solid var(--line-strong);
+    border-radius: 7px;
+    box-shadow: 0 10px 24px rgb(0 0 0 / 0.5);
     display: flex;
     flex-direction: column;
     gap: 0.6rem;
+  }
+
+  @media (max-width: 767px) {
+    :global(body:has(.ws-sheet-open:not(.folded))) .fab {
+      display: none;
+    }
+
+    :global(body:has(.ws-sheet-open.folded)) .fab {
+      bottom: calc(var(--bottombar-h) + 3.75rem);
+    }
   }
 
   .grow {
@@ -118,14 +151,19 @@
     flex-direction: column;
   }
 
+  .grow .muted {
+    font-size: 0.85rem;
+  }
+
   .dice button {
     flex: 1 1 3rem;
+    padding-inline: 0.3rem;
   }
 
   button[aria-pressed='true'] {
-    background: var(--accent);
+    background: var(--raised);
     border-color: var(--accent);
-    color: var(--bg);
+    color: var(--text-strong);
   }
 
   .error,
@@ -136,16 +174,17 @@
   .log {
     display: flex;
     flex-direction: column;
-    gap: 0.4rem;
+    list-style: none;
+    margin: 0;
+    padding: 0; /* the global .plain only covers ul */
   }
 
   .log li {
     display: flex;
-    gap: 0.6rem;
+    gap: 0.7rem;
     align-items: baseline;
-    padding: 0.3rem 0.5rem;
-    border: 1px solid var(--border);
-    border-radius: 0.35rem;
+    padding: 0.35rem 0.5rem;
+    border-top: 1px solid var(--line);
     overflow-wrap: anywhere;
   }
 
@@ -154,35 +193,43 @@
   }
 
   .total {
-    font-size: 1.4rem;
+    color: var(--text-strong);
+    font-size: 1.35rem;
     min-width: 2.2ch;
     text-align: right;
   }
 
   .nat20 {
-    border-color: var(--accent);
-    border-width: 2px;
-    background: color-mix(in srgb, var(--accent) 18%, var(--surface));
+    background: var(--raised);
+    box-shadow: inset 2px 0 var(--accent);
+  }
+
+  .nat20 b {
+    color: var(--accent);
   }
 
   .nat1 {
-    border: 2px dashed #b3261e;
+    box-shadow: inset 2px 0 var(--danger);
   }
 
-  @media (prefers-color-scheme: dark) {
-    .nat1 {
-      border-color: #f2938c;
-    }
+  .nat1 b {
+    color: var(--danger);
   }
 
   @media (min-width: 768px) {
     .fab {
-      bottom: 1rem;
+      z-index: 15; /* above the sticky top bar (10) */
+      top: calc((var(--topbar-h) - 2.25rem) / 2);
+      bottom: auto;
+      min-height: 2.25rem;
+      padding-block: 0.15rem;
+      box-shadow: none;
     }
 
     .tray {
-      bottom: 4.5rem;
-      max-height: calc(100vh - 6rem);
+      top: calc(var(--topbar-h) + 0.5rem);
+      bottom: auto;
+      max-height: calc(100dvh - var(--topbar-h) - 1rem);
     }
   }
 </style>

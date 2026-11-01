@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount, untrack, type Component } from 'svelte';
-  import { APP_NAME } from './lib/app.ts';
   import { requestPersistence } from './lib/db.ts';
   import { router } from './lib/router.svelte.ts';
   import { app, startup } from './lib/store.svelte.ts';
@@ -77,6 +76,12 @@
   const here = $derived(router.path[0] ?? '');
   let moreOpen = $state(false);
 
+  // The sticky top bar's height, for kit/Workspace.svelte (panel height) and the Dice button (sits in the bar on desktop).
+  let topH = $state(0);
+  $effect(() => {
+    if (topH) document.documentElement.style.setProperty('--topbar-h', `${topH}px`);
+  });
+
   function match(key: string) {
     const path = key.split('/').filter(Boolean);
     for (const [pattern, name, load] of routes) {
@@ -99,21 +104,22 @@
 </script>
 
 <div class="shell">
-  <header>
-    <strong>{APP_NAME}</strong>
-    <SyncStatus />
+  <header bind:offsetHeight={topH}>
+    <span class="brand phone-only">DNDND</span>
     <div class="campaign-slot"><CampaignPicker /></div>
+    <SyncStatus />
     <ViewerToggle />
   </header>
 
   <nav aria-label="Main">
+    <span class="brand rail-only">DNDND</span>
     {#each nav as [label, segment]}
       <a href="#/{segment}" class:secondary={!PRIMARY.has(segment)} aria-current={here === segment ? 'page' : undefined}>{label}</a>
     {/each}
     <!-- Phones: the bottom bar keeps four big tabs; the rest sit behind More. -->
     <details class="more" bind:open={moreOpen}>
       <summary aria-current={nav.some(([, g]) => g === here && !PRIMARY.has(g)) ? 'page' : undefined}>More</summary>
-      <div class="menu card">
+      <div class="menu">
         {#each nav.filter(([, g]) => !PRIMARY.has(g)) as [label, segment]}
           <a href="#/{segment}" aria-current={here === segment ? 'page' : undefined} onclick={() => (moreOpen = false)}>{label}</a>
         {/each}
@@ -146,53 +152,78 @@
 <Toast />
 
 <style>
+  /*
+   * Phones: top bar (scrolls away), page, fixed bottom tab bar.
+   * >= 768 px: left rail (sticky, full height) | sticky slim top bar over the page.
+   * Pages are padded by --page-pad / --page-pad-bottom; kit/Workspace.svelte cancels that to go edge to edge.
+   */
   .shell {
     display: grid;
     grid-template-areas: 'top' 'main';
     grid-template-rows: auto 1fr;
-    min-height: 100vh;
-    padding-bottom: 3.5rem; /* room for the fixed bottom tab bar */
+    min-height: 100dvh;
+    padding-bottom: var(--bottombar-h); /* room for the fixed bottom tab bar */
+  }
+
+  .brand {
+    color: var(--text-strong);
+    font-weight: 600;
+    font-size: 0.9rem;
+    letter-spacing: 0.3em;
+  }
+
+  .rail-only {
+    display: none;
   }
 
   header {
     grid-area: top;
     display: flex;
     align-items: center;
-    gap: 1rem;
+    gap: 0.4rem 0.9rem;
     flex-wrap: wrap;
-    padding: 0.5rem 1rem;
-    background: var(--surface);
-    border-bottom: 1px solid var(--border);
+    min-height: 2.75rem;
+    box-sizing: border-box;
+    padding: 0.3rem var(--page-pad);
+    background: var(--bg);
+    border-bottom: 1px solid var(--line);
   }
 
   .campaign-slot {
-    margin-left: auto;
+    margin-right: auto;
+    min-width: 0;
   }
 
   main {
+    --page-pad: 1rem;
+    --page-pad-bottom: 4.5rem; /* the floating Dice button must never cover the last controls on a page */
     grid-area: main;
-    padding: 0 1rem 4.5rem; /* the floating Dice button must never cover the last controls on a page */
+    padding: 0 var(--page-pad) var(--page-pad-bottom);
     min-width: 0;
     overflow-wrap: anywhere; /* long URLs, such as the SRD attribution's, must not widen the page */
+  }
+
+  header {
+    --page-pad: 1rem;
   }
 
   nav {
     position: fixed;
     inset: auto 0 0 0;
-    z-index: 30; /* the More menu opens above the page and the floating Dice button */
+    z-index: 30; /* the More menu opens above the page, the bottom sheet and the floating Dice button */
     display: flex;
-    background: var(--surface);
-    border-top: 1px solid var(--border);
+    height: var(--bottombar-h);
+    background: var(--rail);
+    border-top: 1px solid var(--line);
   }
 
   nav > a,
   .more > summary {
     flex: 1 1 0;
-    min-height: 3.25rem;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 0.9rem;
+    font-size: 0.85rem;
     color: var(--muted);
     text-decoration: none;
     cursor: pointer;
@@ -218,17 +249,20 @@
   .more .menu {
     position: fixed;
     right: 0.5rem;
-    bottom: 3.75rem;
+    bottom: calc(var(--bottombar-h) + 0.4rem);
     display: flex;
     flex-direction: column;
     min-width: 12rem;
-    margin: 0;
-    padding: 0.25rem 0;
-    box-shadow: 0 0.5rem 1.5rem rgb(0 0 0 / 0.35);
+    padding: 0.3rem;
+    background: var(--panel);
+    border: 1px solid var(--line-strong);
+    border-radius: 7px;
+    box-shadow: 0 10px 24px rgb(0 0 0 / 0.5);
   }
 
   .more .menu a {
-    padding: 0.85rem 1.25rem;
+    padding: 0.7rem 1rem;
+    border-radius: 4px;
     color: var(--text);
     text-decoration: none;
   }
@@ -236,38 +270,72 @@
   nav a[aria-current='page'],
   .more > summary[aria-current='page'] {
     color: var(--accent);
-    box-shadow: inset 0 3px var(--accent);
+    box-shadow: inset 0 2px var(--accent);
   }
 
   .more .menu a[aria-current='page'] {
-    box-shadow: inset 3px 0 var(--accent);
+    color: var(--text-strong);
+    background: var(--raised);
+    box-shadow: inset 2px 0 var(--accent);
   }
 
   @media (min-width: 768px) {
     .shell {
       grid-template-areas: 'nav top' 'nav main';
-      grid-template-columns: 12rem 1fr;
-      padding-bottom: 0;
+      grid-template-columns: 11rem minmax(0, 1fr);
+      grid-template-rows: auto 1fr;
+    }
+
+    .phone-only {
+      display: none;
+    }
+
+    .rail-only {
+      display: block;
+      padding: 0.35rem 0.6rem 1.1rem;
+    }
+
+    header,
+    main {
+      --page-pad: 1.5rem;
+    }
+
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      padding-right: 7rem; /* the Dice button sits at the top bar's right end */
+    }
+
+    main {
+      --page-pad-bottom: 1.5rem;
     }
 
     nav {
       grid-area: nav;
       position: sticky;
       top: 0;
-      height: 100vh;
+      height: 100dvh;
       flex-direction: column;
+      gap: 1px;
+      box-sizing: border-box;
+      padding: 0.9rem 0.6rem;
+      overflow-y: auto;
       border-top: 0;
-      border-right: 1px solid var(--border);
+      border-right: 1px solid var(--line);
     }
 
     nav > a,
     nav > a.secondary {
       display: block;
       flex: none;
-      min-height: 0;
-      padding: 0.75rem 1.25rem;
-      text-align: left;
+      padding: 0.4rem 0.6rem;
+      border-radius: 5px;
       font-size: 1rem;
+    }
+
+    nav > a:hover {
+      color: var(--text);
     }
 
     .more {
@@ -275,7 +343,9 @@
     }
 
     nav a[aria-current='page'] {
-      box-shadow: inset 3px 0 var(--accent);
+      color: var(--text-strong);
+      background: var(--raised);
+      box-shadow: inset 2px 0 var(--accent);
     }
   }
 </style>

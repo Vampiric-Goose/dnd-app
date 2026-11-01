@@ -35,16 +35,32 @@
 
 <style>
   .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
     font-size: 0.8rem;
-    padding: 0.15rem 0.6rem;
-    border: 1px solid var(--accent);
-    border-radius: 1rem;
+    padding: 0.1rem 0.6rem;
+    border: 1px solid var(--line-strong);
+    border-radius: 99px;
+    color: var(--text);
     text-decoration: none;
     white-space: nowrap;
   }
 
+  /* status dot: teal when connected, muted while not */
+  .chip::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+
   .bad {
-    border-color: var(--muted);
     color: var(--muted);
+  }
+
+  .bad::before {
+    background: var(--danger);
   }
 </style>

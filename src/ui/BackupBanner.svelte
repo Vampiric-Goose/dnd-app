@@ -55,14 +55,14 @@
 </script>
 
 {#if showTip}
-  <div class="card banner" role="note" aria-label="Home Screen tip">
+  <div class="strip" role="note" aria-label="Home Screen tip">
     <p>Add this app to your Home Screen so Safari doesn't clear your data.</p>
-    <div class="row"><button onclick={dismissTip}>Got it</button></div>
+    <button onclick={dismissTip}>Got it</button>
   </div>
 {/if}
 
 {#if show}
-  <div class="card banner" role="region" aria-label="Backup reminder">
+  <div class="strip" role="region" aria-label="Backup reminder">
     <p>
       Your data lives only in this browser.
       {app.lastBackupAt === undefined ? "You haven't made a backup yet." : 'Your last backup was more than two weeks ago.'}
@@ -71,20 +71,50 @@
       <input type="checkbox" bind:checked={includeBooks} />
       Include imported books (larger file)
     </label>
+    <button class="primary" disabled={busy} onclick={exportAll}>Export backup</button>
+    <button disabled={busy} onclick={snooze}>Remind me in 3 days</button>
     {#if error}<p role="alert" class="error">{error}</p>{/if}
-    <div class="row">
-      <button class="primary" disabled={busy} onclick={exportAll}>Export backup</button>
-      <button disabled={busy} onclick={snooze}>Remind me in 3 days</button>
-    </div>
   </div>
 {/if}
 
 <style>
-  .banner {
-    border-left: 4px solid var(--accent);
+  /* A slim one-line strip (wraps on narrow screens), not a card */
+  .strip {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem 0.9rem;
+    margin: 0.5rem 0;
+    padding: 0.3rem 0.4rem 0.3rem 0.75rem;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-left: 2px solid var(--accent);
+    border-radius: 4px;
+    font-size: 0.875rem;
   }
 
-  .banner p {
-    margin: 0 0 0.5rem;
+  .strip p {
+    margin: 0;
+    flex: 1 1 18rem;
+  }
+
+  .strip .check {
+    margin: 0;
+    align-items: center;
+  }
+
+  .strip button {
+    min-height: 2rem;
+    padding: 0.1rem 0.7rem;
+  }
+
+  .strip .error {
+    flex-basis: 100%;
+  }
+
+  @media (max-width: 767px) {
+    .strip button {
+      min-height: 44px;
+    }
   }
 </style>

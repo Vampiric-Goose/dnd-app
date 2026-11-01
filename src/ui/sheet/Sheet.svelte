@@ -283,7 +283,7 @@
   }
 
   .warnings {
-    border-color: #b3261e;
+    border-color: var(--danger);
   }
 
   .warnings ul {
