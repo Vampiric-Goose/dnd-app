@@ -5,6 +5,7 @@
   import { db } from '../../lib/db.ts';
   import { computeSheet } from '../../lib/rules/sheet.ts';
   import { saveCampaign } from '../../lib/store.svelte.ts';
+  import { toast } from '../../lib/toast.svelte.ts';
   import type { Campaign, CampaignSettings, Character, Combat, MonsterDef } from '../../lib/types.ts';
   import { act } from './act.ts';
   import CombatantRow from './CombatantRow.svelte';
@@ -56,7 +57,12 @@
   });
 
   function end() {
-    if (confirm('End this combat? The order, monster HP and condition durations are cleared.')) void run(() => endCombat(cid));
+    if (!confirm('End this combat? The order, monster HP and condition durations are cleared.')) return;
+    void run(async () => {
+      // Stage 5: the fight's monster HP stays on the map's linked tokens. A failure there must not keep the fight going.
+      try { await (await import('../../lib/map/store.ts')).endCombatWriteBack(cid); } catch (e) { console.warn(e); toast('The map tokens kept their old HP.', true); }
+      await endCombat(cid);
+    });
   }
 
   // Native drag and drop for the mouse (Move up / Move down are the keyboard and touch way).
