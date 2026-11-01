@@ -28,6 +28,7 @@
     try {
       const [c, cs, es] = await Promise.all([db.combat.get(id), db.characters.list(id), asPlayer ? [] : db.encounters.list(id)]);
       if (id !== cid) return;
+      error = '';
       combat = c;
       chars = cs.sort((a, b) => a.name.localeCompare(b.name));
       encounters = es.sort((a, b) => a.name.localeCompare(b.name));

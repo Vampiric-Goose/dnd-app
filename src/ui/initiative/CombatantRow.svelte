@@ -27,12 +27,14 @@
   const patch = (p: Partial<Combatant>) => edit((c) => patchCombatant(c, x.id, p));
 
   let concDc: number | undefined = $state();
+  let concLost = $state(false);
   let statOpen = $state(false);
 
   function hpOp(op: Parameters<typeof changeHp>[2]) {
     void run(async () => {
       const r = await changeHp(cid, x.id, op, settings);
-      if (r.concentrationDc !== undefined) concDc = r.concentrationDc;
+      if (r.concentrationDc !== undefined) { concDc = r.concentrationDc; concLost = false; }
+      if (r.concentrationLost) { concDc = undefined; concLost = true; }
       return r;
     });
   }
@@ -52,6 +54,17 @@
     const on = !conditions.includes(name);
     const duration = on && Number.isInteger(rounds) && rounds! >= 1 ? { rounds: rounds!, at, of } : undefined;
     void run(() => setCondition(cid, x.id, name, on, duration));
+  }
+
+  // Final M2: from the stored record, so two quick taps both count.
+  const legendary = (d: number) => edit((c) => {
+    const l = c.combatants.find((z) => z.id === x.id)?.legendary;
+    return l ? patchCombatant(c, x.id, { legendary: { ...l, used: Math.max(0, Math.min(l.max, l.used + d)) } }) : c;
+  });
+
+  // Final M8: a monster with special HP gets its HP typed in.
+  function setMax(v: number | null) {
+    if (typeof v === 'number' && Number.isInteger(v) && v >= 1) void patch({ hp: v, maxHp: v });
   }
 
   function rollDeath() {
@@ -77,8 +90,8 @@
   </div>
 
   <div class="row">
-    <button type="button" aria-label="Move {x.name} up" disabled={i === 0} onclick={() => edit((c) => reorder(c, x.id, i - 1))}>↑</button>
-    <button type="button" aria-label="Move {x.name} down" disabled={i === count - 1} onclick={() => edit((c) => reorder(c, x.id, i + 1))}>↓</button>
+    <button type="button" aria-label="Move {x.name} up" disabled={i === 0 || current} onclick={() => edit((c) => reorder(c, x.id, i - 1))}>↑</button>
+    <button type="button" aria-label="Move {x.name} down" disabled={i === count - 1 || current} onclick={() => edit((c) => reorder(c, x.id, i + 1))}>↓</button>
     <label class="check"><input type="checkbox" checked={!!x.hidden} onchange={(e) => patch({ hidden: e.currentTarget.checked })} /> Hidden from players</label>
     <button type="button" class="danger" aria-label="Remove {x.name}" onclick={() => run(() => remove(cid, x.id))}>Remove</button>
   </div>
@@ -89,6 +102,9 @@
       {#if hp.temp}<span class="muted">Temp {hp.temp}</span>{/if}
       {#if life !== 'ok'}<strong class="error">{life === 'dying' ? 'Dying' : life === 'stable' ? 'Stable' : 'Dead'}</strong>{/if}
     </p>
+    {#if x.kind === 'monster' && x.hp === undefined}
+      <label class="row"><span>Max HP of {x.name}</span><input type="number" class="init" min="1" step="1" inputmode="numeric" onchange={(e) => setMax(e.currentTarget.valueAsNumber)} /></label>
+    {/if}
     <HpControls label={x.name} dead={!!ch?.state.dead} atZero={!!ch && ch.state.hp === 0 && !ch.state.dead}
       ondamage={(n, crit) => hpOp({ damage: n, crit })} onheal={(n) => hpOp({ heal: n })} ontemp={(n) => hpOp({ temp: n })} />
   {/if}
@@ -98,6 +114,13 @@
       <button type="button" onclick={() => rollTo('Concentration save', `1d20${signed(x.conSave)}`, { public: false })}>Roll</button>
       <button type="button" onclick={() => { concDc = undefined; void patch({ concentrating: false }); }}>Lost concentration</button>
       <button type="button" aria-label="Dismiss the concentration prompt for {x.name}" onclick={() => (concDc = undefined)}>Kept</button>
+    </div>
+  {/if}
+
+  {#if concLost}
+    <div class="row prompt" role="status">
+      <span>Concentration ends (0 HP)</span>
+      <button type="button" aria-label="Dismiss the concentration notice for {x.name}" onclick={() => (concLost = false)}>OK</button>
     </div>
   {/if}
 
@@ -134,16 +157,16 @@
       {@const l = x.legendary}
       <span class="row" role="group" aria-label="Legendary actions of {x.name}">
         <span>Legendary {l.used}/{l.max}</span>
-        <button type="button" aria-label="One fewer legendary action used by {x.name}" disabled={l.used <= 0} onclick={() => patch({ legendary: { ...l, used: l.used - 1 } })}>−</button>
-        <button type="button" aria-label="One more legendary action used by {x.name}" disabled={l.used >= l.max} onclick={() => patch({ legendary: { ...l, used: l.used + 1 } })}>+</button>
+        <button type="button" aria-label="One fewer legendary action used by {x.name}" disabled={l.used <= 0} onclick={() => legendary(-1)}>−</button>
+        <button type="button" aria-label="One more legendary action used by {x.name}" disabled={l.used >= l.max} onclick={() => legendary(1)}>+</button>
       </span>
     {/if}
   </div>
 
   {#if mods.deathSaves && ch && life === 'dying'}
     <div class="row" role="group" aria-label="Death saves of {x.name}">
-      <span>Successes <span class="marks" aria-label="{ch.state.deathSaves.success} of 3">{'●'.repeat(ch.state.deathSaves.success)}{'○'.repeat(3 - ch.state.deathSaves.success)}</span></span>
-      <span>Failures <span class="marks" aria-label="{ch.state.deathSaves.fail} of 3">{'●'.repeat(ch.state.deathSaves.fail)}{'○'.repeat(3 - ch.state.deathSaves.fail)}</span></span>
+      <span>Successes <span class="marks" role="img" aria-label="{ch.state.deathSaves.success} of 3">{'●'.repeat(ch.state.deathSaves.success)}{'○'.repeat(3 - ch.state.deathSaves.success)}</span></span>
+      <span>Failures <span class="marks" role="img" aria-label="{ch.state.deathSaves.fail} of 3">{'●'.repeat(ch.state.deathSaves.fail)}{'○'.repeat(3 - ch.state.deathSaves.fail)}</span></span>
       <button type="button" onclick={rollDeath}>Roll death save</button>
     </div>
   {/if}

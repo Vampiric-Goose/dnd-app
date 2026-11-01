@@ -4,7 +4,7 @@ import { applyDamage, applyHealing, rollDeathSave } from '../character/rest.ts';
 import { db, DeletedError } from '../db.ts';
 import { computeSheet } from '../rules/sheet.ts';
 import type { CampaignSettings, Character, Combat, Combatant, Duration } from '../types.ts';
-import { concentrationDc, initOk, monsterHp, newCombat, next, removeStep, setInit, start, type Expired, type HpOp, type Step } from './combat.ts';
+import { concentrationDc, initOk, monsterHp, newCombat, next, patchCombatant, removeStep, setInit, start, type Expired, type HpOp, type Step } from './combat.ts';
 
 // One operation at a time (per tab): two quick hits each read the character after the other's write, so both land.
 let queue: Promise<unknown> = Promise.resolve();
@@ -76,19 +76,37 @@ export const remove = (cid: string, combatantId: string): Promise<Step> => seria
   return clearExpired({ combat, expired });
 });
 
-/** `concentrationDc`: a damage op on a concentrating combatant (the full amount entered, temp HP included). */
-export const changeHp = (cid: string, combatantId: string, op: HpOp, settings: CampaignSettings): Promise<{ combat: Combat; concentrationDc?: number }> => serial(async () => {
+const GONE = 'That character is no longer in the campaign.';
+
+/**
+ * `concentrationDc`: a damage op on a concentrating combatant (the full amount entered, temp HP included). Final M6: damage that leaves it
+ * at 0 HP ends concentration instead (unconscious, PHB p.203): `concentrating` is cleared and `concentrationLost` is set. Final M7: a PC
+ * whose character is gone throws.
+ */
+export const changeHp = (cid: string, combatantId: string, op: HpOp, settings: CampaignSettings): Promise<{ combat: Combat; concentrationDc?: number; concentrationLost?: true }> => serial(async () => {
   const { combat: had, x } = await combatant(cid, combatantId);
-  const dc = 'damage' in op && op.damage > 0 && x.concentrating ? concentrationDc(op.damage) : undefined;
-  let combat = had;
+  const hit = 'damage' in op && op.damage > 0 && !!x.concentrating;
+  let combat = had, down = false;
   if (x.kind === 'pc') {
-    if (x.characterId) await editCharacter(x.characterId, (c) => {
+    if (x.characterId && !(await editCharacter(x.characterId, (c) => {
       const sheet = computeSheet(c, { settings, viewer: 'dm' });
-      return 'damage' in op ? applyDamage(c, op.damage, sheet, op.crit) : 'heal' in op ? applyHealing(c, op.heal, sheet) : { ...c, state: { ...c.state, tempHp: Math.max(0, op.temp) } };
-    });
-  } else combat = await update(cid, (c) => ({ ...c, combatants: c.combatants.map((y) => (y.id === combatantId ? monsterHp(y, op) : y)) }));
-  return { combat, ...(dc !== undefined && { concentrationDc: dc }) };
+      const out = 'damage' in op ? applyDamage(c, op.damage, sheet, op.crit) : 'heal' in op ? applyHealing(c, op.heal, sheet) : { ...c, state: { ...c.state, tempHp: Math.max(0, op.temp) } };
+      down = out.state.hp === 0;
+      return out;
+    }))) throw new Error(GONE);
+  } else {
+    combat = await update(cid, (c) => ({ ...c, combatants: c.combatants.map((y) => (y.id === combatantId ? monsterHp(y, op) : y)) }));
+    down = combat.combatants.find((y) => y.id === combatantId)?.hp === 0;
+  }
+  if (hit && down) {
+    combat = await update(cid, (c) => patchCombatant(c, combatantId, { concentrating: false }));
+    return { combat, concentrationLost: true };
+  }
+  return { combat, ...(hit && { concentrationDc: concentrationDc((op as { damage: number }).damage) }) };
 });
+
+/** Final M4: ends the fight (deletes the record) in the queue, so an operation sent just before it cannot write a fresh combat after. */
+export const endCombat = (cid: string): Promise<unknown> => serial(() => db.combat.update(cid, () => undefined));
 
 /** A PC's condition is on its character, a monster's on the combatant; the duration is on the combatant either way (off drops it). */
 export const setCondition = (cid: string, combatantId: string, name: string, on: boolean, duration?: Duration): Promise<Combat> => serial(async () => {
@@ -110,7 +128,7 @@ export const setCondition = (cid: string, combatantId: string, name: string, on:
 
 export const deathSave = (cid: string, combatantId: string, d20: number): Promise<void> => serial(async () => {
   const { x } = await combatant(cid, combatantId);
-  if (x.kind === 'pc' && x.characterId) await editCharacter(x.characterId, (c) => rollDeathSave(c, d20));
+  if (x.kind === 'pc' && x.characterId && !(await editCharacter(x.characterId, (c) => rollDeathSave(c, d20)))) throw new Error(GONE);
 });
 
 /**

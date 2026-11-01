@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { addCombatants, addMonsters, lairCombatant, MAX_COMBATANTS, pcCombatant, prev, rollInit, setInit, sortCombat } from '../../lib/combat/combat.ts';
-  import { turn, updateCombat } from '../../lib/combat/store.ts';
+  import { addCombatants, addMonsters, lairCombatant, MAX_COMBATANTS, pcCombatant, prev, rollInit, setInit } from '../../lib/combat/combat.ts';
+  import { endCombat, turn, updateCombat } from '../../lib/combat/store.ts';
   import type { ContentIndex } from '../../lib/content/index.ts';
   import { db } from '../../lib/db.ts';
   import { computeSheet } from '../../lib/rules/sheet.ts';
@@ -9,7 +9,7 @@
   import { act } from './act.ts';
   import CombatantRow from './CombatantRow.svelte';
   import MonsterSearch from './MonsterSearch.svelte';
-  import { currentRun, reorder } from './order.ts';
+  import { currentRun, reorder, sortAround } from './order.ts';
 
   let { campaign, combat, chars, pool, index, reload }: {
     campaign: Campaign; combat: Combat | undefined; chars: Character[]; pool: MonsterDef[]; index: ContentIndex | undefined; reload: () => Promise<void>;
@@ -42,7 +42,11 @@
   const pcs = (cs: Character[]) => cs.map((c) => pcCombatant(c, computeSheet(c, { settings, viewer: 'dm' })));
 
   function setModule(k: Mod, on: boolean) {
-    void act(() => saveCampaign({ ...campaign, settings: { ...settings, initiativeModules: { ...mods, [k]: on } } }));
+    // Final M3: from the stored campaign, so a second quick toggle does not undo the first.
+    void act(async () => {
+      const fresh = await db.campaigns.get(cid);
+      if (fresh) await saveCampaign({ ...fresh, settings: { ...fresh.settings, initiativeModules: { ...fresh.settings.initiativeModules, [k]: on } } });
+    });
   }
 
   const rollUnrolled = () => edit((c) => {
@@ -52,7 +56,7 @@
   });
 
   function end() {
-    if (confirm('End this combat? The order, monster HP and condition durations are cleared.')) void run(() => db.combat.update(cid, () => undefined));
+    if (confirm('End this combat? The order, monster HP and condition durations are cleared.')) void run(() => endCombat(cid));
   }
 
   // Native drag and drop for the mouse (Move up / Move down are the keyboard and touch way).
@@ -83,7 +87,7 @@
     <label class="check"><input type="checkbox" checked={combat?.groupMonsters ?? false} onchange={(e) => { const on = e.currentTarget.checked; void edit((c) => ({ ...c, groupMonsters: on })); }} /> Group identical monsters</label>
   </div>
   <div class="row">
-    <button type="button" disabled={list.length < 2} onclick={() => edit(sortCombat)}>Sort</button>
+    <button type="button" disabled={list.length < 2} onclick={() => edit(sortAround)}>Sort</button>
     <button type="button" disabled={!list.some((x) => x.kind !== 'pc' && x.init === undefined)} onclick={rollUnrolled}>Roll unrolled</button>
   </div>
 

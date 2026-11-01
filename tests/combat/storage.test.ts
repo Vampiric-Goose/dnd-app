@@ -6,7 +6,7 @@ import { hlcNow } from '../../src/lib/sync/hlc.ts';
 import { latestClock } from '../../src/lib/sync/merge.ts';
 import { exportBackup } from '../../src/lib/backup.ts';
 import { addCombatants, monsterCombatant, newCombat, start } from '../../src/lib/combat/combat.ts';
-import { applyInitiative, changeHp, deathSave, setCondition, turn, updateCombat } from '../../src/lib/combat/store.ts';
+import { applyInitiative, changeHp, deathSave, endCombat, setCondition, turn, updateCombat } from '../../src/lib/combat/store.ts';
 import { db, onLocalChange, resetDb } from '../../src/lib/db.ts';
 import { blankMonster } from '../../src/lib/monsters/homebrew.ts';
 import type { Campaign, Character, Combat, Combatant, Encounter, MonsterDef, Pack } from '../../src/lib/types.ts';
@@ -132,12 +132,39 @@ test('PC damage from the tracker goes through characters.put', async () => {
 });
 
 test('concentration', async () => {
-  const g = { ...monsterCombatant(goblin, 'Goblin', 'average', half), id: 'g', concentrating: true };
+  const g = { ...monsterCombatant(goblin, 'Goblin', 'average', half), id: 'g', concentrating: true, hp: 50, maxHp: 50 };
   await updateCombat('c1', (c) => addCombatants(c, [g, { ...g, id: 'h', concentrating: false }]));
   const r = await changeHp('c1', 'g', { damage: 25 }, settings);
   expect(r.concentrationDc).toBe(12);
-  expect(r.combat.combatants.find((x) => x.id === 'g')!.hp).toBe(0);
+  expect(r.combat.combatants.find((x) => x.id === 'g')!.hp).toBe(25);
   expect((await changeHp('c1', 'h', { damage: 25 }, settings)).concentrationDc).toBeUndefined();
+});
+
+test('final M6: damage that drops a concentrating creature to 0 HP ends concentration, with no save', async () => {
+  const g = { ...monsterCombatant(goblin, 'Goblin', 'average', half), id: 'g', concentrating: true };
+  await updateCombat('c1', (c) => addCombatants(c, [g, pcC('p', { concentrating: true })]));
+  const r = await changeHp('c1', 'g', { damage: 25 }, settings);
+  expect(r.concentrationDc).toBeUndefined();
+  expect(r.concentrationLost).toBe(true);
+  expect(r.combat.combatants.find((x) => x.id === 'g')).toMatchObject({ hp: 0, concentrating: false });
+  await db.characters.put(pc(5));
+  const p = await changeHp('c1', 'pc:p', { damage: 12 }, settings);
+  expect(p).toMatchObject({ concentrationLost: true });
+  expect(p.concentrationDc).toBeUndefined();
+  expect((await db.combat.get('c1'))!.combatants.find((x) => x.id === 'pc:p')!.concentrating).toBe(false);
+  expect((await db.characters.get('p'))!.state.hp).toBe(0);
+});
+
+test('final M7: HP and death saves on a PC whose character is gone say so', async () => {
+  await updateCombat('c1', (c) => addCombatants(c, [pcC('gone')]));
+  await expect(changeHp('c1', 'pc:gone', { damage: 3 }, settings)).rejects.toThrow('That character is no longer in the campaign.');
+  await expect(deathSave('c1', 'pc:gone', 12)).rejects.toThrow('That character is no longer in the campaign.');
+});
+
+test('final M4: End combat waits its turn in the queue, so a Next just before it cannot bring the fight back', async () => {
+  await updateCombat('c1', (c) => addCombatants(c, [pcC('p', { init: 10 })]));
+  await Promise.all([turn('c1', 'next'), endCombat('c1')]);
+  expect(await db.combat.get('c1')).toBeUndefined();
 });
 
 describe('death saves and expiry write the character', () => {

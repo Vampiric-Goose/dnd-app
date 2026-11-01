@@ -34,7 +34,10 @@
     if (!e || !e.name.trim()) return;
     const lines = e.lines.filter((l) => Number.isInteger(l.count) && l.count >= 1 && l.count <= 99)
       .map((l) => { const name = monById.get(l.monsterId)?.name ?? l.name; return { monsterId: l.monsterId, count: l.count, ...(name && { name }) }; });
-    await act(() => db.encounters.put({ id: e.id, campaignId: campaign.id, name: e.name.trim(), monsters: $state.snapshot(lines), updatedAt: Date.now() }));
+    // Final M5: a failed save keeps the editor open, so the list is not lost.
+    let ok = false;
+    await act(async () => { await db.encounters.put({ id: e.id, campaignId: campaign.id, name: e.name.trim(), monsters: $state.snapshot(lines), updatedAt: Date.now() }); ok = true; });
+    if (!ok) return;
     editing = undefined;
     await reload();
   }
