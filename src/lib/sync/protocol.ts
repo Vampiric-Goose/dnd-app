@@ -25,7 +25,8 @@ export type GuestMsg =
   | { t: 'packWant'; ids: string[] }
   | { t: 'initiative'; characterId: string; total: number /* stage 4: the player's own roll, an integer INIT_MIN–INIT_MAX */ }
   | { t: 'move'; sceneId: string; tokenId: string; x: number; y: number /* stage 5: the player's own token, scene px */ }
-  | { t: 'blobWant'; hashes: string[] /* stage 5: images of the current scene it lacks */ };
+  | { t: 'blobWant'; hashes: string[] /* stage 5: images of the current scene it lacks */ }
+  | { t: 'dash'; characterId: string /* the player's own character Dashes on its turn (honour system) */ };
 
 export interface PackOffer { id: string; hash: string; size: number }
 
@@ -103,6 +104,8 @@ export function parseGuestMessage(raw: unknown): GuestMsg | { error: string } {
       const h = raw.hashes;
       return Array.isArray(h) && h.length >= 1 && h.length <= 201 && h.every((x) => typeof x === 'string' && HASH.test(x)) ? { t: 'blobWant', hashes: h as string[] } : { error: 'bad blobWant' };
     }
+    case 'dash':
+      return str(raw.characterId, 100) ? { t: 'dash', characterId: raw.characterId } : { error: 'bad dash' };
     default:
       return { error: 'unknown message' };
   }

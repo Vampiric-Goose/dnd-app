@@ -1,11 +1,12 @@
 // Pure (no Svelte/Vite/DOM). Stage 3: everything a player receives is built here, and none of it may carry hidden data (spec 3.6):
 // no loot (R50), no sync secrets or player list, no monsters, no item secrets (R51), only summaries of other players' characters.
 // Stage 4: the initiative tracker's player view (trackerForPlayers).
+import { budgetApplies } from '../combat/movement.ts';
 import { entityAllowed, packAllowed, patchAllowed } from '../content/sources.ts';
 import type { ContentIndex } from '../content/index.ts';
 import { playerCharacter, restoreSecrets } from '../items/playerView.ts';
 import { computeSheet } from '../rules/sheet.ts';
-import type { Campaign, CampaignSettings, Character, Combat, Pack } from '../types.ts';
+import type { Campaign, CampaignSettings, Character, Combat, Movement, Pack } from '../types.ts';
 import type { Synced } from './merge.ts';
 
 export interface CampaignForPlayers { id: string; name: string; settings: CampaignSettings; enabledPacks: string[] }
@@ -48,13 +49,14 @@ export function healthStatus(hp: number | undefined, maxHp: number | undefined):
   return hp <= 0 ? 'Down' : hp >= maxHp ? 'Unhurt' : hp * 2 <= maxHp ? 'Bloodied' : 'Hurt';
 }
 
-export interface TrackerRow { id: string; name: string; characterId?: string; init?: number; hp?: number; maxHp?: number; health?: HealthStatus }
+export interface TrackerRow { id: string; name: string; characterId?: string; init?: number; hp?: number; maxHp?: number; health?: HealthStatus;
+  moved?: Movement /* a player character's movement this turn, while a budget applies */ }
 export interface TrackerView { round: number; current?: string; rows: TrackerRow[] }
 
 /**
  * The tracker as players see it, an allowlist (spec 3.6): no hidden combatants, no monsters during setup (round 0), and of everything
  * but a player's character only its name (plus a health word when the DM shows monster health). A player character carries its
- * initiative, HP and the player-view max HP (hidden item bonuses stay hidden). A DM-only character counts as "everything else" (R13).
+ * initiative, HP and the player-view max HP (hidden item bonuses stay hidden), and while a budget applies its movement this turn. A DM-only character counts as "everything else" (R13).
  * S4-R5: every row but a player's character gets its id from `alias` (the host passes opaque random ids, so no record id leaves).
  * S4-R4: on a turn players can't see (hidden, or a missing PC), `current` and `round` stay where the last visible turn left them.
  */
@@ -65,12 +67,15 @@ export function trackerForPlayers(c: Combat | undefined, characters: Character[]
   const showHealth = settings.showMonsterHealth && settings.initiativeModules.hp;
   const rows: TrackerRow[] = [];
   const sent = new Map<string, string>(); // combatant id → row id
+  const budget = budgetApplies(c, settings);
   for (const x of c.combatants) {
     if (x.hidden) continue;
     const ch = x.characterId === undefined ? undefined : byId.get(x.characterId);
     if (x.characterId !== undefined && !ch) continue;
     if (ch?.ownerId) {
-      rows.push({ id: x.id, name: ch.name, characterId: ch.id, ...(x.init !== undefined && { init: x.init }), hp: ch.state.hp, maxHp: maxHp(ch) });
+      const m = budget ? c.movement?.[x.id] : undefined;
+      rows.push({ id: x.id, name: ch.name, characterId: ch.id, ...(x.init !== undefined && { init: x.init }), hp: ch.state.hp, maxHp: maxHp(ch),
+        ...(m && { moved: { feet: m.feet, dashes: m.dashes } }) });
       sent.set(x.id, x.id);
       continue;
     }

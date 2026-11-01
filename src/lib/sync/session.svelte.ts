@@ -168,6 +168,7 @@ function hostDeps(r: Run, cid: string): HostDeps {
     packMeta: () => db.packs.listMeta(),
     loadPack: (id) => db.packs.get(id),
     loadCombat: () => db.combat.get(cid),
+    updateCombat: (fn) => db.combat.update(cid, (c) => c && fn(c)).then((c) => (changed(r), c)), // the DM's tracker re-reads (session.rev)
     loadScene: () => db.scenes.shown(cid),
     updateScene: (id, fn) => db.scenes.update(id, fn, { network: true }).then((s) => (changed(r), s)),
     loadBlob: async (hash) => { const b = await db.blobs.get(hash); return b && { type: b.type, data: await b.arrayBuffer() }; },
@@ -359,6 +360,11 @@ onLocalChange((kind, id) => {
 /** Stage 5: the player's own token, dropped at `to` (the guest checks owner and that it is online; the DM checks the turn). */
 export function sendMove(sceneId: string, tokenId: string, to: Pt): void {
   run?.guest?.sendMove(sceneId, tokenId, to);
+}
+
+/** The player's own character Dashes on its turn (the guest checks owner and that it is online; the DM checks the turn). */
+export function sendDash(characterId: string): void {
+  run?.guest?.sendDash(characterId);
 }
 
 /** Stage 4: the player's own initiative roll, sent to the DM (the guest checks owner, range and that it is online). */

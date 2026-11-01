@@ -117,7 +117,9 @@ export function cleanTracker(v: unknown): TrackerView | undefined {
     if (!isRec(r) || !s(r.id, 100) || !s(r.name, 200)) return [];
     return [{ id: r.id, name: r.name, ...(s(r.characterId, 100) && { characterId: r.characterId }), ...(fin(r.init) && { init: r.init as number }),
       ...(fin(r.hp) && { hp: r.hp as number }), ...(fin(r.maxHp) && { maxHp: r.maxHp as number }),
-      ...(typeof r.health === 'string' && HEALTH.includes(r.health) && { health: r.health as HealthStatus })}];
+      ...(typeof r.health === 'string' && HEALTH.includes(r.health) && { health: r.health as HealthStatus }),
+      ...(isRec(r.moved) && fin(r.moved.feet) && fin(r.moved.dashes) && (r.moved.feet as number) >= 0 && (r.moved.dashes as number) >= 0
+        && { moved: { feet: r.moved.feet as number, dashes: r.moved.dashes as number } })}];
   })).slice(0, MAX_ROWS);
   const current = rows.some((r) => r.id === v.current) ? v.current as string : undefined;
   return { round: v.round as number, ...(current !== undefined && { current }), rows };
@@ -208,6 +210,15 @@ export class Guest {
       if (this.#status !== 'online') return;
       const c = await this.#deps.loadCharacter(characterId);
       if (c && c.campaignId === this.#campaignId && c.ownerId === this.#playerId) this.#send({ t: 'initiative', characterId, total });
+    });
+  }
+
+  /** The player's own character Dashes, sent only while online. The DM checks the turn. */
+  sendDash(characterId: string): void {
+    void this.#task(async () => {
+      if (this.#status !== 'online') return;
+      const c = await this.#deps.loadCharacter(characterId);
+      if (c && c.campaignId === this.#campaignId && c.ownerId === this.#playerId) this.#send({ t: 'dash', characterId });
     });
   }
 

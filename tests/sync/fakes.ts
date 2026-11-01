@@ -87,6 +87,7 @@ export class Device {
       packMeta: async () => this.packMeta(),
       loadPack: async (id) => clone(this.packs.get(id)),
       loadCombat: async () => clone(this.combat),
+      updateCombat: async (fn) => (this.combat ? clone(this.combat = clone(fn(clone(this.combat)))) : undefined),
       ...(this.map && {
         loadScene: async () => (this.scene?.shown ? clone(this.scene) : undefined),
         updateScene: async (id: string, fn: (s: Scene) => Scene) => {

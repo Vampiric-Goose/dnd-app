@@ -6,16 +6,17 @@ import type { ContentIndex } from '../content/index.ts';
 import { idSource, is2024Source, restorablePack } from '../content/sources.ts';
 import type { RollEntry } from '../rolls.svelte.ts';
 import { toBase64 } from '../base64.ts';
+import { addDash, budgetApplies, combatantForToken, recordMove } from '../combat/movement.ts';
 import { moveTokens } from '../map/scene.ts';
 import type { Campaign, CampaignSync, Character, Combat, Pack, PackMeta, Scene } from '../types.ts';
 import { newJoinCode, nextPlayerId, sha256Text } from './code.ts';
 import { hlcNow, hlcReceive, MAX_AHEAD } from './hlc.ts';
 import type { Link } from './link.ts';
 import { canon, latestClock, mergeCharacter, type Synced } from './merge.ts';
-import { campaignForPlayers, characterForPlayer, packForPlayers, rosterEntry, trackerForPlayers, unprojectCharacter, type TrackerView } from './project.ts';
+import { campaignForPlayers, characterForPlayer, currentActor, packForPlayers, rosterEntry, trackerForPlayers, unprojectCharacter, type TrackerView } from './project.ts';
 import { uid } from '../uid.ts';
 import { BLOB_CHUNK, cleanRoll, IMAGE_TYPES, MAX_BLOB, MAX_CHUNK, MAX_MESSAGE, MAX_PACK, parseGuestMessage, size, type GuestMsg, type HostMsg, type PackOffer } from './protocol.ts';
-import { moveProblem, sceneBlobs, sceneForPlayers, type PlayerScene } from './scene.ts';
+import { moveCost, moveProblem, sceneBlobs, sceneForPlayers, type PlayerScene } from './scene.ts';
 
 export interface HostDeps {
   /** The hosted campaign (its `sync.role` is 'dm'). */
@@ -41,6 +42,8 @@ export interface HostDeps {
   loadCombat?(): Promise<Combat | undefined>;
   /** Stage 4: a player's initiative roll for their own character in this campaign (shape and owner checked; the store checks the fit). */
   onInitiative?(characterId: string, total: number, from: string): void;
+  /** A read-modify-write of the existing live combat (db.combat.update; none: nothing happens). Its change re-sends the tracker. */
+  updateCombat?(fn: (c: Combat) => Combat): Promise<Combat | undefined>;
   /** Stage 5: the campaign's shown scene (db.scenes.shown). Without it no scene is sent. */
   loadScene?(): Promise<Scene | undefined>;
   /** Stage 5: a player's move, a read-modify-write of the fresh record (db.scenes.update, a network write: not reported). */
@@ -268,7 +271,20 @@ export class Host {
       case 'initiative': return this.#initiative(c, c.playerId, msg.characterId, msg.total);
       case 'move': return this.#move(c, c.playerId, msg);
       case 'blobWant': return this.#blobWant(c, msg.hashes);
+      case 'dash': return this.#dash(c, c.playerId, msg.characterId);
     }
+  }
+
+  /** Only the owner's (else a violation), on their turn as players see it while a budget applies, checked on the fresh combat; else ignored. */
+  async #dash(c: Conn, pid: string, id: string): Promise<void> {
+    const camp = await this.#deps.loadCampaign();
+    const ch = await this.#deps.loadCharacter(id);
+    if (!camp || !ch || ch.ownerId !== pid || ch.campaignId !== camp.id) return this.#violation(c, 'not their character');
+    const chars = (await this.#deps.loadCharacters()).filter((x) => x.campaignId === camp.id);
+    await this.#deps.updateCombat?.((k) => {
+      const x = budgetApplies(k, camp.settings) && currentActor(trackerForPlayers(k, chars, camp.settings)) === id ? combatantForToken(k, { characterId: id }) : undefined;
+      return x ? addDash(k, x.id) : k;
+    });
   }
 
   /** Review Focus 4: only for the player's own character in this campaign. Whether it fits the fight is the store's check. */
@@ -535,8 +551,16 @@ export class Host {
     const combat = await this.#deps.loadCombat?.();
     const why = moveProblem(await this.#deps.loadScene(), m, pid, chars, combat, camp.settings);
     if (why?.violation) return this.#violation(c, why.error);
-    // checked again on the fresh record, in the write (the DM may have hidden the token since)
-    if (!why) await this.#deps.updateScene(m.sceneId, (s) => (moveProblem(s, m, pid, chars, combat, camp.settings) ? s : moveTokens(s, [m.tokenId], m.tokenId, m)));
+    // checked again on the fresh record, in the write (the DM may have hidden the token since); its cost is measured on that record too
+    let cost: ReturnType<typeof moveCost>;
+    if (!why) await this.#deps.updateScene(m.sceneId, (s) => {
+      if (moveProblem(s, m, pid, chars, combat, camp.settings)) return s;
+      const id = s.tokens.find((t) => t.id === m.tokenId)!.characterId;
+      cost = moveCost(s, m, chars.find((ch) => ch.id === id)!, combat, camp.settings);
+      return moveTokens(s, [m.tokenId], m.tokenId, m);
+    });
+    const k = cost;
+    if (k) await this.#deps.updateCombat?.((x) => recordMove(x, k.combatantId, k.feet)); // the db change re-sends the tracker
     await this.#sendScene(camp, c);
   }
 
