@@ -77,6 +77,7 @@
       image={view.image}
       grid={view.grid}
       tokens={view.tokens}
+      fog={view.fog}
       dm={false}
       diagonal={settings.diagonal}
       {selected}

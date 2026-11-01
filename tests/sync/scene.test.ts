@@ -1,6 +1,7 @@
 // Stage 5, Task B1: the scene players receive (an allowlist), their token moves, and the chunked image transfer.
 import { describe, expect, test } from 'vitest';
 import { toBase64, fromBase64 } from '../../src/lib/base64.ts';
+import { paintFog } from '../../src/lib/map/fog.ts';
 import { DEFAULT_GRID } from '../../src/lib/map/scene.ts';
 import { DEFAULT_SETTINGS } from '../../src/lib/settings.ts';
 import { sha256Bytes } from '../../src/lib/sync/code.ts';
@@ -99,6 +100,25 @@ describe('sceneForPlayers', () => {
     expect(sceneBlobs(undefined)).toEqual([]);
   });
 
+  test('C2: with fog on, fogged tokens and their portraits never reach players; the fog goes along', () => {
+    const base = scene();
+    base.tokens[1] = { ...base.tokens[1], portrait: PX }; // the goblin, about to be fogged
+    const fog = paintFog(undefined, 700, 700, { k: 'rect', a: { x: 0, y: 0 }, b: { x: 60, y: 60 }, reveal: true }); // only Thorin's corner
+    const s = { ...base, fog };
+    const v = sceneForPlayers(s, chars(), undefined, settings({ fog: true }))!;
+    expect(v.tokens.map((t) => t.name)).toEqual(['Thorin']);
+    expect(v.fog).toBe(fog);
+    expect(sceneBlobs(v)).toEqual([IMG, PT]);
+    expect(JSON.stringify(v)).not.toMatch(/Goblin|Shadowy|Spy/);
+    expect(sceneForPlayers(base, chars(), undefined, settings({ fog: true }))!.tokens).toEqual([]); // no fog yet: all fogged
+    expect(sceneForPlayers(s, chars(), undefined, settings())!.fog).toBeUndefined(); // fog off: nothing withheld, no fog sent
+    // a move of a fogged token is a stale one, never applied
+    const mv = { sceneId: 's1', tokenId: 't-thorin', x: 35, y: 35 };
+    expect(moveProblem({ ...base, fog: paintFog(undefined, 700, 700, { k: 'all', reveal: false }) }, mv, 'A1', chars(), fight(), settings({ fog: true })))
+      .toEqual({ error: 'no such token', violation: false });
+    expect(moveProblem(s, mv, 'A1', chars(), fight(), settings({ fog: true }))).toBeUndefined();
+  });
+
   test('a full scene fits in one message (Review Focus 5)', () => {
     const tokens = Array.from({ length: 200 }, (_, i) => ({ id: `t${i}`.padEnd(36, 'x'), name: 'N'.repeat(100), x: 35, y: 35, size: 'M' as const, color: '#123456', portrait: PT }));
     const v = sceneForPlayers(scene({ tokens }), [], undefined, settings())!;
@@ -145,6 +165,10 @@ test('cleanScene', () => {
   expect(cleanScene({ ...base, image: 'abc' })!.image).toBeUndefined();
   expect(cleanScene({ ...base, tokens: [{ ...t, x: NaN }] })!.tokens).toEqual([]);
   expect(cleanScene('nope')).toBeUndefined();
+  const fog = paintFog(undefined, 700, 700, { k: 'all', reveal: true });
+  expect(cleanScene({ ...base, fog })!.fog).toBe(fog);
+  expect(cleanScene({ ...base, fog: 'garbage!' })!.fog).toBe(paintFog(undefined, 700, 700, { k: 'all', reveal: false })); // bad fog: all fogged
+  expect('fog' in cleanScene(base)!).toBe(false);
 });
 
 test('the parse: move and blobWant shapes', () => {

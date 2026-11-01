@@ -1,5 +1,6 @@
 // Pure (no Svelte/Vite/DOM). Stage 5: the battle map scene as players get it (an allowlist, spec 3.6), the check on a player's token
 // move, and the guest's rebuild of what a host sent. Lazy: only host.ts and guest.ts import it.
+import { applyFog, cleanFog, decodeFog, isRevealed } from '../map/fog.ts';
 import { snap } from '../map/grid.ts';
 import { liveHp } from '../map/scene.ts';
 import { isRec, sceneProblem } from '../recordShape.ts';
@@ -25,8 +26,7 @@ export function sceneForPlayers(s: Scene | undefined, characters: Character[], c
   const maxHp = (c: Character) => computeSheet(c, { settings, viewer: 'player' }).maxHp;
   const tokens: PlayerToken[] = [];
   for (const t of s.tokens) {
-    if (t.hidden) continue;
-    // stage 5 C2: fog filter goes here
+    if (t.hidden) continue; // fogged tokens are dropped by applyFog below
     const ch = t.characterId === undefined ? undefined : byId.get(t.characterId);
     const portrait = t.portrait ?? ch?.details.portrait;
     const base = { id: t.id, name: t.name, x: t.x, y: t.y, size: t.size, color: t.color, ...(portrait !== undefined && { portrait }) };
@@ -39,8 +39,13 @@ export function sceneForPlayers(s: Scene | undefined, characters: Character[], c
     const health = gate ? healthStatus(live.hp, live.maxHp) : undefined;
     tokens.push({ ...base, conditions: [...live.conditions], ...(health && { health }) });
   }
-  return { id: s.id, name: s.name, ...(s.image !== undefined && { image: s.image }), width: s.width, height: s.height, grid: gridOf(s.grid), tokens };
+  const v: PlayerScene = { id: s.id, name: s.name, ...(s.image !== undefined && { image: s.image }), width: s.width, height: s.height, grid: gridOf(s.grid), tokens };
+  return settings.fog ? applyFog(v, s) : v; // C2: no token whose centre is fogged; the fog (or all fogged) goes along
 }
+
+/** With fog on: the token's centre is in a fogged cell (a missing or damaged fog counts as all fogged). */
+const fogged = (s: Scene, p: { x: number; y: number }, settings: CampaignSettings) =>
+  settings.fog && !isRevealed(s.fog === undefined ? undefined : decodeFog(s.fog, s.width, s.height), s.width, s.height, p);
 
 /** The blobs a player may ask for: the scene image and visible portraits, each once. */
 export const sceneBlobs = (v: PlayerScene | undefined): string[] =>
@@ -51,7 +56,7 @@ export function moveProblem(s: Scene | undefined, m: { sceneId: string; tokenId:
   characters: Character[], combat: Combat | undefined, settings: CampaignSettings): { error: string; violation: boolean } | undefined {
   if (!s?.shown || s.id !== m.sceneId) return { error: 'not the shown scene', violation: false };
   const t = s.tokens.find((x) => x.id === m.tokenId);
-  if (!t || t.hidden) return { error: 'no such token', violation: false }; // it may have just been hidden
+  if (!t || t.hidden || fogged(s, t, settings)) return { error: 'no such token', violation: false }; // it may have just been hidden or fogged
   const ch = t.characterId === undefined ? undefined : characters.find((c) => c.id === t.characterId);
   if (!ch || ch.ownerId !== playerId || ch.campaignId !== s.campaignId) return { error: 'not their token', violation: true };
   const turn = combat && combat.round > 0 ? combat.combatants.find((x) => x.id === combat.turn) : undefined;
@@ -78,6 +83,7 @@ export function cleanScene(v: unknown): PlayerScene | undefined {
       ...(typeof t.portrait === 'string' && HASH.test(t.portrait) && { portrait: t.portrait }), ...(str(t.characterId, 100) && { characterId: t.characterId }),
       conditions, ...(typeof t.health === 'string' && HEALTH.includes(t.health) && { health: t.health as HealthStatus }) }];
   }).slice(0, 200);
-  return { id: v.id, name: v.name, ...(typeof v.image === 'string' && HASH.test(v.image) && { image: v.image }), width: v.width as number, height: v.height as number,
-    grid: gridOf(v.grid as Grid), tokens };
+  const w = v.width as number, h = v.height as number, fog = cleanFog(v.fog, w, h); // a bad fog: all fogged
+  return { id: v.id, name: v.name, ...(typeof v.image === 'string' && HASH.test(v.image) && { image: v.image }), width: w, height: h,
+    grid: gridOf(v.grid as Grid), ...(fog !== undefined && { fog }), tokens };
 }
