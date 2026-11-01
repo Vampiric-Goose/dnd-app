@@ -3,7 +3,7 @@
 import { applyDamage, applyHealing, rollDeathSave } from '../character/rest.ts';
 import { db, DeletedError } from '../db.ts';
 import { computeSheet } from '../rules/sheet.ts';
-import type { CampaignSettings, Character, Combat, Combatant, Duration, Encounter, MonsterDef } from '../types.ts';
+import type { CampaignSettings, Character, Combat, Combatant, Duration, Encounter, MonsterDef, Scene } from '../types.ts';
 import { uid } from '../uid.ts';
 import { addMonsters, concentrationDc, encounterPicks, initOk, monsterHp, newCombat, next, patchCombatant, removeStep, setInit, start, type Expired, type HpOp, type Step } from './combat.ts';
 import { restoreCombat, restoreScene, snapshotFight } from './encounters.ts';
@@ -140,11 +140,20 @@ export async function addPreparedToFight(cid: string, e: Encounter, lookup: (id:
   return { added: after.combatants.filter((x) => !before.has(x.id)), missing };
 }
 
-/** Saves the live fight (and the shown scene's tokens and fog) as a new encounter, and links the fight to it. */
+/**
+ * W5: the scene a fight is on: the shown one, else `prefer` (when it still exists), else the most recently updated. The DM's map needs no
+ * "Show to players", so a fight run on an unshown scene still saves and resumes with it.
+ */
+export async function fightScene(cid: string, prefer?: string): Promise<Scene | undefined> {
+  const scenes = await db.scenes.list(cid);
+  return scenes.find((s) => s.shown) ?? scenes.find((s) => s.id === prefer) ?? scenes.sort((a, b) => b.updatedAt - a.updatedAt)[0];
+}
+
+/** Saves the live fight (and its scene's tokens and fog, see fightScene) as a new encounter, and links the fight to it. */
 export const saveFightAs = (cid: string, name: string): Promise<Encounter> => serial(async () => {
   const c = await db.combat.get(cid);
   if (!c) throw new Error('There is no fight to save.');
-  const e: Encounter = { id: uid(), campaignId: cid, name, monsters: [], fight: snapshotFight(c, await db.scenes.shown(cid)), updatedAt: Date.now() };
+  const e: Encounter = { id: uid(), campaignId: cid, name, monsters: [], fight: snapshotFight(c, await fightScene(cid)), updatedAt: Date.now() };
   await db.encounters.put(e);
   await update(cid, (x) => ({ ...x, encounterId: e.id }));
   return e;
@@ -155,27 +164,34 @@ export const saveFight = (cid: string): Promise<Encounter | undefined> => serial
   const c = await db.combat.get(cid);
   const had = c?.encounterId ? await db.encounters.get(c.encounterId) : undefined;
   if (!c || !had) return undefined;
-  const shown = await db.scenes.shown(cid), fight = snapshotFight(c, shown);
-  // with no scene shown, the map an earlier save stored stays
-  const e: Encounter = { ...had, fight: { ...fight, ...(!shown && had.fight?.map && { map: had.fight.map }) }, updatedAt: Date.now() };
+  const scene = await fightScene(cid, had.fight?.map?.sceneId), fight = snapshotFight(c, scene);
+  // with no scene at all, the map an earlier save stored stays
+  const e: Encounter = { ...had, fight: { ...fight, ...(!scene && had.fight?.map && { map: had.fight.map }) }, updatedAt: Date.now() };
   await db.encounters.put(e);
   return e;
 });
 
-/** The encounter's saved fight replaces the live one; its map comes back on its scene (shown) unless that scene was deleted. */
-export const resumeFight = (cid: string, e: Encounter): Promise<{ dropped: string[]; sceneMissing: boolean }> => serial(async () => {
+/**
+ * The encounter's saved fight replaces the live one; its map comes back on its scene unless that scene was deleted. W5: the fight's scene
+ * (else fightScene's) is shown, and every combatant with no token on it gets one (placeCombatants), so the Map tab shows the fight.
+ */
+export const resumeFight = (cid: string, e: Encounter, lookup: (id: string) => MonsterDef | undefined = () => undefined)
+  : Promise<{ dropped: string[]; sceneMissing: boolean; place: { placed: number; why?: 'no scene' | 'full' } }> => serial(async () => {
   const f = e.fight;
   if (!f) throw new Error('That encounter holds no saved fight.');
   const chars = await db.characters.list(cid);
   const { combat, dropped } = restoreCombat(f, e.id, chars, cid);
   await db.combat.update(cid, () => combat);
-  let sceneMissing = false;
+  let sceneMissing = false, target: string | undefined;
   if (f.map) {
     const ids = new Set(chars.map((c) => c.id));
-    if (await db.scenes.update(f.map.sceneId, (s) => restoreScene(s, f, ids))) await db.scenes.show(cid, f.map.sceneId);
+    if (await db.scenes.update(f.map.sceneId, (s) => restoreScene(s, f, ids))) target = f.map.sceneId;
     else sceneMissing = true;
   }
-  return { dropped, sceneMissing };
+  target ??= (await fightScene(cid))?.id;
+  if (target) await db.scenes.show(cid, target);
+  const place = await (await import('../map/store.ts')).placeCombatants(cid, combat.combatants, lookup);
+  return { dropped, sceneMissing, place };
 });
 
 /** Deletes the encounter; a live fight linked to it is unlinked and goes on. */

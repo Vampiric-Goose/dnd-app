@@ -1,6 +1,6 @@
 // The map's db helpers (lazy: reached from the map page only). Token builders that need the combat engine live here, not in scene.ts.
 import { addCombatants, monsterCombatant, pcCombatant } from '../combat/combat.ts';
-import { remove, updateCombat } from '../combat/store.ts';
+import { fightScene, remove, updateCombat } from '../combat/store.ts';
 import { db } from '../db.ts';
 import type { CampaignSettings, Character, Combat, Combatant, MonsterDef, Scene, Sheet, Size } from '../types.ts';
 import { addTokens, patchToken, tokensFromCombat, type NewToken } from './scene.ts';
@@ -61,21 +61,24 @@ export async function addTokensToCombat(cid: string, sceneId: string, ids: strin
 }
 
 /**
- * An encounter's new combatants placed on the shown scene (else the most recently updated one): one token per monster combatant that no
- * token links to yet, near the scene's centre. Returns how many were placed, and why not all were: no scene, or the scene is full
- * (MAX_TOKENS). The caller says so.
+ * Combatants placed on the shown scene (else the most recently updated one, fightScene): one token per monster combatant that no token
+ * links to yet, and (W5, a resumed fight) one per PC whose character has no token there, near the scene's centre. Returns how many were
+ * placed, and why not all were: no scene, or the scene is full (MAX_TOKENS). The caller says so.
  */
 export async function placeCombatants(cid: string, added: Combatant[], lookup: (id: string) => MonsterDef | undefined): Promise<{ placed: number; why?: 'no scene' | 'full' }> {
-  const scenes = await db.scenes.list(cid);
-  const target = scenes.find((s) => s.shown) ?? scenes.sort((a, b) => b.updatedAt - a.updatedAt)[0];
+  const target = await fightScene(cid);
   if (!target) return { placed: 0, why: 'no scene' };
   let placed = 0, wanted = 0;
   await editScene(target.id, (s) => {
-    const linked = new Set(s.tokens.map((t) => t.combatantId));
-    const list: NewToken[] = added.filter((x) => x.kind === 'monster' && !linked.has(x.id)).map((x) => ({
-      name: x.name, size: (x.monsterId && lookup(x.monsterId)?.size[0]) || 'M', combatantId: x.id,
-      ...(x.monsterId && { monsterId: x.monsterId }), ...(x.hp !== undefined && { hp: x.hp }), ...(x.maxHp !== undefined && { maxHp: x.maxHp }), ...(x.hidden && { hidden: true }),
-    }));
+    const linked = new Set(s.tokens.map((t) => t.combatantId)), chars = new Set(s.tokens.map((t) => t.characterId));
+    const list: NewToken[] = added.flatMap((x): NewToken[] => {
+      // ponytail: PC tokens are Medium (a Small PC takes the same one square in 2014); the DM map's Add uses the race's size
+      if (x.kind === 'pc') return x.characterId && !chars.has(x.characterId) ? [{ name: x.name, size: 'M', characterId: x.characterId }] : [];
+      return x.kind !== 'monster' || linked.has(x.id) ? [] : [{
+        name: x.name, size: (x.monsterId && lookup(x.monsterId)?.size[0]) || 'M', combatantId: x.id,
+        ...(x.monsterId && { monsterId: x.monsterId }), ...(x.hp !== undefined && { hp: x.hp }), ...(x.maxHp !== undefined && { maxHp: x.maxHp }), ...(x.hidden && { hidden: true }),
+      }];
+    });
     const out = list.length ? addTokens(s, list) : s;
     placed = out.tokens.length - s.tokens.length;
     wanted = list.length;

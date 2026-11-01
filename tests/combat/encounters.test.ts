@@ -168,13 +168,55 @@ describe('store flows', () => {
     await db.scenes.put(s);
     const e: Encounter = { id: 'e1', campaignId: 'c1', name: 'Ambush', monsters: [], fight: snapshotFight(fight(), s), updatedAt: 0 };
     await db.scenes.update(s.id, (x) => ({ ...x, tokens: [] }));
-    expect(await resumeFight('c1', e)).toEqual({ dropped: [], sceneMissing: false });
-    expect((await db.scenes.get(s.id))?.tokens.map((t) => t.name)).toEqual(['a']);
+    expect(await resumeFight('c1', e)).toMatchObject({ dropped: [], sceneMissing: false });
+    expect((await db.scenes.get(s.id))?.tokens.map((t) => t.name)).toEqual(['a', 'Goblin 1', 'b', 'Goblin 2']); // W5: the saved token, then the rest placed
     expect((await db.scenes.shown('c1'))?.id).toBe(s.id);
     await db.scenes.delete(s.id);
     await updateCombat('c1', () => newCombat('c1'));
-    expect(await resumeFight('c1', e)).toEqual({ dropped: [], sceneMissing: true });
+    expect(await resumeFight('c1', e)).toMatchObject({ dropped: [], sceneMissing: true });
     expect(await db.combat.get('c1')).toMatchObject({ round: 2, encounterId: 'e1' });
+  });
+
+  // W5: "I click resume in the combat tab and then nothing shows up in the map tab."
+  const lookup = (id: string) => (id === goblin.id ? goblin : undefined);
+  const saved = (s?: Parameters<typeof snapshotFight>[1]): Encounter => ({ id: 'e1', campaignId: 'c1', name: 'Ambush', monsters: [], fight: snapshotFight(fight(), s), updatedAt: 0 });
+  const onScene = async (id: string) => (await db.scenes.get(id))!.tokens.map((t) => t.characterId ?? t.combatantId).sort();
+
+  test('W5: resume with no saved map places every combatant on the shown scene', async () => {
+    const cave = newScene('c1', 'Cave'), arena = newScene('c1', 'Arena');
+    await db.scenes.put(cave);
+    await db.scenes.put(arena);
+    await db.scenes.show('c1', cave.id);
+    expect((await resumeFight('c1', saved(), lookup)).place).toEqual({ placed: 4 });
+    expect(await onScene(cave.id)).toEqual(['a', 'b', 'g1', 'g2']);
+    expect(await onScene(arena.id)).toEqual([]);
+  });
+
+  test('W5: resume places only the combatants that have no token on the saved scene', async () => {
+    const s = addTokens(newScene('c1', 'Cave'), [{ name: 'a', size: 'M', characterId: 'a', x: 100, y: 100 }, { name: 'Goblin 1', size: 'S', combatantId: 'g1', monsterId: goblin.id, x: 300, y: 300 }]);
+    await db.scenes.put(s);
+    const r = await resumeFight('c1', saved(s), lookup);
+    expect(r).toEqual({ dropped: [], sceneMissing: false, place: { placed: 2 } });
+    expect(await onScene(s.id)).toEqual(['a', 'b', 'g1', 'g2']);
+    expect((await db.scenes.shown('c1'))?.id).toBe(s.id);
+  });
+
+  test('W5: resume with no scene shown uses the latest scene and shows it; with no scene at all it says so', async () => {
+    expect((await resumeFight('c1', saved(), lookup)).place).toEqual({ placed: 0, why: 'no scene' });
+    const old = { ...newScene('c1', 'Old'), updatedAt: 1 }, latest = { ...newScene('c1', 'Latest'), updatedAt: 2 };
+    await db.scenes.put(old);
+    await db.scenes.put(latest);
+    await resumeFight('c1', saved(), lookup);
+    expect((await db.scenes.shown('c1'))?.id).toBe(latest.id);
+    expect(await onScene(latest.id)).toEqual(['a', 'b', 'g1', 'g2']);
+    expect(await onScene(old.id)).toEqual([]);
+  });
+
+  test('W5: Save as with a scene that is not shown stores that scene as the map', async () => {
+    const s = newScene('c1', 'Cave');
+    await db.scenes.put(s);
+    await updateCombat('c1', () => newCombat('c1'));
+    expect((await saveFightAs('c1', 'Ambush')).fight?.map?.sceneId).toBe(s.id);
   });
 
   test('deleteEncounter on the linked one unlinks the live fight, which goes on', async () => {

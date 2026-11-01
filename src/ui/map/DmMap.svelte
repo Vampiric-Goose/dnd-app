@@ -48,7 +48,7 @@
 
   const cid = $derived(campaign.id);
   const settings = $derived(campaign.settings);
-  const scene = $derived(scenes.find((s) => s.id === router.query.get('scene')) ?? scenes[0]);
+  const scene = $derived(scenes.find((s) => s.id === router.query.get('scene')) ?? scenes.find((s) => s.shown) ?? scenes[0]); // W5: a resumed fight's scene is shown
 
   const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
   async function run(fn: () => Promise<void>) {

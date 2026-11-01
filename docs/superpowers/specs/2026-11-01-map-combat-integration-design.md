@@ -82,8 +82,12 @@ after the save, which amounts to rolling back their conditions. Timed effects on
 **Link.** The live `Combat` remembers the encounter it came from (`encounterId`).
 
 **Actions** (Encounters tab of the combat panel; the turn bar's "⋯" menu gets "Save as encounter…" and, when linked, "Save encounter"):
-- **Save as encounter…**: name it; snapshot the live fight and the shown scene (or, if no scene is shown, no map state). Links the fight.
-- **Save encounter**: overwrite the linked encounter with the current state.
+- **Save as encounter…**: name it; snapshot the live fight and its scene: the shown one, else the most recently updated (the DM's own map
+  needs no "Show to players", so an unshown scene is still the fight's). No map state only when the campaign has no scene. Links the fight.
+- **Save encounter**: overwrite the linked encounter with the current state (scene: the shown one, else the one the encounter was saved
+  on, else the most recently updated).
+- **Resume (W5 fix)**: after restoring, the fight's scene (the saved one, else as for Save as) is shown, the DM map opens on the shown
+  scene, and every combatant with no token there gets one (PCs by character, monsters linked by combatant). No scene at all: a toast.
 - **Resume / Start** an encounter: if a fight is running and linked, it is saved back into its encounter first; if running and not linked,
   ask "Save the current fight first?" (Save as encounter… / Discard / Cancel). Then the encounter's combat becomes the live combat and,
   when it has map state and its scene still exists, that scene's tokens and fog are restored and the scene is shown. If the scene was
