@@ -98,11 +98,17 @@ stage 5 (map). Look and feel: the Abyssal design (`src/ui/kit`). 2014 rules only
 - The players' tracker gains, for their own characters only, the pips and the Attack-action count. A monster's pips and actions
   never reach players. The turn strip uses the players' tracker view, so hidden creatures stay hidden.
 
-## Calls made after the builder check (mine, not the user's)
+## Calls made after the builder check (confirmed or corrected by the user)
 1. **Extra Actions:** the Action pip is a count, not a yes/no.
    - A turn starts with 1 Action.
    - Using Action Surge (by name) adds one for that turn.
    - The DM can add one for any creature (Haste and similar).
+   - User: the **Bonus action is a separate resource**. Extra Actions never add Bonus actions; a turn has one Bonus action.
+1b. **The pop-up lists every action, not just attacks** (user), grouped by what it costs: Action, Bonus action, Reaction, and no-cost.
+   - Attacks, the standard actions (Dash, Disengage, Dodge, Help, Hide, Ready, Search, Use an Object), spells and resources each sit
+     under their cost. Spells are usually Actions.
+   - Feature-granted options are their own entries under the cost they use, for example Cunning Action: Dash, Cunning Action:
+     Disengage and Cunning Action: Hide under Bonus action.
 2. **Resource costs:** the sheet's resource list gains an optional `cost` ('action' | 'bonus' | 'reaction'), read from the text of the
    feature that grants the resource. No other change to how the sheet computes resources.
 3. **One atomic "use":** the DM's device does the whole use.
@@ -121,8 +127,9 @@ stage 5 (map). Look and feel: the Abyssal design (`src/ui/kit`). 2014 rules only
    - Casting asks for the slot level among the free slots at or above the spell's level; cantrips use none.
    - Casting a concentration spell sets concentration, asking first to drop the current one.
    - Rituals aren't offered in combat (they take 10 minutes).
-7. **Dash** becomes a "use" (the standard action, or the bonus action with Cunning Action) that also adds the Dash to movement. The
-   old `dash` message is removed. The DM's turn-bar Dash (up to 3 a turn) stays.
+7. **Dash and Cunning Action: Dash are separate entries** (user), each with its own cost and effect: Dash spends an Action, and
+   Cunning Action: Dash spends the Bonus action. Each is a "use" that grants its extra movement. The old `dash` message is removed.
+   The DM's turn-bar Dash (up to 3 a turn) stays.
 
 ## Constraints
 - Svelte 5, existing code and kit; no new dependencies; first load ≤ 150 KB gzipped (now about 61.5 KB). The panel and pop-up load
