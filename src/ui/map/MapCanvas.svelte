@@ -520,8 +520,8 @@
       schedule();
       return;
     }
-    if (tool === 'template') { // the origin on a grid intersection (a hex centre on hex grids)
-      const o = snap(grid, w, 'L');
+    if (tool === 'template') { // the origin on the centre of the cell under the pointer, as a Medium token stands (square and hex)
+      const o = snap(grid, w, 'M');
       tplAt = { origin: o, aim: { x: o.x + 1, y: o.y } };
       mode = { k: 'template' };
       return;
