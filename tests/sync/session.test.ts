@@ -1,6 +1,6 @@
 // Task 5: the app-wide sync session over a fake transport (an in-memory "signaling server" of memory links) and the real db.
 import 'fake-indexeddb/auto';
-import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
 import { db, hostOffKey, resetDb, TRASH_CAP } from '../../src/lib/db.ts';
 import { makeEntry } from '../../src/lib/items/inventory.ts';
 import { roll, rollLog, rollViewer, rollVisibility } from '../../src/lib/rolls.svelte.ts';
@@ -63,6 +63,9 @@ async function settle(...hosts: { idle(): Promise<void> }[]) {
 const fightWith = (id: string): Combat => ({ campaignId: CID, round: 1, turn: `pc:${id}`, groupMonsters: false, updatedAt: 1,
   combatants: [{ id: `pc:${id}`, kind: 'pc', name: id, characterId: id, initMod: 0, dex: 10, tie: 0.5, conSave: 0 }] });
 const hosted = (): Campaign => ({ ...camp(CID), name: 'Ravenloft', sync: { role: 'dm', code: CODE, node: 'dmnode01' } });
+
+// The session imports these on demand. Load them once up front so a cold first import (slow on CI) doesn't outlast settle()'s ticks.
+beforeAll(async () => { await Promise.all([import('../../src/lib/sync/host.ts'), import('../../src/lib/sync/guest.ts'), import('../../src/lib/combat/store.ts')]); });
 
 beforeEach(async () => {
   stopSession();
