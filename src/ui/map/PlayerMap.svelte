@@ -7,7 +7,8 @@
   import { computeSheet } from '../../lib/rules/sheet.ts';
   import { currentActor } from '../../lib/sync/project.ts';
   import { sceneForPlayers, type PlayerScene } from '../../lib/sync/scene.ts';
-  import { sendMove, session } from '../../lib/sync/session.svelte.ts';
+  import { sendDash, sendMove, session } from '../../lib/sync/session.svelte.ts';
+  import { effectiveSpeed, remainingFeet } from '../../lib/combat/movement.ts';
   import type { Campaign, Character } from '../../lib/types.ts';
   import MapCanvas from './MapCanvas.svelte';
   import Drawer from '../kit/Drawer.svelte';
@@ -49,6 +50,18 @@
   const owned = $derived(view?.tokens.filter((t) => mine(t.characterId)) ?? []);
   const myTurn = $derived(owned.some((t) => t.characterId === actor));
   const status = $derived(!owned.length ? '' : unsent && session.status !== 'online' ? "You're offline: that move wasn't sent." : settings.freeMovement ? 'Free movement is on.' : myTurn ? 'Your turn: drag your token.' : 'Wait for your turn to move.');
+  // Movement budget (spec 1): the tracker carries each player character's movement this turn while one applies.
+  const budget = $derived(!!session.tracker && session.tracker.round >= 1 && !settings.freeMovement);
+  const budgetOf = (characterId: string | undefined) => {
+    const c = mine(characterId), row = c && session.tracker?.rows.find((r) => r.characterId === c.id);
+    if (!budget || !c || !row) return undefined;
+    try {
+      const speed = effectiveSpeed(computeSheet(c, { settings, viewer: 'player' }).speed.walk, c.state.conditions, c.state.exhaustion);
+      return { left: remainingFeet(speed, row.moved), dashes: row.moved?.dashes ?? 0 };
+    } catch { return undefined; }
+  };
+  const turnBudget = $derived(myTurn && !(unsent && session.status !== 'online') ? budgetOf(actor) : undefined);
+  const limitOf = (id: string) => { const b = budgetOf(tokenOf(id)?.characterId); return b && { left: b.left, clamp: true }; };
 
   const tokenOf = (id: string) => view?.tokens.find((t) => t.id === id);
   const canDrag = (id: string) => {
@@ -89,6 +102,7 @@
         {selected}
         {canDrag}
         {speedOf}
+        {limitOf}
         onselect={(ids) => (selected = ids)}
         {onmove}
         rev={session.rev}
@@ -98,7 +112,14 @@
       {#if error}<p role="alert" class="error">{error}</p>{/if}
       <h2 class="scene-name">{view.name}</h2>
       {#if !joined}<p class="muted note">Player view: read-only</p>{/if}
-      <p class="status" role="status" aria-live="polite">{status}</p>
+      {#if turnBudget && actor}
+        <div class="turn">
+          <p class="status" role="status" aria-live="polite">Your turn: <span class="num">{turnBudget.left}</span> ft left{turnBudget.dashes ? ` · Dashed ×${turnBudget.dashes}` : ''}.</p>
+          <button type="button" aria-label="Dash" onclick={() => sendDash(actor!)}>Dash</button>
+        </div>
+      {:else}
+        <p class="status" role="status" aria-live="polite">{status}</p>
+      {/if}
       {#if owned.length}
         <div class="caption">Your tokens</div>
         <ul class="plain tokens">{#each owned as t (t.id)}{@render row(t)}{/each}</ul>
@@ -131,6 +152,18 @@
   .status {
     margin: 0.4rem 0 0.9rem;
     color: var(--text-strong);
+  }
+
+  .turn {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem 0.75rem;
+    margin: 0.4rem 0 0.9rem;
+  }
+
+  .turn .status {
+    margin: 0;
   }
 
   .tokens {

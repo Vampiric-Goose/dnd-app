@@ -1,6 +1,7 @@
 <script lang="ts">
   import { addCombatants, addMonsters, lairCombatant, MAX_COMBATANTS, pcCombatant, prev, rollInit, setInit } from '../../lib/combat/combat.ts';
   import { endCombat, turn, updateCombat } from '../../lib/combat/store.ts';
+  import { addDash, budgetApplies, effectiveSpeed, remainingFeet, resetMovement, undoDash } from '../../lib/combat/movement.ts';
   import type { ContentIndex } from '../../lib/content/index.ts';
   import { db } from '../../lib/db.ts';
   import { computeSheet } from '../../lib/rules/sheet.ts';
@@ -38,6 +39,19 @@
     return new Set(r ? list.slice(r[0], r[1] + 1).map((x) => x.id) : []);
   });
   const turnName = $derived(list.find((x) => x.id === combat?.turn)?.name);
+
+  // Movement budget (spec 1): the current run's first combatant, its speed after conditions (as the host counts it) and feet left.
+  const mover = $derived.by(() => {
+    const r = currentRun(combat), x = r && combat && budgetApplies(combat, settings) ? list[r[0]] : undefined;
+    if (!x) return undefined;
+    let walk: number | undefined, conds = x.conditions ?? [], exh = 0;
+    const ch = x.characterId ? charById.get(x.characterId) : undefined;
+    if (ch) { try { walk = computeSheet(ch, { settings, viewer: 'player' }).speed.walk; } catch { /* a damaged character: no readout */ } conds = ch.state.conditions; exh = ch.state.exhaustion; }
+    else if (x.monsterId) walk = monById.get(x.monsterId)?.speed.walk;
+    if (walk === undefined) return undefined;
+    const speed = effectiveSpeed(walk, conds, exh), m = combat!.movement?.[x.id];
+    return { id: x.id, speed, left: remainingFeet(speed, m), dashes: m?.dashes ?? 0 };
+  });
   const status = $derived(round === 0 ? 'Setup' : `Round ${round}${turnName ? ` · ${turnName}'s turn` : ''}`);
 
   const charById = $derived(new Map(chars.map((c) => [c.id, c])));
@@ -100,6 +114,11 @@
     { label: 'Sort', disabled: list.length < 2, onselect: () => void edit(sortAround) },
     { label: 'Roll unrolled', disabled: !list.some((x) => x.kind !== 'pc' && x.init === undefined), onselect: () => void rollUnrolled() },
     { label: 'Encounters', onselect: () => { tab = 'encounters'; sheet = true; } },
+    ...(mover && combat ? [
+      { separator: true } as const,
+      { label: 'Undo Dash', disabled: undoDash(combat, mover.id, mover.speed) === combat, onselect: () => { const { id, speed } = mover; void edit((c) => undoDash(c, id, speed)); } },
+      { label: 'Reset movement', disabled: resetMovement(combat, mover.id) === combat, onselect: () => { const { id } = mover; void edit((c) => resetMovement(c, id)); } },
+    ] : []),
     ...(combat ? [{ separator: true } as const, { label: 'End combat', danger: true, onselect: end }] : []),
   ]);
 </script>
@@ -112,7 +131,13 @@
         {#if round === 0}<span class="caption">Setup</span>{:else}<span class="caption">Round</span> <span class="num">{round}</span>{/if}
       </h2>
       <span class="who">{turnName && round ? `${turnName}'s turn` : `${list.length} ${list.length === 1 ? 'combatant' : 'combatants'}`}</span>
+      {#if mover}
+        <span class="left num">{mover.left} ft left{mover.dashes ? ` · Dashed ×${mover.dashes}` : ''}</span>
+      {/if}
       <div class="acts">
+        {#if mover}
+          <button type="button" onclick={() => { const { id } = mover; void edit((c) => addDash(c, id)); }}>Dash</button>
+        {/if}
         {#if round === 0}
           <button type="button" class="primary" disabled={!list.length} onclick={() => run(() => turn(cid, 'start'))}>Start</button>
         {:else}
@@ -221,6 +246,11 @@
     color: var(--text-strong);
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .left {
+    color: var(--text-strong);
     white-space: nowrap;
   }
 

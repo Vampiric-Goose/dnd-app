@@ -9,7 +9,9 @@
   import { snap, type Pt } from '../../lib/map/grid.ts';
   import { addTokens, liveHp, MAX_SIDE, MAX_TOKENS, moveTokens, newScene, patchToken, regrid, removeTokens, type NewToken } from '../../lib/map/scene.ts';
   import { addTokensToCombat, editScene, tokenForCharacter, tokenForMonster } from '../../lib/map/store.ts';
-  import { patchCombatant } from '../../lib/combat/combat.ts';
+  import { currentRun, patchCombatant } from '../../lib/combat/combat.ts';
+  import { budgetApplies, combatantForToken, effectiveSpeed, recordMove, remainingFeet } from '../../lib/combat/movement.ts';
+  import { feetBetween } from '../../lib/map/grid.ts';
   import { updateCombat } from '../../lib/combat/store.ts';
   import { toast } from '../../lib/toast.svelte.ts';
   import { soundMonster } from '../../lib/monsters/homebrew.ts';
@@ -18,7 +20,7 @@
   import { getIndex, saveCampaign } from '../../lib/store.svelte.ts';
   import { MAX_BLOB } from '../../lib/sync/protocol.ts';
   import { session } from '../../lib/sync/session.svelte.ts';
-  import type { Campaign, Character, Combat, MonsterDef, RaceDef, Scene, Sheet, Size, Token } from '../../lib/types.ts';
+  import type { Campaign, Character, Combat, Combatant, MonsterDef, RaceDef, Scene, Sheet, Size, Token } from '../../lib/types.ts';
   import GridForm from './GridForm.svelte';
   import { detectSquareGrid } from '../../lib/map/detectGrid.ts';
   import MapCanvas from './MapCanvas.svelte';
@@ -218,7 +220,39 @@
     await reload(); // a new hash: MapCanvas loads it without re-decoding the background (M2)
   });
 
-  const onmove = (ids: string[], primary: string, to: Pt) => edit((s) => moveTokens(s, ids, primary, to));
+  /** One scene write, then the feet each moved token walked go on the budget of its combatant if that one is taking its turn (P2). */
+  const onmove = (ids: string[], primary: string, to: Pt) => run(async () => {
+    if (!scene) return;
+    let walked: { t: Token; feet: number }[] = [];
+    await editScene(scene.id, (s) => {
+      const out = moveTokens(s, ids, primary, to);
+      walked = out.tokens.flatMap((t) => {
+        const o = s.tokens.find((x) => x.id === t.id);
+        return o && (o.x !== t.x || o.y !== t.y) ? [{ t, feet: feetBetween(s.grid, o, t, settings.diagonal) }] : [];
+      });
+      return out;
+    });
+    if (walked.length && budgetApplies(combat, settings)) await updateCombat(cid, (c) => {
+      if (!budgetApplies(c, settings)) return c;
+      const now = currentRun(c);
+      for (const { t, feet } of walked) { const x = combatantForToken(c, t); if (x && now.has(x.id)) c = recordMove(c, x.id, feet); }
+      return c;
+    });
+    await reload();
+  });
+  /** Speed after conditions, as the host's check counts it: a PC's player-view walk, a monster's stat block. */
+  const speedFor = (x: Combatant): number | undefined => {
+    const ch = x.characterId ? chars.find((c) => c.id === x.characterId) : undefined;
+    if (ch) { try { return effectiveSpeed(computeSheet(ch, { settings, viewer: 'player' }).speed.walk, ch.state.conditions, ch.state.exhaustion); } catch { return undefined; } }
+    const walk = x.monsterId ? monsterById.get(x.monsterId)?.speed.walk : undefined;
+    return walk === undefined ? undefined : effectiveSpeed(walk, x.conditions ?? []);
+  };
+  const turnIds = $derived(combat ? currentRun(combat) : new Set<string>());
+  const limitOf = (id: string) => {
+    const t = scene?.tokens.find((x) => x.id === id), x = t && combat && budgetApplies(combat, settings) ? combatantForToken(combat, t) : undefined;
+    const speed = x && turnIds.has(x.id) ? speedFor(x) : undefined;
+    return speed === undefined ? undefined : { left: remainingFeet(speed, combat!.movement?.[x!.id]), clamp: false };
+  };
   /** One stroke, rectangle or Reveal all / Hide all: one write, painted onto the fresh record's fog. */
   const onfog = (e: FogEdit) => edit((s) => ({ ...s, fog: paintFog(s.fog, s.width, s.height, e) }));
   const speedOf = (id: string) => {
@@ -251,6 +285,7 @@
         {selected}
         canDrag={() => true}
         {speedOf}
+        {limitOf}
         onselect={(ids) => (selected = ids)}
         {onmove}
         fog={settings.fog ? scene.fog ?? encodeFog(newFog(scene.width, scene.height, false)) : undefined}
