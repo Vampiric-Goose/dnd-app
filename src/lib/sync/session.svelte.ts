@@ -83,7 +83,6 @@ const keyOf = (role: string, id: string, code: string) => `${role}|${id}|${code}
 export function stopSession(): void {
   const r = run;
   run = undefined;
-  local = undefined;
   if (r) {
     clearTimeout(r.timer);
     r.host?.stop();
@@ -91,10 +90,11 @@ export function stopSession(): void {
     r.listener?.close();
   }
   session.confirm?.answer(false);
-  Object.assign(session, { role: undefined, campaignId: undefined, status: 'off', reason: '', online: {}, roster: [], tracker: undefined, scene: undefined, packs: undefined, welcomed: false, confirm: undefined, retryAt: undefined, actions: [] });
+  Object.assign(session, { role: undefined, campaignId: undefined, status: 'off', reason: '', online: {}, roster: [], tracker: undefined, scene: undefined, packs: undefined, welcomed: false, confirm: undefined, retryAt: undefined, actions: local?.board.list() ?? [] });
 }
 
 function begin(role: Run['role'], code: string, campaignId?: string): Run {
+  local = undefined; // a session holds its own arrows
   stopSession();
   const r: Run = { role, code, campaignId, attempt: 0, ...(campaignId && { key: keyOf(role, campaignId, code) }) };
   run = r;
@@ -106,6 +106,7 @@ let follows = 0;
 /** Follows the open campaign: App calls it whenever that changes. */
 export async function follow(c: Campaign | undefined): Promise<void> {
   const n = ++follows;
+  if (local && local.cid !== c?.id) local = undefined; // another campaign: the local arrows go (a save of the same one keeps them)
   const key = c?.sync && keyOf(c.sync.role, c.id, c.sync.code);
   if (run && (run.key === key || (run.key === undefined && session.status !== 'rejected'))) return; // the same session, or a join underway
   if (!c?.sync) return stopSession();

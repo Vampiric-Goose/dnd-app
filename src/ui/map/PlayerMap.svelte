@@ -62,6 +62,16 @@
       return { left: remainingFeet(speed, row.moved), dashes: row.moved?.dashes ?? 0 };
     } catch { return undefined; }
   };
+  /** The tracker a Dash was sent under: the button stays off until the next tracker arrives or 3 s pass (a double tap sends one Dash). */
+  let dashUnder: object | undefined = $state.raw();
+  let dashTimer: ReturnType<typeof setTimeout> | undefined;
+  function dash() {
+    dashUnder = session.tracker;
+    sendDash(actor!);
+    clearTimeout(dashTimer);
+    dashTimer = setTimeout(() => (dashUnder = undefined), 3000);
+  }
+  $effect(() => () => clearTimeout(dashTimer));
   const turnBudget = $derived(myTurn && !(unsent && session.status !== 'online') ? budgetOf(actor) : undefined);
   const limitOf = (id: string) => { const b = budgetOf(tokenOf(id)?.characterId); return b && { left: b.left, clamp: true }; };
 
@@ -133,7 +143,7 @@
       {#if turnBudget && actor}
         <div class="turn">
           <p class="status" role="status" aria-live="polite">Your turn: <span class="num">{turnBudget.left}</span> ft left{turnBudget.dashes ? ` · Dashed ×${turnBudget.dashes}` : ''}.</p>
-          <button type="button" aria-label="Dash" onclick={() => sendDash(actor!)}>Dash</button>
+          <button type="button" aria-label="Dash" disabled={!!dashUnder && dashUnder === session.tracker} onclick={dash}>Dash</button>
         </div>
       {:else}
         <p class="status" role="status" aria-live="polite">{status}</p>

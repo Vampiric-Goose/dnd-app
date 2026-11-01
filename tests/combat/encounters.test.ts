@@ -1,7 +1,8 @@
 import 'fake-indexeddb/auto';
 import fs from 'node:fs';
 import { beforeEach, describe, expect, test } from 'vitest';
-import { addCombatants, monsterCombatant, newCombat, start } from '../../src/lib/combat/combat.ts';
+import { addCombatants, monsterCombatant, newCombat, next, prev, start } from '../../src/lib/combat/combat.ts';
+import { recordMove } from '../../src/lib/combat/movement.ts';
 import { restoreCombat, restoreScene, snapshotFight } from '../../src/lib/combat/encounters.ts';
 import { addPreparedToFight, deleteEncounter, resumeFight, saveFight, saveFightAs, updateCombat } from '../../src/lib/combat/store.ts';
 import { db, resetDb } from '../../src/lib/db.ts';
@@ -114,6 +115,16 @@ describe('restore: fight identity and movement', () => {
     expect(dropped).toEqual(['a']);
     expect(combat.turn).toBe('pc:b');
     expect(combat.movement).toEqual({ g1: { feet: 10, dashes: 0 } });
+  });
+
+  test('the passed turn counts as started: Previous then Next keeps the new holder movement (no second reset)', () => {
+    const { combat } = restoreCombat(snapshotFight(fight(), undefined), 'e1', [char('b', 'c1')], 'c1');
+    expect(combat.turn).toBe('pc:b');
+    const back = prev(recordMove(combat, 'pc:b', 15));
+    expect(back.turn).toBe('g1');
+    const again = next(back).combat;
+    expect(again.turn).toBe('pc:b');
+    expect(again.movement?.['pc:b']).toEqual({ feet: 15, dashes: 0 });
   });
 });
 

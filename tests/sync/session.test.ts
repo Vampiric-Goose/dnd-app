@@ -21,7 +21,7 @@ import { Device } from './fakes.ts';
 vi.mock('../../src/lib/content/srd.ts', async () => ({ loadSrd: async () => (await import('../fixtures/srdPack.ts')).srdPackFixture }));
 await import('../fixtures/srdPack.ts'); // loaded once here, so the mocked SRD resolves at once inside settle()
 const { app, refreshCampaigns, setCampaign } = await import('../../src/lib/store.svelte.ts');
-const { backoff, follow, hostCampaign, join, retryNow, rotateCode, sendInitiative, sendMove, session, stopHosting, stopSession, useTransport } = await import('../../src/lib/sync/session.svelte.ts');
+const { backoff, declareAction, follow, hostCampaign, join, retryNow, rotateCode, sendInitiative, sendMove, session, stopHosting, stopSession, useTransport } = await import('../../src/lib/sync/session.svelte.ts');
 
 const CODE = 'ABCDEFGHJKMN';
 const CID = 'c1';
@@ -301,6 +301,26 @@ describe('final review fixes (DM side)', () => {
     await refreshCampaigns();
     await hostCampaign(CID);
     expect([session.role, session.status, session.reason]).toEqual([undefined, 'off', 'Could not start hosting: no WebRTC here']);
+  });
+
+  test('local DM arrows survive a save of the open campaign; another campaign clears them', async () => {
+    await db.campaigns.put(camp(CID));
+    await db.campaigns.put(camp('c2'));
+    const s = newScene(CID, 'Cave');
+    await db.scenes.put(s);
+    await db.scenes.show(CID, s.id);
+    await refreshCampaigns();
+    await setCampaign(CID);
+    await follow(app.campaign);
+    await declareAction({ sceneId: s.id, from: { x: 10, y: 10 }, to: { x: 100, y: 100 }, kind: 'intent' });
+    expect(session.actions).toHaveLength(1);
+    await db.campaigns.put({ ...app.campaign!, name: 'Renamed' }); // as saveCampaign (e.g. free movement toggled): a new object
+    await refreshCampaigns();
+    await follow(app.campaign);
+    expect(session.actions).toHaveLength(1);
+    await setCampaign('c2');
+    await follow(app.campaign);
+    expect(session.actions).toEqual([]);
   });
 });
 

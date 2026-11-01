@@ -36,7 +36,9 @@ export function restoreCombat(f: SavedFight, encounterId: string, characters: Ch
     if (after) turn = after.id;
     else if (cs.length) { turn = cs[0].id; round++; } else turn = undefined;
   }
-  let combat: Combat = { ...c, combatants: cs, turn, round, encounterId, campaignId, updatedAt: Date.now(), fightId: uid() };
+  // the passed turn has started (nothing ticked): mark it, so Previous then Next does not start it again (M1)
+  const done = turn !== c.turn && turn !== undefined ? [...(c.done ?? []), `${round}:s:${turn}`] : c.done;
+  let combat: Combat = { ...c, combatants: cs, turn, round, done, encounterId, campaignId, updatedAt: Date.now(), fightId: uid() };
   for (const id of [...gone, ...(turn !== c.turn ? currentRun(combat) : [])]) combat = resetMovement(combat, id);
   return { combat, dropped };
 }

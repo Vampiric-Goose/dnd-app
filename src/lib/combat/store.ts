@@ -5,7 +5,7 @@ import { db, DeletedError } from '../db.ts';
 import { computeSheet } from '../rules/sheet.ts';
 import type { CampaignSettings, Character, Combat, Combatant, Duration, Encounter, MonsterDef } from '../types.ts';
 import { uid } from '../uid.ts';
-import { addMonsters, concentrationDc, encounterPicks, initOk,monsterHp, newCombat, next, patchCombatant, removeStep, setInit, start, type Expired, type HpOp, type Step } from './combat.ts';
+import { addMonsters, concentrationDc, encounterPicks, initOk, monsterHp, newCombat, next, patchCombatant, removeStep, setInit, start, type Expired, type HpOp, type Step } from './combat.ts';
 import { restoreCombat, restoreScene, snapshotFight } from './encounters.ts';
 
 // One operation at a time (per tab): two quick hits each read the character after the other's write, so both land.
@@ -188,7 +188,7 @@ export const deleteEncounter = (cid: string, id: string): Promise<void> => seria
   });
 });
 
-export const deathSave =(cid: string, combatantId: string, d20: number): Promise<void> => serial(async () => {
+export const deathSave = (cid: string, combatantId: string, d20: number): Promise<void> => serial(async () => {
   const { x } = await combatant(cid, combatantId);
   if (x.kind === 'pc' && x.characterId && !(await editCharacter(x.characterId, (c) => rollDeathSave(c, d20)))) throw new Error(GONE);
 });
