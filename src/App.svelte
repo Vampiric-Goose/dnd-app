@@ -53,12 +53,14 @@
     ['settings', 'CampaignSettings', () => import('./ui/pages/CampaignSettings.svelte')],
     ['about', 'About', () => import('./ui/pages/About.svelte')],
     ['join/:code', 'Join', () => import('./ui/pages/Join.svelte')],
+    ['map', 'Map', () => import('./ui/pages/Map.svelte')], // stage 5; `?scene=<id>` picks the scene
   ];
 
   // Monsters are DM information (R2): no link in Player view.
   const nav = $derived<[label: string, segment: string][]>([
     ['Campaigns', ''],
     ['Characters', 'characters'],
+    ['Map', 'map'], // stage 5: right after Combat once stage 4's nav entry merges
     ['Compendium', 'compendium'],
     ...(app.viewer === 'dm' ? [['Monsters', 'monsters'] as [string, string]] : []),
     ['Items', 'items'],
@@ -98,7 +100,7 @@
 
   <nav aria-label="Main">
     {#each nav as [label, segment]}
-      <a href="#/{segment}" aria-current={(router.path[0] ?? '') === segment ? 'page' : undefined}>{label}</a>
+      <a href="#/{segment}" class:wide-only={segment === 'packs' || segment === 'about'} aria-current={(router.path[0] ?? '') === segment ? 'page' : undefined}>{label}</a>
     {/each}
   </nav>
 
@@ -177,6 +179,13 @@
   nav a[aria-current='page'] {
     color: var(--accent);
     box-shadow: inset 0 3px var(--accent);
+  }
+
+  /* Stage 5: below 768 px Packs and About leave the bottom bar (the Campaigns page links to both) so the labels still fit at 375 px. */
+  @media (max-width: 767.98px) {
+    nav a.wide-only {
+      display: none;
+    }
   }
 
   @media (min-width: 768px) {
