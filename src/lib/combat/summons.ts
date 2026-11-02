@@ -5,7 +5,7 @@
 import { richToPlain } from '../content/richtext.ts';
 import { slug } from '../content/ids.ts';
 import type { Block, Combat, Combatant, MonsterDef, RichText } from '../types.ts';
-import { monsterCombatant, rollInit } from './combat.ts';
+import { monsterCombatant, removeCombatant, rollInit } from './combat.ts';
 
 const WORDS: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, eight: 8 };
 const flat = (expr: string) => expr.replace(/((?:\s*[+-]\s*\d+)+)$/, (all) => { const n = [...all.matchAll(/([+-])\s*(\d+)/g)].reduce((t, m) => t + (m[1] === '-' ? -1 : 1) * +m[2], 0); return n ? ` ${n < 0 ? '-' : '+'} ${Math.abs(n)}` : ''; });
@@ -43,7 +43,7 @@ export function scaleSummon(m: MonsterDef, o: { level: number; attack: number; v
     traits: part(m.traits), actions: part(m.actions), bonusActions: part(m.bonusActions), reactions: part(m.reactions) };
 }
 
-export type SummonSpec = { creature: string; variants?: string[] } | { options: { count: number; cr: number; type?: string }[]; crPerSlot?: { above: number } }
+export type SummonSpec = { creature: string; variants?: string[] } | { options: { count: number; cr: number; type?: string }[]; crPerSlot?: { above: number }; /** more appear at higher slots (Conjure Animals) */ times?: { slot: number; x: number }[] }
   | { forms: string[]; count?: number; perSlot?: { count: number; above: number } };
 
 /**
@@ -63,7 +63,9 @@ export function summonOptions(text: RichText, higher?: RichText): SummonSpec | u
     const [a, b] = m[3].split('/'), type = m[2].toLowerCase().replace(/ creatures?$/, '').replace(/s$/, '');
     return [{ count: WORDS[m[1].toLowerCase()], cr: b ? +a / +b : +a, ...(type && { type }) }];
   });
-  if (options.length) return { options };
+  // "twice as many with a 5th-level slot, three times as many with a 7th-level slot"
+  const times = [...h.matchAll(/\b(twice|three times) as many with an? (\d)(?:st|nd|rd|th)-level slot/gi)].map((m) => ({ slot: +m[2], x: /twice/i.test(m[1]) ? 2 : 3 }));
+  if (options.length) return { options, ...(times.length && { times }) };
   const one = /\b(?:an?|one) ([a-z ]+?) of challenge rating (\d+(?:\/\d+)?) or lower\b/i.exec(t);
   if (one) {
     const [a, b] = one[2].split('/'), up = /\bchallenge rating increases by 1 for each slot level above (\d)/i.exec(h);
@@ -75,6 +77,14 @@ export function summonOptions(text: RichText, higher?: RichText): SummonSpec | u
   return forms ? { forms: forms[1].split(/,\s*(?:or\s+)?|\s+or\s+/).map((x) => x.replace(/^(?:an?|or)\s+/i, '').trim()).filter(Boolean) } : undefined;
 }
 
+/** How many a pick calls at this slot: a conjure option times its multiple, forms with their extra per slot, a spirit one. */
+export function summonCount(s: SummonSpec, option: number | undefined, slot: number): number {
+  if ('creature' in s) return 1;
+  if ('forms' in s) return (s.count ?? 1) + (s.perSlot ? s.perSlot.count * Math.max(0, slot - s.perSlot.above) : 0);
+  const x = Math.max(1, ...(s.times ?? []).filter((t) => slot >= t.slot).map((t) => t.x));
+  return (s.options[option ?? -1]?.count ?? 0) * x;
+}
+
 const crOf = (m: MonsterDef) => { const [a, b] = String(m.cr ?? '0').split('/'); return b ? +a / +b : +a || 0; };
 
 /** Why a pick doesn't fit the spell at this slot (count, CR, type, the named spirit or forms), or undefined: the DM's device checks it. */
@@ -82,13 +92,14 @@ export function checkPick(s: SummonSpec, pick: { option?: number; monsters: Mons
   const ms = pick.monsters;
   if ('creature' in s) return ms.length === 1 && ms[0].name.startsWith(s.creature) ? undefined : `that spell summons a ${s.creature}`;
   if ('forms' in s) {
-    const n = (s.count ?? 1) + (s.perSlot ? s.perSlot.count * Math.max(0, slot - s.perSlot.above) : 0);
+    const n = summonCount(s, undefined, slot);
     if (ms.length < 1 || ms.length > n) return `pick up to ${n}`;
     return ms.every((m) => s.forms.some((f) => f.toLowerCase().includes(m.name.toLowerCase()))) ? undefined : 'not one of its forms';
   }
   const o = s.options[pick.option ?? -1];
   if (!o) return 'pick an option';
-  if (ms.length !== o.count) return `pick ${o.count} creature${o.count === 1 ? '' : 's'}`;
+  const n = summonCount(s, pick.option, slot);
+  if (ms.length !== n) return `pick ${n} creature${n === 1 ? '' : 's'}`;
   const cap = o.cr + (s.crPerSlot ? Math.max(0, slot - s.crPerSlot.above) : 0);
   if (ms.some((m) => crOf(m) > cap)) return 'too strong for this spell';
   if (o.type && ms.some((m) => !m.type.toLowerCase().startsWith(o.type!))) return `not a ${o.type}`;
@@ -114,5 +125,5 @@ export function endedSummons(k: Combat): { combat: Combat; gone: string[] } {
     const c = k.combatants.find((y) => y.id === x.summon!.by);
     return !c || (x.summon.cast !== undefined && !(c.concentrating && c.concentratingOn === x.summon.spell && c.concentrationCount === x.summon.cast));
   }).map((x) => x.id);
-  return { combat: gone.length ? { ...k, combatants: k.combatants.filter((x) => !gone.includes(x.id)) } : k, gone };
+  return { combat: gone.reduce(removeCombatant, k), gone }; // the turn passes on if it was theirs
 }

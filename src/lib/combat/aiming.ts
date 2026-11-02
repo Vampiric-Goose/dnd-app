@@ -27,7 +27,7 @@ export interface AimArea { shape: Shape; feet: number; width?: number; on: 'crea
 /** `choices`: the damage types to pick from for dice whose type is chosen (their `type` stays '' until one is picked). */
 /** `mark`: a rider spell aimed at the creature it marks (no dice). A die's `vs`: it hurts only that creature (a marked rider). */
 export interface AimPlan { reach: Reach; line: boolean; attack: boolean; toHit?: number; area?: AimArea; dice: { expr: string; type: string; on?: 'hit' | 'save'; vs?: string; part?: 'alt' | 'later' }[]; read?: SpellRead;
-  ignore?: { long?: true; close?: true }; choices?: string[]; mark?: true; /** rays, beams or darts: a target each */ count?: number; /** a helpful spell: up to `max` creatures, the caster included */ helps?: { max: number }; /** damage over time, kept for the turns to come */ linger?: { dice: { expr: string; type: string }[]; read: SpellRead } }
+  ignore?: { long?: true; close?: true }; choices?: string[]; mark?: true; /** rays, beams or darts: a target each */ count?: number; /** `count` is a most, each creature once (Bane) */ upTo?: true; /** a helpful spell: up to `max` creatures, the caster included */ helps?: { max: number }; /** damage over time, kept for the turns to come */ linger?: { dice: { expr: string; type: string }[]; read: SpellRead } }
 
 /**
  * The spell areas to draw on a scene, for everyone: an instant one until its caster's next turn, a concentration one while its caster
@@ -136,9 +136,10 @@ export function aimPlan(a: TurnAction, o: { level?: number; toggles?: Toggle[]; 
   if (read.attack && o.rider?.anyAttack) dice.push({ expr: o.rider.dice, type: o.rider.type || dice[0]?.type || '', on: 'hit', ...(o.rider.target && { vs: o.rider.target }) }); // Hex on a spell attack
   const ignore = read.attack === 'ranged' && has('Crossbow Expert') ? { close: true as const } : undefined;
   const slot = o.level ?? a.spell.level, lvl = a.cast!.charLevel ?? 1, up = (above?: number) => (above !== undefined && slot > above ? slot - above : 0);
-  const count = read.rays ? (read.rays.byLevel ? (lvl >= 17 ? 4 : lvl >= 11 ? 3 : lvl >= 5 ? 2 : 1) : read.rays.count + up(read.rays.above)) : read.auto ? read.auto.count + up(read.auto.above) : 1;
+  const count = read.rays ? (read.rays.byLevel ? (lvl >= 17 ? 4 : lvl >= 11 ? 3 : lvl >= 5 ? 2 : 1) : read.rays.count + up(read.rays.above)) : read.auto ? read.auto.count + up(read.auto.above)
+    : read.targets && read.save && !area ? read.targets.count + up(read.targets.above) : 1; // Bane, Hold Person: up to that many, each once
   return { reach, line: read.attack === 'ranged', attack: !!read.attack, ...(a.cast!.attack !== undefined && { toHit: a.cast!.attack }), ...(area && { area }), dice, read, ...(ignore && { ignore }),
-    ...(read.choices && { choices: read.choices }), ...(count > 1 && { count }) };
+    ...(read.choices && { choices: read.choices }), ...(count > 1 && { count, ...(!read.rays && !read.auto && { upTo: true as const }) }) };
 }
 
 /** Whether a creature at `t` can be picked from `me`, and with what disadvantage. A melee weapon past its reach is thrown (ranged). */
@@ -196,7 +197,9 @@ export async function workOut(i: WorkIn): Promise<Aimed | string> {
   if ([...plan.dice, ...(plan.linger?.dice ?? [])].some((d) => !d.type) && plan.choices && !plan.read?.typeFromDie) return 'pick a damage type';
   if (plan.count && !i.ray) { // rays, beams or darts: one aim each (two d20s and the dice each), worked out one by one
     const ts = aim.targets ?? [], n = plan.dice.length;
-    if (ts.length !== plan.count) return 'pick a target';
+    if (plan.upTo ? !ts.length : ts.length !== plan.count) return 'pick a target';
+    if (plan.upTo && ts.length > plan.count) return 'too many targets';
+    if (plan.upTo && new Set(ts).size !== ts.length) return 'pick each creature once';
     if (plan.attack && aim.rolled.d20?.length !== 2 * ts.length) return 'bad d20';
     if (aim.rolled.dmg.length !== n * ts.length) return 'bad damage dice';
     const per: Aimed[] = [];

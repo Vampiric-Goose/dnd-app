@@ -158,10 +158,11 @@ export function readSpell(s: Pick<SpellDef, 'text' | 'level' | 'range'> & { name
   else if (flatHeal) out.heal = { dice: flatHeal[1].replace(/\s+/g, ''), mod: false };
   const temp = /\bgains? (\d+d\d+(?:\s*\+\s*\d+)?) temporary hit points\b/i.exec(t), tempUp = /\b(\d+) additional temporary hit points for each slot level above\b/i.exec(h);
   if (temp) out.temp = { dice: temp[1].replace(/\s+/g, ''), ...(tempUp && { perSlot: +tempUp[1] }) };
-  const many = /\bup to (two|three|four|five|six|\d+) (?:willing )?creatures\b/i.exec(t), more = /\bone additional creature for each slot level above (\d)/i.exec(h);
-  if (many) out.targets = { count: WORDS[many[1].toLowerCase()] ?? +many[1], ...(more && { above: +more[1] }) };
+  const many = /\bup to (two|three|four|five|six|\d+) (?:willing )?creatures\b/i.exec(t), more = /\bone additional (?:creature|humanoid|beast) for each slot level above (\d)/i.exec(h);
+  const any = /\bany number of (?:willing )?creatures\b/i.test(t); // ponytail: Beacon of Hope's "any number" as 99
+  if (many || more || any) out.targets = { count: any ? 99 : many ? WORDS[many[1].toLowerCase()] ?? +many[1] : 1, ...(more && { above: +more[1] }) };
   // "increases by 1d8 for each slot level above 1st" (a comma allowed), or "takes 1d6 extra damage … for each slot level above 1st"
-  const up = /increases by (\d+d\d+),? for (each|every two) (?:slot )?levels? (?:above|of higher spell slot) (?:the )?(\d)/i.exec(h)
+  const up = /increases by (\d+(?:d\d+)?),? for (each|every two) (?:slot )?levels? (?:above|of higher spell slot) (?:the )?(\d)/i.exec(h)
     ?? /\b(\d+d\d+) extra damage\b[^.]*?\bfor (each|every two) slot levels? above (\d)/i.exec(h);
   if (up) out.perSlot = { dice: up[1], above: Number(up[3]), step: /two/i.test(up[2]) ? 2 : 1 };
   if (s.level === 0 && /when you reach 5th level \(\d+d\d+\)/i.test(t)) out.scales = true;
@@ -220,7 +221,8 @@ export function readSpell(s: Pick<SpellDef, 'text' | 'level' | 'range'> & { name
 /** `count`d`size` + more of the same die, or the two side by side. */
 function addDice(base: string, extra: string, times: number): string {
   if (times <= 0) return base;
-  const a = /^(\d+)d(\d+)(.*)$/.exec(base), b = /^(\d+)d(\d+)$/.exec(extra);
+  if (/^\d+$/.test(extra)) return /^\d+$/.test(base) ? String(+base + +extra * times) : `${base}+${+extra * times}`; // Heal's 70 + 10 a level
+  const a =/^(\d+)d(\d+)(.*)$/.exec(base), b = /^(\d+)d(\d+)$/.exec(extra);
   if (a && b && a[2] === b[2]) return `${+a[1] + +b[1] * times}d${a[2]}${a[3]}`;
   return `${base}+${b ? `${+b[1] * times}d${b[2]}` : extra}`;
 }

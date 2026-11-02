@@ -8,7 +8,8 @@ export const SPELL_RULES: Record<string, Partial<SpellRead>> = {
   'hunger of hadar': { damage: [{ dice: '2d6', type: 'cold' }], manual: 'Entering the area and the acid at the end of a turn in it aren’t automated: apply them by hand.' },
   // the undead they raise: one skeleton or zombie, two more per slot above 3rd; three ghouls, one more per slot above 6th
   'animate dead': { summon: { forms: ['Skeleton', 'Zombie'], count: 1, perSlot: { count: 2, above: 3 } } },
-  'create undead': { summon: { forms: ['Ghoul', 'Ghast', 'Wight', 'Mummy'], count: 3, perSlot: { count: 1, above: 6 } } },
+  // the ghasts, wights and mummies of its 8th- and 9th-level slots come instead of ghouls: by hand
+  'create undead': { summon: { forms: ['Ghoul'], count: 3, perSlot: { count: 1, above: 6 } }, manual: 'At 8th level or higher, ghasts, wights or mummies instead of ghouls are by hand.' },
   // the steeds' forms, named apart from the summoning sentence
   'find steed': { summon: { forms: ['Warhorse', 'Pony', 'Camel', 'Elk', 'Mastiff'] } },
   'find greater steed': { summon: { forms: ['Griffon', 'Pegasus', 'Peryton', 'Dire Wolf', 'Rhinoceros', 'Saber-Toothed Tiger'] } },
@@ -44,6 +45,8 @@ export const SPELL_RULES: Record<string, Partial<SpellRead>> = {
   // buffs on the caster (rules/constants.ts SPELL_EFFECTS); their own saves and attacks are by hand
   'investiture of stone': { save: undefined, conditions: undefined, manual: 'Its earthquake action is by hand.' },
   "tenser's transformation": { save: undefined, manual: 'The extra force damage on weapon hits and the Constitution save at the end are by hand.' },
+  // a buff whose save is the attacker's (a fiend or undead that hits): aimed at allies, the save by hand
+  'holy aura': { save: undefined, conditions: undefined, manual: 'A fiend or undead that hits a creature in it makes the Constitution save by hand.' },
   'wrath of nature': { manual: 'Only the trees’ slashing is automated: the roots, vines and hurled rocks are by hand.' },
   // fight-changing, but nothing a roll or a number here can carry: the cast says so
   ...Object.fromEntries(Object.entries({

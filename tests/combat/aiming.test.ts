@@ -234,3 +234,23 @@ describe('helpful spells', () => {
     expect(life.resolution.outcomes).toEqual([{ id: 'a', damage: 0, temp: 12 }]); // 3 + 4, +5 at 2nd level
   });
 });
+
+// Final review: a save spell on "up to N creatures" (Bane) takes that many at its slot, each once, and may take fewer.
+describe('save spells on several creatures', () => {
+  const k: Combat = { campaignId: 'c1', round: 1, turn: 'a', groupMonsters: false, updatedAt: 0, combatants: ['a', 'b', 'c', 'd', 'e'].map((id) => cb({ id, kind: 'monster', name: id.toUpperCase() })) };
+  const sc: Scene = { id: 's1', campaignId: 'c1', name: 'F', width: 1400, height: 700, grid: { ...DEFAULT_GRID }, shown: true, updatedAt: 0,
+    tokens: ['a', 'b', 'c', 'd', 'e'].map((id, q) => ({ id: `t-${id}`, name: id, ...cell(q), size: 'M' as const, color: '#000000', combatantId: id })) };
+  const bane: TurnAction = { id: 's', name: 'Bane', cost: 'action', group: 'spell', spell: { id: 's', level: 1, concentration: true },
+    cast: { read: { damage: [], range: { feet: 30 }, save: 'Cha', onSave: 'none', targets: { count: 3, above: 1 } } as never, attack: 5, dc: 13, charLevel: 3, mod: 3 } };
+  const run = (targets: string[], level = 1) => workOut({ a: bane, level, features: [], actor: k.combatants[0], combat: k, scene: sc, diagonal: '5-5-5',
+    aim: { targets, rolled: { dmg: [] }, toggles: [] }, findTarget: (id) => k.combatants.find((z) => z.id === id), info: (z) => targetOf(z, {}), nameOf: (z) => z.name, magical: false, id: 'r', now: 0, rng: () => 0.01 });
+  test('three at 1st level, four at 2nd; fewer is fine, the same creature twice is not', async () => {
+    expect([aimPlan(bane)!.count, aimPlan(bane)!.upTo]).toEqual([3, true]);
+    expect(aimPlan(bane, { level: 2 })!.count).toBe(4);
+    const r = await run(['b', 'c']);
+    if (typeof r === 'string') throw new Error(r);
+    expect(r.resolution.outcomes.map((o) => o.id)).toEqual(['b', 'c']);
+    expect(await run(['b', 'b'])).toBe('pick each creature once');
+    expect(await run(['b', 'c', 'd', 'e'])).toBe('too many targets');
+  });
+});

@@ -370,7 +370,7 @@
     await reload();
   });
   /** Pays for a use (the pip on the fresh fight, then a slot or resource on the character); throws why when it can't. */
-  async function pay(v: NonNullable<typeof view>, a: TurnAction, slot?: number, target?: string) {
+  async function pay(v: NonNullable<typeof view>, a: TurnAction, slot?: number, target?: string, aimed = false) {
     const pay = v.ch && v.sheet ? payment(a, v.sheet, v.ch, slot) : {};
     if (pay.problem) throw new Error(`Not done: ${pay.problem}.`);
     let why: string | undefined;
@@ -380,7 +380,7 @@
       return y && !why ? applyUse(k, y, a, v.perAction, target) : k;
     });
     if (why) throw new Error(`Not done: ${why}.`);
-    if (v.ch && editsCharacter(a, pay.level)) await editCharacter(v.ch.id, (c) => characterEffect(spendOn(c, pay.level, a.resource, pay.pact), a, target));
+    if (v.ch && editsCharacter(a, pay.level)) await editCharacter(v.ch.id, (c) => characterEffect(spendOn(c, pay.level, a.resource, pay.pact), a, target, aimed));
   }
 
   // Targeting (the DM's setting): the action being aimed on the map, then rolled here and worked out by the same rules as a player's use.
@@ -416,7 +416,7 @@
       },
       ...(count ? { status: `Target ${picks.length + 1} of ${count}${picks.length ? `: ${picks.map(nameAt).join(', ')}` : ''}` } : m.leap ? { status: 'Leap: a creature within 30 ft of the last one' } : {}),
       ...(picks.length && { onundo: () => (aiming = { ...m, picks: picks.slice(0, -1) }) }),
-      ...(m.plan.helps && picks.length && { ondone: () => void fire(picks, pickable) }), // a helpful spell may take fewer than it could
+      ...((m.plan.helps || m.plan.upTo) && picks.length && { ondone: () => void fire(picks, pickable) }), // a helpful spell may take fewer than it could
       oncancel: () => (aiming = undefined) };
   });
   const fire = (ps: Pick[], pickable: (id: string) => Pickable) => run(async () => {
@@ -440,7 +440,7 @@
     const before = snapOf(k, chars, touched(res.resolution)); // before paying: Undo gives the pip and slot back too
     const rid = m.leap?.rid;
     if (rid) await updateCombat(cid, (c) => ({ ...c, resolutions: (c.resolutions ?? []).map((y) => (y.id === rid ? { ...y, leapt: true as const } : y)) })); // the same casting: nothing to pay
-    else await pay(m.v, m.a, m.slot);
+    else await pay(m.v, m.a, m.slot, undefined, true);
     reveal(r.held, res.outcome.hit, undefined, res.outcome.hits);
     await applyResolution(cid, res.resolution, settings, before);
     await reload();

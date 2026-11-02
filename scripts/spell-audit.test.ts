@@ -25,6 +25,7 @@ const maxFaces = (expr: string) => parseDice(expr).flatMap((t) => ('const' in t 
 // Lightning Lure pulls one creature, then the 15-foot radius is only where it takes the damage.
 const RULED = new Set(['Greater Invisibility conditions', 'Invisibility conditions', 'Mislead conditions', 'Project Image conditions', 'Sequester conditions',
   'Silence conditions', 'Light no save', 'Reverse Gravity no save', 'Lightning Lure no area']);
+const DEBUFFS = new Set(['Bane', 'Faerie Fire']);
 const SHORT: Record<string, string> = { strength: 'Str', dexterity: 'Dex', constitution: 'Con', intelligence: 'Int', wisdom: 'Wis', charisma: 'Cha' };
 /** Where the read and the book's own tags disagree: damage types, save, attack kind, area shape and size. */
 export function disagree(s: SpellDef): string[] {
@@ -43,19 +44,20 @@ export function disagree(s: SpellDef): string[] {
 
 export async function audit(s: SpellDef): Promise<string> {
   const read = readSpell(s);
-  if (SPELL_EFFECTS[s.name]) return 'ok: effect';
   const sm = read.summon;
-  if (sm) return `summon: ${'creature' in sm ? sm.creature : 'forms' in sm ? sm.forms.join(', ') : sm.options.map((x) => `${x.count}×CR${x.cr} ${x.type ?? ''}`).join(' / ')}`;
+  if (sm) return `summon: ${'creature' in sm ? sm.creature : 'forms' in sm ? sm.forms.join(', ') : sm.options.map((x) => `${x.count}×CR${x.cr} ${x.type ?? ''}`).join(' / ')}${'times' in sm && sm.times ? ` (×${sm.times.map((t) => `${t.x} at ${t.slot}`).join(', ')})` : ''}`;
   if (read.rider) return `ok: rider, ${read.rider.dice} ${read.rider.type || 'weapon'}${read.rider.once ? ' on the next hit' : ''}`;
   const a: TurnAction = { id: 's', name: s.name, cost: 'action', group: 'spell', spell: { id: s.id, level: s.level, concentration: s.concentration }, cast: { read, attack: 5, dc: 13, charLevel: 5, mod: 3 } };
   const plan = aimPlan(a);
+  // a buff must be aimed at allies (helps); a debuff by its save (Bane, Faerie Fire); Haste marks its own target (final review: Holy Aura)
+  if (SPELL_EFFECTS[s.name]) return plan?.helps || (DEBUFFS.has(s.name) && read.save) || s.name === 'Haste' ? 'ok: effect' : 'BROKEN: a buff not aimed at allies';
   const hurts = read.damage.length > 0, conds = !!read.conditions?.length;
   if (!plan) return read.manual ? `manual: ${read.manual}` : read.heal ? 'heal: roll button' : hurts || conds ? 'BROKEN: has effects but cannot be aimed' : 'none: no automated effect';
   const scene: Scene = { id: 's1', campaignId: 'c', name: 'F', width: 2800, height: 700, grid: { ...DEFAULT_GRID }, shown: true, updatedAt: 0, tokens: [
     { id: 't-c', name: 'Caster', ...cell(5), size: 'M', color: '#000000', combatantId: 'c' }, { id: 't-o', name: 'Orc', ...cell(6), size: 'M', color: '#000000', combatantId: 'o' }] };
   const k: Combat = { campaignId: 'c', round: 1, turn: 'c', groupMonsters: false, updatedAt: 0, combatants: [cb({ id: 'c', kind: 'monster', name: 'Caster' }), cb({ id: 'o', kind: 'monster', name: 'Orc' })] };
-  const n = plan.count ?? 1;
-  const aim: WorkIn['aim'] = { ...(n > 1 ? { targets: Array(n).fill('o') } : plan.area?.on === 'self' ? {} : { target: plan.helps && plan.reach === 'self' ? 'c' : 'o' }), point: cell(6),
+  const n = plan.upTo ? 1 : plan.count ?? 1;
+  const aim: WorkIn['aim'] = { ...(plan.count ? { targets: Array(n).fill('o') } : plan.area?.on === 'self' ? {} : { target: plan.helps && plan.reach === 'self' ? 'c' : 'o' }), point: cell(6),
     rolled: { ...(plan.attack && { d20: Array(2 * n).fill(15) }), dmg: Array.from({ length: n }, () => plan.dice.map((d) => maxFaces(d.expr))).flat() }, toggles: [], ...(plan.choices && { dtype: plan.choices[0] }) };
   const r = await workOut({ a, features: [], actor: k.combatants[0], combat: k, scene, diagonal: '5-5-5', aim, findTarget: (id) => k.combatants.find((z) => z.id === id),
     info: (z) => ({ ...targetOf(z, {}), ac: 10 }), nameOf: (z) => z.name, magical: false, id: 'r', now: 0, rng: () => 0.01 });

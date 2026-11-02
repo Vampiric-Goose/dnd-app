@@ -363,3 +363,12 @@ test('a flat amount of healing is read as healing (Heal)', () => {
   expect(readSpell({ level: 6, range: '60 feet', text: [{ p: 'A creature you choose within range regains 70 hit points.' }] } as unknown as SpellDef).heal).toEqual({ dice: '70', mod: false });
   expect(readSpell({ level: 7, range: 'Touch', text: [{ p: 'The target regains 4d8 + 15 hit points.' }] } as unknown as SpellDef).heal).toEqual({ dice: '4d8+15', mod: false });
 });
+// Final review: one creature plus one per slot (Longstrider), any number (Beacon of Hope), and a flat upcast (Heal).
+test('upcast target counts and a flat healing upcast', () => {
+  const sp = (p: string, higher?: string) => readSpell({ level: 1, range: 'Touch', text: [{ p }], ...(higher && { higherLevels: [{ p: higher }] }) } as unknown as SpellDef);
+  expect(sp('You touch a creature. Its speed increases by 10 feet.', 'You can target one additional creature for each slot level above 1st.').targets).toEqual({ count: 1, above: 1 });
+  expect(sp('Choose a humanoid you can see within range. It must succeed on a Wisdom saving throw.', 'You can target one additional humanoid for each slot level above 2nd.').targets).toEqual({ count: 1, above: 2 });
+  expect(sp('Choose any number of creatures within range.').targets?.count).toBeGreaterThan(10);
+  const heal = readSpell({ level: 6, range: '60 feet', text: [{ p: 'A creature you choose within range regains 70 hit points.' }], higherLevels: [{ p: 'The amount of healing increases by 10 for each slot level above 6th.' }] } as unknown as SpellDef);
+  expect(diceAt(heal, { slot: 8, level: 6 }).heal).toBe('90');
+});

@@ -188,11 +188,14 @@ const costOf = (x: Combatant, a: TurnAction): Cost => (OBJECT.includes(a.id) && 
 export const editsCharacter = (a: TurnAction, level?: number): boolean => level !== undefined || !!a.resource || ['free:draw', 'free:stow', 'free:prone', 'free:stand'].includes(a.id);
 
 /** The character after the use's own effect: drawing `pick` (a carried weapon that fits the free hands), stowing it (a held one); Prone. */
-export function characterEffect(c: Character, a: TurnAction, pick?: string): Character {
+export function characterEffect(c: Character, a: TurnAction, pick?: string, aimed = false): Character {
   const prone = (on: boolean) => ({ ...c, state: { ...c.state, conditions: [...c.state.conditions.filter((n) => n.toLowerCase() !== 'prone'), ...(on ? ['Prone'] : [])] } });
   if (a.id === 'free:prone') return prone(true);
   if (a.id === 'free:stand') return prone(false);
-  if (a.spell && SPELL_EFFECTS[a.name]) return c.state.conditions.includes(a.name) ? c : { ...c, state: { ...c.state, conditions: [...c.state.conditions, a.name] } }; // Mage Armor
+  // a buff cast without aiming (targeting off) goes on the caster; aimed, the resolution puts it on its targets. Never a debuff (Bane);
+  // Haste marks its own target (combat.ts).
+  const buff = !aimed && a.name !== 'Haste' && !a.cast?.read.save && !a.cast?.read.attack;
+  if (a.spell && SPELL_EFFECTS[a.name] && buff) return c.state.conditions.includes(a.name) ? c : { ...c, state: { ...c.state, conditions: [...c.state.conditions, a.name] } }; // Mage Armor
   const e = c.inventory.find((x) => x.id === pick && x.item.weapon);
   if (!e) return c;
   // one from a stack is drawn into its own row; a stowed one goes back on its stack (hands.ts)

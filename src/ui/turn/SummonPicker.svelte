@@ -1,7 +1,7 @@
 <script lang="ts">
   // What a summon cast calls (summons.ts): a TCE spirit (its stat block from the shared books, a variant such as Air, Land or Water), a
   // conjure option (that many creatures up to its challenge rating and type), or one of a list of forms (Find Familiar).
-  import { checkPick, type SummonSpec } from '../../lib/combat/summons.ts';
+  import { checkPick, summonCount, type SummonSpec } from '../../lib/combat/summons.ts';
   import type { MonsterDef } from '../../lib/types.ts';
 
   let { spec, pool, slot, level, disabled = false, onpick }: {
@@ -20,7 +20,7 @@
     const cap = o.cr + (spec.crPerSlot ? Math.max(0, slot - spec.crPerSlot.above) : 0);
     return pool.filter((m) => cr(m) <= cap && (!o.type || m.type.toLowerCase().startsWith(o.type))).sort((a, b) => cr(b) - cr(a) || a.name.localeCompare(b.name));
   });
-  const count = $derived('options' in spec ? spec.options[option]?.count ?? 1 : 1);
+  const count = $derived(summonCount(spec, 'options' in spec ? option : undefined, slot));
   const chosen = $derived(fits.find((m) => m.id === creature) ?? fits[0]);
   const pick = $derived(chosen && { ...('options' in spec && { option }), monsters: Array(count).fill(chosen), ...(variant && { variant }) });
   const why = $derived(!chosen ? ('creature' in spec ? `Import the book with the ${spec.creature} to summon it.` : 'No creature in the books fits.') : checkPick(spec, pick!, slot, level));
@@ -29,7 +29,7 @@
 <span class="summon">
   {#if 'options' in spec}
     <select aria-label="What appears" bind:value={option}>
-      {#each spec.options as o, i (i)}<option value={i}>{o.count} × CR {o.cr < 1 ? `1/${Math.round(1 / o.cr)}` : o.cr}{o.type ? ` ${o.type}` : ''}</option>{/each}
+      {#each spec.options as o, i (i)}<option value={i}>{summonCount(spec, i, slot)} × CR {o.cr < 1 ? `1/${Math.round(1 / o.cr)}` : o.cr}{o.type ? ` ${o.type}` : ''}</option>{/each}
     </select>
   {/if}
   {#if fits.length > 1}

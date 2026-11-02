@@ -144,7 +144,7 @@
       },
       ...(count ? { status: `Target ${picks.length + 1} of ${count}${picks.length ? `: ${picks.map(nameAt).join(', ')}` : ''}` } : m.leap ? { status: 'Leap: a creature within 30 ft of the last one' } : {}),
       ...(picks.length && { onundo: () => (aiming = { ...m, picks: picks.slice(0, -1) }) }),
-      ...(m.plan.helps && picks.length && { ondone: () => fire(picks, pickable) }), // a helpful spell may take fewer than it could
+      ...((m.plan.helps || m.plan.upTo) && picks.length && { ondone: () => fire(picks, pickable) }), // a helpful spell may take fewer than it could
       oncancel: () => (aiming = undefined) };
   });
   function fire(ps: Pick[], pickable: (id: string) => Pickable) {

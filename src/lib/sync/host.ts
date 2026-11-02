@@ -384,7 +384,7 @@ export class Host {
       return applyUse(k, x, a, per, t?.id);
     });
     if (why) return refuse(why);
-    if (edits && !(await this.#deps.editCharacter!(ch.id, (x) => characterEffect(spendOn(x, level, a.resource, pact), a, m.target)).catch(() => false))) {
+    if (edits && !(await this.#deps.editCharacter!(ch.id, (x) => characterEffect(spendOn(x, level, a.resource, pact), a, m.target, !!aimed)).catch(() => false))) {
       return refuse('the character could not be updated, so nothing was paid');
     }
     if (aimed) {

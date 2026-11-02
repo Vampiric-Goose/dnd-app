@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, test } from 'vitest';
-import { checkPick, endedSummons, scaleSummon, summonCombatants, summonOptions } from '../../src/lib/combat/summons.ts';
+import { checkPick, endedSummons, scaleSummon, summonCombatants, summonCount, summonOptions } from '../../src/lib/combat/summons.ts';
 import { updateCombat } from '../../src/lib/combat/store.ts';
 import { db, resetDb } from '../../src/lib/db.ts';
 import { newScene } from '../../src/lib/map/scene.ts';
@@ -94,4 +94,26 @@ describe('what a cast may summon', () => {
 test('forms the caster takes are not a summon', () => {
   expect(summonOptions([{ p: 'A spirit transforms you into a guardian. You choose one of the following forms to assume: Beast or Tree.' }])).toBeUndefined();
   expect(summonOptions([{ p: 'You gain the service of a familiar that takes an animal form you choose: bat, cat, or owl.' }])).toEqual({ forms: ['bat', 'cat', 'owl'] });
+});
+
+// Final review: a summon that drops on its own turn passes the turn on; the round stays.
+test('a summon dropping on its own turn hands the turn to the next creature, same round', () => {
+  const caster = cb({ id: 'pc:m', kind: 'pc', name: 'Mira', init: 15, concentrating: true, concentratingOn: 'Summon Test', concentrationCount: 3 });
+  const [s] = summonCombatants(caster, [scaleSummon(spirit, { level: 2, attack: 5 })], { spell: 'Summon Test', cast: 3, share: true, hpMode: 'average', rng: () => 0.5 });
+  const gob = cb({ id: 'g', kind: 'monster', name: 'Goblin', init: 10, hp: 7 }), orc = cb({ id: 'o', kind: 'monster', name: 'Orc', init: 20, hp: 15 });
+  const k: Combat = { campaignId: 'c1', round: 3, turn: s.id, groupMonsters: false, updatedAt: 0, combatants: [orc, caster, { ...s, hp: 0 }, gob] };
+  const r = endedSummons(k);
+  expect([r.gone, r.combat.round, r.combat.turn]).toEqual([[s.id], 3, 'g']);
+});
+
+// Final review (paraphrased wording): counts grow with the slot — a conjure's multiples, and forms raised per slot (Animate Dead).
+test('a summon\'s count at its slot: multiples of a conjure option, more forms per slot', () => {
+  const conj = summonOptions([{ p: 'Choose one of the following options for what appears:' }, { list: ['Two beasts of challenge rating 1 or lower', 'Eight beasts of challenge rating 1/4 or lower'] }],
+    [{ p: 'When you cast this spell using certain higher-level spell slots, you choose one of the summoning options above, and more creatures appear: twice as many with a 5th-level slot and three times as many with a 7th-level slot.' }])!;
+  expect([summonCount(conj, 1, 3), summonCount(conj, 1, 5), summonCount(conj, 1, 7)]).toEqual([8, 16, 24]);
+  const wolf = { ...spirit, name: 'Wolf', cr: '1/4' } as MonsterDef;
+  expect(checkPick(conj, { option: 1, monsters: Array(16).fill(wolf) }, 5)).toBeUndefined();
+  expect(checkPick(conj, { option: 1, monsters: Array(16).fill(wolf) }, 3)).toBe('pick 8 creatures');
+  const dead = { forms: ['Skeleton', 'Zombie'], count: 1, perSlot: { count: 2, above: 3 } };
+  expect([summonCount(dead, undefined, 3), summonCount(dead, undefined, 5)]).toEqual([1, 5]);
 });

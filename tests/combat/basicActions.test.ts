@@ -88,3 +88,14 @@ test('casting Mage Armor puts it on the caster', () => {
   expect(on.state.conditions).toEqual(['Mage Armor']);
   expect(characterEffect(on, a).state.conditions).toEqual(['Mage Armor']); // cast again: still once
 });
+
+// Final review: an aimed buff goes on its targets (the resolution), never also on the caster; a debuff or Haste never on the caster.
+test('casting a buff or debuff changes the caster only when it is a buff cast unaimed', () => {
+  const c = mkChar({ race: 'human', base: {}, levels: ['fighter'] });
+  const sp = (name: string, read: object): TurnAction => ({ id: `spell:${name}`, name, cost: 'action', group: 'spell', spell: { id: `spell:${name}`, level: 1, concentration: true }, cast: { read: { damage: [], ...read } } as never });
+  expect(characterEffect(c, sp('Bless', {}), undefined, true).state.conditions).toEqual([]);
+  expect(characterEffect(c, sp('Bane', { save: 'Cha' })).state.conditions).toEqual([]);
+  expect(characterEffect(c, sp('Faerie Fire', { save: 'Dex' })).state.conditions).toEqual([]);
+  expect(characterEffect(c, sp('Haste', {})).state.conditions).toEqual([]);
+  expect(characterEffect(c, sp('Bless', {})).state.conditions).toEqual(['Bless']); // targeting off: the caster, the DM moves it
+});
