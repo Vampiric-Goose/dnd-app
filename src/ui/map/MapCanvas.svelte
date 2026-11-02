@@ -43,7 +43,8 @@
      * lists who is inside. A mouse click picks; on touch a tap shows it and a second tap on the same spot picks. Escape cancels.
      */
     aim?: { from: Pt; pickable: (id: string) => Pickable; line: boolean; area?: { shape: Shape; feet: number; width?: number; on: 'creature' | 'point' | 'self'; range?: number };
-      onpick: (p: { tokenId?: string; point: Pt; caught: string[] }) => void; oncancel: () => void };
+      onpick: (p: { tokenId?: string; point: Pt; caught: string[] }) => void; oncancel: () => void;
+      /** several picks (rays, darts): where it stands ("Target 2 of 3: Goblin 1"), and taking the last pick back */ status?: string; onundo?: () => void };
     /** Spell areas cast on this scene, drawn for everyone under the tokens. */
     areas?: Template[];
   } = $props();
@@ -848,9 +849,11 @@
     {/if}
     {#if aim}
       <div class="strip" role="group" aria-label="Aiming">
+        {#if aim.status}<span class="inside" role="status">{aim.status}</span>{/if}
         {#if aimWhy}<span class="inside" role="status">{aimWhy}</span>{/if}
         {#if aim.area}<span class="inside" role="status">In the area: {aimCaught.length ? tokens.filter((t) => aimCaught.includes(t.id)).map((t) => t.name).join(', ') : 'none'}</span>{/if}
         <span class="hint">{aim.area?.on === 'point' ? 'Tap where it lands' : aim.area?.on === 'self' ? 'Tap the direction' : 'Tap a ringed creature'}{aimPick ? ' — tap again to confirm' : ''}.</span>
+        {#if aim.onundo}<button type="button" onclick={() => aim?.onundo?.()}>Undo pick</button>{/if}
         <button type="button" onclick={() => aim?.oncancel()}>Cancel</button>
       </div>
     {:else if tool === 'template' || template}

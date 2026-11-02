@@ -9,12 +9,21 @@ import { signed } from '../creator/labels.ts';
 export interface AimRoll {
   /** The raw faces to send. `mode`: the roller's own advantage pick; the DM's device adds any forced disadvantage itself. */
   rolled: { d20?: number[]; mode?: 'adv' | 'dis'; dmg: number[][] };
-  /** The damage rolls, not yet logged: `hit` the attack's part, `save` the part that lands either way. */
-  held: { entry: RollEntry; part: 'hit' | 'save' }[];
+  /** The damage rolls, not yet logged: `hit` the attack's part, `save` the part that lands either way; `ray`: which ray of several. */
+  held: { entry: RollEntry; part: 'hit' | 'save'; ray?: number }[];
 }
 
-/** `judged`: the target as judge() saw it (its advantage and disadvantage reasons, a critical by itself). */
-export function rollAim(name: string, plan: AimPlan, judged?: Pickable): AimRoll {
+/**
+ * `judged`: the target as judge() saw it (its advantage and disadvantage reasons, a critical by itself); for rays, beams or darts one per
+ * ray, each rolled as its own attack (two d20s and the dice each, held per ray).
+ */
+export function rollAim(name: string, plan: AimPlan, judged?: Pickable | (Pickable | undefined)[]): AimRoll {
+  if (Array.isArray(judged)) {
+    const pick = rollMode.value;
+    const each = judged.map((j, ray) => { rollMode.value = pick; const r = rollAim(name, { ...plan, count: undefined }, j); return { ...r, held: r.held.map((h) => ({ ...h, ray })) }; });
+    return { rolled: { ...(plan.attack && { d20: each.flatMap((r) => r.rolled.d20 ?? []) }), ...(each[0]?.rolled.mode && { mode: each[0].rolled.mode }), dmg: each.flatMap((r) => r.rolled.dmg) },
+      held: each.flatMap((r) => r.held) };
+  }
   const pick = rollMode.value === 'normal' ? undefined : rollMode.value, j = judged?.ok ? judged : undefined;
   const mode = plan.attack ? combineMode({ adv: j?.adv ?? [], dis: j?.dis ?? (j?.disadvantage ? [j.disadvantage] : []) }, pick) : undefined;
   const d20 = plan.attack ? roll(`${name}: attack`, `1d20${signed(plan.toHit ?? 0)}`, { mode: mode ?? 'normal', shareAs: 'Attack' }) : undefined;
@@ -28,7 +37,7 @@ export function rollAim(name: string, plan: AimPlan, judged?: Pickable): AimRoll
   };
 }
 
-/** Shows the held damage the result allows: the hit part only on a hit, the save part always. */
-export function reveal(held: AimRoll['held'], hit: boolean | undefined, shareAs?: string): void {
-  for (const h of held) if (h.part === 'save' || hit) publish(h.entry, shareAs);
+/** Shows the held damage the result allows: the hit part only on a hit (a ray's, by `hits`), the save part always. */
+export function reveal(held: AimRoll['held'], hit: boolean | undefined, shareAs?: string, hits?: boolean[]): void {
+  for (const h of held) if (h.part === 'save' || (hits && h.ray !== undefined ? hits[h.ray] : hit)) publish(h.entry, shareAs);
 }

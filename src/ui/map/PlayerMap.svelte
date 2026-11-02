@@ -13,7 +13,7 @@
   import { computeSheet } from '../../lib/rules/sheet.ts';
   import { currentActor } from '../../lib/sync/project.ts';
   import { sceneForPlayers, type PlayerScene } from '../../lib/sync/scene.ts';
-  import { clearDeclared, declareAction, sendDrag, sendEndTurn, sendUse, sendMove, session } from '../../lib/sync/session.svelte.ts';
+  import { clearDeclared, declareAction, sendDrag, sendEndTurn, sendLeap, sendUse, sendMove, session } from '../../lib/sync/session.svelte.ts';
   import { budgetFeet, effectiveSpeed, originOf, remainingFeet } from '../../lib/combat/movement.ts';
   import { pcActions, slotsLeft, type TurnAction } from '../../lib/combat/turnActions.ts';
   import { featureList } from '../../lib/character/play.ts';
@@ -106,8 +106,12 @@
   $effect(() => () => clearTimeout(sentTimer));
 
   // Targeting: the action being aimed on the map. The dice roll here (the d20 shows at once); the DM's device works it out and answers.
-  let aiming: { a: TurnAction; slot?: number; toggles: Toggle[]; dtype?: string; plan: AimPlan; c: Character } | undefined = $state.raw();
-  let held: { action: string; roll: AimRoll } | undefined;
+  // `picks`: rays or darts picked so far; `leap`: a leaping spell's next target (Chaos Bolt), from token `from`, not one in `exclude`
+  type Pick = { tokenId?: string; point: Pt };
+  let aiming: { a: TurnAction; slot?: number; toggles: Toggle[]; dtype?: string; plan: AimPlan; c: Character; picks?: Pick[]; leap?: { rid: string; from: string; exclude: string[] } } | undefined = $state.raw();
+  let held: { action: string; roll: AimRoll; a: TurnAction; slot?: number; c: Character; plan: AimPlan; targets: string[] } | undefined;
+  /** The DM's device says the last cast may leap (Chaos Bolt): offered until taken or dismissed. */
+  let leapOffer: { rid: string; a: TurnAction; slot?: number; c: Character; plan: AimPlan; from: string; exclude: string[] } | undefined = $state.raw();
   const onaim = (a: TurnAction, slot: number | undefined, toggles: Toggle[], dtype?: string) => {
     const plan = aimPlan(a, { level: slot, toggles, dtype, rider: turn?.econ.rider });
     if (plan && turn && joined) { aiming = { a, slot, toggles, dtype, plan, c: turn.c }; selected = []; }
@@ -116,27 +120,38 @@
   const aim = $derived.by(() => {
     const m = aiming, v = view;
     if (!m || !v) return undefined;
-    const me = v.tokens.find((t) => t.characterId === m.c.id);
+    const me = v.tokens.find((t) => (m.leap ? t.id === m.leap.from : t.characterId === m.c.id));
     if (!me) return undefined;
     // the DM's device decides; this only rolls two d20s when it will see a hostile creature within 5 ft (one with no character)
     const foe = v.tokens.some((t) => t.id !== me.id && t.characterId === undefined && !t.conditions.some((c) => OUT.test(c)) && feetBetween(v.grid, me, t, settings.diagonal) <= 5);
     const pickable = (id: string): Pickable => {
       const t = v.tokens.find((x) => x.id === id);
       // its conditions as the player's map shows them; a monster's Dodge only the DM's device knows (two d20s are sent either way)
-      return t && t.id !== me.id ? judge(m.plan, v.grid, settings.diagonal, me, foe, t, { attacker: m.c.state.conditions, target: t.conditions, exhaustion: m.c.state.exhaustion }) : { ok: false };
+      return t && t.id !== me.id && t.characterId !== m.c.id && !m.leap?.exclude.includes(t.id) ? judge(m.plan, v.grid, settings.diagonal, me, foe, t, { attacker: m.c.state.conditions, target: t.conditions, exhaustion: m.c.state.exhaustion }) : { ok: false };
     };
+    const picks = m.picks ?? [], count = m.plan.count, nameAt = (p: Pick) => v.tokens.find((t) => t.id === p.tokenId)?.name ?? '?';
     return { from: { x: me.x, y: me.y }, line: m.plan.line, ...(m.plan.area && { area: m.plan.area }), pickable,
-      onpick: (p: { tokenId?: string; point: Pt }) => fire(p, pickable), oncancel: () => (aiming = undefined) };
+      onpick: (p: Pick) => {
+        if (count && picks.length + 1 < count) { aiming = { ...m, picks: [...picks, p] }; return; }
+        fire([...picks, p], pickable);
+      },
+      ...(count ? { status: `Target ${picks.length + 1} of ${count}${picks.length ? `: ${picks.map(nameAt).join(', ')}` : ''}` } : m.leap ? { status: 'Leap: a creature within 30 ft of the last one' } : {}),
+      ...(picks.length && { onundo: () => (aiming = { ...m, picks: picks.slice(0, -1) }) }),
+      oncancel: () => (aiming = undefined) };
   });
-  function fire(p: { tokenId?: string; point: Pt }, pickable: (id: string) => Pickable) {
+  function fire(ps: Pick[], pickable: (id: string) => Pickable) {
     const m = aiming;
     aiming = undefined;
     if (!m || offline()) return;
-    const pick = p.tokenId ? pickable(p.tokenId) : undefined;
-    const r = rollAim(m.a.name, m.plan, pick);
-    held = { action: m.a.name, roll: r };
+    const judged = (p: Pick) => (p.tokenId ? pickable(p.tokenId) : undefined);
+    const r = m.plan.count ? rollAim(m.a.name, m.plan, ps.map(judged)) : rollAim(m.a.name, m.plan, judged(ps[0]));
+    const targets = ps.flatMap((p) => (p.tokenId ? [p.tokenId] : []));
+    held = { action: m.a.name, roll: r, a: m.a, slot: m.slot, c: m.c, plan: m.plan, targets: [...(m.leap?.exclude ?? []), ...targets] };
     sentUnder = session.tracker;
-    sendUse(m.c.id, m.a.id, m.slot, undefined, { ...(p.tokenId ? { target: p.tokenId } : { point: p.point }), rolled: r.rolled, toggles: m.toggles.map((t) => t.id), ...(m.dtype && { dtype: m.dtype }) });
+    const where = m.plan.count ? { targets } : ps[0].tokenId ? { target: ps[0].tokenId } : { point: ps[0].point };
+    const aimed = { ...where, rolled: r.rolled, toggles: m.toggles.map((t) => t.id), ...(m.dtype && { dtype: m.dtype }) };
+    if (m.leap) sendLeap(m.leap.rid, m.c.id, aimed);
+    else sendUse(m.c.id, m.a.id, m.slot, undefined, aimed);
     clearTimeout(sentTimer);
     sentTimer = setTimeout(() => (sentUnder = undefined), 3000);
   }
@@ -148,8 +163,9 @@
     untrack(() => {
       const h = held;
       held = undefined;
-      if (h?.action === o.action) reveal(h.roll.held, o.hit);
-      toast([o.action, o.hit === undefined ? '' : o.hit ? 'Hit!' : 'Missed.', o.dc !== undefined ? `Save DC ${o.dc}.` : '',
+      if (h?.action === o.action) reveal(h.roll.held, o.hit, undefined, o.hits);
+      leapOffer = h && o.leap && h.action === o.action ? { rid: o.leap, a: h.a, slot: h.slot, c: h.c, plan: h.plan, from: h.targets.at(-1)!, exclude: h.targets } : undefined;
+      toast([o.action, o.hits ? `${o.hits.filter(Boolean).length} of ${o.hits.length} hit.` : o.hit === undefined ? '' : o.hit ? 'Hit!' : 'Missed.', o.leap ? 'It can leap!' : '', o.dc !== undefined ? `Save DC ${o.dc}.` : '',
         o.caught ? `In the area: ${o.caught.join(', ') || 'no one'}.` : ''].filter(Boolean).join(' '));
     });
   });
@@ -238,6 +254,11 @@
       {#if error}<p role="alert" class="error">{error}</p>{/if}
       <h2 class="scene-name">{view.name}</h2>
       {#if !joined}<p class="muted note">Player view: read-only</p>{/if}
+      {#if leapOffer}
+        <p class="row"><span>{leapOffer.a.name} can leap to another creature.</span>
+          <button type="button" onclick={() => { const l = leapOffer!; leapOffer = undefined; aiming = { a: l.a, slot: l.slot, toggles: [], plan: { ...l.plan, reach: { spell: l.plan.read?.leap ?? 0 } }, c: l.c, leap: { rid: l.rid, from: l.from, exclude: l.exclude } }; }}>Leap</button>
+          <button type="button" onclick={() => (leapOffer = undefined)}>Not now</button></p>
+      {/if}
       {#if turn && fight}
         <TurnPanel name={turn.c.name} order={fight.rows} self={turn.r.id} current={fight.current} round={fight.round}
           ac={turn.sheet.ac} hp={turn.c.state.hp} maxHp={turn.sheet.maxHp} tempHp={turn.c.state.tempHp} conditions={[...turn.c.state.conditions, ...(turn.econ.hasted ? ['Haste'] : [])]}

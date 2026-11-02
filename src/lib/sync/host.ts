@@ -9,7 +9,7 @@ import { toBase64 } from '../base64.ts';
 import { budgetApplies, combatantForToken, recordMove } from '../combat/movement.ts';
 import { applyUse, attacksPerAction, characterEffect, editsCharacter, payment, pcActions, problemOf, spendOn, type TurnAction } from '../combat/turnActions.ts';
 import { targetOf, type TargetInfo } from '../combat/resolve.ts';
-import { snapOf, touched, workOut, type Aim, type Aimed } from '../combat/aiming.ts';
+import { snapOf, touched, workOut, type Aim, type Aimed, type WorkIn } from '../combat/aiming.ts';
 import { targetingOn } from '../combat/targeting.ts';
 import { featureList } from '../character/play.ts';
 import { computeSheet } from '../rules/sheet.ts';
@@ -298,6 +298,7 @@ export class Host {
       case 'blobWant': return this.#blobWant(c, msg.hashes);
       case 'use': return this.#use(c, c.playerId, msg);
       case 'save': return this.#save(c, c.playerId, msg);
+      case 'leap': return this.#leap(c, c.playerId, msg);
       case 'endTurn': return this.#endTurn(c, c.playerId, msg.characterId);
       case 'action': return this.#action(c, c.playerId, msg.action);
       case 'clearAction': return this.#actionsChanged(this.#board.clear(c.playerId));
@@ -390,7 +391,30 @@ export class Host {
    * on the shown scene (PHB range, close-combat disadvantage), the dice must fit the action, and an area catches every token in it, hidden
    * ones too. The player hears only hit or miss, a spell's DC and the names of the visible creatures caught. A string: why not.
    */
-  async #aim(camp: Campaign, ch: Character, features: { name: string }[], a: TurnAction, aim: Aim, level: number | undefined): Promise<Aimed | string> {
+  /**
+   * Targeting: a leaping spell's next target (Chaos Bolt), from the creature that result hit, never one already hit this casting. Only its
+   * caster's player, once per hit that may leap; nothing is paid (it is the same casting).
+   */
+  async #leap(c: Conn, pid: string, m: Extract<GuestMsg, { t: 'leap' }>): Promise<void> {
+    const camp = await this.#deps.loadCampaign();
+    const ch = await this.#deps.loadCharacter(m.characterId);
+    if (!camp || !ch || ch.ownerId !== pid || ch.campaignId !== camp.id) return this.#violation(c, 'not their character');
+    const refuse = (reason: string) => this.#send(c, { t: 'useRefused', reason });
+    const k = await this.#deps.loadCombat?.(), r = k?.resolutions?.find((y) => y.id === m.resolution), x = k && combatantForToken(k, { characterId: ch.id });
+    const from = r?.outcomes.find((o) => o.leap)?.id;
+    if (!k || !r || !x || r.actor !== x.id || r.leapt || !from || !this.#deps.updateCombat || !this.#deps.resolve) return refuse('no leap');
+    const features = featureList(ch, camp.settings), a = pcActions(ch, computeSheet(ch, { settings: camp.settings, viewer: 'player' }), features).find((y) => y.spell && y.name === r.action);
+    if (!a) return refuse('no leap');
+    const aimed = await this.#aim(camp, ch, features, a, m.aim, r.slot, { from, exclude: r.chain ?? r.outcomes.map((o) => o.id) });
+    if (typeof aimed === 'string') return refuse(aimed);
+    let taken = false;
+    await this.#deps.updateCombat((y) => ({ ...y, resolutions: (y.resolutions ?? []).map((z) => (z.id !== r.id || z.leapt ? z : (taken = true, { ...z, leapt: true as const }))) }));
+    if (!taken) return refuse('no leap');
+    await this.#deps.resolve(aimed.resolution, snapOf(k, await this.#deps.loadCharacters(), touched(aimed.resolution)));
+    this.#send(c, { t: 'outcome', ...aimed.outcome });
+  }
+
+  async #aim(camp: Campaign, ch: Character, features: { name: string }[], a: TurnAction, aim: Aim, level: number | undefined, leapFrom?: WorkIn['leapFrom']): Promise<Aimed | string> {
     const k = await this.#deps.loadCombat?.(), s = await this.#deps.loadScene?.();
     if (!k || !s) return 'no map';
     const x = combatantForToken(k, { characterId: ch.id });
@@ -412,7 +436,7 @@ export class Host {
       conditionsOf: (z) => (z.characterId ? chars.find((c) => c.id === z.characterId)?.state.conditions : undefined) ?? z.conditions ?? [],
       exhaustionOf: (z) => (z.characterId ? chars.find((c) => c.id === z.characterId)?.state.exhaustion : undefined) ?? 0,
       seen, magical: ch.inventory.find((e) => e.id === a.attack?.entryId)?.item.magic ?? false,
-      id: uid(), now: this.#deps.now?.() ?? Date.now(), rng: Math.random,
+      id: uid(), now: this.#deps.now?.() ?? Date.now(), rng: Math.random, ...(leapFrom && { leapFrom }),
     });
   }
 

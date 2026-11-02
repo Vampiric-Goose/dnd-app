@@ -22,14 +22,17 @@ const shard: SpellDef = { kind: 'spell', id: 'spell:shard@FIX', name: 'Shard', s
   components: { s: true }, duration: 'Instantaneous', concentration: false, ritual: false, classes: ['wizard'],
   text: [{ p: 'Make a ranged spell attack against the target. On a hit, the target takes 1d10 piercing damage. Hit or miss, the shard bursts: the target and each creature within 5 feet of it must succeed on a Dexterity saving throw or take 2d6 cold damage.' }] };
 
+// Paraphrased: a bolt whose d8s pick its type and leap on a match (Chaos Bolt's rule applies by name).
+const bolt: SpellDef = { ...shard, id: 'spell:chaos-bolt@FIX', name: 'Chaos Bolt', range: '120 feet', text: [{ p: 'Make a ranged spell attack against the target. On a hit, the target takes 2d8 + 1d6 damage.' }] };
+
 function thorin(): Character {
   const c = mkChar({ race: 'human', base: { str: 16 }, levels: ['fighter'] });
   return { ...c, id: 'thorin', name: 'Thorin', campaignId: CID, ownerId: 'A1' };
 }
 function mira(): Character {
   const c = mkChar({ race: 'human', base: { int: 16 }, levels: ['wizard'] });
-  return { ...c, id: 'mira', name: 'Mira', campaignId: CID, ownerId: 'A2', embedded: { ...c.embedded, [shard.id]: shard },
-    build: { ...c.build, spells: { 'class:wizard@FIX': { known: [shard.id], prepared: [shard.id] } } } };
+  return { ...c, id: 'mira', name: 'Mira', campaignId: CID, ownerId: 'A2', embedded: { ...c.embedded, [shard.id]: shard, [bolt.id]: bolt },
+    build: { ...c.build, spells: { 'class:wizard@FIX': { known: [shard.id, bolt.id], prepared: [shard.id, bolt.id] } } } };
 }
 const scene = (): Scene => ({
   id: 's1', campaignId: CID, name: 'Field', width: 1400, height: 1400, grid: { ...DEFAULT_GRID }, shown: true, updatedAt: 0,
@@ -86,6 +89,11 @@ describe('targeting over sync', () => {
     const typed = (dtype: unknown) => parseGuestMessage({ ...strike('g1', [17], [[]]), aim: { ...strike('g1', [17], [[]]).aim, dtype } });
     expect(typed('fire')).toMatchObject({ aim: { dtype: 'fire' } });
     expect(typed(7)).toMatchObject({ error: 'bad use' });
+    const rays = (targets: unknown, d20: number[]) => parseGuestMessage({ ...strike('g1', d20, [[], [], []]), aim: { targets, rolled: { d20, dmg: [[], [], []] }, toggles: [] } });
+    expect(rays(['g1', 'g1', 'g2'], [1, 2, 3, 4, 5, 6])).toMatchObject({ aim: { targets: ['g1', 'g1', 'g2'], rolled: { d20: [1, 2, 3, 4, 5, 6] } } });
+    expect(rays(Array(13).fill('g1'), [1, 2])).toMatchObject({ error: 'bad use' });
+    expect(parseGuestMessage({ t: 'leap', characterId: 'mira', resolution: 'r1', aim: { target: 'g2', rolled: { d20: [3, 4], dmg: [[1, 2, 3]] }, toggles: [] } }))
+      .toMatchObject({ t: 'leap', characterId: 'mira', resolution: 'r1', aim: { target: 'g2' } });
     expect(parseGuestMessage({ t: 'save', resolution: 'r1', characterId: 'mira', d20: 12 })).toEqual({ t: 'save', resolution: 'r1', characterId: 'mira', d20: 12 });
     expect(parseGuestMessage({ t: 'save', resolution: 'r1', characterId: 'mira', d20: 21 })).toMatchObject({ error: 'bad save' });
   });
@@ -110,6 +118,21 @@ describe('targeting over sync', () => {
     a.deliver(strike('t-g1', [17], [[], [2]]));
     await settle(host);
     expect(hp(d, 'g1')).toBe(1); // 4 + 2
+  });
+
+  test('Chaos Bolt leaps once from the creature it hit, to one it has not hit; nothing more is paid', async () => {
+    const hit: Combat['resolutions'] = [{ id: 'r1', actor: 'pc:mira', action: 'Chaos Bolt', outcomes: [{ id: 'g1', part: 'hit', hit: true, damage: 5, leap: true }], applied: [], at: 0, chain: ['g1'], slot: 1 }];
+    const { d, host, b } = await joined({ combat: fight({ turn: 'pc:mira', resolutions: hit }) });
+    const leap = (target: string) => b.deliver({ t: 'leap', characterId: 'mira', resolution: 'r1', aim: { target, rolled: { d20: [18, 18], dmg: [[1, 2, 4]] }, toggles: [] } });
+    leap('t-g1');
+    leap('t-g2');
+    leap('t-g2');
+    await settle(host);
+    expect(refusals(b)).toEqual(['pick another creature', 'no leap']);
+    expect(hp(d, 'g2')).toBe(0); // 1 + 2 + 4
+    expect(d.combat!.resolutions!.find((r) => r.id === 'r1')!.leapt).toBe(true);
+    expect(d.combat!.resolutions!.at(-1)).toMatchObject({ action: 'Chaos Bolt', chain: ['g1', 'g2'] });
+    expect(d.combat!.combatants.find((x) => x.id === 'pc:mira')!.economy?.used ?? 0).toBe(0);
   });
 
   test('a player map names its target by token id; a hidden token is no target', async () => {

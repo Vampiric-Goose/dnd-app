@@ -48,6 +48,10 @@ export interface SpellRead {
   rounds?: number;
   /** The target saves again at the end of each of its turns, ending the conditions on a success. */
   repeat?: true;
+  /** Several rays or beams, an attack each: `count`, one more for each slot level above `above`, or by character level (two at 5th, three at 11th, four at 17th). */
+  rays?: { count: number; above?: number; byLevel?: true };
+  /** It leaps this far from its target to another when its dice match (Chaos Bolt). */
+  leap?: number;
   /** Extra damage on the caster's weapon hits (`type` '' = the weapon's): the next hit only (`once`), or hits on a creature it marks. */
   rider?: { dice: string; type: string; once?: true; marked?: true };
   area?: SpellArea;
@@ -90,6 +94,13 @@ export function readSpell(s: Pick<SpellDef, 'text' | 'level' | 'range'> & { name
   if (darts) {
     const more = /one more (?:dart|bolt|missile) for each slot level above (\d)/i.exec(h);
     out.auto = { count: WORDS[darts[1].toLowerCase()] ?? +darts[1], ...(more && { above: +more[1] }) };
+  }
+  // several rays or beams, an attack each (Scorching Ray), or more beams with character level (Eldritch Blast)
+  const rayN = /\b(two|three|four|five|\d+) (?:rays|beams)\b/i.exec(t);
+  if (/two beams at 5th level/i.test(t)) out.rays = { count: 1, byLevel: true };
+  else if (rayN && /for each (?:ray|beam)/i.test(t)) {
+    const more = /one (?:additional|more) (?:ray|beam) for each slot level above (\d)/i.exec(h);
+    out.rays = { count: WORDS[rayN[1].toLowerCase()] ?? +rayN[1], ...(more && { above: +more[1] }) };
   }
   if (mech?.types?.length === 1) {
     for (const d of out.damage) if (!d.type) d.type = mech.types[0];
@@ -156,9 +167,7 @@ function addDice(base: string, extra: string, times: number): string {
   if (a && b && a[2] === b[2]) return `${+a[1] + +b[1] * times}d${a[2]}${a[3]}`;
   return `${base}+${b ? `${+b[1] * times}d${b[2]}` : extra}`;
 }
-/** `n` of `NdM+K` rolled together: `nN`d`M`+`nK` (every dart's damage, summed). */
-const timesDice = (dice: string, n: number) => dice.replace(/^(\d+)d(\d+)(?:\+(\d+))?$/, (_, c, d, k) => `${+c * n}d${d}${k ? `+${+k * n}` : ''}`);
-const signedMod =(n: number) => (n === 0 ? '' : n > 0 ? `+${n}` : `${n}`);
+const signedMod = (n: number) => (n === 0 ? '' : n > 0 ? `+${n}` : `${n}`);
 
 /**
  * The dice to roll: at slot `slot` for a spell of `level` (higher slots add perSlot), a cantrip at character level `charLevel` (×2 at
@@ -172,9 +181,7 @@ export function diceAt(r: SpellRead, o: { slot?: number; level: number; charLeve
     const lvl = r.scaling && Object.keys(r.scaling).map(Number).filter((k) => k <= (o.charLevel ?? 1)).sort((a, b) => b - a)[0];
     if (r.scaling && i === 0 && lvl !== undefined) dice = r.scaling[lvl];
     else if (r.scales && i === 0) dice = dice.replace(/^(\d+)d/, (_, c) => `${+c * tier}d`);
-    if (!r.heal && i === 0 && r.perSlot) dice = addDice(dice, r.perSlot.dice, n);
-    if (r.auto && i === 0) dice = timesDice(dice, r.auto.count + (r.auto.above !== undefined && o.slot !== undefined ? Math.max(0, o.slot - r.auto.above) : 0));
-    return `${dice}${d.mod ? signedMod(o.mod ?? 0) : ''} ${d.type}`;
+    if (!r.heal && i === 0 && r.perSlot) dice = addDice(dice, r.perSlot.dice, n);    return `${dice}${d.mod ? signedMod(o.mod ?? 0) : ''} ${d.type}`;
   });
   const heal = r.heal && `${r.perSlot ? addDice(r.heal.dice, r.perSlot.dice, n) : r.heal.dice}${r.heal.mod ? signedMod(o.mod ?? 0) : ''}`;
   return { damage, ...(heal && { heal }) };

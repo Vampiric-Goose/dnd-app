@@ -144,12 +144,20 @@ describe('reading a spell: wording without a named shape', () => {
     const r = readSpell(fix('Self', 'Each creature you choose within 30 feet of you must succeed on a Constitution saving throw or take 5d6 thunder damage and 5d6 radiant or necrotic damage (your choice).'));
     expect(r).toMatchObject({ damage: [{ dice: '5d6', type: 'thunder' }, { dice: '5d6', type: '' }], choices: ['radiant', 'necrotic'] });
   });
-  test('darts that always hit: one more a slot level up, all of them at the one target', () => {
+  test('darts that always hit: one more a slot level up, each dart its own roll', () => {
     const r = readSpell(fix('120 feet', 'You conjure three darts of force. Each dart hits a creature you choose within range, dealing 1d4 + 1 force damage.', 'One more dart for each slot level above 1st.'));
     expect(r.auto).toEqual({ count: 3, above: 1 });
-    expect(diceAt(r, { slot: 1, level: 1 }).damage).toEqual(['3d4+3 force']);
-    expect(diceAt(r, { slot: 3, level: 1 }).damage).toEqual(['5d4+5 force']);
+    expect(diceAt(r, { slot: 3, level: 1 }).damage).toEqual(['1d4+1 force']);
     expect(readSpell(spell('Magic Missile')).auto).toEqual({ count: 3, above: 1 });
+  });
+  test('several rays or beams, each its own attack: more with a higher slot, or with character level', () => {
+    const rays = readSpell(fix('120 feet', 'You make three rays of fire. Make a ranged spell attack for each ray. On a hit, the target takes 2d6 fire damage.', 'You make one additional ray for each slot level above 2nd.'));
+    expect(rays.rays).toEqual({ count: 3, above: 2 });
+    const beams = readSpell({ ...fix('120 feet', 'A beam streaks out. Make a ranged spell attack against the target. On a hit, it takes 1d10 force damage. The spell makes more than one beam as you grow: two beams at 5th level, three beams at 11th level, and four beams at 17th level.'), level: 0 });
+    expect(beams.rays).toEqual({ count: 1, byLevel: true });
+  });
+  test('Chaos Bolt leaps 30 feet when its d8s match', () => {
+    expect(readSpell({ ...fix('120 feet', 'Make a ranged spell attack. On a hit, the target takes 2d8 + 1d6 damage.'), name: 'Chaos Bolt' }).leap).toBe(30);
   });
 });
 

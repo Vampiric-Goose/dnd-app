@@ -421,6 +421,9 @@ export function sendDrag(sceneId: string, tokenId: string, at?: Pt): void {
 export function sendUse(characterId: string, action: string, slot?: number, target?: string, aim?: Aim): void {
   run?.guest?.sendUse(characterId, action, slot, target, aim);
 }
+export function sendLeap(resolution: string, characterId: string, aim: Aim): void {
+  run?.guest?.sendLeap(resolution, characterId, aim);
+}
 export function sendSave(resolution: string, characterId: string, d20: number): void {
   run?.guest?.sendSave(resolution, characterId, d20);
 }

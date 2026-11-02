@@ -29,6 +29,7 @@ export type GuestMsg =
   | { t: 'blobWant'; hashes: string[] /* stage 5: images of the current scene it lacks */ }
   | { t: 'use'; characterId: string; action: string; slot?: number; target?: string /* turn panel: the player's own character does something (a TurnAction id) */; aim?: Aim }
   | { t: 'save'; resolution: string; characterId: string; d20: number /* targeting: the player's own save roll for a pending area save */ }
+  | { t: 'leap'; characterId: string; resolution: string; aim: Aim /* targeting: a leaping spell's next target (Chaos Bolt), from that result's creature */ }
   | { t: 'endTurn'; characterId: string /* the player's own character ends its turn */ }
   | { t: 'action'; action: ActionRequest /* declared action: the player's arrow (replaces their last) */ }
   | { t: 'clearAction' /* the player's arrow goes */ }
@@ -89,14 +90,15 @@ const ints = (v: unknown, max: number, lo: number, hi: number): v is number[] =>
 /** An aim rebuilt from its known fields, or null when malformed. Whether the dice fit the action is the host's check (resolve.ts). */
 function cleanAim(a: unknown): Aim | null {
   if (!isRec(a) || !isRec(a.rolled)) return null;
-  const { target, point, toggles, dtype } = a, { d20, mode, dmg } = a.rolled;
+  const { target, targets, point, toggles, dtype } = a, { d20, mode, dmg } = a.rolled;
   if (target !== undefined && !str(target, 100)) return null;
+  if (targets !== undefined && !(Array.isArray(targets) && targets.length >= 1 && targets.length <= 12 && targets.every((x) => str(x, 100)))) return null;
   if (dtype !== undefined && !str(dtype, 20)) return null;
   if (point !== undefined && !(isRec(point) && num(point.x) && num(point.y) && point.x >= 0 && point.y >= 0 && point.x <= MAX_SIDE && point.y <= MAX_SIDE)) return null;
-  if ((d20 !== undefined && !ints(d20, 2, 0, 99)) || (mode !== undefined && mode !== 'adv' && mode !== 'dis')) return null;
-  if (!Array.isArray(dmg) || dmg.length > 12 || !dmg.every((f) => ints(f, 80, 0, 999))) return null;
+  if ((d20 !== undefined && !ints(d20, 24, 0, 99)) || (mode !== undefined && mode !== 'adv' && mode !== 'dis')) return null;
+  if (!Array.isArray(dmg) || dmg.length > 24 || !dmg.every((f) => ints(f, 80, 0, 999))) return null;
   if (!Array.isArray(toggles) || toggles.length > 2 || !toggles.every((t) => t === 'gwm' || t === 'ss')) return null;
-  return { ...(target !== undefined && { target }), ...(point !== undefined && { point: { x: point.x as number, y: point.y as number } }),
+  return { ...(target !== undefined && { target }), ...(targets !== undefined && { targets: targets as string[] }), ...(point !== undefined && { point: { x: point.x as number, y: point.y as number } }),
     rolled: { ...(d20 !== undefined && { d20: d20 as number[] }), ...(mode !== undefined && { mode: mode as 'adv' | 'dis' }), dmg: dmg as number[][] }, toggles: toggles as Aim['toggles'],
     ...(dtype !== undefined && { dtype }) };
 }
@@ -142,6 +144,10 @@ export function parseGuestMessage(raw: unknown): GuestMsg | { error: string } {
       return str(characterId, 100) && str(action, 200) && (slot === undefined || (Number.isInteger(slot) && (slot as number) >= 1 && (slot as number) <= 9))
         && (target === undefined || str(target, 100)) && aim !== null
         ? { t: 'use', characterId, action, ...(slot !== undefined && { slot: slot as number }), ...(target !== undefined && { target: target as string }), ...(aim && { aim }) } : { error: 'bad use' };
+    }
+    case 'leap': {
+      const { resolution, characterId } = raw, aim = cleanAim(raw.aim);
+      return str(resolution, 100) && str(characterId, 100) && aim && aim.target !== undefined ? { t: 'leap', resolution, characterId, aim } : { error: 'bad leap' };
     }
     case 'save': {
       const { resolution, characterId, d20 } = raw;

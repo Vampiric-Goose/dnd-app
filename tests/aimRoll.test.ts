@@ -25,3 +25,13 @@ test('a forced disadvantage rolls and logs both d20s', () => {
   expect(r.rolled.d20).toHaveLength(2);
   expect(rollLog[0].detail).toMatch(/2d20kl1/);
 });
+
+test('rays: two d20s and the dice for each ray; each ray\'s damage shows only if that ray hit', () => {
+  rollLog.length = 0;
+  const r = rollAim('Scorching Ray', { ...sword, line: true, count: 3 }, [undefined, undefined, undefined]);
+  expect(r.rolled.d20).toHaveLength(6);
+  expect(r.rolled.dmg).toHaveLength(3);
+  rollLog.length = 0;
+  reveal(r.held, true, undefined, [true, false, true]);
+  expect(rollLog).toHaveLength(2);
+});

@@ -12,10 +12,10 @@ import { attackEdge, attackToggles, canTarget, combineMode, monsterAttack, reach
 import type { TurnAction } from './turnActions.ts';
 
 /** What a use aims at (a creature's id, or a map point for an area) and the roller's own raw dice (resolve.ts Rolled). */
-/** `dtype`: the damage type picked, for a spell whose type is chosen. */
-export interface Aim { target?: string; point?: { x: number; y: number }; rolled: { d20?: number[]; mode?: 'adv' | 'dis'; dmg: number[][] }; toggles: ('gwm' | 'ss')[]; dtype?: string }
-/** To the acting player only: hit or miss, a spell's save DC, the names of the visible creatures its area caught. */
-export interface UseOutcome { action: string; hit?: boolean; dc?: number; caught?: string[] }
+/** `dtype`: the damage type picked, for a spell whose type is chosen. `targets`: one per ray or dart (repeats allowed), in place of `target`. */
+export interface Aim { target?: string; targets?: string[]; point?: { x: number; y: number }; rolled: { d20?: number[]; mode?: 'adv' | 'dis'; dmg: number[][] }; toggles: ('gwm' | 'ss')[]; dtype?: string }
+/** To the acting player only: hit or miss (`hits`: each ray's), a spell's save DC, the names of the visible creatures its area caught; `leap`: the result it may leap from. */
+export interface UseOutcome { action: string; hit?: boolean; hits?: boolean[]; dc?: number; caught?: string[]; leap?: string }
 /** A use worked out, waiting for its payment to go through. */
 export interface Aimed { resolution: Omit<Resolution, 'applied'>; outcome: UseOutcome }
 
@@ -25,7 +25,7 @@ export interface AimArea { shape: Shape; feet: number; width?: number; on: 'crea
 /** `choices`: the damage types to pick from for dice whose type is chosen (their `type` stays '' until one is picked). */
 /** `mark`: a rider spell aimed at the creature it marks (no dice). A die's `vs`: it hurts only that creature (a marked rider). */
 export interface AimPlan { reach: Reach; line: boolean; attack: boolean; toHit?: number; area?: AimArea; dice: { expr: string; type: string; on?: 'hit' | 'save'; vs?: string }[]; read?: SpellRead;
-  ignore?: { long?: true; close?: true }; choices?: string[]; mark?: true; /** damage over time, kept for the turns to come */ linger?: { dice: { expr: string; type: string }[]; read: SpellRead } }
+  ignore?: { long?: true; close?: true }; choices?: string[]; mark?: true; /** rays, beams or darts: a target each */ count?: number; /** damage over time, kept for the turns to come */ linger?: { dice: { expr: string; type: string }[]; read: SpellRead } }
 
 /**
  * The spell areas to draw on a scene, for everyone: an instant one until its caster's next turn, a concentration one while its caster
@@ -116,8 +116,10 @@ export function aimPlan(a: TurnAction, o: { level?: number; toggles?: Toggle[]; 
   if (read.lingering) return { reach, line: false, attack: false, ...(area && { area }), dice: [], read: { ...read, attack: undefined, save: undefined, damage: [] }, // placed and listed now
     ...(dice.length && { linger: { dice: dice.map(({ expr, type }) => ({ expr, type })), read } }) }; // rolled as a creature starts its turn there
   const ignore = read.attack === 'ranged' && has('Crossbow Expert') ? { close: true as const } : undefined;
+  const slot = o.level ?? a.spell.level, lvl = a.cast!.charLevel ?? 1, up = (above?: number) => (above !== undefined && slot > above ? slot - above : 0);
+  const count = read.rays ? (read.rays.byLevel ? (lvl >= 17 ? 4 : lvl >= 11 ? 3 : lvl >= 5 ? 2 : 1) : read.rays.count + up(read.rays.above)) : read.auto ? read.auto.count + up(read.auto.above) : 1;
   return { reach, line: read.attack === 'ranged', attack: !!read.attack, ...(a.cast!.attack !== undefined && { toHit: a.cast!.attack }), ...(area && { area }), dice, read, ...(ignore && { ignore }),
-    ...(read.choices && { choices: read.choices }) };
+    ...(read.choices && { choices: read.choices }), ...(count > 1 && { count }) };
 }
 
 /** Whether a creature at `t` can be picked from `me`, and with what disadvantage. A melee weapon past its reach is thrown (ranged). */
@@ -161,19 +163,40 @@ export interface WorkIn {
   seen?: (z: Combatant) => boolean;
   /** A weapon attack's weapon is magical (it beats "nonmagical" resistance). */
   magical: boolean; id: string; now: number; rng: () => number;
+  /** A leap (Chaos Bolt): from that creature, never at one already hit this casting; no payment. */
+  leapFrom?: { from: string; exclude: string[] };
+  /** One ray of several (internal). */
+  ray?: true;
 }
 
 /** An aim checked on the scene and worked out, or why not. */
 export async function workOut(i: WorkIn): Promise<Aimed | string> {
   const { a, aim, combat: k, scene: s, actor } = i;
-  const plan = aimPlan(a, { level: i.level, features: i.features, toggles: attackToggles(a, i.features).filter((t) => aim.toggles.includes(t.id)), dtype: aim.dtype, rider: actor.rider });
+  let plan = aimPlan(a, { level: i.level, features: i.features, toggles: attackToggles(a, i.features).filter((t) => aim.toggles.includes(t.id)), dtype: aim.dtype, rider: actor.rider });
   if (!plan) return 'that cannot be aimed';
   if (plan.dice.some((d) => !d.type) && plan.choices && !plan.read?.typeFromDie) return 'pick a damage type';
+  if (plan.count && !i.ray) { // rays, beams or darts: one aim each (two d20s and the dice each), worked out one by one
+    const ts = aim.targets ?? [], n = plan.dice.length;
+    if (ts.length !== plan.count) return 'pick a target';
+    if (plan.attack && aim.rolled.d20?.length !== 2 * ts.length) return 'bad d20';
+    if (aim.rolled.dmg.length !== n * ts.length) return 'bad damage dice';
+    const per: Aimed[] = [];
+    for (const [r, target] of ts.entries()) {
+      const rolled = { ...(aim.rolled.d20 && { d20: aim.rolled.d20.slice(2 * r, 2 * r + 2) }), ...(aim.rolled.mode && { mode: aim.rolled.mode }), dmg: aim.rolled.dmg.slice(r * n, (r + 1) * n) };
+      const one = await workOut({ ...i, ray: true, aim: { ...aim, targets: undefined, target, rolled } });
+      if (typeof one === 'string') return one;
+      per.push(one);
+    }
+    return { resolution: { ...per[0].resolution, outcomes: per.flatMap((p) => p.resolution.outcomes) },
+      outcome: { ...per[0].outcome, hit: per.some((p) => !!p.outcome.hit), hits: per.map((p) => !!p.outcome.hit) } };
+  }
+  if (i.leapFrom) plan = { ...plan, reach: { spell: plan.read?.leap ?? 0 } }; // the leap's range counts from the creature it leaps from
   const tokenOf = (id: string) => s.tokens.find((t) => combatantForToken(k, t)?.id === id);
-  const me = tokenOf(actor.id);
+  const me = tokenOf(i.leapFrom?.from ?? actor.id);
   if (!me) return 'not on the map';
   const target = aim.target === undefined ? undefined : i.findTarget(aim.target), tt = target && tokenOf(target.id);
   if (aim.target !== undefined && !tt) return 'pick a target';
+  if (i.leapFrom && target && i.leapFrom.exclude.includes(target.id)) return 'pick another creature';
   const foe = foeWithin5(k, s, actor, i.diagonal, i.conditionsOf);
   const cond = (z: Combatant) => i.conditionsOf?.(z) ?? z.conditions ?? [];
   const pick = tt && target ? judge(plan, s.grid, i.diagonal, me, foe, tt, { attacker: cond(actor), target: cond(target), exhaustion: i.exhaustionOf?.(actor), dodging: !!target.economy?.dodging }) : undefined;
@@ -186,7 +209,7 @@ export async function workOut(i: WorkIn): Promise<Aimed | string> {
   const why = rolled.mode ? `${rolled.mode === 'adv' ? 'advantage' : 'disadvantage'}: ${(rolled.mode === 'adv' ? edge.adv : edge.dis).join(', ') || 'chosen'}` : undefined;
   const withWhy = (o: Outcome): Outcome => (why && o.roll !== undefined ? { ...o, edge: why } : o);
   const crit = plan.attack && (keptD20(rolled) === 20 || autoCrit); // a critical's dice come doubled
-  const base = { id: i.id, actor: actor.id, action: a.name, at: i.now };
+  const base = { id: i.id, actor: actor.id, action: a.name, at: i.now, ...(i.level !== undefined && plan.read?.leap && { slot: i.level }) };
   if (!plan.read) { // a weapon or a monster's attack
     const bad = checkFaces(plan.dice.map((d) => ({ expr: d.expr, crit })), rolled);
     if (bad) return bad;
@@ -216,8 +239,9 @@ export async function workOut(i: WorkIn): Promise<Aimed | string> {
   return {
     resolution: { ...base, outcomes: outcomes.map(withWhy).map(named), ...(placed && { caught: caught.map((z) => z.id), area: placed, sceneId: s.id, round: k.round }),
       ...(plan.linger && { linger: { ...plan.linger, ...(plan.linger.read.save && a.cast!.dc !== undefined && { dc: a.cast!.dc }) } }),
+      ...(read.leap && target && { chain: [...(i.leapFrom?.exclude ?? []), target.id] }),
       ...(a.spell?.concentration ? { lasting: true as const } : read.rounds && { rounds: read.rounds }), ...(read.repeat && { repeat: true as const }), ...(read.save && { dc: a.cast!.dc, ability: read.save.toLowerCase() as Ability, onSave: read.onSave }) },
     outcome: { action: a.name, ...(hit !== undefined && { hit }), ...(read.save && a.cast!.dc !== undefined && { dc: a.cast!.dc }),
-      ...(area && { caught: caught.filter((z) => !z.hidden && (i.seen?.(z) ?? true)).map(i.nameOf) }) },
+      ...(area && { caught: caught.filter((z) => !z.hidden && (i.seen?.(z) ?? true)).map(i.nameOf) }), ...(outcomes.some((o) => o.leap) && { leap: i.id }) },
   };
 }

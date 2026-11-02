@@ -147,7 +147,8 @@ const ABILITY = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
 export function cleanOutcome(m: unknown): UseOutcome | undefined {
   if (!isRec(m) || !s(m.action, 200)) return undefined;
   const caught = Array.isArray(m.caught) ? m.caught.filter((n): n is string => s(n, 200)).slice(0, 40) : undefined;
-  return { action: m.action, ...(typeof m.hit === 'boolean' && { hit: m.hit }), ...(fin(m.dc) && { dc: m.dc as number }), ...(caught && { caught }) };
+  const hits = Array.isArray(m.hits) && m.hits.length <= 12 && m.hits.every((h) => typeof h === 'boolean') ? m.hits as boolean[] : undefined;
+  return { action: m.action, ...(typeof m.hit === 'boolean' && { hit: m.hit }), ...(hits && { hits }), ...(fin(m.dc) && { dc: m.dc as number }), ...(caught && { caught }), ...(s(m.leap, 100) && { leap: m.leap }) };
 }
 /** B3: a tombstone clock from the DM, unless it claims a wall time past MAX_AHEAD (then the local clock is used). */
 const fairAt = (at: unknown, now: number): string | undefined =>
@@ -244,6 +245,8 @@ export class Guest {
   }
   /** Targeting: the player's own save roll for their character's pending area save. */
   sendSave(resolution: string, characterId: string, d20: number): void { this.#own(characterId, () => this.#send({ t: 'save', resolution, characterId, d20 })); }
+  /** Targeting: a leaping spell's next target (Chaos Bolt), for the result the DM's device names in the outcome. */
+  sendLeap(resolution: string, characterId: string, aim: Aim): void { this.#own(characterId, () => this.#send({ t: 'leap', resolution, characterId, aim })); }
   sendEndTurn(characterId: string): void { this.#own(characterId, () => this.#send({ t: 'endTurn', characterId })); }
   #own(characterId: string, send: () => void): void {
     void this.#task(async () => {

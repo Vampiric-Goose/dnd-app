@@ -163,6 +163,7 @@ export interface Outcome {
   damage: number; note?: string;
   pending?: true; owed?: { amount: number; type: string }[];
   /** conditions a failed save left (`inflicts`: what a PC's pending save would leave on a failure; `ends`: what a repeat save ends on a success) */ inflict?: string[]; inflicts?: string[]; ends?: string[];
+  /** its dice matched: the spell may leap to another creature (Chaos Bolt) */ leap?: true;
 }
 /** What a result took off a combatant (HP and temp HP), and a PC's dying state before it, so Undo puts back exactly that. */
 export interface Applied { id: string; hp: number; temp: number; dying?: { deathSaves: { success: number; fail: number }; stable: boolean; dead: boolean };
@@ -175,6 +176,7 @@ export interface Resolution { id: string; actor: string /* combatant */; action:
   /** the conditions it left, which end with the spell; `rounds`: a non-concentration spell's length */ inflicted?: { id: string; condition: string; /** a monster's save bonus, for its repeat saves */ bonus?: number }[]; rounds?: number;
   /** its targets save again at the end of each of their turns */ repeat?: true;
   /** a marked rider spell (Hex): the creature marked and the rider its caster now has; `spent`: a hit used a once-only rider */ mark?: string; rider?: Combatant['rider']; spent?: true;
+  /** a leaping spell (Chaos Bolt): the creatures it has hit so far this casting, and whether this hit's leap was taken; `slot`: the slot it was cast with */ chain?: string[]; leapt?: true; slot?: number;
   /** damage over time (Moonbeam): its dice, reading and DC, rolled when a creature starts its turn in the area */ linger?: { dice: { expr: string; type: string }[]; read: SpellRead; dc?: number } }
 /** An area on the map (as a map template: a cone's or line's length, a sphere's or cylinder's radius, a cube's side, in ft). */
 export interface Area { shape: 'cone' | 'sphere' | 'cube' | 'line' | 'cylinder'; origin: { x: number; y: number }; aim: { x: number; y: number }; feet: number; width?: number }

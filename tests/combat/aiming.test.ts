@@ -137,11 +137,30 @@ describe('workOut on the DM\'s map', () => {
     const r = await workOut({ ...base(bolt, rolled), info: (z: Combatant) => ({ ...targetOf(z, {}), ac: 14, defenses: { resist: ['fire'], immune: [], vulnerable: [] } }) });
     expect(r).toMatchObject({ resolution: { outcomes: [{ hit: true, damage: 9, note: 'cold (d8 2)' }] } });
   });
-  test('darts that always hit: no d20, all the damage to the one target', async () => {
+  test('darts that always hit: a target per dart (repeats allowed), each its own damage', async () => {
     const darts = spell({ auto: { count: 3, above: 1 }, damage: [{ dice: '1d4+1', type: 'force' }] });
-    expect(aimPlan(darts)).toMatchObject({ attack: false, dice: [{ expr: '3d4+3' }] });
-    const r = await workOut(base(darts, { dmg: [[1, 2, 3]] }));
-    expect(r).toMatchObject({ resolution: { outcomes: [{ id: 'pc:thorin', part: 'hit', hit: true, damage: 9 }] }, outcome: { hit: true } });
+    expect(aimPlan(darts)).toMatchObject({ attack: false, count: 3, dice: [{ expr: '1d4+1' }] });
+    expect(aimPlan(darts, { level: 3 })!.count).toBe(5);
+    const r = await workOut({ ...base(darts, { dmg: [[1], [2], [3]] }), aim: { targets: ['g', 'g', 'pc:thorin'], rolled: { dmg: [[1], [2], [3]] }, toggles: [] } });
+    expect(r).toMatchObject({ resolution: { outcomes: [{ id: 'g', damage: 2 }, { id: 'g', damage: 3 }, { id: 'pc:thorin', damage: 4 }] }, outcome: { hit: true, hits: [true, true, true] } });
+    expect(await workOut({ ...base(darts, { dmg: [[1], [2]] }), aim: { targets: ['g', 'g'], rolled: { dmg: [[1], [2]] }, toggles: [] } })).toBe('pick a target');
+  });
+  test('rays: each its own d20 against its own target; the wrong number of d20s is refused', async () => {
+    const rays = { ...spell({ attack: 'ranged', rays: { count: 3, above: 2 }, damage: [{ dice: '2d6', type: 'fire' }] }), spell: { id: 's', level: 2, concentration: false } };
+    expect(aimPlan(rays, { level: 3 })!.count).toBe(4);
+    const rolled = { d20: [18, 18, 2, 2, 18, 18], dmg: [[3, 3], [3, 3], [3, 3]] };
+    const r = await workOut({ ...base(rays, rolled), level: 2, aim: { targets: ['pc:thorin', 'pc:thorin', 'pc:mira'], rolled, toggles: [] } });
+    expect(r).toMatchObject({ resolution: { outcomes: [{ id: 'pc:thorin', hit: true }, { id: 'pc:thorin', hit: false }, { id: 'pc:mira', hit: true }] }, outcome: { hits: [true, false, true] } });
+    expect(await workOut({ ...base(rays, rolled), level: 2, aim: { targets: ['pc:thorin', 'pc:thorin', 'pc:mira'], rolled: { ...rolled, d20: [18, 18] }, toggles: [] } })).toBe('bad d20');
+  });
+  test('Chaos Bolt\'s leap: from the first target, within 30 ft of it, never a creature already hit; no new payment', async () => {
+    const bolt = spell({ attack: 'ranged', leap: 30, damage: [{ dice: '2d8+1d6', type: '' }], typeFromDie: { sides: 8, types: ['acid', 'cold', 'fire', 'force', 'lightning', 'poison', 'psychic', 'thunder'] } });
+    const rolled = { d20: [18, 18], dmg: [[3, 3, 4]] };
+    expect(await workOut(base(bolt, rolled))).toMatchObject({ resolution: { outcomes: [{ hit: true, leap: true }] }, outcome: { leap: 'r1' } });
+    const leap = (target: string, a = bolt) => workOut({ ...base(a, { d20: [18, 18], dmg: [[1, 2, 4]] }), aim: { target, rolled: { d20: [18, 18], dmg: [[1, 2, 4]] }, toggles: [] }, leapFrom: { from: 'pc:thorin', exclude: ['pc:thorin'] } });
+    expect(await leap('pc:mira')).toMatchObject({ resolution: { outcomes: [{ id: 'pc:mira', hit: true }], chain: ['pc:thorin', 'pc:mira'] } });
+    expect(await leap('pc:thorin')).toBe('pick another creature');
+    expect(await leap('pc:mira', { ...bolt, cast: { ...bolt.cast!, read: { ...bolt.cast!.read, leap: 5 } } })).toBe('out of range'); // Mira is 10 ft from Thorin
   });
   test('a ranged spell attack gets the close-combat disadvantage too', async () => {
     const r = await workOut(base(spell({ attack: 'ranged', damage: [{ dice: '1d10', type: 'fire' }] }), { d20: [19, 3], dmg: [[5]] }));

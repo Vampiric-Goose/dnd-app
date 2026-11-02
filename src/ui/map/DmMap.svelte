@@ -356,7 +356,9 @@
   }
 
   // Targeting (the DM's setting): the action being aimed on the map, then rolled here and worked out by the same rules as a player's use.
-  let aiming: { a: TurnAction; slot?: number; toggles: Toggle[]; dtype?: string; plan: AimPlan; v: NonNullable<typeof view> } | undefined = $state.raw();
+  // `picks`: rays or darts picked so far; `leap`: a leaping spell's next target (Chaos Bolt), from the creature `from`, not one in `exclude`
+  type Pick = { tokenId?: string; point: Pt };
+  let aiming: { a: TurnAction; slot?: number; toggles: Toggle[]; dtype?: string; plan: AimPlan; v: NonNullable<typeof view>; picks?: Pick[]; leap?: { rid: string; from: string; exclude: string[] } } | undefined = $state.raw();
   const onaim = (a: TurnAction, slot: number | undefined, toggles: Toggle[], dtype?: string) => {
     const plan = aimPlan(a, { level: slot, toggles, dtype, rider: view?.x.rider });
     if (plan && view) { aiming = { a, slot, toggles, dtype, plan, v: view }; sheet = false; selected = []; }
@@ -366,34 +368,46 @@
   const aim = $derived.by(() => {
     const m = aiming, k = combat, s = scene;
     if (!m || !k || !s) return undefined;
-    const me = s.tokens.find((t) => combatantForToken(k, t)?.id === m.v.x.id);
+    const me = s.tokens.find((t) => combatantForToken(k, t)?.id === (m.leap?.from ?? m.v.x.id));
     if (!me) return undefined;
     const foe = foeWithin5(k, s, m.v.x, settings.diagonal, conditionsOf);
     const pickable = (id: string): Pickable => {
       const t = s.tokens.find((x) => x.id === id), z = t && combatantForToken(k, t);
-      return t && z && z.id !== m.v.x.id ? judge(m.plan, s.grid, settings.diagonal, me, foe, t,
+      return t && z && z.id !== m.v.x.id && !m.leap?.exclude.includes(z.id) ? judge(m.plan, s.grid, settings.diagonal, me, foe, t,
         { attacker: conditionsOf(m.v.x), target: conditionsOf(z), exhaustion: m.v.ch?.state.exhaustion, dodging: !!z.economy?.dodging }) : { ok: false };
     };
+    const picks = m.picks ?? [], count = m.plan.count, nameAt = (p: Pick) => s.tokens.find((t) => t.id === p.tokenId)?.name ?? '?';
     return { from: { x: me.x, y: me.y }, line: m.plan.line, ...(m.plan.area && { area: m.plan.area }), pickable,
-      onpick: (p: { tokenId?: string; point: Pt }) => void fire(p, pickable), oncancel: () => (aiming = undefined) };
+      onpick: (p: Pick) => {
+        if (count && picks.length + 1 < count) { aiming = { ...m, picks: [...picks, p] }; return; }
+        void fire([...picks, p], pickable);
+      },
+      ...(count ? { status: `Target ${picks.length + 1} of ${count}${picks.length ? `: ${picks.map(nameAt).join(', ')}` : ''}` } : m.leap ? { status: 'Leap: a creature within 30 ft of the last one' } : {}),
+      ...(picks.length && { onundo: () => (aiming = { ...m, picks: picks.slice(0, -1) }) }),
+      oncancel: () => (aiming = undefined) };
   });
-  const fire = (p: { tokenId?: string; point: Pt }, pickable: (id: string) => Pickable) => run(async () => {
+  const fire = (ps: Pick[], pickable: (id: string) => Pickable) => run(async () => {
     const m = aiming, k = combat, s = scene;
     aiming = undefined;
     if (!m || !k || !s) return;
-    const pick = p.tokenId ? pickable(p.tokenId) : undefined;
-    const r = rollAim(m.a.name, m.plan, pick);
-    const t = p.tokenId ? s.tokens.find((x) => x.id === p.tokenId) : undefined, target = t && combatantForToken(k, t), ch = m.v.ch;
+    const judged = (p: Pick) => (p.tokenId ? pickable(p.tokenId) : undefined);
+    const r = m.plan.count ? rollAim(m.a.name, m.plan, ps.map(judged)) : rollAim(m.a.name, m.plan, judged(ps[0]));
+    const idOf = (p: Pick) => { const t = p.tokenId ? s.tokens.find((x) => x.id === p.tokenId) : undefined; return t && combatantForToken(k, t)?.id; };
+    const target = idOf(ps[0]), ch = m.v.ch;
+    const where = m.plan.count ? { targets: ps.map((p) => idOf(p) ?? '') } : target ? { target } : { point: ps[0].point };
     const res = await workOut({ a: m.a, level: m.slot, features: ch ? featureList(ch, settings).map((f) => f.name) : [], actor: m.v.x, combat: k, scene: s,
-      diagonal: settings.diagonal, aim: { ...(target ? { target: target.id } : { point: p.point }), rolled: r.rolled, toggles: m.toggles.map((x) => x.id), ...(m.dtype && { dtype: m.dtype }) },
+      ...(m.leap && { leapFrom: { from: m.leap.from, exclude: m.leap.exclude } }),
+      diagonal: settings.diagonal, aim: { ...where, rolled: r.rolled, toggles: m.toggles.map((x) => x.id), ...(m.dtype && { dtype: m.dtype }) },
       findTarget: (id) => k.combatants.find((z) => z.id === id), conditionsOf,
       exhaustionOf: (z) => (z.characterId ? chars.find((c) => c.id === z.characterId)?.state.exhaustion : undefined) ?? 0,
       info: infoOf,
       nameOf: (z) => nameOfCombatant(z.id), magical: !!ch?.inventory.find((e) => e.id === m.a.attack?.entryId)?.item.magic, id: uid(), now: Date.now(), rng: Math.random });
     if (typeof res === 'string') throw new Error(`Not done: ${res}.`);
     const before = snapOf(k, chars, touched(res.resolution)); // before paying: Undo gives the pip and slot back too
-    await pay(m.v, m.a, m.slot);
-    reveal(r.held, res.outcome.hit);
+    const rid = m.leap?.rid;
+    if (rid) await updateCombat(cid, (c) => ({ ...c, resolutions: (c.resolutions ?? []).map((y) => (y.id === rid ? { ...y, leapt: true as const } : y)) })); // the same casting: nothing to pay
+    else await pay(m.v, m.a, m.slot);
+    reveal(r.held, res.outcome.hit, undefined, res.outcome.hits);
     await applyResolution(cid, res.resolution, settings, before);
     await reload();
   });
@@ -417,6 +431,14 @@
       ...(l.dc !== undefined && l.read.save && { dc: l.dc, ability: l.read.save.toLowerCase() as Ability, onSave: l.read.onSave }) }, settings);
     await reload();
   });
+  /** A leaping spell's next target (Chaos Bolt): aimed from the creature it hit, while its caster's turn panel is open. */
+  const startLeap = (r: Resolution) => {
+    const v = view, a = v?.x.id === r.actor ? v.actions.find((x) => x.spell && x.name === r.action) : undefined, plan = a && aimPlan(a, { level: r.slot });
+    const from = r.outcomes.find((o) => o.leap)?.id;
+    if (!v || !a || !plan || !from) return;
+    aiming = { a, slot: r.slot, toggles: [], plan: { ...plan, reach: { spell: plan.read?.leap ?? 0 } }, v, leap: { rid: r.id, from, exclude: r.chain ?? r.outcomes.map((o) => o.id) } };
+    sheet = false; selected = [];
+  };
   const undo = (rid: string) => run(async () => { await undoResolution(cid, rid, settings); await reload(); });
   const rollFor = (rid: string, target: string) => run(async () => {
     const d = roll(`${nameOfCombatant(target)}: save (rolled by the DM)`, '1d20', { mode: 'normal' });
@@ -556,6 +578,7 @@
                 {#each [...combat.resolutions].reverse().slice(0, 6) as r (r.id)}
                   <li>
                     <div class="row"><strong>{nameOfCombatant(r.actor)}: {r.action}</strong>{#if r.dc !== undefined}<span class="muted small">DC {r.dc} {r.ability?.toUpperCase()}</span>{/if}
+                      {#if r.outcomes.some((o) => o.leap) && !r.leapt && view?.x.id === r.actor}<button type="button" disabled={busy} onclick={() => startLeap(r)}>Leap</button>{/if}
                       <button type="button" disabled={busy} onclick={() => undo(r.id)}>Undo</button></div>
                     {#if r.caught?.length}<p class="muted small">In the area: {r.caught.map(nameOfCombatant).join(', ')}</p>{/if}
                     <ul class="plain small">
