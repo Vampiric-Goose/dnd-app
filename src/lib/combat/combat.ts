@@ -167,6 +167,11 @@ function runAt(cs: Combatant[], i: number): [number, number] {
   return [a, b];
 }
 const idsOf = (cs: Combatant[], [a, b]: [number, number]) => new Set(cs.slice(a, b + 1).map((x) => x.id));
+/** The combatants whose turn is now (a group of monsters acts together). */
+export function turnIds(c: Combat): string[] {
+  const i = c.combatants.findIndex((x) => x.id === c.turn);
+  return c.round === 0 || i < 0 ? [] : [...idsOf(c.combatants, runAt(c.combatants, i))];
+}
 /** The ids acting on the current turn (a grouped run is several); empty in setup or with no turn. */
 export function currentRun(c: Combat): Set<string> {
   const i = c.combatants.findIndex((x) => x.id === c.turn);

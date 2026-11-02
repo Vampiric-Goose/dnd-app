@@ -8,7 +8,7 @@ import { settle } from './resolve.ts';
 import { endedSpells, snapOf, touched } from './aiming.ts';
 import { canon } from '../sync/merge.ts';
 import { uid } from '../uid.ts';
-import { addMonsters, concentrationDc, encounterPicks, initOk, monsterHp, newCombat, next, patchCombatant, removeStep, rollInit, setInit, start, type Expired, type HpOp, type Step } from './combat.ts';
+import { addMonsters, concentrationDc, turnIds, encounterPicks, initOk, monsterHp, newCombat, next, patchCombatant, removeStep, rollInit, setInit, start, type Expired, type HpOp, type Step } from './combat.ts';
 import { restoreCombat, restoreScene, snapshotFight } from './encounters.ts';
 import { BLOCKING } from './economy.ts';
 
@@ -89,12 +89,15 @@ export const updateCombat = (cid: string, fn: (c: Combat) => Combat): Promise<Co
  * while that combatant holds the turn (a player's End turn that arrives after the turn moved on changes nothing).
  */
 export const turn = (cid: string, dir: 'start' | 'next', expect?: string): Promise<Step> => serial(async () => {
-  let expired: Expired[] = [];
+  let expired: Expired[] = [], ended: string[] = [];
   const combat = await update(cid, (c) => {
     if (expect !== undefined && c.turn !== expect) return c;
+    if (dir === 'next') ended = turnIds(c);
     const s = dir === 'start' ? start(c) : next(c); expired = s.expired; return s.combat;
   });
-  return clearExpired({ combat, expired });
+  const step = await clearExpired({ combat, expired });
+  for (const id of ended) await repeatSaves(cid, id);
+  return ended.length ? { ...step, combat: (await db.combat.get(cid)) ?? step.combat } : step;
 });
 
 /** removeCombatant, writing the PC side of any expiry the passed turn starts (see removeStep). */
@@ -166,16 +169,40 @@ export async function applyResolution(cid: string, r: Omit<Resolution, 'applied'
   const ids = touched(r), was = before ?? await snapNow(cid, ids);
   const applied: Applied[] = [];
   for (const o of r.outcomes) if (o.damage > 0 && !o.pending) applied.push(await hurtOne(cid, o.id, o.damage, o.nat === 20 && o.part !== 'save', settings));
-  const inflicted = await inflict(cid, r, r.outcomes.flatMap((o) => (o.inflict ?? []).map((condition) => ({ id: o.id, condition }))));
+  const inflicted = await inflict(cid, r, r.outcomes.flatMap((o) => (o.inflict ?? []).map((condition) => ({ id: o.id, condition, ...(o.save && { bonus: o.save.total - o.save.roll }) }))));
   const after = await snapNow(cid, ids);
   return serial(() => update(cid, (c) => ({ ...c, resolutions: [...(c.resolutions ?? []), { ...r, applied, ...(inflicted.length && { inflicted }), undo: { before: was, after } }].slice(-20) })));
 }
 
 /** The conditions a result's failed saves leave, put on; a non-concentration spell's last its rounds (to the start of its caster's turn). */
-async function inflict(cid: string, r: Pick<Resolution, 'actor' | 'rounds' | 'lasting'>, list: { id: string; condition: string }[]): Promise<{ id: string; condition: string }[]> {
+async function inflict<T extends { id: string; condition: string }>(cid: string, r: Pick<Resolution, 'actor' | 'rounds' | 'lasting'>, list: T[]): Promise<T[]> {
   const lasts: Duration | undefined = !r.lasting && r.rounds ? { rounds: r.rounds, at: 'start', of: r.actor } : undefined;
   for (const x of list) await conditionOn(cid, x.id, x.condition, true, lasts);
   return list;
+}
+
+/**
+ * The end of `id`'s turn: each repeat-save spell whose conditions it still has gets a new result. A monster rolls at once (its bonus kept
+ * from the first save) and a success ends them; a PC's save is pending, for its player's pop-up (settleSave ends them on a success).
+ */
+async function repeatSaves(cid: string, id: string): Promise<void> {
+  const k = await db.combat.get(cid), x = k?.combatants.find((y) => y.id === id);
+  if (!k || !x) return;
+  const has = x.kind === 'pc' ? ((x.characterId && (await db.characters.get(x.characterId))?.state.conditions) || []) : x.conditions ?? [];
+  for (const r of k.resolutions ?? []) {
+    const mine = (r.inflicted ?? []).filter((d) => d.id === id && has.includes(d.condition));
+    if (!r.repeat || r.dc === undefined || !mine.length) continue;
+    const ends = mine.map((d) => d.condition), before = await snapNow(cid, [id]);
+    let o: Outcome = { id, part: 'save', pending: true, damage: 0, owed: [], ends };
+    if (x.kind !== 'pc') {
+      const roll = 1 + Math.floor(Math.random() * 20), total = roll + (mine[0].bonus ?? 0), ok = total >= r.dc;
+      o = { id, part: 'save', save: { roll, total, ok }, damage: 0, ...(ok && { ends }) };
+      if (ok) for (const c of ends) await conditionOn(cid, id, c, false);
+    }
+    const after = await snapNow(cid, [id]);
+    const next: Resolution = { id: uid(), actor: r.actor, action: `${r.action} (repeat save)`, dc: r.dc, ...(r.ability && { ability: r.ability }), outcomes: [o], applied: [], at: Date.now(), undo: { before, after } };
+    await update(cid, (c) => ({ ...c, resolutions: [...(c.resolutions ?? []), next].slice(-20) }));
+  }
 }
 
 type Rec = Record<string, unknown>;
@@ -230,18 +257,20 @@ export async function settleSave(cid: string, rid: string, target: string, d20: 
   if (!r || r.dc === undefined || !ch) return undefined;
   const sheet = computeSheet(ch, { settings, viewer: 'dm' });
   const total = d20 + sheet.saves[r.ability ?? 'dex'].bonus, ok = total >= r.dc;
-  let owed: Outcome['owed'], lost: string[] = [];
+  let owed: Outcome['owed'], lost: string[] = [], freed: string[] = [];
   await serial(() => update(cid, (c) => ({ ...c, resolutions: (c.resolutions ?? []).map((y) => y.id !== rid ? y : { ...y, outcomes: y.outcomes.map((o) => {
     if (o.id !== target || !o.pending) return o;
     owed = o.owed;
     const { pending: _p, owed: _o, inflicts, ...rest } = o;
     if (!ok && inflicts) lost = inflicts;
+    if (ok && o.ends) freed = o.ends;
     return { ...rest, ...(!ok && inflicts && { inflict: inflicts }), save: { roll: d20, total, ok }, ...settle({ pc: true, defenses: { resist: sheet.resistances, immune: sheet.immunities, vulnerable: sheet.vulnerabilities } }, o.owed ?? [], ok, y.onSave) };
   }) }) })));
   if (!owed) return undefined; // already settled
   const damage = (await db.combat.get(cid))?.resolutions?.find((y) => y.id === rid)?.outcomes.find((o) => o.id === target && o.part === 'save')?.damage ?? 0;
   const applied = damage > 0 ? await hurtOne(cid, target, damage, false, settings) : undefined;
   const inflicted = await inflict(cid, r, lost.map((condition) => ({ id: target, condition })));
+  for (const c of freed) await conditionOn(cid, target, c, false);
   const now = await snapNow(cid, [target]); // Undo's "after" follows the save's damage
   return serial(() => update(cid, (c) => ({ ...c, resolutions: (c.resolutions ?? []).map((y) => (y.id !== rid ? y : { ...y, ...(applied && { applied: [...y.applied, applied] }), ...(inflicted.length && { inflicted: [...(y.inflicted ?? []), ...inflicted] }),
     ...(y.undo && { undo: { before: y.undo.before, after: { combatants: { ...y.undo.after.combatants, ...now.combatants }, states: { ...y.undo.after.states, ...now.states } } } }) })) })));

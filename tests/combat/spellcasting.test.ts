@@ -216,3 +216,8 @@ describe('monster spellcasting', () => {
 test('a light radius is not an area of effect (Light)', () => {
   expect(readSpell(spell('Light')).area).toBeUndefined();
 });
+
+test('a save repeated at the end of each turn', () => {
+  expect(readSpell(fix('60 feet', 'The target makes a Wisdom saving throw or is paralyzed. At the end of each of its turns, the target can make another Wisdom saving throw.')).repeat).toBe(true);
+  expect(readSpell(spell('Fireball')).repeat).toBeUndefined();
+});

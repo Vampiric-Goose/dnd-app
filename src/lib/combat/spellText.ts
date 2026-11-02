@@ -46,6 +46,8 @@ export interface SpellRead {
   manual?: string;
   /** How long it lasts, in rounds (a minute is 10); none for an instantaneous or open-ended spell. */
   rounds?: number;
+  /** The target saves again at the end of each of its turns, ending the conditions on a success. */
+  repeat?: true;
   area?: SpellArea;
 }
 
@@ -95,6 +97,7 @@ export function readSpell(s: Pick<SpellDef, 'text' | 'level' | 'range'> & { name
     .map((x) => x[1].charAt(0).toUpperCase() + x[1].slice(1).toLowerCase()))];
   if (conds.length) out.conditions = conds;
   if (mech?.scaling && s.level === 0) out.scaling = mech.scaling;
+  if (/at the end of each of its turns[^.]*saving throw/i.test(t)) out.repeat = true;
   const lasts = /(\d+) (round|minute|hour)s?/i.exec(s.duration ?? '');
   if (lasts) out.rounds = +lasts[1] * ({ round: 1, minute: 10, hour: 600 } as Record<string, number>)[lasts[2].toLowerCase()];
   if (out.save) out.onSave = /half as much damage on a successful/i.test(t) ? 'half' : 'none';

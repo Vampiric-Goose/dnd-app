@@ -159,7 +159,7 @@ export interface Outcome {
   save?: { roll: number; total: number; ok: boolean };
   damage: number; note?: string;
   pending?: true; owed?: { amount: number; type: string }[];
-  /** conditions a failed save left (`inflicts`: what a PC's pending save would leave on a failure) */ inflict?: string[]; inflicts?: string[];
+  /** conditions a failed save left (`inflicts`: what a PC's pending save would leave on a failure; `ends`: what a repeat save ends on a success) */ inflict?: string[]; inflicts?: string[]; ends?: string[];
 }
 /** What a result took off a combatant (HP and temp HP), and a PC's dying state before it, so Undo puts back exactly that. */
 export interface Applied { id: string; hp: number; temp: number; dying?: { deathSaves: { success: number; fail: number }; stable: boolean; dead: boolean };
@@ -169,7 +169,8 @@ export interface Resolution { id: string; actor: string /* combatant */; action:
   /** Undo: the creatures it touched (combatants, and PCs' character state) before it was paid for, and after it landed. */ undo?: { before: Snap; after: Snap };
   /** A spell's area as cast, on scene `sceneId` in `round`; `lasting`: a concentration spell's, shown while its caster concentrates. */
   area?: Area; sceneId?: string; round?: number; lasting?: true;
-  /** the conditions it left, which end with the spell; `rounds`: a non-concentration spell's length */ inflicted?: { id: string; condition: string }[]; rounds?: number }
+  /** the conditions it left, which end with the spell; `rounds`: a non-concentration spell's length */ inflicted?: { id: string; condition: string; /** a monster's save bonus, for its repeat saves */ bonus?: number }[]; rounds?: number;
+  /** its targets save again at the end of each of their turns */ repeat?: true }
 /** An area on the map (as a map template: a cone's or line's length, a sphere's or cylinder's radius, a cube's side, in ft). */
 export interface Area { shape: 'cone' | 'sphere' | 'cube' | 'line' | 'cylinder'; origin: { x: number; y: number }; aim: { x: number; y: number }; feet: number; width?: number }
 export interface Snap { combatants: Record<string, Combatant>; states: Record<string, Character['state']> }

@@ -1,10 +1,10 @@
 import 'fake-indexeddb/auto';
 import fs from 'node:fs';
-import { beforeEach, expect, test } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { addCombatants, monsterCombatant } from '../../src/lib/combat/combat.ts';
 import { targetOf } from '../../src/lib/combat/resolve.ts';
 import { snapOf } from '../../src/lib/combat/aiming.ts';
-import { applyResolution, changeHp, settleSave, undoResolution, updateCombat } from '../../src/lib/combat/store.ts';
+import { applyResolution, changeHp, settleSave, turn, undoResolution, updateCombat } from '../../src/lib/combat/store.ts';
 import { db, resetDb } from '../../src/lib/db.ts';
 import { computeSheet } from '../../src/lib/rules/sheet.ts';
 import type { Character, Combatant, MonsterDef, Pack, Resolution } from '../../src/lib/types.ts';
@@ -117,7 +117,7 @@ const conds = async (id: string) => (await db.combat.get('c1'))!.combatants.find
 test('a failed save leaves its conditions, the spell\'s own name too; Undo takes them back', async () => {
   await applyResolution('c1', held('r1'), settings);
   expect(await conds('g1')).toEqual(['Paralyzed', 'Hold Monster']);
-  expect((await db.combat.get('c1'))!.resolutions![0].inflicted).toEqual([{ id: 'g1', condition: 'Paralyzed' }, { id: 'g1', condition: 'Hold Monster' }]);
+  expect((await db.combat.get('c1'))!.resolutions![0].inflicted).toEqual([{ id: 'g1', condition: 'Paralyzed', bonus: 0 }, { id: 'g1', condition: 'Hold Monster', bonus: 0 }]);
   await undoResolution('c1', 'r1', settings);
   expect(await conds('g1')).toEqual([]);
 });
@@ -142,4 +142,33 @@ test.each([
   await end();
   expect(await conds('g1')).toEqual([]);
   expect((await db.characters.get('p'))!.state.conditions).toEqual([]);
+});
+
+describe('saving again at the end of each turn', () => {
+  const holdOn = (who: string, roll: number) => ({ id: who, part: 'save' as const, save: { roll, total: roll, ok: false }, damage: 0, inflict: ['Paralyzed', 'Hold Monster'] });
+  const turnOf = (id: string) => updateCombat('c1', (c) => ({ ...c, round: 1, turn: id }));
+  afterEach(() => vi.restoreAllMocks());
+
+  test('a held monster saves again when its turn ends: a success frees it, a failure keeps it', async () => {
+    await applyResolution('c1', res('r1', [holdOn('g1', 2)], { actor: 'g2', action: 'Hold Monster', lasting: true, dc: 13, ability: 'wis', repeat: true }), settings);
+    await turnOf('g1');
+    vi.spyOn(Math, 'random').mockReturnValue(0); // a 1
+    await turn('c1', 'next');
+    expect(await conds('g1')).toEqual(['Paralyzed', 'Hold Monster']);
+    await turnOf('g1');
+    vi.spyOn(Math, 'random').mockReturnValue(0.99); // a 20
+    await turn('c1', 'next');
+    expect(await conds('g1')).toEqual([]);
+    const last = (await db.combat.get('c1'))!.resolutions!.at(-1)!;
+    expect(last).toMatchObject({ action: 'Hold Monster (repeat save)', outcomes: [{ id: 'g1', save: { roll: 20, total: 20, ok: true }, ends: ['Paralyzed', 'Hold Monster'] }] });
+  });
+  test('a held PC gets the save pop-up when its turn ends; a success frees it', async () => {
+    await applyResolution('c1', res('r1', [{ ...holdOn('pc:p', 2), inflict: ['Paralyzed'] }], { actor: 'g2', action: 'Hold Person', lasting: true, dc: 13, ability: 'wis', repeat: true }), settings);
+    await turnOf('pc:p');
+    await turn('c1', 'next');
+    const last = (await db.combat.get('c1'))!.resolutions!.at(-1)!;
+    expect(last.outcomes).toEqual([expect.objectContaining({ id: 'pc:p', pending: true, ends: ['Paralyzed'] })]);
+    await settleSave('c1', last.id, 'pc:p', 19, settings);
+    expect((await db.characters.get('p'))!.state.conditions).toEqual([]);
+  });
 });

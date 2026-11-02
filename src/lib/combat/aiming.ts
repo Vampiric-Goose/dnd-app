@@ -193,7 +193,7 @@ export async function workOut(i: WorkIn): Promise<Aimed | string> {
   const named = (o: Outcome): Outcome => (!lasts ? o : o.inflict ? { ...o, inflict: [...o.inflict, a.name] } : o.inflicts ? { ...o, inflicts: [...o.inflicts, a.name] } : o);
   return {
     resolution: { ...base, outcomes: outcomes.map(withWhy).map(named), ...(placed && { caught: caught.map((z) => z.id), area: placed, sceneId: s.id, round: k.round }),
-      ...(a.spell?.concentration ? { lasting: true as const } : read.rounds && { rounds: read.rounds }), ...(read.save && { dc: a.cast!.dc, ability: read.save.toLowerCase() as Ability, onSave: read.onSave }) },
+      ...(a.spell?.concentration ? { lasting: true as const } : read.rounds && { rounds: read.rounds }), ...(read.repeat && { repeat: true as const }), ...(read.save && { dc: a.cast!.dc, ability: read.save.toLowerCase() as Ability, onSave: read.onSave }) },
     outcome: { action: a.name, ...(hit !== undefined && { hit }), ...(read.save && a.cast!.dc !== undefined && { dc: a.cast!.dc }),
       ...(area && { caught: caught.filter((z) => !z.hidden && (i.seen?.(z) ?? true)).map(i.nameOf) }) },
   };
