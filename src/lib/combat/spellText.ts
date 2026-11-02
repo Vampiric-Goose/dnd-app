@@ -29,6 +29,8 @@ export interface SpellRead {
   /** "each creature within N feet of it": a burst of N feet around the target. */
   burst?: number;
   range?: { feet: number } | 'self' | 'touch';
+  /** A range-Self or Touch spell attack's reach in feet: 5 in melee, else as far as the wording throws it (Produce Flame's 30). */
+  reach?: number;
   /** It hurts a creature that enters the area or starts its turn there (Moonbeam), not when cast. */
   lingering?: true;
   heal?: { dice: string; mod: boolean };
@@ -132,7 +134,9 @@ export function readSpell(s: Pick<SpellDef, 'text' | 'level' | 'range'> & { name
   if (/starts its turn there|enters the (?:spell's )?area|starts its turn (?:with)?in/i.test(t)) out.lingering = true;
   const heal = /regains? (?:a number of )?hit points equal to (\d+d\d+)( \+ your spellcasting ability modifier)?/i.exec(t);
   if (heal) out.heal = { dice: heal[1], mod: !!heal[2] };
-  const up = /increases by (\d+d\d+) for (each|every two) (?:slot )?levels? (?:above|of higher spell slot) (?:the )?(\d)/i.exec(h);
+  // "increases by 1d8 for each slot level above 1st" (a comma allowed), or "takes 1d6 extra damage … for each slot level above 1st"
+  const up = /increases by (\d+d\d+),? for (each|every two) (?:slot )?levels? (?:above|of higher spell slot) (?:the )?(\d)/i.exec(h)
+    ?? /\b(\d+d\d+) extra damage\b[^.]*?\bfor (each|every two) slot levels? above (\d)/i.exec(h);
   if (up) out.perSlot = { dice: up[1], above: Number(up[3]), step: /two/i.test(up[2]) ? 2 : 1 };
   if (s.level === 0 && /when you reach 5th level \(\d+d\d+\)/i.test(t)) out.scales = true;
   const self = /^self/i.test(s.range.trim());
@@ -140,14 +144,25 @@ export function readSpell(s: Pick<SpellDef, 'text' | 'level' | 'range'> & { name
   if ((m = /(\d+)-foot[- ]radius,?\s*(?:\d+-foot[- ]high\s+)?(sphere|cylinder)/i.exec(t))) out.area = { shape: m[2].toLowerCase() as Shape, feet: +m[1], self };
   else if ((m = /(\d+)-foot cone/i.exec(t))) out.area = { shape: 'cone', feet: +m[1], self };
   else if ((m = /(\d+)-foot cube/i.exec(t))) out.area = { shape: 'cube', feet: +m[1], self };
-  else if ((m = /line (\d+) feet long and (\d+) feet wide/i.exec(t)) || (m = /(\d+)-foot[- ]long,? (\d+)-foot[- ]wide line/i.exec(t))) out.area = { shape: 'line', feet: +m[1], width: +m[2], self };
+  else if ((m = /\bline (?:of [^.]*?)?(\d+) feet long and (\d+) feet wide/i.exec(t)) || (m = /(\d+)-foot[- ]long,? (\d+)-foot[- ]wide line/i.exec(t))) out.area = { shape: 'line', feet: +m[1], width: +m[2], self };
   else if ((m = /(\d+)-foot-wide,? (\d+)-foot-long line/i.exec(t))) out.area = { shape: 'line', feet: +m[2], width: +m[1], self };
   else if ((m = /within (\d+) feet of a point you choose/i.exec(t))) out.area = { shape: 'sphere', feet: +m[1], self }; // Sleep
   // a save around the caster, by distance: "all creatures within 10 feet of you", "each creature within range" (the range is the radius)
-  else if (out.save && (m = /\b(?:each|all)(?: other)? creatures? (?:you choose )?within (\d+) feet of you\b/i.exec(t))) out.area = { shape: 'sphere', feet: +m[1], self: true };
+  else if (out.save && (m = /\b(?:each|all)(?: other)? creatures? (?:you choose |of your choice (?:that you can see )?)?within (\d+) feet of you\b/i.exec(t))) out.area = { shape: 'sphere', feet: +m[1], self: true };
   else if (out.save && typeof range === 'object' && /each creature (?:within range|other than you in that area)/i.test(t)) out.area = { shape: 'sphere', feet: range.feet, self: true };
   // ponytail: a bare "N-foot radius" is often light or an aura (Light), not an area of effect: only an explicit sphere or cylinder counts
-  if (out.save && mech?.area && !out.area && !out.burst) out.area = { shape: mech.area.shape, feet: mech.area.feet, self: true };
+  // …but not for a spell aimed at one creature (Lightning Lure's "one creature of your choice … within 15 feet of you")
+  const one = /\b(?:one|a) creature (?:of your choice )?(?:that you can see )?within \d+ feet of you\b/i.test(t);
+  if (out.save && mech?.area && !out.area && !out.burst && !one) out.area = { shape: mech.area.shape, feet: mech.area.feet, self: true };
+  // the blade cantrips: a weapon attack carries them, not a spell attack (Booming Blade, Green-Flame Blade)
+  // a range-Self or Touch spell aimed at one creature: an attack 5 ft in melee, else as far as the wording reaches ("within 30 feet of you",
+  // "has a range of 60 feet"); a save on one creature with no area the same (Lightning Lure, Eyebite)
+  const thrown = /\bwithin (\d+) feet of you\b|\b(?:with|has) a range of (\d+) feet\b/i.exec(t);
+  if ((range === 'self' || range === 'touch') && (out.attack || (out.save && !out.area && !out.burst))) {
+    const n = out.attack === 'melee' ? 5 : thrown ? +(thrown[1] ?? thrown[2]) : undefined;
+    if (n) out.reach = n;
+  }
+  if (/\bmake a melee attack with (?:it|a weapon|the weapon)\b/i.test(t)) { delete out.attack; delete out.reach; out.manual = 'Make the weapon attack, then apply its extra effect by hand.'; }
   // extra damage on weapon hits: hits on a marked target (Hex), every weapon hit (Divine Favor), or the next hit only (a smite)
   const ty = `(?:(${TYPES}) )?`, extra = new RegExp(`extra (\\d+d\\d+) ${ty}damage`, 'i');
   const marked = new RegExp(`extra (\\d+d\\d+) ${ty}damage to the target whenever you hit it`, 'i').exec(t);

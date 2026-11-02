@@ -21,7 +21,8 @@ export function reachOf(a: TurnAction): Reach | undefined {
     if (w.ranged) return r ? { normal: r[0], long: r[1] } : undefined;
     return { melee: w.properties.includes('reach') ? 10 : 5, ...(r && { normal: r[0], long: r[1] }) };
   }
-  const range = a.cast?.read.range;
+  const range = a.cast?.read.range, far = a.cast?.read.reach;
+  if (far !== undefined) return a.cast!.read.attack === 'melee' ? { melee: far } : { spell: far }; // a range-Self or Touch attack (Produce Flame)
   if (range) return range === 'self' ? 'self' : range === 'touch' ? { melee: 5 } : { spell: range.feet };
   if (a.group === 'monster' && a.text) {
     const t = richToPlain(a.text), reach = /reach (\d+) ft/i.exec(t), rng = /range (\d+)\/(\d+) ft/i.exec(t);

@@ -281,3 +281,33 @@ test('a save worded in the plural or as a failure still counts; one made with ad
   expect(sp('Any creature in the area is outlined in light if it fails a dexterity saving throw.').save).toBe('Dex');
   expect(sp('You make Constitution saving throws with advantage.').save).toBeUndefined();
 });
+
+// Every Spell, Task 2 (paraphrased wording): range-Self attacks reach, every upcast wording, areas of your choice.
+describe('ranges, upcasts and areas', () => {
+  const sp = (p: string, range = 'Self', higher?: string) => readSpell({ level: 1, range, text: [{ p }], ...(higher && { higherLevels: [{ p: higher }] }) } as unknown as SpellDef);
+  test('a range-Self attack reaches 5 ft in melee, or as far as it is thrown', () => {
+    expect(sp('Make a melee spell attack against a creature within your reach. On a hit, the target takes 3d6 necrotic damage.').reach).toBe(5);
+    expect(sp('You can hurl the flame at a creature within 30 feet of you. Make a ranged spell attack. On a hit, the target takes 1d8 fire damage.').reach).toBe(30);
+    expect(sp('You or someone else can make a ranged spell attack with a pebble by throwing it, with a range of 60 feet. On a hit, the target takes 1d6 bludgeoning damage.', 'Touch').reach).toBe(60);
+  });
+  test('upcasts with a comma, or as extra damage per slot level', () => {
+    expect(sp('The target must make a Dexterity saving throw or take 3d8 bludgeoning damage.', '60 feet', 'The damage increases by 1d8, for each slot level above 1st.').perSlot).toEqual({ dice: '1d8', above: 1, step: 1 });
+    expect(sp('Make a ranged spell attack. On a hit, the target takes 2d8 + 1d6 damage.', '120 feet', 'Each target takes 1d6 extra damage of the type rolled for each slot level above 1st.').perSlot).toEqual({ dice: '1d6', above: 1, step: 1 });
+  });
+  test('creatures of your choice around you are an area; one creature of your choice is not', () => {
+    expect(sp('Each creature of your choice that you can see within 5 feet of you must succeed on a Constitution saving throw or take 1d6 radiant damage.').area).toEqual({ shape: 'sphere', feet: 5, self: true });
+    const lure = readSpell({ level: 0, range: 'Self (15-foot radius)', text: [{ p: 'One creature of your choice that you can see within 15 feet of you must succeed on a Strength saving throw or take 1d8 lightning damage.' }],
+      mech: { save: ['strength'], area: { shape: 'sphere', feet: 15 } } } as unknown as SpellDef);
+    expect(lure.area).toBeUndefined();
+  });
+  test('a blade cantrip is a weapon attack: no spell attack, and it says what to do', () => {
+    const r = sp('You brandish the weapon used in the spell\'s casting and make a melee attack with it against one creature within 5 feet of you. On a hit, the target suffers the weapon attack\'s normal effects and then becomes sheathed in booming energy.');
+    expect([r.attack, r.manual]).toEqual([undefined, 'Make the weapon attack, then apply its extra effect by hand.']);
+  });
+});
+test('range Self: one creature within N feet saves at that reach; "has a range of"; a named line', () => {
+  const sp = (p: string, range = 'Self') => readSpell({ level: 1, range, text: [{ p }] } as unknown as SpellDef);
+  expect(sp('One creature of your choice that you can see within 15 feet of you must succeed on a Strength saving throw or take 1d8 lightning damage.').reach).toBe(15);
+  expect(sp('You can make a ranged spell attack with the pebble. If thrown, it has a range of 60 feet. On a hit, the target takes 1d6 bludgeoning damage.', 'Touch').reach).toBe(60);
+  expect(sp('A line of roaring flame 15 feet long and 5 feet wide extends from you. Each creature in the line must make a Dexterity saving throw, taking 4d8 fire damage on a failed save.').area).toEqual({ shape: 'line', feet: 15, width: 5, self: true });
+});

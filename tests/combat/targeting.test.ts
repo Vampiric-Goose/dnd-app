@@ -26,6 +26,10 @@ describe('targeting', () => {
     expect(reachOf(spell({ feet: 60 }))).toEqual({ spell: 60 });
     expect(reachOf(spell('touch'))).toEqual({ melee: 5 });
     expect(reachOf(spell('self'))).toBe('self');
+    // a range-Self or Touch spell attack reaches what its wording says (Every Spell, Task 2)
+    const att = (attack: 'melee' | 'ranged', reach: number): TurnAction => ({ id: 's', name: 'S', cost: 'action', group: 'spell', cast: { read: { damage: [], range: 'self', attack, reach } as never, charLevel: 1, mod: 3 } });
+    expect(reachOf(att('melee', 5))).toEqual({ melee: 5 });
+    expect(reachOf(att('ranged', 30))).toEqual({ spell: 30 });
     expect(reachOf(monster('Melee Weapon Attack: +4 to hit, reach 10 ft., one target. Hit: 5 (1d6 + 2) slashing damage.'))).toEqual({ melee: 10 });
     expect(reachOf(monster('Ranged Weapon Attack: +4 to hit, range 80/320 ft., one target. Hit: 5 (1d6 + 2) piercing damage.'))).toEqual({ normal: 80, long: 320 });
   });
