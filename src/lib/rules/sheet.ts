@@ -128,7 +128,8 @@ export function computeSheet(c: Character, opts: SheetOpts): Sheet {
   let base: number;
   if (armor) base = armor.ac + (armor.category === 'light' ? mods.dex : armor.category === 'medium' ? Math.min(mods.dex, armor.dexCap ?? Infinity) : 0);
   else base = Math.max(10 + mods.dex, ...ofType(effects, 'acBase').filter(b => !shield || b.effect.shieldAllowed).map(b => b.effect.base + (b.effect.abilities ?? []).reduce((t, a) => t + mods[a], 0)));
-  const ac = override('ac', base + (shield?.ac ?? 0) + itemBonus('ac') + bonus('ac'));
+  const acMin = Math.max(0, ...ofType(effects, 'acMin').map(b => b.effect.value)); // Barkskin: AC can't be less than 16
+  const ac = override('ac', Math.max(acMin, base + (shield?.ac ?? 0) + itemBonus('ac') + bonus('ac')));
 
   // HP and hit dice
   // Class-sourced HP bonuses count per level of that class; race/feat/item ones every level (R22).
@@ -138,7 +139,7 @@ export function computeSheet(c: Character, opts: SheetOpts): Sheet {
     const roll = i === 0 ? die : (c.build.levels[i].hpRoll ?? (die ? averageHp(die) : 0));
     const extra = hpPer.filter(b => !b.classId || b.classId === s.classId).reduce((n, b) => n + num(b.effect.value, b.classId), 0);
     return t + Math.max(1, roll + mods.con + extra);
-  }, 0));
+  }, 0) + bonus('hpMax')); // Aid
   const dice: Record<number, number> = {};
   for (const s of steps) if (s.cls) dice[s.cls.hitDie] = (dice[s.cls.hitDie] ?? 0) + 1;
   const hitDice = Object.entries(dice).map(([d, total]) => ({ die: Number(d), total })).sort((a, b) => b.die - a.die);

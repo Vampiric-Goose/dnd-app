@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { blankValues, buildEffect, EFFECT_FIELDS, EFFECT_LABEL, EFFECT_TYPES, PROFICIENCY_KEYS, type FieldValue } from '../lib/character/customEffect.ts';
+  import { blankValues, buildEffect, EFFECT_FIELDS, EFFECT_LABEL, EFFECT_TYPES, PROFICIENCY_KEYS, type CustomType, type FieldValue } from '../lib/character/customEffect.ts';
   import { ABILITIES } from '../lib/rules/constants.ts';
   import type { Effect } from '../lib/types.ts';
   import { ABILITY_NAMES, titleCase } from './creator/labels.ts';
@@ -7,7 +7,7 @@
   // The effect form shared by the sheet's custom effects and the item editor: pick a type, fill its fields, validate with buildEffect.
   let { onadd }: { onadd: (e: Effect) => void } = $props();
 
-  let type: Effect['type'] = $state(EFFECT_TYPES[0]);
+  let type: CustomType = $state(EFFECT_TYPES[0]);
   let values: Record<string, FieldValue> = $state(blankValues(EFFECT_TYPES[0]));
   let error = $state('');
 
@@ -19,7 +19,7 @@
     if (type === 'proficiency' && name === 'category') values.value = PROFICIENCY_KEYS[v]?.[0] ?? '';
   }
 
-  function pick(t: Effect['type']) {
+  function pick(t: CustomType) {
     type = t;
     values = blankValues(t);
     error = '';
@@ -42,7 +42,7 @@
 <form onsubmit={add}>
   <div class="field">
     <label for="ce-type">Type</label>
-    <select id="ce-type" value={type} onchange={(e) => pick(e.currentTarget.value as Effect['type'])}>
+    <select id="ce-type" value={type} onchange={(e) => pick(e.currentTarget.value as CustomType)}>
       {#each EFFECT_TYPES as t (t)}<option value={t}>{EFFECT_LABEL[t]}</option>{/each}
     </select>
   </div>

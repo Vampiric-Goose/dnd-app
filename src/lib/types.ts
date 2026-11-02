@@ -10,11 +10,14 @@ export type Block = { p: string } | { list: string[] } | { table: { caption?: st
 export type RichText = Block[]; // inline marks: **bold**, *italic*, {{redact:ID}}…{{/redact}}
 export type Speeds = { walk: number; fly?: number; swim?: number; climb?: number; burrow?: number };
 export type Recharge = 'short' | 'long' | 'dawn' | 'dusk' | 'none';
-export type BonusTarget = 'ac' | 'initiative' | 'hpPerLevel' | 'save.all' | `save.${Ability}` | `check.${Ability}` | `skill.${Skill}` | 'attack.melee' | 'attack.ranged' | 'attack.spell' | 'damage.melee' | 'damage.ranged' | 'spellDc' | 'passive.perception';
+export type BonusTarget = 'ac' | 'initiative' | 'hpPerLevel' | 'hpMax' | 'save.all' | `save.${Ability}` | `check.${Ability}` | `skill.${Skill}` | 'attack.melee' | 'attack.ranged' | 'attack.spell' | 'damage.melee' | 'damage.ranged' | 'spellDc' | 'passive.perception';
 export type When = 'armored' | 'unarmored' | 'notHeavy' | 'noShield';
 export type Effect =
   | { type: 'bonus'; target: BonusTarget; value: number | string /* formula, Task 6 */; when?: When }
   | { type: 'acBase'; base: number; abilities: Ability[]; shieldAllowed: boolean }
+  | { type: 'acMin'; value: number } // AC can't be less (Barkskin)
+  | { type: 'rollDice'; on: 'attack' | 'save' | 'check'; dice: string /* '1d4', '-1d4' */ } // Bless, Bane, Guidance
+  | { type: 'edge'; on: 'attacksBy' | 'attacksAgainst' | `save.${Ability}`; mode: 'adv' | 'dis' } // Faerie Fire, Blur, Haste's Dex saves
   | { type: 'setScore'; ability: Ability; value: number }
   | { type: 'proficiency'; category: 'skill' | 'save' | 'tool' | 'weapon' | 'armor' | 'language'; value: string }
   | { type: 'expertise'; skill: Skill }

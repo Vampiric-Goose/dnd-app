@@ -55,8 +55,27 @@ export const CONDITIONS = [
  * Spells kept on a character as a condition of their own name, and what they do to its sheet while it holds it (mechanics only, by name;
  * the user's ruling, 11-02). Casting one puts it on the caster; the sheet's chips toggle it; a long rest ends it (each lasts 8 hours or less).
  */
+const ALL_SAVES = (mode: 'adv' | 'dis'): Effect[] => ABILITIES.map((a) => ({ type: 'edge', on: `save.${a}`, mode }));
+const resist = (...types: string[]): Effect[] => types.map((damageType) => ({ type: 'damage', kind: 'resistance', damageType }));
 export const SPELL_EFFECTS: Record<string, Effect[]> = {
   'Mage Armor': [{ type: 'acBase', base: 13, abilities: ['dex'], shieldAllowed: true }], // ends if the target dons armor: worn armor wins (sheet.ts)
+  Shield: [{ type: 'bonus', target: 'ac', value: 5 }],
+  'Shield of Faith': [{ type: 'bonus', target: 'ac', value: 2 }],
+  Haste: [{ type: 'bonus', target: 'ac', value: 2 }, { type: 'edge', on: 'save.dex', mode: 'adv' }], // doubled speed and the action: combat.ts
+  Barkskin: [{ type: 'acMin', value: 16 }],
+  Bless: [{ type: 'rollDice', on: 'attack', dice: '1d4' }, { type: 'rollDice', on: 'save', dice: '1d4' }],
+  Bane: [{ type: 'rollDice', on: 'attack', dice: '-1d4' }, { type: 'rollDice', on: 'save', dice: '-1d4' }],
+  Guidance: [{ type: 'rollDice', on: 'check', dice: '1d4' }],
+  Resistance: [{ type: 'rollDice', on: 'save', dice: '1d4' }],
+  'Faerie Fire': [{ type: 'edge', on: 'attacksAgainst', mode: 'adv' }],
+  Blur: [{ type: 'edge', on: 'attacksAgainst', mode: 'dis' }],
+  Stoneskin: resist('bludgeoning, piercing, and slashing from nonmagical attacks'),
+  'Blade Ward': resist('bludgeoning', 'piercing', 'slashing'), // ponytail: from weapon attacks in the book; any of those types here
+  Longstrider: [{ type: 'speed', mode: 'walk', value: 10 }],
+  Aid: [{ type: 'bonus', target: 'hpMax', value: 5 }], // ponytail: the 2nd-level amount; higher slots add 5 more each (by hand)
+  Foresight: [{ type: 'edge', on: 'attacksBy', mode: 'adv' }, { type: 'edge', on: 'attacksAgainst', mode: 'dis' }, ...ALL_SAVES('adv')],
+  'Holy Aura': [{ type: 'edge', on: 'attacksAgainst', mode: 'dis' }, ...ALL_SAVES('adv')],
+  ...Object.fromEntries(['acid', 'cold', 'fire', 'lightning', 'thunder'].map((t) => [`Protection from Energy (${t})`, resist(t)])),
 };
 
 export const ATTUNEMENT_LIMIT = 3;

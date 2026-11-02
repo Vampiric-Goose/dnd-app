@@ -421,7 +421,7 @@ export class Host {
       },
       info: async (z): Promise<TargetInfo> => {
         const pc = z.characterId ? chars.find((c) => c.id === z.characterId) : undefined;
-        return pc ? targetOf(z, { sheet: computeSheet(pc, { settings: camp.settings, viewer: 'dm' }), hp: pc.state.hp }) : targetOf(z, { monster: z.monsterId ? await this.#deps.loadMonster?.(z.monsterId) : undefined });
+        return pc ? targetOf(z, { sheet: computeSheet(pc, { settings: camp.settings, viewer: 'dm' }), hp: pc.state.hp, conditions: pc.state.conditions }) : targetOf(z, { monster: z.monsterId ? await this.#deps.loadMonster?.(z.monsterId) : undefined });
       },
       nameOf: (z) => (z.characterId ? chars.find((c) => c.id === z.characterId)?.name : undefined) ?? z.name,
       conditionsOf: (z) => (z.characterId ? chars.find((c) => c.id === z.characterId)?.state.conditions : undefined) ?? z.conditions ?? [],

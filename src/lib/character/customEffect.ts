@@ -11,15 +11,17 @@ export type FieldValue = string | boolean | string[];
 
 const SKILLS = Object.keys(SKILL_ABILITY) as Skill[];
 const BONUS_TARGETS: BonusTarget[] = [
-  'ac', 'initiative', 'hpPerLevel', 'save.all',
+  'ac', 'initiative', 'hpPerLevel', 'hpMax', 'save.all',
   ...ABILITIES.map((a) => `save.${a}` as const), ...ABILITIES.map((a) => `check.${a}` as const), ...SKILLS.map((s) => `skill.${s}` as const),
   'attack.melee', 'attack.ranged', 'attack.spell', 'damage.melee', 'damage.ranged', 'spellDc', 'passive.perception',
 ];
 const WHEN = ['armored', 'unarmored', 'notHeavy', 'noShield'];
 const RECHARGE = ['short', 'long', 'dawn', 'dusk', 'none'];
 
-// Keyed by the Effect union, so adding an effect type without a form fails the type check.
-export const EFFECT_FIELDS: Record<Effect['type'], Field[]> = {
+// Keyed by the Effect union, so adding an effect type without a form fails the type check. Dice on rolls and advantage are spell-only
+// (SPELL_EFFECTS, read in a fight), so a sheet's custom effect doesn't offer them.
+export type CustomType = Exclude<Effect['type'], 'rollDice' | 'edge'>;
+export const EFFECT_FIELDS: Record<CustomType, Field[]> = {
   bonus: [
     { name: 'target', label: 'Applies to', kind: 'select', options: BONUS_TARGETS },
     { name: 'value', label: 'Bonus (number or formula)', kind: 'formula' },
@@ -30,6 +32,7 @@ export const EFFECT_FIELDS: Record<Effect['type'], Field[]> = {
     { name: 'abilities', label: 'Add modifiers', kind: 'abilities' },
     { name: 'shieldAllowed', label: 'A shield still counts', kind: 'check' },
   ],
+  acMin: [{ name: 'value', label: 'Lowest AC (it can’t be lower)', kind: 'integer' }],
   setScore: [
     { name: 'ability', label: 'Ability', kind: 'select', options: ABILITIES },
     { name: 'value', label: 'Score (raises to at least this)', kind: 'integer' },
@@ -64,13 +67,13 @@ export const EFFECT_FIELDS: Record<Effect['type'], Field[]> = {
   flag: [{ name: 'flag', label: 'Flag', kind: 'select', options: ['ignoreHeavyArmorSpeed', 'martialArts'] }],
   note: [{ name: 'text', label: 'Note', kind: 'longtext' }],
 };
-export const EFFECT_TYPES = Object.keys(EFFECT_FIELDS) as Effect['type'][];
+export const EFFECT_TYPES = Object.keys(EFFECT_FIELDS) as CustomType[];
 
 /** Proficiency categories whose value must be a skill slug or an ability key (the sheet matches them exactly), so the form offers a select. */
 export const PROFICIENCY_KEYS: Record<string, readonly string[]> = { skill: SKILLS, save: ABILITIES };
 
 /** The form's starting values: first option of each select, empty elsewhere. */
-export const blankValues = (type: Effect['type']): Record<string, FieldValue> => ({
+export const blankValues = (type: CustomType): Record<string, FieldValue> => ({
   ...Object.fromEntries(EFFECT_FIELDS[type].map((f) => [f.name, f.kind === 'check' ? false : f.kind === 'abilities' ? [] : f.kind === 'select' && !f.optional ? f.options![0] : ''])),
   ...(type === 'proficiency' && { value: SKILLS[0] }), // the default category is skill
 });
@@ -79,7 +82,7 @@ const ABILITY_KEY: Record<string, string> = { strength: 'str', dexterity: 'dex',
 const ZERO = Object.fromEntries(ABILITIES.map((a) => [a, 0])) as Record<Ability, number>;
 
 /** Validates the form values for one effect type and builds the Effect, or says what is wrong. */
-export function buildEffect(type: Effect['type'], values: Record<string, FieldValue>): { effect: Effect } | { error: string } {
+export function buildEffect(type: CustomType, values: Record<string, FieldValue>): { effect: Effect } | { error: string } {
   const out: Record<string, unknown> = { type };
   for (const f of EFFECT_FIELDS[type]) {
     const raw = values[f.name];
@@ -126,7 +129,7 @@ export function effectOk(e: unknown): e is Effect {
   if (typeof e !== 'object' || e === null || Array.isArray(e)) return false;
   const r = e as Record<string, unknown>;
   if (typeof r.type !== 'string' || !Object.hasOwn(EFFECT_FIELDS, r.type)) return false;
-  return EFFECT_FIELDS[r.type as Effect['type']].every((f) => {
+  return EFFECT_FIELDS[r.type as CustomType].every((f) => {
     const v = r[f.name];
     if (v === undefined) return !!f.optional || f.kind === 'check';
     switch (f.kind) {
@@ -144,7 +147,7 @@ export function effectOk(e: unknown): e is Effect {
 export const describeEffect = (e: Effect): string =>
   `${e.type}: ${Object.entries(e).filter(([k]) => k !== 'type').map(([k, v]) => `${k} ${Array.isArray(v) ? v.join('/') || 'none' : v}`).join(', ')}`;
 
-export const EFFECT_LABEL: Record<Effect['type'], string> = {
-  bonus: 'Bonus', acBase: 'Base armor class', setScore: 'Ability score', proficiency: 'Proficiency', expertise: 'Expertise', halfProficiency: 'Half proficiency',
+export const EFFECT_LABEL: Record<CustomType, string> = {
+  bonus: 'Bonus', acBase: 'Base armor class', acMin: 'Lowest armor class', setScore: 'Ability score', proficiency: 'Proficiency', expertise: 'Expertise', halfProficiency: 'Half proficiency',
   damage: 'Resistance, immunity or vulnerability', speed: 'Speed', resource: 'Resource with uses', resourceRecharge: 'Resource recharge change', flag: 'Special rule', note: 'Note',
 };

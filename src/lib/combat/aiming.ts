@@ -8,6 +8,7 @@ import type { Ability, Area, Character, Combat, Combatant, Grid, Resolution, Sce
 import { combatantForToken } from './movement.ts';
 import { checkFaces, keptD20, resolveAttack, resolveSpell, type Outcome, type TargetInfo } from './resolve.ts';
 import { diceAt, type SpellRead } from './spellText.ts';
+import { rollSpellDice, spellMods } from './spellEffects.ts';
 import { attackEdge, attackToggles, canTarget, combineMode, monsterAttack, reachOf, type Pickable, type Reach, type Sides, type Toggle } from './targeting.ts';
 import type { TurnAction } from './turnActions.ts';
 
@@ -215,15 +216,21 @@ export async function workOut(i: WorkIn): Promise<Aimed | string> {
   if (plan.attack && (!rolled.d20?.length || (rolled.mode && rolled.d20.length < 2))) return 'bad d20';
   const autoCrit = !!(pick?.ok && pick.autoCrit);
   const why = rolled.mode ? `${rolled.mode === 'adv' ? 'advantage' : 'disadvantage'}: ${(rolled.mode === 'adv' ? edge.adv : edge.dis).join(', ') || 'chosen'}` : undefined;
-  const withWhy = (o: Outcome): Outcome => (why && o.roll !== undefined ? { ...o, edge: why } : o);
+  // the attacker's spells add dice to its attack roll (Bless, Bane), rolled on this device and noted with the result
+  const blessed = plan.attack ? rollSpellDice(spellMods(cond(actor)), 'attack', i.rng) : { total: 0 };
+  const toHit = plan.toHit === undefined ? undefined : plan.toHit + blessed.total;
+  const withWhy = (o: Outcome): Outcome => {
+    const e = why && o.roll !== undefined ? { ...o, edge: why } : o;
+    return blessed.note && o.roll !== undefined ? { ...e, note: [e.note, blessed.note].filter(Boolean).join(', ') } : e;
+  };
   const crit = plan.attack && (keptD20(rolled) === 20 || autoCrit); // a critical's dice come doubled
   const base = { id: i.id, actor: actor.id, action: a.name, at: i.now, round: k.round, ...(i.level !== undefined && plan.read?.leap && { slot: i.level }),
     ...(a.spell?.concentration && !i.leapFrom && { cast: (actor.concentrationCount ?? 0) + 1 }) }; // worked out before it is paid for
   if (!plan.read) { // a weapon or a monster's attack
     const bad = checkFaces(plan.dice.map((d) => ({ expr: d.expr, crit })), rolled);
     if (bad) return bad;
-    const o = resolveAttack(await i.info(target!), plan.toHit ?? 0, plan.dice, rolled, i.magical, autoCrit);
-    return { resolution: { ...base, outcomes: [withWhy(o)], ...(o.hit && actor.rider?.once && { spent: true as const }) }, outcome: { action: a.name, hit: !!o.hit } };
+    const o = withWhy(resolveAttack(await i.info(target!), toHit ?? 0, plan.dice, rolled, i.magical, autoCrit));
+    return { resolution: { ...base, outcomes: [o], ...(o.hit && actor.rider?.once && { spent: true as const }) }, outcome: { action: a.name, hit: !!o.hit } };
   }
   const read = plan.read, area = plan.area;
   if (plan.mark && read.rider) { // Hex: the mark, and a condition named after the spell on it
@@ -240,7 +247,7 @@ export async function workOut(i: WorkIn): Promise<Aimed | string> {
     .map((id) => combatantForToken(k, s.tokens.find((t) => t.id === id)!)).filter((z): z is Combatant => !!z && !(area?.on === 'self' && z.id === actor.id)) : [];
   const bad = checkFaces(plan.dice.map((d) => ({ expr: d.expr, crit: crit && d.on !== 'save' })), rolled);
   if (bad) return bad;
-  const outcomes = resolveSpell(read, plan.dice, a.cast!.dc, plan.toHit, target && await i.info(target), await Promise.all(caught.map(i.info)), rolled, i.rng, autoCrit, actor.kind === 'pc');
+  const outcomes = resolveSpell(read, plan.dice, a.cast!.dc, toHit, target && await i.info(target), await Promise.all(caught.map(i.info)), rolled, i.rng, autoCrit, actor.kind === 'pc');
   const hit = outcomes.find((o) => o.part === 'hit')?.hit;
   // a lasting spell's effect also leaves a condition named after the spell (the user's standard: Hold Monster, Hex, Haste)
   const lasts = !!(a.spell?.concentration || read.rounds);

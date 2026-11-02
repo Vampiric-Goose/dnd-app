@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 import { DEFAULT_GRID } from '../../src/lib/map/scene.ts';
 import { DEFAULT_SETTINGS } from '../../src/lib/settings.ts';
 import { cleanOutcome, cleanSettings, cleanTracker } from '../../src/lib/sync/guest.ts';
@@ -107,6 +107,17 @@ describe('targeting over sync', () => {
     expect(JSON.stringify(a.got)).not.toMatch(/"ac"/);
     expect(d.combat!.resolutions).toHaveLength(1);
     expect(d.combat!.resolutions![0].undo?.before.combatants['pc:thorin'].economy?.used ?? 0).toBe(0); // taken before paying: Undo gives the Action back
+  });
+
+  test('Every Spell, Review Focus 1: Bless on a player\'s character adds its d4 to the attack the player sends', async () => {
+    const { d, host, a } = await joined();
+    d.edit({ ...thorin(), state: { ...thorin().state, conditions: ['Bless'] } });
+    vi.spyOn(Math, 'random').mockReturnValue(0.99); // the d4 shows 4, rolled on the DM's device
+    a.deliver(strike(aliasOf(a, 'Goblin 1'), [9], [[]])); // 9 + 5 = 14 misses AC 15; + 4 hits
+    await settle(host);
+    vi.restoreAllMocks();
+    expect(outcomes(a)).toEqual([{ t: 'outcome', action: 'Unarmed Strike', hit: true }]);
+    expect(d.combat!.resolutions![0].outcomes[0].note).toMatch(/Bless \+4/);
   });
 
   test('Review Focus 5: a player whose device left out the rider\'s dice is refused; with them, the hit carries the extra damage', async () => {

@@ -35,7 +35,7 @@ test('setAt fills holes with zero', () => {
 });
 
 test('custom effect form: every type has fields, and each builds a valid Effect', () => {
-  expect(EFFECT_TYPES.length).toBe(12);
+  expect(EFFECT_TYPES.length).toBe(13);
   for (const t of EFFECT_TYPES) expect(EFFECT_FIELDS[t].length).toBeGreaterThan(0);
   // Defaults alone build for types that need no typing
   expect(buildEffect('flag', blankValues('flag'))).toEqual({ effect: { type: 'flag', flag: 'ignoreHeavyArmorSpeed' } });

@@ -5,6 +5,7 @@ import { db, DeletedError } from '../db.ts';
 import { computeSheet } from '../rules/sheet.ts';
 import type { Applied, CampaignSettings, Character, Combat, Combatant, Duration, Encounter, MonsterDef, Outcome, Resolution, Scene, Snap } from '../types.ts';
 import { settle } from './resolve.ts';
+import { rollSpellDice, spellMods } from './spellEffects.ts';
 import { castLive, endedSpells, snapOf, touched } from './aiming.ts';
 import { canon } from '../sync/merge.ts';
 import { uid } from '../uid.ts';
@@ -309,7 +310,8 @@ export async function settleSave(cid: string, rid: string, target: string, d20: 
   const ch = x?.characterId ? await db.characters.get(x.characterId) : undefined;
   if (!r || r.dc === undefined || !ch) return undefined;
   const sheet = computeSheet(ch, { settings, viewer: 'dm' });
-  const total = d20 + sheet.saves[r.ability ?? 'dex'].bonus, ok = total >= r.dc;
+  const extra = rollSpellDice(spellMods(ch.state.conditions), 'save', Math.random); // Bless, Bane: rolled here, on the DM's device
+  const total = d20 + sheet.saves[r.ability ?? 'dex'].bonus + extra.total, ok = total >= r.dc;
   let owed: Outcome['owed'], lost: string[] = [], freed: string[] = [];
   await serial(() => update(cid, (c) => ({ ...c, resolutions: (c.resolutions ?? []).map((y) => y.id !== rid ? y : { ...y, outcomes: y.outcomes.map((o) => {
     if (o.id !== target || !o.pending) return o;

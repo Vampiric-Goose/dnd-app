@@ -5,6 +5,7 @@ import { richToPlain } from '../content/richtext.ts';
 import { rollParts } from '../monsters/library.ts';
 import type { CampaignSettings } from '../types.ts';
 import type { TurnAction } from './turnActions.ts';
+import { spellEdges, spellMods } from './spellEffects.ts';
 
 /** The DM's Targeting setting: on unless turned off, so campaigns made before it exist are on too. */
 export const targetingOn = (s: CampaignSettings): boolean => s.targeting !== false;
@@ -69,6 +70,8 @@ export function attackEdge(s: Sides): { adv: string[]; dis: string[]; autoCrit: 
   if (hasCondition(s.target, 'prone')) (s.within5 ? adv : dis).push(`target is prone (${s.within5 ? 'within' : 'beyond'} 5 ft)`);
   if (hasCondition(s.target, 'invisible')) dis.push('target is invisible');
   if (s.dodging) dis.push('target is dodging');
+  // spells they hold (Faerie Fire, Blur, Foresight)
+  for (const e of [...spellEdges(spellMods(s.attacker), 'attacksBy', 'you have'), ...spellEdges(spellMods(s.target), 'attacksAgainst', 'target has')]) (e.mode === 'adv' ? adv : dis).push(e.why);
   return { adv, dis, autoCrit: s.within5 && (hasCondition(s.target, 'paralyzed') || hasCondition(s.target, 'unconscious')) };
 }
 

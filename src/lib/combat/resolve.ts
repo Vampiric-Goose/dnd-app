@@ -7,8 +7,9 @@ import type { Ability, Combatant, MonsterDef, Outcome, Sheet } from '../types.ts
 export type { Outcome };
 import type { SpellRead } from './spellText.ts';
 import { afterDefenses, type Defenses } from './targeting.ts';
+import { rollSpellDice, spellEdges, spellMods } from './spellEffects.ts';
 
-export interface TargetInfo { id: string; ac: number; save: Record<Ability, number>; defenses: Defenses; pc: boolean; hidden: boolean; conditionImmune?: string[]; /** missing any hit points (Toll the Dead) */ hurt?: boolean }
+export interface TargetInfo { id: string; ac: number; save: Record<Ability, number>; defenses: Defenses; pc: boolean; hidden: boolean; conditionImmune?: string[]; /** missing any hit points (Toll the Dead) */ hurt?: boolean; /** what it holds, for its spells' save dice and advantage */ conditions?: string[] }
 type Die = { expr: string; type: string; on?: 'hit' | 'save'; vs?: string; part?: 'alt' | 'later' };
 /** A list's alternatives (Toll the Dead): for a hurt target each `alt` replaces the part before it, else alternatives drop. */
 const pickAlt = <T extends Pick<Die, 'part'>>(list: T[], hurt?: boolean): T[] =>
@@ -132,8 +133,13 @@ export function resolveSpell(read: SpellRead, dice: Die[], dc: number | undefine
     const would = lose(t);
     const owed = owedBy(t);
     if (t.pc) { out.push({ id: t.id, part: 'save', pending: true, damage: 0, owed, ...(would.length && { inflicts: would }) }); continue; }
-    const roll = 1 + Math.floor(rng() * 20), total = roll + t.save[ability], ok = total >= dc;
-    out.push({ id: t.id, part: 'save', save: { roll, total, ok }, ...settle(t, owed, ok, read.onSave), ...(!ok && would.length && { inflict: would }) });
+    // its spells: advantage or disadvantage on this save (Haste on Dex), dice added (Bless, Bane), both on this device
+    const sp = spellMods(t.conditions ?? []), modes = new Set(spellEdges(sp, `save.${ability}`, 'target has').map((e) => e.mode));
+    const d1 = 1 + Math.floor(rng() * 20), d2 = modes.size === 1 ? 1 + Math.floor(rng() * 20) : d1;
+    const roll = modes.has('adv') && !modes.has('dis') ? Math.max(d1, d2) : modes.has('dis') && !modes.has('adv') ? Math.min(d1, d2) : d1;
+    const extra = rollSpellDice(sp, 'save', rng), total = roll + t.save[ability] + extra.total, ok = total >= dc;
+    const s = settle(t, owed, ok, read.onSave), note = [s.note, extra.note].filter(Boolean).join(', ');
+    out.push({ id: t.id, part: 'save', save: { roll, total, ok }, ...s, ...(note && { note }), ...(!ok && would.length && { inflict: would }) });
   }
   return out;
 }
@@ -152,15 +158,16 @@ export function settle(t: Pick<TargetInfo, 'defenses'> & { pc?: boolean }, owed:
 
 const mod = (score: number) => Math.floor((score - 10) / 2);
 /** A combatant as a target: a monster's AC, saves (printed, else its ability modifier) and defenses; a PC's from its sheet. */
-export function targetOf(x: Combatant, o: { monster?: MonsterDef; sheet?: Sheet; /** a PC's current HP (its character's) */ hp?: number }): TargetInfo {
+export function targetOf(x: Combatant, o: { monster?: MonsterDef; sheet?: Sheet; /** a PC's current HP and conditions (its character's) */ hp?: number; conditions?: string[] }): TargetInfo {
   const keys: Ability[] = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
-  if (o.sheet) {
+  if (o.sheet) { // the sheet already holds what its spells do to AC and defenses (rules/effects.ts)
     const s = o.sheet;
     return { id: x.id, ac: s.ac, pc: true, hidden: !!x.hidden, ...(o.hp !== undefined && o.hp < s.maxHp && { hurt: true }), save: Object.fromEntries(keys.map((k) => [k, s.saves[k].bonus])) as Record<Ability, number>,
-      defenses: { resist: s.resistances, immune: s.immunities, vulnerable: s.vulnerabilities } };
+      defenses: { resist: s.resistances, immune: s.immunities, vulnerable: s.vulnerabilities }, ...(o.conditions?.length && { conditions: o.conditions }) };
   }
-  const m = o.monster;
-  return { id: x.id, ac: x.ac ?? m?.ac[0]?.value ?? 10, pc: false, hidden: !!x.hidden, ...(x.hp !== undefined && x.maxHp !== undefined && x.hp < x.maxHp && { hurt: true }),
+  const m = o.monster, sp = spellMods(x.conditions ?? []); // a monster's spells (Shield, Stoneskin) on top of its stat block
+  return { id: x.id, ac: Math.max(sp.acMin ?? 0, (x.ac ?? m?.ac[0]?.value ?? 10) + sp.ac), pc: false, hidden: !!x.hidden, ...(x.hp !== undefined && x.maxHp !== undefined && x.hp < x.maxHp && { hurt: true }),
     save: Object.fromEntries(keys.map((k) => [k, m?.saves[k] ?? (m ? mod(m.scores[k]) : 0)])) as Record<Ability, number>,
-    defenses: { resist: m?.resist ?? [], immune: m?.immune ?? [], vulnerable: m?.vulnerable ?? [] }, conditionImmune: m?.conditionImmune ?? [] };
+    defenses: { resist: [...(m?.resist ?? []), ...sp.resist], immune: [...(m?.immune ?? []), ...sp.immune], vulnerable: m?.vulnerable ?? [] }, conditionImmune: m?.conditionImmune ?? [],
+    ...(x.conditions?.length && { conditions: x.conditions }) };
 }
