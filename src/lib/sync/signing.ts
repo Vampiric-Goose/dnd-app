@@ -4,7 +4,9 @@
 const ALG = { name: 'ECDSA', namedCurve: 'P-256' } as const, SIG = { name: 'ECDSA', hash: 'SHA-256' } as const;
 
 /** The public halves (base64 SPKI) whose signed books win over a DM's copy. */
-export const TRUSTED_KEYS: readonly string[] = [];
+export const TRUSTED_KEYS: readonly string[] = [
+  'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEgCjR5Sp8MbP5xm9MgHKhaKp3roCkGu0tO9DNsTsvPV4iO4URIn85Vfu9TrrFIbfGQgLLHR05HAZwyG1UaFutWA==', // the app's owner
+];
 
 const b64 = (b: ArrayBuffer) => btoa(String.fromCharCode(...new Uint8Array(b)));
 const unb64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
