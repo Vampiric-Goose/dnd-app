@@ -83,6 +83,23 @@ describe('workOut on the DM\'s map', () => {
       conditionsOf: (z) => (z.id === 'pc:mira' ? ['Paralyzed'] : []) });
     expect(r).toMatchObject({ resolution: { outcomes: [{ id: 'pc:mira', hit: true, damage: 12 }] } });
   });
+  test('a chosen damage type: needed before it is worked out, and it is the type the target\'s defenses see', async () => {
+    const orb = spell({ attack: 'ranged', damage: [{ dice: '3d8', type: '' }], choices: ['acid', 'fire'] });
+    expect(aimPlan(orb)).toMatchObject({ choices: ['acid', 'fire'], dice: [{ type: '' }] });
+    expect(aimPlan(orb, { dtype: 'fire' })).toMatchObject({ dice: [{ type: 'fire' }] });
+    expect(aimPlan(orb, { dtype: 'cold' })).toMatchObject({ dice: [{ type: '' }] });
+    const at = (dtype?: string) => ({ ...base(orb, { d20: [18, 18], dmg: [[4, 4, 4]] }), aim: { target: 'pc:thorin', rolled: { d20: [18, 18], dmg: [[4, 4, 4]] }, toggles: [], ...(dtype && { dtype }) },
+      info: (z: Combatant) => ({ ...targetOf(z, {}), ac: 14, defenses: { resist: ['fire'], immune: [], vulnerable: [] } }) });
+    expect(await workOut(at())).toBe('pick a damage type');
+    expect(await workOut(at('fire'))).toMatchObject({ resolution: { outcomes: [{ hit: true, damage: 6 }] } });
+    expect(await workOut(at('acid'))).toMatchObject({ resolution: { outcomes: [{ hit: true, damage: 12 }] } });
+  });
+  test('darts that always hit: no d20, all the damage to the one target', async () => {
+    const darts = spell({ auto: { count: 3, above: 1 }, damage: [{ dice: '1d4+1', type: 'force' }] });
+    expect(aimPlan(darts)).toMatchObject({ attack: false, dice: [{ expr: '3d4+3' }] });
+    const r = await workOut(base(darts, { dmg: [[1, 2, 3]] }));
+    expect(r).toMatchObject({ resolution: { outcomes: [{ id: 'pc:thorin', part: 'hit', hit: true, damage: 9 }] }, outcome: { hit: true } });
+  });
   test('a ranged spell attack gets the close-combat disadvantage too', async () => {
     const r = await workOut(base(spell({ attack: 'ranged', damage: [{ dice: '1d10', type: 'fire' }] }), { d20: [19, 3], dmg: [[5]] }));
     expect(r).toMatchObject({ resolution: { outcomes: [{ hit: false, roll: 8 }] } });

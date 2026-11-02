@@ -67,6 +67,46 @@ describe('reading a spell (the interpreter)', () => {
   });
 });
 
+// More wording, from paraphrased fixtures: areas around the caster named by distance, damage whose type is chosen, darts that always hit.
+const fix = (range: string, p: string, h?: string) => ({ level: 1, range, text: [{ p }], ...(h && { higherLevels: [{ p: h }] }) }) as unknown as SpellDef;
+describe('reading a spell: wording without a named shape', () => {
+  test('a save against every creature within N feet of you is a burst around the caster; an aura with no save is not', () => {
+    expect(readSpell(fix('Self (10-foot radius)', 'Shadows lash all creatures within 10 feet of you. Each one must make a Strength saving throw or take 2d6 necrotic damage.')).area)
+      .toEqual({ shape: 'sphere', feet: 10, self: true });
+    expect(readSpell(fix('Self', 'Each creature you choose within 30 feet of you must succeed on a Constitution saving throw or take 5d6 thunder damage.')).area)
+      .toEqual({ shape: 'sphere', feet: 30, self: true });
+    expect(readSpell(fix('Self (30-foot radius)', 'Each friendly creature within 30 feet of you deals an extra 1d4 radiant damage when it hits.')).area).toBeUndefined();
+  });
+  test('"each creature within range" bursts from the caster as far as the range', () => {
+    expect(readSpell(fix('5 feet', 'A loud crack. Each creature within range, other than you, must make a Constitution saving throw or take 1d6 thunder damage.')).area)
+      .toEqual({ shape: 'sphere', feet: 5, self: true });
+  });
+  test('a beam given as "W-foot-wide, L-foot-long line"', () => {
+    expect(readSpell(fix('Self (60-foot line)', 'Light streams from you in a 5-foot-wide, 60-foot-long line. Each creature in the line must make a Constitution saving throw or take 6d8 radiant damage.')).area)
+      .toEqual({ shape: 'line', feet: 60, width: 5, self: true });
+  });
+  test('damage of a type picked from those the spell names; extra damage that only rides on later hits is not read', () => {
+    const orb = readSpell(fix('90 feet', 'Pick acid, cold or fire for the orb, then make a ranged spell attack. On a hit, the target takes 3d8 damage of the type you picked.'));
+    expect(orb).toMatchObject({ damage: [{ dice: '3d8', type: '' }], choices: ['acid', 'cold', 'fire'] });
+    const bolt = readSpell(fix('120 feet', 'Make a ranged spell attack. On a hit, the target takes 2d8 + 1d6 damage. One of the d8s sets the type:\n1 | Acid\n2 | Force\n3 | Thunder'));
+    expect(bolt).toMatchObject({ damage: [{ dice: '2d8+1d6', type: '' }], choices: ['acid', 'force', 'thunder'] });
+    expect(readSpell(fix('90 feet', 'The target must make a Constitution saving throw. Until the spell ends, it takes an extra 2d6 damage of the type you chose when hit.')).damage).toEqual([]);
+    // one type word is no list to pick from (here it is the verb "fire"): every type is offered
+    expect(readSpell(fix('Self (60-foot cone)', 'You fire a hail of arrows in a 60-foot cone. Each creature there makes a Dexterity saving throw and takes 3d8 damage of the ammunition\'s type on a failure.')).choices).toHaveLength(13);
+  });
+  test('"X or Y damage (your choice)" offers just those two', () => {
+    const r = readSpell(fix('Self', 'Each creature you choose within 30 feet of you must succeed on a Constitution saving throw or take 5d6 thunder damage and 5d6 radiant or necrotic damage (your choice).'));
+    expect(r).toMatchObject({ damage: [{ dice: '5d6', type: 'thunder' }, { dice: '5d6', type: '' }], choices: ['radiant', 'necrotic'] });
+  });
+  test('darts that always hit: one more a slot level up, all of them at the one target', () => {
+    const r = readSpell(fix('120 feet', 'You conjure three darts of force. Each dart hits a creature you choose within range, dealing 1d4 + 1 force damage.', 'One more dart for each slot level above 1st.'));
+    expect(r.auto).toEqual({ count: 3, above: 1 });
+    expect(diceAt(r, { slot: 1, level: 1 }).damage).toEqual(['3d4+3 force']);
+    expect(diceAt(r, { slot: 3, level: 1 }).damage).toEqual(['5d4+5 force']);
+    expect(readSpell(spell('Magic Missile')).auto).toEqual({ count: 3, above: 1 });
+  });
+});
+
 const wizardWith = (names: string[], armor?: 'heavy'): { c: Character; sheet: Sheet } => {
   const spells = names.map(spell);
   const c = {

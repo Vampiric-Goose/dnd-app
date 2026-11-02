@@ -89,14 +89,16 @@ const ints = (v: unknown, max: number, lo: number, hi: number): v is number[] =>
 /** An aim rebuilt from its known fields, or null when malformed. Whether the dice fit the action is the host's check (resolve.ts). */
 function cleanAim(a: unknown): Aim | null {
   if (!isRec(a) || !isRec(a.rolled)) return null;
-  const { target, point, toggles } = a, { d20, mode, dmg } = a.rolled;
+  const { target, point, toggles, dtype } = a, { d20, mode, dmg } = a.rolled;
   if (target !== undefined && !str(target, 100)) return null;
+  if (dtype !== undefined && !str(dtype, 20)) return null;
   if (point !== undefined && !(isRec(point) && num(point.x) && num(point.y) && point.x >= 0 && point.y >= 0 && point.x <= MAX_SIDE && point.y <= MAX_SIDE)) return null;
   if ((d20 !== undefined && !ints(d20, 2, 0, 99)) || (mode !== undefined && mode !== 'adv' && mode !== 'dis')) return null;
   if (!Array.isArray(dmg) || dmg.length > 12 || !dmg.every((f) => ints(f, 80, 0, 999))) return null;
   if (!Array.isArray(toggles) || toggles.length > 2 || !toggles.every((t) => t === 'gwm' || t === 'ss')) return null;
   return { ...(target !== undefined && { target }), ...(point !== undefined && { point: { x: point.x as number, y: point.y as number } }),
-    rolled: { ...(d20 !== undefined && { d20: d20 as number[] }), ...(mode !== undefined && { mode: mode as 'adv' | 'dis' }), dmg: dmg as number[][] }, toggles: toggles as Aim['toggles'] };
+    rolled: { ...(d20 !== undefined && { d20: d20 as number[] }), ...(mode !== undefined && { mode: mode as 'adv' | 'dis' }), dmg: dmg as number[][] }, toggles: toggles as Aim['toggles'],
+    ...(dtype !== undefined && { dtype }) };
 }
 
 /** A guest message checked against its shape, or why not. Ownership and 2024 checks need the campaign and are the host's. */

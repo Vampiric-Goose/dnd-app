@@ -6,6 +6,7 @@ import type { RichText, SpellDef, Trait } from '../types.ts';
 import type { Shape } from '../map/templates.ts';
 
 const TYPES = 'acid|bludgeoning|cold|fire|force|lightning|necrotic|piercing|poison|psychic|radiant|slashing|thunder';
+const WORDS: Record<string, number> = { two: 2, three: 3, four: 4, five: 5 };
 const SAVES: Record<string, string> = { strength: 'Str', dexterity: 'Dex', constitution: 'Con', intelligence: 'Int', wisdom: 'Wis', charisma: 'Cha' };
 
 /** An area of effect; `self`: it starts from the caster (range Self), else from a point the caster picks. */
@@ -16,6 +17,10 @@ export interface SpellRead {
   save?: string;
   /** Damage dice; `mod`: plus the spellcasting modifier; `on` (a spell with an attack and a save): which part deals it. */
   damage: { dice: string; type: string; mod?: boolean; on?: 'hit' | 'save' }[];
+  /** The types to pick from for damage whose type is chosen or rolled (its `type` is ''). */
+  choices?: string[];
+  /** Darts that always hit (no attack, no save): `count` of them, one more for each slot level above `above`. */
+  auto?: { count: number; above?: number };
   /** A save's damage on a success: half ("half as much damage on a successful one"), else none. */
   onSave?: 'half' | 'none';
   /** "each creature within N feet of it": a burst of N feet around the target. */
@@ -51,6 +56,20 @@ export function readSpell(s: Pick<SpellDef, 'text' | 'level' | 'range'> & { high
   };
   for (const m of t.matchAll(new RegExp(`(\\d+d\\d+(?:\\s*\\+\\s*\\d+)?)\\s+(${TYPES})\\s+damage`, 'gi'))) dmg(m[1], m[2], m.index);
   for (const m of t.matchAll(new RegExp(`(${TYPES}) damage equal to (\\d+d\\d+)( \\+ your spellcasting ability modifier)?`, 'gi'))) dmg(m[2], m[1], m.index, !!m[3]);
+  // a type the caster picks: "NdM X or Y damage (your choice)", else untyped "takes NdM damage" from the types the wording names
+  const either = new RegExp(`(\\d+d\\d+) (${TYPES}) or (${TYPES}) damage`, 'i').exec(t);
+  if (either) { dmg(either[1], '', either.index); out.choices = [either[2].toLowerCase(), either[3].toLowerCase()]; }
+  const untyped = !out.damage.length && /takes (\d+d\d+(?:\s*\+\s*\d+d\d+)*) damage/i.exec(t);
+  if (untyped) {
+    dmg(untyped[1], '', untyped.index);
+    const named = [...new Set([...t.matchAll(new RegExp(`\\b(${TYPES})\\b`, 'gi'))].map((x) => x[1].toLowerCase()))];
+    out.choices = named.length > 1 ? named : TYPES.split('|'); // one type word is no list (often the verb "fire")
+  }
+  const darts = /each (?:dart|bolt|missile) hits/i.test(t) && /\b(two|three|four|five|\d+)(?: glowing)? (?:darts|bolts|missiles)\b/i.exec(t);
+  if (darts) {
+    const more = /one more (?:dart|bolt|missile) for each slot level above (\d)/i.exec(h);
+    out.auto = { count: WORDS[darts[1].toLowerCase()] ?? +darts[1], ...(more && { above: +more[1] }) };
+  }
   if (out.save) out.onSave = /half as much damage on a successful/i.test(t) ? 'half' : 'none';
   const burst = /each creature within (\d+) feet of (?:it|the target|that creature)\b/i.exec(t);
   if (burst) out.burst = +burst[1];
@@ -69,7 +88,11 @@ export function readSpell(s: Pick<SpellDef, 'text' | 'level' | 'range'> & { high
   else if ((m = /(\d+)-foot cone/i.exec(t))) out.area = { shape: 'cone', feet: +m[1], self };
   else if ((m = /(\d+)-foot cube/i.exec(t))) out.area = { shape: 'cube', feet: +m[1], self };
   else if ((m = /line (\d+) feet long and (\d+) feet wide/i.exec(t)) || (m = /(\d+)-foot[- ]long,? (\d+)-foot[- ]wide line/i.exec(t))) out.area = { shape: 'line', feet: +m[1], width: +m[2], self };
+  else if ((m = /(\d+)-foot-wide,? (\d+)-foot-long line/i.exec(t))) out.area = { shape: 'line', feet: +m[2], width: +m[1], self };
   else if ((m = /within (\d+) feet of a point you choose/i.exec(t))) out.area = { shape: 'sphere', feet: +m[1], self }; // Sleep
+  // a save around the caster, by distance: "all creatures within 10 feet of you", "each creature within range" (the range is the radius)
+  else if (out.save && (m = /\b(?:each|all)(?: other)? creatures? (?:you choose )?within (\d+) feet of you\b/i.exec(t))) out.area = { shape: 'sphere', feet: +m[1], self: true };
+  else if (out.save && typeof range === 'object' && /each creature (?:within range|other than you in that area)/i.test(t)) out.area = { shape: 'sphere', feet: range.feet, self: true };
   // ponytail: a bare "N-foot radius" is often light or an aura (Light), not an area of effect: only an explicit sphere or cylinder counts
   return out;
 }
@@ -81,7 +104,9 @@ function addDice(base: string, extra: string, times: number): string {
   if (a && b && a[2] === b[2]) return `${+a[1] + +b[1] * times}d${a[2]}${a[3]}`;
   return `${base}+${b ? `${+b[1] * times}d${b[2]}` : extra}`;
 }
-const signedMod = (n: number) => (n === 0 ? '' : n > 0 ? `+${n}` : `${n}`);
+/** `n` of `NdM+K` rolled together: `nN`d`M`+`nK` (every dart's damage, summed). */
+const timesDice = (dice: string, n: number) => dice.replace(/^(\d+)d(\d+)(?:\+(\d+))?$/, (_, c, d, k) => `${+c * n}d${d}${k ? `+${+k * n}` : ''}`);
+const signedMod =(n: number) => (n === 0 ? '' : n > 0 ? `+${n}` : `${n}`);
 
 /**
  * The dice to roll: at slot `slot` for a spell of `level` (higher slots add perSlot), a cantrip at character level `charLevel` (×2 at
@@ -94,6 +119,7 @@ export function diceAt(r: SpellRead, o: { slot?: number; level: number; charLeve
     let dice = d.dice;
     if (r.scales && i === 0) dice = dice.replace(/^(\d+)d/, (_, c) => `${+c * tier}d`);
     if (!r.heal && i === 0 && r.perSlot) dice = addDice(dice, r.perSlot.dice, n);
+    if (r.auto && i === 0) dice = timesDice(dice, r.auto.count + (r.auto.above !== undefined && o.slot !== undefined ? Math.max(0, o.slot - r.auto.above) : 0));
     return `${dice}${d.mod ? signedMod(o.mod ?? 0) : ''} ${d.type}`;
   });
   const heal = r.heal && `${r.perSlot ? addDice(r.heal.dice, r.perSlot.dice, n) : r.heal.dice}${r.heal.mod ? signedMod(o.mod ?? 0) : ''}`;

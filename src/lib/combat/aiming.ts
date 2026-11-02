@@ -12,7 +12,8 @@ import { attackEdge, attackToggles, canTarget, combineMode, monsterAttack, reach
 import type { TurnAction } from './turnActions.ts';
 
 /** What a use aims at (a creature's id, or a map point for an area) and the roller's own raw dice (resolve.ts Rolled). */
-export interface Aim { target?: string; point?: { x: number; y: number }; rolled: { d20?: number[]; mode?: 'adv' | 'dis'; dmg: number[][] }; toggles: ('gwm' | 'ss')[] }
+/** `dtype`: the damage type picked, for a spell whose type is chosen. */
+export interface Aim { target?: string; point?: { x: number; y: number }; rolled: { d20?: number[]; mode?: 'adv' | 'dis'; dmg: number[][] }; toggles: ('gwm' | 'ss')[]; dtype?: string }
 /** To the acting player only: hit or miss, a spell's save DC, the names of the visible creatures its area caught. */
 export interface UseOutcome { action: string; hit?: boolean; dc?: number; caught?: string[] }
 /** A use worked out, waiting for its payment to go through. */
@@ -21,8 +22,9 @@ export interface Aimed { resolution: Omit<Resolution, 'applied'>; outcome: UseOu
 export interface AimArea { shape: Shape; feet: number; width?: number; on: 'creature' | 'point' | 'self'; range?: number }
 /** `attack`: it rolls a d20 against AC. `dice`: its damage, in roll order (`on`: the part of a spell that deals it). */
 /** `ignore`: disadvantages a feat removes (Sharpshooter: long range; Crossbow Expert: a hostile within 5 ft). */
+/** `choices`: the damage types to pick from for dice whose type is chosen (their `type` stays '' until one is picked). */
 export interface AimPlan { reach: Reach; line: boolean; attack: boolean; toHit?: number; area?: AimArea; dice: { expr: string; type: string; on?: 'hit' | 'save' }[]; read?: SpellRead;
-  ignore?: { long?: true; close?: true } }
+  ignore?: { long?: true; close?: true }; choices?: string[] }
 
 /**
  * The spell areas to draw on a scene, for everyone: an instant one until its caster's next turn, a concentration one while its caster
@@ -55,7 +57,7 @@ export function snapOf(k: Combat, chars: Character[], ids: string[]): Snap {
 }
 
 /** What an action needs to be aimed, or undefined when it can't be (no reach, or a spell with no attack, save or area). */
-export function aimPlan(a: TurnAction, o: { level?: number; toggles?: Toggle[]; features?: string[] } = {}): AimPlan | undefined {
+export function aimPlan(a: TurnAction, o: { level?: number; toggles?: Toggle[]; features?: string[]; dtype?: string } = {}): AimPlan | undefined {
   const reach = reachOf(a);
   if (!reach) return undefined;
   const has = (f: string) => !!o.features?.includes(f);
@@ -68,15 +70,17 @@ export function aimPlan(a: TurnAction, o: { level?: number; toggles?: Toggle[]; 
   const ma = a.group === 'monster' ? monsterAttack(a) : undefined;
   if (ma) return { reach, line: ma.ranged, attack: true, toHit: ma.toHit, dice: ma.dmg };
   const read = a.cast?.read;
-  if (!read || !a.spell || !(read.attack || read.save || read.area || read.burst)) return undefined;
+  if (!read || !a.spell || !(read.attack || read.save || read.area || read.burst || read.auto)) return undefined;
+  const picked = o.dtype && read.choices?.includes(o.dtype) ? o.dtype : '';
   const dice = diceAt(read, { slot: o.level ?? a.spell.level, level: a.spell.level, charLevel: a.cast!.charLevel, mod: a.cast!.mod }).damage
-    .map((d, i) => { const [expr, ...type] = d.split(' '); return { expr, type: type.join(' '), ...(read.damage[i]?.on && { on: read.damage[i].on }) }; });
+    .map((d, i) => { const [expr, ...type] = d.split(' '); return { expr, type: type.join(' ') || picked, ...(read.damage[i]?.on && { on: read.damage[i].on }) }; });
   const area: AimArea | undefined = read.burst ? { shape: 'sphere', feet: read.burst, on: 'creature' }
     : read.area ? { shape: read.area.shape, feet: read.area.feet, ...(read.area.width && { width: read.area.width }), on: read.area.self ? 'self' : 'point',
       ...(reach !== 'self' && reach.spell !== undefined && { range: reach.spell }) } : undefined;
   if (read.lingering) return { reach, line: false, attack: false, ...(area && { area }), dice: [], read: { ...read, attack: undefined, save: undefined, damage: [] } }; // placed and listed only
   const ignore = read.attack === 'ranged' && has('Crossbow Expert') ? { close: true as const } : undefined;
-  return { reach, line: read.attack === 'ranged', attack: !!read.attack, ...(a.cast!.attack !== undefined && { toHit: a.cast!.attack }), ...(area && { area }), dice, read, ...(ignore && { ignore }) };
+  return { reach, line: read.attack === 'ranged', attack: !!read.attack, ...(a.cast!.attack !== undefined && { toHit: a.cast!.attack }), ...(area && { area }), dice, read, ...(ignore && { ignore }),
+    ...(read.choices && { choices: read.choices }) };
 }
 
 /** Whether a creature at `t` can be picked from `me`, and with what disadvantage. A melee weapon past its reach is thrown (ranged). */
@@ -125,8 +129,9 @@ export interface WorkIn {
 /** An aim checked on the scene and worked out, or why not. */
 export async function workOut(i: WorkIn): Promise<Aimed | string> {
   const { a, aim, combat: k, scene: s, actor } = i;
-  const plan = aimPlan(a, { level: i.level, features: i.features, toggles: attackToggles(a, i.features).filter((t) => aim.toggles.includes(t.id)) });
+  const plan = aimPlan(a, { level: i.level, features: i.features, toggles: attackToggles(a, i.features).filter((t) => aim.toggles.includes(t.id)), dtype: aim.dtype });
   if (!plan) return 'that cannot be aimed';
+  if (plan.dice.some((d) => !d.type) && plan.choices) return 'pick a damage type';
   const tokenOf = (id: string) => s.tokens.find((t) => combatantForToken(k, t)?.id === id);
   const me = tokenOf(actor.id);
   if (!me) return 'not on the map';

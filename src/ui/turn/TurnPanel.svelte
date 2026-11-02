@@ -43,8 +43,8 @@
     onstrip?: (id: string) => void;
     /** Place an area spell's template on the map. */
     ontemplate?: (area: SpellArea) => void;
-    /** Targeting (the DM's setting): an aimable action shows Target, which hands it to the map with its slot and the toggles picked. */
-    targeting?: boolean; features?: string[]; onaim?: (a: TurnAction, slot: number | undefined, toggles: Toggle[]) => void;
+    /** Targeting (the DM's setting): an aimable action shows Target, which hands it to the map with its slot, the toggles and damage type picked. */
+    targeting?: boolean; features?: string[]; onaim?: (a: TurnAction, slot: number | undefined, toggles: Toggle[], dtype?: string) => void;
     top?: Snippet;
   } = $props();
 
@@ -88,6 +88,8 @@
   let targetFor: Record<string, string> = $state({});
   /** Targeting: the attack toggles ticked per action (Great Weapon Master, Sharpshooter). */
   let toggleFor: Record<string, string[]> = $state({});
+  /** Targeting: the damage type picked per spell whose type is chosen (default: the first it names). */
+  let typeFor: Record<string, string> = $state({});
   /** A character's levelled spell uses a slot it picks; a monster's spends its own slots or per-day uses (a.spend). */
   const slotted = (a: TurnAction) => !!a.spell && a.spell.level > 0 && !a.spend;
   const problem = (a: TurnAction) => problemOf(x, a, conditions, onTurn, perAction) ?? (slotted(a) && !freeSlots(a).length ? 'no slot left' : undefined);
@@ -97,7 +99,7 @@
 
   let dialog: HTMLDialogElement | undefined = $state();
   let crit = $state(false);
-  $effect(() => { void self; untrack(() => { slotFor = {}; targetFor = {}; toggleFor = {}; crit = false; }); }); // another creature: its own slot picks, no carried crit
+  $effect(() => { void self; untrack(() => { slotFor = {}; targetFor = {}; toggleFor = {}; typeFor = {}; crit = false; }); }); // another creature: its own slot picks, no carried crit
   /** The slot picked for it while still free, else the lowest free one. */
   const slotOf = (a: TurnAction) => (freeSlots(a).includes(slotFor[a.id]) ? slotFor[a.id] : freeSlots(a)[0]);
 
@@ -224,8 +226,14 @@
           {#each freeSlots(a) as l}<option value={l}>Level {l}</option>{/each}
         </select>
       {/if}
+      {@const choices = a.cast?.read.choices}
+      {#if choices}
+        <select aria-label="{a.name} damage type" value={typeFor[a.id] ?? choices[0]} onchange={(ev) => (typeFor[a.id] = (ev.currentTarget as HTMLSelectElement).value)}>
+          {#each choices as c}<option value={c}>{c}</option>{/each}
+        </select>
+      {/if}
       {#if a.cast?.read.save && a.cast.dc !== undefined}<span class="save">DC <span class="num">{a.cast.dc}</span> {a.cast.read.save} save</span>{/if}
-      <button type="button" class="use" disabled={!!why || busy} onclick={() => { dialog?.close(); onaim(a, slotted(a) ? slotOf(a) : undefined, toggles.filter((t) => toggleFor[a.id]?.includes(t.id))); }}>Target</button>
+      <button type="button" class="use" disabled={!!why || busy} onclick={() => { dialog?.close(); onaim(a, slotted(a) ? slotOf(a) : undefined, toggles.filter((t) => toggleFor[a.id]?.includes(t.id)), choices && (typeFor[a.id] ?? choices[0])); }}>Target</button>
     {:else if a.attack}
       <button type="button" disabled={!!why || busy} aria-label="Roll {a.name} attack, {signed(a.attack.toHit)}" onclick={() => attack(a)}>Attack <span class="num">{signed(a.attack.toHit)}</span></button>
       <button type="button" aria-label="Roll {a.name} damage, {a.attack.damage}" onclick={() => damage(`${a.attack!.name} damage`, a.attack!.damage)}>Damage <span class="num">{a.attack.damage}</span></button>

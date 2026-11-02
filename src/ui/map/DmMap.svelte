@@ -356,10 +356,10 @@
   }
 
   // Targeting (the DM's setting): the action being aimed on the map, then rolled here and worked out by the same rules as a player's use.
-  let aiming: { a: TurnAction; slot?: number; toggles: Toggle[]; plan: AimPlan; v: NonNullable<typeof view> } | undefined = $state.raw();
-  const onaim = (a: TurnAction, slot: number | undefined, toggles: Toggle[]) => {
-    const plan = aimPlan(a, { level: slot, toggles });
-    if (plan && view) { aiming = { a, slot, toggles, plan, v: view }; sheet = false; selected = []; }
+  let aiming: { a: TurnAction; slot?: number; toggles: Toggle[]; dtype?: string; plan: AimPlan; v: NonNullable<typeof view> } | undefined = $state.raw();
+  const onaim = (a: TurnAction, slot: number | undefined, toggles: Toggle[], dtype?: string) => {
+    const plan = aimPlan(a, { level: slot, toggles, dtype });
+    if (plan && view) { aiming = { a, slot, toggles, dtype, plan, v: view }; sheet = false; selected = []; }
   };
   const conditionsOf = (z: Combatant) => (z.characterId ? chars.find((c) => c.id === z.characterId)?.state.conditions : undefined) ?? z.conditions ?? [];
   const nameOfCombatant = (id: string) => { const z = combat?.combatants.find((y) => y.id === id); return (z?.characterId ? chars.find((c) => c.id === z.characterId)?.name : undefined) ?? z?.name ?? '?'; };
@@ -385,7 +385,7 @@
     const r = rollAim(m.a.name, m.plan, pick);
     const t = p.tokenId ? s.tokens.find((x) => x.id === p.tokenId) : undefined, target = t && combatantForToken(k, t), ch = m.v.ch;
     const res = await workOut({ a: m.a, level: m.slot, features: ch ? featureList(ch, settings).map((f) => f.name) : [], actor: m.v.x, combat: k, scene: s,
-      diagonal: settings.diagonal, aim: { ...(target ? { target: target.id } : { point: p.point }), rolled: r.rolled, toggles: m.toggles.map((x) => x.id) },
+      diagonal: settings.diagonal, aim: { ...(target ? { target: target.id } : { point: p.point }), rolled: r.rolled, toggles: m.toggles.map((x) => x.id), ...(m.dtype && { dtype: m.dtype }) },
       findTarget: (id) => k.combatants.find((z) => z.id === id), conditionsOf,
       exhaustionOf: (z) => (z.characterId ? chars.find((c) => c.id === z.characterId)?.state.exhaustion : undefined) ?? 0,
       info: (z) => {

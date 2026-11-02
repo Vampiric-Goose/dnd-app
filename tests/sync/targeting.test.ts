@@ -83,6 +83,9 @@ describe('targeting over sync', () => {
     const ok = parseGuestMessage(strike('g1', [17], [[]]));
     expect(ok).toMatchObject({ t: 'use', aim: { target: 'g1', rolled: { d20: [17], dmg: [[]] }, toggles: [] } });
     expect(parseGuestMessage({ ...strike('g1', [17], [[]]), aim: { rolled: { d20: ['x'], dmg: [] }, toggles: [] } })).toMatchObject({ error: 'bad use' });
+    const typed = (dtype: unknown) => parseGuestMessage({ ...strike('g1', [17], [[]]), aim: { ...strike('g1', [17], [[]]).aim, dtype } });
+    expect(typed('fire')).toMatchObject({ aim: { dtype: 'fire' } });
+    expect(typed(7)).toMatchObject({ error: 'bad use' });
     expect(parseGuestMessage({ t: 'save', resolution: 'r1', characterId: 'mira', d20: 12 })).toEqual({ t: 'save', resolution: 'r1', characterId: 'mira', d20: 12 });
     expect(parseGuestMessage({ t: 'save', resolution: 'r1', characterId: 'mira', d20: 21 })).toMatchObject({ error: 'bad save' });
   });

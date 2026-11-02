@@ -106,11 +106,11 @@
   $effect(() => () => clearTimeout(sentTimer));
 
   // Targeting: the action being aimed on the map. The dice roll here (the d20 shows at once); the DM's device works it out and answers.
-  let aiming: { a: TurnAction; slot?: number; toggles: Toggle[]; plan: AimPlan; c: Character } | undefined = $state.raw();
+  let aiming: { a: TurnAction; slot?: number; toggles: Toggle[]; dtype?: string; plan: AimPlan; c: Character } | undefined = $state.raw();
   let held: { action: string; roll: AimRoll } | undefined;
-  const onaim = (a: TurnAction, slot: number | undefined, toggles: Toggle[]) => {
-    const plan = aimPlan(a, { level: slot, toggles });
-    if (plan && turn && joined) { aiming = { a, slot, toggles, plan, c: turn.c }; selected = []; }
+  const onaim = (a: TurnAction, slot: number | undefined, toggles: Toggle[], dtype?: string) => {
+    const plan = aimPlan(a, { level: slot, toggles, dtype });
+    if (plan && turn && joined) { aiming = { a, slot, toggles, dtype, plan, c: turn.c }; selected = []; }
   };
   const OUT = /incapacitated|paralyzed|petrified|stunned|unconscious/i;
   const aim = $derived.by(() => {
@@ -136,7 +136,7 @@
     const r = rollAim(m.a.name, m.plan, pick);
     held = { action: m.a.name, roll: r };
     sentUnder = session.tracker;
-    sendUse(m.c.id, m.a.id, m.slot, undefined, { ...(p.tokenId ? { target: p.tokenId } : { point: p.point }), rolled: r.rolled, toggles: m.toggles.map((t) => t.id) });
+    sendUse(m.c.id, m.a.id, m.slot, undefined, { ...(p.tokenId ? { target: p.tokenId } : { point: p.point }), rolled: r.rolled, toggles: m.toggles.map((t) => t.id), ...(m.dtype && { dtype: m.dtype }) });
     clearTimeout(sentTimer);
     sentTimer = setTimeout(() => (sentUnder = undefined), 3000);
   }
