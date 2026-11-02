@@ -65,10 +65,13 @@ export function readSpell(s: Pick<SpellDef, 'text' | 'level' | 'range'> & { name
   const out: SpellRead = { damage: [] };
   const atk = /make a (melee|ranged) spell attack/i.exec(t);
   if (atk) out.attack = atk[1].toLowerCase() as 'melee' | 'ranged';
-  const sv = /(strength|dexterity|constitution|intelligence|wisdom|charisma) saving throw/i.exec(t);
+  // a save the target must make ("must make", "must succeed on", "makes a"), not one it gains a benefit on (Haste's "advantage on Dexterity saving throws")
+  const ABL = '(strength|dexterity|constitution|intelligence|wisdom|charisma)';
+  const sv = new RegExp(`\\b(?:make|makes|succeed on|succeeds on|fails?) (?:an? )?${ABL} saving throws?\\b(?! with advantage)`, 'i').exec(t) ?? new RegExp(`saving throw of ${ABL}`, 'i').exec(t);
   if (sv) out.save = SAVES[sv[1].toLowerCase()];
   const mech = s.mech;
   if (mech?.save?.length) { const named = sv && ABILITY_OF[sv[1].toLowerCase()]; out.save = SHORT[named && mech.save.includes(named) ? named : mech.save[0]]; }
+  const sentenceAt = (i: number) => t.slice(t.lastIndexOf('.', i) + 1, (t.indexOf('.', i) + 1 || t.length + 1) - 1);
   if (mech?.attack) out.attack = mech.attack;
   const seen = new Set<string>();
   // the sentence a damage roll sits in says which part deals it, when the spell has both an attack and a save
@@ -117,7 +120,10 @@ export function readSpell(s: Pick<SpellDef, 'text' | 'level' | 'range'> & { name
   if (slow) out.slow = { feet: +slow[1] };
   const lasts = /(\d+) (round|minute|hour)s?/i.exec(s.duration ?? '');
   if (lasts) out.rounds = +lasts[1] * ({ round: 1, minute: 10, hour: 600 } as Record<string, number>)[lasts[2].toLowerCase()];
-  if (out.save) out.onSave = /half as much damage on a successful/i.test(t) ? 'half' : 'none';
+  // Light: the only save is one an object's holder makes to avoid it, with nothing to deal or inflict
+  if (out.save && sv && !out.damage.length && !out.conditions?.length && /\bobject\b/i.test(sentenceAt(sv.index))) delete out.save;
+  // half on a success, however the sentence words it ("takes half as much damage and isn't pushed", "half damage, but…")
+  if (out.save) out.onSave = t.split(/(?<=\.)\s+/).some((x) => /successful (?:save|one)|succeeds on (?:its|the|a) saving throw|on a success/i.test(x) && /\bhalf (?:as much )?(?:the )?damage\b/i.test(x)) ? 'half' : 'none';
   const burst = /each creature within (\d+) feet of (?:it|the target|that creature)\b/i.exec(t);
   if (burst) out.burst = +burst[1];
   const r = s.range.trim(), feet = /(\d+)\s*(?:feet|foot)/i.exec(r), miles = /(\d+)\s*miles?/i.exec(r);

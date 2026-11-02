@@ -260,3 +260,24 @@ test('a hit that slows: its speed cut, read from the wording', () => {
   expect(readSpell(spell('Ray of Frost')).slow).toEqual({ feet: 10 });
   expect(readSpell(spell('Fire Bolt')).slow).toBeUndefined();
 });
+
+// Every Spell, Task 1 (paraphrased wording, no book text): half damage on a save in any phrasing; a save only when one is forced.
+describe('saves and half damage, by wording', () => {
+  const sp = (p: string) => ({ level: 1, range: '60 feet', text: [{ p }] }) as unknown as SpellDef;
+  test('half damage however a success is worded', () => {
+    expect(readSpell(sp('Each creature must make a Constitution saving throw. On a failed save, a creature takes 2d8 thunder damage. On a successful save, the creature takes half as much damage and isn\'t pushed.')).onSave).toBe('half');
+    expect(readSpell(sp('Each creature must make a Strength saving throw or take 2d6 necrotic damage. On a successful save, a creature takes half damage, but suffers no other effect.')).onSave).toBe('half');
+    expect(readSpell(sp('Each creature must make a Strength saving throw or take 3d8 force damage. A creature that succeeds on its saving throw takes half as much damage and isn\'t knocked prone.')).onSave).toBe('half');
+  });
+  test('a save only when the target must make one', () => {
+    expect(readSpell(sp('Until the spell ends, the target gains a +2 bonus to AC and has advantage on Dexterity saving throws.')).save).toBeUndefined();
+    expect(readSpell(sp('You touch an object that sheds bright light. If you target an object held or worn by a hostile creature, that creature must succeed on a Dexterity saving throw to avoid the spell.')).save).toBeUndefined();
+    expect(readSpell(sp('One creature of your choice must make a Wisdom saving throw or be frightened.')).save).toBe('Wis');
+  });
+});
+test('a save worded in the plural or as a failure still counts; one made with advantage does not', () => {
+  const sp = (p: string) => readSpell({ level: 1, range: '30 feet', text: [{ p }] } as unknown as SpellDef);
+  expect(sp('Up to three creatures of your choice within range must make charisma saving throws.').save).toBe('Cha');
+  expect(sp('Any creature in the area is outlined in light if it fails a dexterity saving throw.').save).toBe('Dex');
+  expect(sp('You make Constitution saving throws with advantage.').save).toBeUndefined();
+});
