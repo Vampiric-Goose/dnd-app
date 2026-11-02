@@ -203,7 +203,7 @@ export function readSpell(s: Pick<SpellDef, 'text' | 'level' | 'range'> & { name
     out.manual = 'Extra damage on weapon hits isn’t automated: apply it by hand.';
   else if (hurts && !(out.damage.length && (out.attack || out.save || out.auto))) out.manual = 'Its damage isn’t automated: apply it by hand.';
   else if (out.conditions?.length && !out.save) out.manual = 'Its effect isn’t automated: apply it by hand.';
-  const called = summonOptions(s.text);
+  const called = summonOptions(s.text, s.higherLevels);
   if (called) out.summon = called;
   const rule = s.name ? SPELL_RULES[s.name.toLowerCase()] : undefined;
   return rule ? { ...out, ...rule } : out;

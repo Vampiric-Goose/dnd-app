@@ -9,7 +9,8 @@
   import { snap, type Pt } from '../../lib/map/grid.ts';
   import { addTokens, liveHp, MAX_SIDE, MAX_TOKENS, moveTokens, newScene, patchToken, regrid, tokenColor, type NewToken } from '../../lib/map/scene.ts';
   import { arrowsOn } from '../../lib/map/actions.ts';
-  import { addTokensToCombat, dropTokens, editScene, joinFight, placeUnplaced, startFight, tokenForCharacter, tokenForMonster } from '../../lib/map/store.ts';
+  import { addTokensToCombat, dropTokens, editScene, joinFight, placeUnplaced, startFight, summon, tokenForCharacter, tokenForMonster } from '../../lib/map/store.ts';
+  import { scaleSummon } from '../../lib/combat/summons.ts';
   import { currentRun, patchCombatant } from '../../lib/combat/combat.ts';
   import { budgetApplies, budgetFeet, combatantForToken, effectiveSpeed, originOf, recordMove } from '../../lib/combat/movement.ts';
   import { applyResolution, editCharacter, settlePick, settleSave, turn, undoResolution, updateCombat } from '../../lib/combat/store.ts';
@@ -358,6 +359,16 @@
     await pay(v, a, slot, target);
     await reload();
   });
+  /** A summon cast: paid for like any use, then its creatures (a spirit scaled to the slot) join the fight beside the caster. */
+  const summonAction = (a: TurnAction, slot: number | undefined, p: { option?: number; monsters: MonsterDef[]; variant?: string }) => run(async () => {
+    const v = view, spec = a.cast?.read.summon;
+    if (!v || !combat || !spec || !p.monsters.length) return;
+    await pay(v, a, slot);
+    const level = slot ?? a.spell!.level, caster = (await db.combat.get(cid))?.combatants.find((x) => x.id === v.x.id);
+    const list = 'creature' in spec ? [scaleSummon(p.monsters[0], { level, attack: a.cast!.attack ?? 0, variant: p.variant, campaignId: cid })] : p.monsters;
+    await summon(cid, v.x.id, list, { spell: a.name, ...(a.spell?.concentration && caster && { cast: caster.concentrationCount }), share: 'creature' in spec, hpMode: settings.monsterHp });
+    await reload();
+  });
   /** Pays for a use (the pip on the fresh fight, then a slot or resource on the character); throws why when it can't. */
   async function pay(v: NonNullable<typeof view>, a: TurnAction, slot?: number, target?: string) {
     const pay = v.ch && v.sheet ? payment(a, v.sheet, v.ch, slot) : {};
@@ -582,7 +593,7 @@
           <TurnPanel dm name={view.name} order={combat.combatants} self={view.x.id} current={combat.turn} round={combat.round}
             ac={view.ac} hp={view.hp} maxHp={view.maxHp} tempHp={view.tempHp} tone={view.ch ? 'accent' : 'danger'} conditions={[...view.conditions, ...(view.x.hasted && !view.x.hasted.ended ? ['Haste'] : [])]}
             x={view.x} perAction={view.perAction} onTurn={turnIds.has(view.x.id)} actions={view.actions} slots={view.slots}
-            concentrating={!!view.x.concentrating} {busy} canEnd={!busy} endLabel="Next turn ▶" onuse={(a, slot, target) => void useAction(a, slot, target)} onend={nextTurn} {onpip}
+            concentrating={!!view.x.concentrating} {busy} canEnd={!busy} endLabel="Next turn ▶" onuse={(a, slot, target) => void useAction(a, slot, target)} onsummon={summonAction} summonPool={pool} onend={nextTurn} {onpip}
             onstrip={(id) => (viewId = id)} ontemplate={placeTemplate}
             targeting={targetingOn(settings)} features={view.ch ? featureList(view.ch, settings).map((f) => f.name) : []} {onaim}>
             {#snippet top()}

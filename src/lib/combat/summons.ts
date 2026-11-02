@@ -43,9 +43,15 @@ export function scaleSummon(m: MonsterDef, o: { level: number; attack: number; v
     traits: part(m.traits), actions: part(m.actions), bonusActions: part(m.bonusActions), reactions: part(m.reactions) };
 }
 
-/** What a spell summons: a named stat block (with its choices, such as Air, Land or Water), or options by count, challenge rating and type. */
-export function summonOptions(text: RichText): { creature: string; variants?: string[] } | { options: { count: number; cr: number; type?: string }[] } | undefined {
-  const t = richToPlain(text), named = /\buses the (.+?) stat block\b/i.exec(t);
+export type SummonSpec = { creature: string; variants?: string[] } | { options: { count: number; cr: number; type?: string }[]; crPerSlot?: { above: number } }
+  | { forms: string[]; count?: number; perSlot?: { count: number; above: number } };
+
+/**
+ * What a spell summons: a named stat block (with its choices, such as Air, Land or Water), options by count, challenge rating and type
+ * (a single creature's CR may rise with the slot), or a list of forms (Find Familiar).
+ */
+export function summonOptions(text: RichText, higher?: RichText): SummonSpec | undefined {
+  const t = richToPlain(text), h = higher ? richToPlain(higher) : t, named = /\buses the (.+?) stat block\b/i.exec(t);
   if (named) {
     const v = /\bchoose an? [a-z ]+?: ((?:[A-Z][a-z]+, )*[A-Z][a-z]+,? or [A-Z][a-z]+)/.exec(t);
     return { creature: named[1], ...(v && { variants: v[1].split(/,\s*(?:or\s+)?|\s+or\s+/).filter(Boolean) }) };
@@ -57,7 +63,36 @@ export function summonOptions(text: RichText): { creature: string; variants?: st
     const [a, b] = m[3].split('/'), type = m[2].toLowerCase().replace(/ creatures?$/, '').replace(/s$/, '');
     return [{ count: WORDS[m[1].toLowerCase()], cr: b ? +a / +b : +a, ...(type && { type }) }];
   });
-  return options.length ? { options } : undefined;
+  if (options.length) return { options };
+  const one = /\b(?:an?|one) ([a-z ]+?) of challenge rating (\d+(?:\/\d+)?) or lower\b/i.exec(t);
+  if (one) {
+    const [a, b] = one[2].split('/'), up = /\bchallenge rating increases by 1 for each slot level above (\d)/i.exec(h);
+    return { options: [{ count: 1, cr: b ? +a / +b : +a, type: one[1].toLowerCase().replace(/ creatures?$/, '') }], ...(up && { crPerSlot: { above: +up[1] } }) };
+  }
+  // a creature's forms (Find Familiar's "takes an animal form you choose: …"), not the caster's own (Guardian of Nature's "you assume")
+  const forms = /\byou (?:assume|transform|take on)\b|\btransforms you\b|\bforms to assume\b/i.test(t) ? null
+    : /\bone of the following forms[^:]*: ([^.]+)/i.exec(t) ?? /\b(?:in a|an? (?:animal )?)form (?:that )?you choose: ([^.]+)/i.exec(t);
+  return forms ? { forms: forms[1].split(/,\s*(?:or\s+)?|\s+or\s+/).map((x) => x.replace(/^(?:an?|or)\s+/i, '').trim()).filter(Boolean) } : undefined;
+}
+
+const crOf = (m: MonsterDef) => { const [a, b] = String(m.cr ?? '0').split('/'); return b ? +a / +b : +a || 0; };
+
+/** Why a pick doesn't fit the spell at this slot (count, CR, type, the named spirit or forms), or undefined: the DM's device checks it. */
+export function checkPick(s: SummonSpec, pick: { option?: number; monsters: MonsterDef[] }, slot: number, _level?: number): string | undefined {
+  const ms = pick.monsters;
+  if ('creature' in s) return ms.length === 1 && ms[0].name.startsWith(s.creature) ? undefined : `that spell summons a ${s.creature}`;
+  if ('forms' in s) {
+    const n = (s.count ?? 1) + (s.perSlot ? s.perSlot.count * Math.max(0, slot - s.perSlot.above) : 0);
+    if (ms.length < 1 || ms.length > n) return `pick up to ${n}`;
+    return ms.every((m) => s.forms.some((f) => f.toLowerCase().includes(m.name.toLowerCase()))) ? undefined : 'not one of its forms';
+  }
+  const o = s.options[pick.option ?? -1];
+  if (!o) return 'pick an option';
+  if (ms.length !== o.count) return `pick ${o.count} creature${o.count === 1 ? '' : 's'}`;
+  const cap = o.cr + (s.crPerSlot ? Math.max(0, slot - s.crPerSlot.above) : 0);
+  if (ms.some((m) => crOf(m) > cap)) return 'too strong for this spell';
+  if (o.type && ms.some((m) => !m.type.toLowerCase().startsWith(o.type!))) return `not a ${o.type}`;
+  return undefined;
 }
 
 /**

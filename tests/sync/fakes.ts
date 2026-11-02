@@ -8,7 +8,7 @@ import { Host, type HostDeps } from '../../src/lib/sync/host.ts';
 import { hlcNow, hlcReceive } from '../../src/lib/sync/hlc.ts';
 import { memoryPair, type Link } from '../../src/lib/sync/link.ts';
 import { latestClock, mergeCharacter, rebase, stamp } from '../../src/lib/sync/merge.ts';
-import type { Campaign, CampaignSync, Character, Combat, Pack, PackMeta, Scene } from '../../src/lib/types.ts';
+import type { Campaign, CampaignSync, Character, Combat, MonsterDef, Pack, PackMeta, Scene } from '../../src/lib/types.ts';
 import { fixtureIndex } from '../fixtures/content.ts';
 
 const clone = <T>(x: T): T => (x === undefined ? x : structuredClone(x));
@@ -29,6 +29,8 @@ export class Device {
   errors: unknown[] = [];
   settled: { rid: string; target: string; d20: number }[] = [];
   picked: { rid: string; target: string; type: string }[] = [];
+  monsters = new Map<string, MonsterDef>();
+  summoned: { casterId: string; names: string[]; spell: string; cast?: number; share: boolean }[] = [];
   signedAt = new Map<string, number>();
   wall: () => number;
   constructor(wall: () => number = Date.now) { this.wall = wall; }
@@ -107,6 +109,8 @@ export class Device {
       },
       settleSave: async (rid, target, d20) => { this.settled.push({ rid, target, d20 }); },
       settlePick: async (rid, target, type) => { this.picked.push({ rid, target, type }); },
+      loadMonster: async (id) => clone(this.monsters.get(id)),
+      summon: async (casterId, list, o) => { this.summoned.push({ casterId, names: list.map((m) => `${m.name} AC ${m.ac[0]?.value}`), ...o }); },
       takeSignedPack: async (p, at) => {
         if (at <= (this.signedAt.get(p.id) ?? 0)) return false;
         this.signedAt.set(p.id, at);

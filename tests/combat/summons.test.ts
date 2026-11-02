@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, test } from 'vitest';
-import { endedSummons, scaleSummon, summonCombatants, summonOptions } from '../../src/lib/combat/summons.ts';
+import { checkPick, endedSummons, scaleSummon, summonCombatants, summonOptions } from '../../src/lib/combat/summons.ts';
 import { updateCombat } from '../../src/lib/combat/store.ts';
 import { db, resetDb } from '../../src/lib/db.ts';
 import { newScene } from '../../src/lib/map/scene.ts';
@@ -69,4 +69,29 @@ describe('with the database (one roster)', () => {
     expect((await db.combat.get('c1'))!.combatants.map((x) => x.id)).toEqual(['pc:m']);
     expect((await db.scenes.get(sc.id))!.tokens.map((x) => x.name)).toEqual(['Mira']);
   });
+});
+
+// Every Spell, Task 8: single-creature conjures (higher CR with the slot), fixed forms, and checking a pick on the DM's device.
+describe('what a cast may summon', () => {
+  const beast = (id: string, cr: string, type = 'beast') => ({ ...spirit, id, name: id, cr, type }) as unknown as MonsterDef;
+  test('one creature up to a CR that rises with the slot; a list of forms', () => {
+    expect(summonOptions([{ p: 'You call forth an elemental of challenge rating 5 or lower.' }], [{ p: 'The challenge rating increases by 1 for each slot level above 5th.' }]))
+      .toEqual({ options: [{ count: 1, cr: 5, type: 'elemental' }], crPerSlot: { above: 5 } });
+    expect(summonOptions([{ p: 'Choose one of the following forms for your companion: bat, cat, crab, or owl.' }])).toEqual({ forms: ['bat', 'cat', 'crab', 'owl'] });
+  });
+  test('a pick is checked against the spell: count, CR (raised by the slot), type, the named spirit', () => {
+    const conj = { options: [{ count: 1, cr: 2, type: 'beast' }, { count: 2, cr: 1, type: 'beast' }] };
+    expect(checkPick(conj, { option: 1, monsters: [beast('wolf', '1/4'), beast('wolf', '1/4')] }, 3, 3)).toBeUndefined();
+    expect(checkPick(conj, { option: 1, monsters: [beast('wolf', '1/4')] }, 3, 3)).toBe('pick 2 creatures');
+    expect(checkPick(conj, { option: 0, monsters: [beast('bear', '3')] }, 3, 3)).toBe('too strong for this spell');
+    expect(checkPick(conj, { option: 0, monsters: [beast('imp', '1', 'fiend')] }, 3, 3)).toBe('not a beast');
+    expect(checkPick({ options: [{ count: 1, cr: 5, type: 'elemental' }], crPerSlot: { above: 5 } }, { option: 0, monsters: [beast('e', '6', 'elemental')] }, 6, 5)).toBeUndefined();
+    expect(checkPick({ creature: 'Test Spirit' }, { monsters: [spirit] }, 2, 2)).toBeUndefined();
+    expect(checkPick({ creature: 'Test Spirit' }, { monsters: [beast('x', '0')] }, 2, 2)).toBe('that spell summons a Test Spirit');
+    expect(checkPick({ forms: ['bat', 'owl'] }, { monsters: [beast('Owl', '0')] }, 1, 1)).toBeUndefined();
+  });
+});
+test('forms the caster takes are not a summon', () => {
+  expect(summonOptions([{ p: 'A spirit transforms you into a guardian. You choose one of the following forms to assume: Beast or Tree.' }])).toBeUndefined();
+  expect(summonOptions([{ p: 'You gain the service of a familiar that takes an animal form you choose: bat, cat, or owl.' }])).toEqual({ forms: ['bat', 'cat', 'owl'] });
 });

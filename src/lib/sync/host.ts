@@ -18,6 +18,7 @@ import { computeSheet } from '../rules/sheet.ts';
 import { moveTokens } from '../map/scene.ts';
 import { ActionBoard, actionProblem, actionsForPlayers, expiry, type ActionRequest, type DeclaredAction, type PlayerAction } from '../map/actions.ts';
 import type { Campaign, CampaignSettings, CampaignSync, Character, Combat, Combatant, MonsterDef, Pack, PackMeta, Resolution, Scene, Snap } from '../types.ts';
+import { checkPick, scaleSummon } from '../combat/summons.ts';
 import { newJoinCode, nextPlayerId, sha256Text } from './code.ts';
 import { hlcNow, hlcReceive, MAX_AHEAD } from './hlc.ts';
 import type { Link } from './link.ts';
@@ -68,6 +69,8 @@ export interface HostDeps {
    *  own copy unless it is no newer than the last signed one taken (false: refused). */
   trusted?: readonly string[];
   takeSignedPack?(p: Pack, at: number): Promise<boolean>;
+  /** Summons (summons.ts): the creatures join the fight beside their caster, marked with the casting (map/store.ts summon). */
+  summon?(casterId: string, list: MonsterDef[], o: { spell: string; cast?: number; share: boolean }): Promise<void>;
   /** Targeting: a monster's stat block (its saves and defenses). */
   loadMonster?(id: string): Promise<MonsterDef | undefined>;
   /** Stage 5: the campaign's shown scene (db.scenes.shown). Without it no scene is sent. */
@@ -346,6 +349,19 @@ export class Host {
     const { level, pact, problem } = payment(a, sheet, ch, m.slot);
     if (problem) return refuse(problem);
     if (a.options && !a.options.some((o) => o.id === m.target)) return refuse('pick one');
+    // a summon's pick, checked here before anything is paid: the spell's options, counts, challenge ratings and types (summons.ts)
+    let called: MonsterDef[] | undefined;
+    const spec = a.cast?.read.summon;
+    if (m.summon || spec) {
+      if (!spec || !m.summon || !this.#deps.summon || !this.#deps.loadMonster) return refuse('pick what to summon');
+      const found = await Promise.all(m.summon.monsterIds.map((id) => this.#deps.loadMonster!(id)));
+      if (found.some((x) => !x)) return refuse('that creature is not in the shared books');
+      const slot = level ?? a.spell!.level, list = found as MonsterDef[];
+      const bad = checkPick(spec, { option: m.summon.option, monsters: list }, slot);
+      if (bad) return refuse(bad);
+      if ('creature' in spec && m.summon.variant !== undefined && !spec.variants?.includes(m.summon.variant)) return refuse('pick one of its forms');
+      called = 'creature' in spec ? [scaleSummon(list[0], { level: slot, attack: a.cast!.attack ?? 0, variant: m.summon.variant, campaignId: camp.id })] : list;
+    }
     let aimed: Aimed | undefined;
     if (m.aim) { // targeting: worked out before anything is paid, so a refusal spends nothing
       if (!targetingOn(camp.settings) || !this.#deps.resolve) return refuse('targeting is off');
@@ -374,6 +390,10 @@ export class Host {
     if (aimed) {
       await this.#deps.resolve!(aimed.resolution, before);
       this.#send(c, { t: 'outcome', ...aimed.outcome });
+    }
+    if (called && spec) {
+      const x = combatantForToken((await this.#deps.loadCombat?.())!, { characterId: ch.id });
+      if (x) await this.#deps.summon!(x.id, called, { spell: a.name, ...(a.spell?.concentration && { cast: x.concentrationCount }), share: 'creature' in spec });
     }
   }
 

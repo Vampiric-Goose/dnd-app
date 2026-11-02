@@ -11,7 +11,7 @@ import type { Guest, GuestDeps, GuestStatus, PackProgress } from './guest.ts';
 import type { Host, HostDeps } from './host.ts';
 import type { Listener, Transport } from './link.ts';
 import type { RosterEntry, TrackerView } from './project.ts';
-import type { Aim, Preview, UseOutcome } from './protocol.ts';
+import type { Aim, Preview, SummonPick, UseOutcome } from './protocol.ts';
 import type { PlayerScene } from './scene.ts';
 import type { Pt } from '../map/grid.ts';
 import type { ActionBoard, ActionRequest, DeclaredAction, PlayerAction } from '../map/actions.ts';
@@ -205,6 +205,11 @@ function hostDeps(r: Run, cid: string): HostDeps {
       changed(r);
     },
     loadMonster: async (id) => ((await db.monsters.get(id)) as MonsterDef | undefined) ?? ((await getIndex(cid)).resolve(id) as MonsterDef | undefined),
+    summon: async (casterId, list, o) => {
+      const [m, camp] = await Promise.all([import('../map/store.ts'), db.campaigns.get(cid)]);
+      if (camp) await m.summon(cid, casterId, list, { ...o, hpMode: camp.settings.monsterHp });
+      changed(r);
+    },
     loadScene: () => db.scenes.shown(cid),
     updateScene: (id, fn) => db.scenes.update(id, fn, { network: true }).then((s) => (changed(r), s)),
     loadBlob: async (hash) => { const b = await db.blobs.get(hash); return b && { type: b.type, data: await b.arrayBuffer() }; },
@@ -433,8 +438,8 @@ export function sendDrag(sceneId: string, tokenId: string, at?: Pt): void {
 }
 
 /** Turn panel: the player's own character uses an action, or ends its turn (the guest checks owner and online; the DM checks the rest). */
-export function sendUse(characterId: string, action: string, slot?: number, target?: string, aim?: Aim): void {
-  run?.guest?.sendUse(characterId, action, slot, target, aim);
+export function sendUse(characterId: string, action: string, slot?: number, target?: string, aim?: Aim, summon?: SummonPick): void {
+  run?.guest?.sendUse(characterId, action, slot, target, aim, summon);
 }
 export function sendPick(resolution: string, characterId: string, type: string): void {
   run?.guest?.sendPick(resolution, characterId, type);

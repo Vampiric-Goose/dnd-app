@@ -39,7 +39,8 @@ export function disagree(s: SpellDef): string[] {
 export async function audit(s: SpellDef): Promise<string> {
   const read = readSpell(s);
   if (SPELL_EFFECTS[s.name]) return 'ok: effect';
-  if (read.summon) return `summon: ${'creature' in read.summon ? read.summon.creature : read.summon.options.map((x) => `${x.count}×CR${x.cr} ${x.type ?? ''}`).join(' / ')}`;
+  const sm = read.summon;
+  if (sm) return `summon: ${'creature' in sm ? sm.creature : 'forms' in sm ? sm.forms.join(', ') : sm.options.map((x) => `${x.count}×CR${x.cr} ${x.type ?? ''}`).join(' / ')}`;
   if (read.rider) return `ok: rider, ${read.rider.dice} ${read.rider.type || 'weapon'}${read.rider.once ? ' on the next hit' : ''}`;
   const a: TurnAction = { id: 's', name: s.name, cost: 'action', group: 'spell', spell: { id: s.id, level: s.level, concentration: s.concentration }, cast: { read, attack: 5, dc: 13, charLevel: 5, mod: 3 } };
   const plan = aimPlan(a);

@@ -41,7 +41,7 @@ export type GuestMsg =
   | { t: 'initiative'; characterId: string; total: number /* stage 4: the player's own roll, an integer INIT_MIN–INIT_MAX */ }
   | { t: 'move'; sceneId: string; tokenId: string; x: number; y: number /* stage 5: the player's own token, scene px */ }
   | { t: 'blobWant'; hashes: string[] /* stage 5: images of the current scene it lacks */ }
-  | { t: 'use'; characterId: string; action: string; slot?: number; target?: string /* turn panel: the player's own character does something (a TurnAction id) */; aim?: Aim }
+  | { t: 'use'; characterId: string; action: string; slot?: number; target?: string /* turn panel: the player's own character does something (a TurnAction id) */; aim?: Aim; summon?: SummonPick }
   | { t: 'save'; resolution: string; characterId: string; d20: number /* targeting: the player's own save roll for a pending area save */ }
   | { t: 'signedChunk'; id: string; at: number; sig: string; seq: number; total: number; data: string /* a trusted publisher's own book, in order (signing.ts) */ }
   | { t: 'pick'; characterId: string; resolution: string; type: string /* targeting: the die picked for a hit waiting on it (Chaos Bolt), by its type */ }
@@ -120,6 +120,18 @@ function cleanAim(a: unknown): Aim | null {
 }
 
 /** A guest message checked against its shape, or why not. Ownership and 2024 checks need the campaign and are the host's. */
+/** A summon cast's pick (summons.ts): the option, the creatures (monster ids from the shared books), a spirit's variant. */
+export interface SummonPick { option?: number; monsterIds: string[]; variant?: string }
+/** null: malformed. */
+function cleanSummon(x: unknown): SummonPick | null {
+  if (typeof x !== 'object' || x === null) return null;
+  const { option, monsterIds, variant } = x as Record<string, unknown>;
+  if (!Array.isArray(monsterIds) || monsterIds.length < 1 || monsterIds.length > 8 || !monsterIds.every((m) => typeof m === 'string' && m.length <= 200)) return null;
+  if (option !== undefined && !(Number.isInteger(option) && (option as number) >= 0 && (option as number) < 8)) return null;
+  if (variant !== undefined && !(typeof variant === 'string' && variant.length <= 40)) return null;
+  return { monsterIds: monsterIds as string[], ...(option !== undefined && { option: option as number }), ...(variant !== undefined && { variant: variant as string }) };
+}
+
 export function parseGuestMessage(raw: unknown): GuestMsg | { error: string } {
   if (!isRec(raw) || poisoned(raw)) return { error: 'malformed' };
   switch (raw.t) {
@@ -156,10 +168,10 @@ export function parseGuestMessage(raw: unknown): GuestMsg | { error: string } {
       return Array.isArray(h) && h.length >= 1 && h.length <= 201 && h.every((x) => typeof x === 'string' && HASH.test(x)) ? { t: 'blobWant', hashes: h as string[] } : { error: 'bad blobWant' };
     }
     case 'use': {
-      const { characterId, action, slot, target } = raw, aim = raw.aim === undefined ? undefined : cleanAim(raw.aim);
+      const { characterId, action, slot, target } = raw, aim = raw.aim === undefined ? undefined : cleanAim(raw.aim), summon = raw.summon === undefined ? undefined : cleanSummon(raw.summon);
       return str(characterId, 100) && str(action, 200) && (slot === undefined || (Number.isInteger(slot) && (slot as number) >= 1 && (slot as number) <= 9))
-        && (target === undefined || str(target, 100)) && aim !== null
-        ? { t: 'use', characterId, action, ...(slot !== undefined && { slot: slot as number }), ...(target !== undefined && { target: target as string }), ...(aim && { aim }) } : { error: 'bad use' };
+        && (target === undefined || str(target, 100)) && aim !== null && summon !== null
+        ? { t: 'use', characterId, action, ...(slot !== undefined && { slot: slot as number }), ...(target !== undefined && { target: target as string }), ...(aim && { aim }), ...(summon && { summon }) } : { error: 'bad use' };
     }
     case 'signedChunk': {
       const { id, at, sig, seq, total, data } = raw;

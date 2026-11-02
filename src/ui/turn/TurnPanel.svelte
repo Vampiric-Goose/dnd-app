@@ -1,4 +1,5 @@
 <script lang="ts">
+  import SummonPicker from './SummonPicker.svelte';
   // The map panel's turn view (turn panel spec): the turn strip, HP, conditions and what they do now, movement, the three pips, the
   // primary action card and End turn / Next. "All actions" opens a pop-up with everything, grouped by what it costs. The page decides
   // what a use does (a player sends it to the DM's device, the DM applies it); this only checks what is greyed out and rolls.
@@ -10,7 +11,7 @@
   import { rollParts } from '../../lib/monsters/library.ts';
   import { diceAt, type SpellArea } from '../../lib/combat/spellText.ts';
   import { natD20 } from '../../lib/rolls.svelte.ts';
-  import type { Combatant } from '../../lib/types.ts';
+  import type { Combatant, MonsterDef } from '../../lib/types.ts';
   import { signed, titleCase } from '../creator/labels.ts';
   import Bar from '../kit/Bar.svelte';
   import RichText from '../RichText.svelte';
@@ -21,7 +22,7 @@
   let {
     name, order, self, current, round, ac, hp, maxHp, tempHp = 0, tone = 'accent', conditions, moveLeft, x, perAction = 1, onTurn, actions,
     slots = [], concentrating = false, dm = false, busy = false, canEnd, endLabel = 'End turn', onuse, onend, onpip, onstrip, ontemplate, top,
-    targeting = false, features = [], onaim,
+    targeting = false, features = [], onaim, onsummon, summonPool = [],
   }: {
     name: string;
     /** The turn order as the viewer sees it; `self` is the creature shown, `current` the one acting. */
@@ -46,6 +47,8 @@
     /** Targeting (the DM's setting): an aimable action shows Target, which hands it to the map with its slot, the toggles and damage type picked. */
     targeting?: boolean; features?: string[]; onaim?: (a: TurnAction, slot: number | undefined, toggles: Toggle[], dtype?: string) => void;
     top?: Snippet;
+    /** A summon cast (summons.ts): what was picked, from the books' monsters (`summonPool`); the caller pays for it and summons. */
+    onsummon?: (a: TurnAction, slot: number | undefined, pick: { option?: number; monsters: MonsterDef[]; variant?: string }) => void; summonPool?: MonsterDef[];
   } = $props();
 
   const e = $derived({ used: 0, extra: 0, bonus: false, attacks: 0, ...x.economy });
@@ -259,7 +262,10 @@
           {#each freeSlots(a) as l}<option value={l}>Level {l}</option>{/each}
         </select>
       {/if}
-      {#if a.cast?.read.attack && a.cast.attack !== undefined}
+      {#if a.cast?.read.summon && onsummon}
+        <SummonPicker spec={a.cast.read.summon} pool={summonPool} slot={slotted(a) ? slotOf(a) : a.spell!.level} level={a.spell!.level} disabled={!!why || busy}
+          onpick={(p) => { if (!(a.spell?.concentration && concentrating && !confirm('Casting this ends your concentration on the current spell. Go on?'))) onsummon(a, slotted(a) ? slotOf(a) : undefined, p); }} />
+      {:else if a.cast?.read.attack && a.cast.attack !== undefined}
         <button type="button" disabled={!!why || busy} aria-label="Cast {a.name}: spell attack {signed(a.cast.attack)}" onclick={() => { if (use(a)) rollD20(`${a.name}: spell attack`, a.cast!.attack!, { shareAs: 'Spell attack' }); }}>Spell attack <span class="num">{signed(a.cast.attack)}</span></button>
       {:else}
         <button type="button" class="use" disabled={!!why || busy} onclick={() => use(a)}>{a.spell ? 'Cast' : 'Use'}{#if slotted(a) && freeSlots(a).length === 1} <span class="muted">(level {freeSlots(a)[0]})</span>{/if}</button>

@@ -17,7 +17,8 @@
   import { budgetFeet, effectiveSpeed, originOf, remainingFeet } from '../../lib/combat/movement.ts';
   import { pcActions, slotsLeft, type TurnAction } from '../../lib/combat/turnActions.ts';
   import { featureList } from '../../lib/character/play.ts';
-  import type { Campaign, Character, Combatant } from '../../lib/types.ts';
+  import type { Campaign, Character, Combatant, MonsterDef } from '../../lib/types.ts';
+  import { getIndex } from '../../lib/store.svelte.ts';
   import MapCanvas from './MapCanvas.svelte';
   import TurnPanel from '../turn/TurnPanel.svelte';
   import type { SpellArea } from '../../lib/combat/spellText.ts';
@@ -26,6 +27,9 @@
   import Workspace from '../kit/Workspace.svelte';
 
   let { campaign }: { campaign: Campaign } = $props();
+  // the shared books' monsters, for a summon's picker (the DM's device checks the pick)
+  let books: MonsterDef[] = $state.raw([]);
+  $effect(() => { getIndex(campaign.id).then((ix) => (books = ix.all('monster')), () => (books = [])); });
 
   const joined = $derived(campaign.sync?.role === 'player');
   const settings = $derived(campaign.settings);
@@ -268,7 +272,8 @@
         <TurnPanel name={turn.c.name} order={fight.rows} self={turn.r.id} current={fight.current} round={fight.round}
           ac={turn.sheet.ac} hp={turn.c.state.hp} maxHp={turn.sheet.maxHp} tempHp={turn.c.state.tempHp} conditions={[...turn.c.state.conditions, ...(turn.econ.hasted ? ['Haste'] : [])]}
           moveLeft={turn.c.id === actor ? turnBudget?.left : undefined} x={turn.x} perAction={turn.econ.perAction} onTurn={turn.c.id === actor}
-          actions={turn.actions} slots={slotsLeft(turn.sheet, turn.c)} concentrating={turn.econ.conc}
+          actions={turn.actions} slots={slotsLeft(turn.sheet, turn.c)} concentrating={turn.econ.conc} summonPool={books}
+          onsummon={(a, slot, p) => { if (!offline()) sendUse(turn!.c.id, a.id, slot, undefined, undefined, { ...(p.option !== undefined && { option: p.option }), monsterIds: p.monsters.map((m) => m.id), ...(p.variant && { variant: p.variant }) }); }}
           busy={!!sentUnder && sentUnder === session.tracker} canEnd={turn.c.id === actor} onuse={useAction} onend={() => { if (!offline()) sendEndTurn(turn!.c.id); }} ontemplate={placeTemplate}
           targeting={joined && targetingOn(settings)} features={featureList(turn.c, settings).map((f) => f.name)} {onaim}>
           {#snippet top()}

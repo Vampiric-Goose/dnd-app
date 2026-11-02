@@ -5,7 +5,7 @@ import { cleanOutcome, cleanSettings, cleanTracker } from '../../src/lib/sync/gu
 import { Host } from '../../src/lib/sync/host.ts';
 import { parseGuestMessage } from '../../src/lib/sync/protocol.ts';
 import type { TrackerView } from '../../src/lib/sync/project.ts';
-import type { Campaign, CampaignSettings, Character, Combat, Combatant, Scene, SpellDef } from '../../src/lib/types.ts';
+import type { Campaign, CampaignSettings, Character, Combat, Combatant, MonsterDef, Scene, SpellDef } from '../../src/lib/types.ts';
 import { mkChar } from '../fixtures/content.ts';
 import { camp } from '../fixtures/records.ts';
 import { Device, rawLink, settle } from './fakes.ts';
@@ -28,14 +28,22 @@ const bolt: SpellDef = { ...shard, id: 'spell:chaos-bolt@FIX', name: 'Chaos Bolt
 // Paraphrased: a ward on one creature within range (Shield of Faith's numbers apply by name, SPELL_EFFECTS).
 const ward: SpellDef = { ...shard, id: 'spell:shield-of-faith@FIX', name: 'Shield of Faith', concentration: true, duration: 'Concentration, up to 10 minutes', text: [{ p: 'A shimmering field surrounds a creature of your choice within range.' }] };
 
+// Paraphrased: a spirit summon (synthetic stat block with the import's formula wording).
+const call: SpellDef = { ...shard, id: 'spell:summon-test@FIX', name: 'Summon Test', level: 1, concentration: true, duration: 'Concentration, up to 1 hour',
+  text: [{ p: 'This corporeal form uses the Test Spirit stat block. When you cast the spell, choose an environment: Air, Land, or Water.' }] };
+const spiritM = { kind: 'monster', id: 'monster:test-spirit@FIX', name: 'Test Spirit', source: 'FIX', text: [], size: ['M'], type: 'beast', alignment: 'unaligned', cr: '0',
+  ac: [{ value: 11, from: '11 + the level of the spell (natural armor)' }], hp: { special: '30 + 5 for each spell level above 2nd' }, speed: { walk: 30 },
+  scores: { str: 18, dex: 11, con: 16, int: 4, wis: 14, cha: 5 }, saves: {}, skills: {}, vulnerable: [], resist: [], immune: [], conditionImmune: [], senses: [], passive: 12, languages: [],
+  traits: [], actions: [], bonusActions: [], reactions: [], legendary: [] } as unknown as MonsterDef;
+
 function thorin(): Character {
   const c = mkChar({ race: 'human', base: { str: 16 }, levels: ['fighter'] });
   return { ...c, id: 'thorin', name: 'Thorin', campaignId: CID, ownerId: 'A1' };
 }
 function mira(): Character {
   const c = mkChar({ race: 'human', base: { int: 16 }, levels: ['wizard'] });
-  return { ...c, id: 'mira', name: 'Mira', campaignId: CID, ownerId: 'A2', embedded: { ...c.embedded, [shard.id]: shard, [bolt.id]: bolt, [ward.id]: ward },
-    build: { ...c.build, spells: { 'class:wizard@FIX': { known: [shard.id, bolt.id, ward.id], prepared: [shard.id, bolt.id, ward.id] } } } };
+  return { ...c, id: 'mira', name: 'Mira', campaignId: CID, ownerId: 'A2', embedded: { ...c.embedded, [shard.id]: shard, [bolt.id]: bolt, [ward.id]: ward, [call.id]: call },
+    build: { ...c.build, spells: { 'class:wizard@FIX': { known: [shard.id, bolt.id, ward.id, call.id], prepared: [shard.id, bolt.id, ward.id, call.id] } } } };
 }
 const scene = (): Scene => ({
   id: 's1', campaignId: CID, name: 'Field', width: 1400, height: 1400, grid: { ...DEFAULT_GRID }, shown: true, updatedAt: 0,
@@ -118,6 +126,19 @@ describe('targeting over sync', () => {
     await settle(host);
     expect(refusals(b)).toEqual([]);
     expect(d.combat!.resolutions!.at(-1)).toMatchObject({ action: 'Shield of Faith', lasting: true, outcomes: [{ id: 'pc:thorin', inflict: ['Shield of Faith'] }] });
+  });
+
+  test('Every Spell, Task 8: a player\'s summon pick is checked on the DM\'s device, scaled, and summoned beside its caster', async () => {
+    const { d, host, b } = await joined({ combat: fight({ turn: 'pc:mira' }) });
+    d.monsters.set(spiritM.id, spiritM);
+    d.monsters.set('monster:wolf@FIX', { ...spiritM, id: 'monster:wolf@FIX', name: 'Wolf' });
+    const cast = (summon: unknown) => b.deliver({ t: 'use', characterId: 'mira', action: `spell:${call.id}`, slot: 1, summon });
+    cast({ monsterIds: ['monster:wolf@FIX'] });
+    await settle(host);
+    expect(refusals(b)).toEqual(['that spell summons a Test Spirit']);
+    cast({ monsterIds: [spiritM.id], variant: 'Land' });
+    await settle(host);
+    expect(d.summoned).toEqual([{ casterId: 'pc:mira', names: ['Test Spirit (Land) AC 12'], spell: 'Summon Test', cast: 1, share: true }]);
   });
 
   test('Every Spell, Review Focus 1: Bless on a player\'s character adds its d4 to the attack the player sends', async () => {

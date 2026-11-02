@@ -14,7 +14,7 @@ import { MAX_AHEAD } from './hlc.ts';
 import type { Link } from './link.ts';
 import { canon, latestClock, mergeCharacter, type Synced } from './merge.ts';
 import { playerPack, type CampaignForPlayers, type HealthStatus, type PickPrompt, type RosterEntry, type SavePrompt, type TrackerRow, type TrackerView } from './project.ts';
-import { BLOB_CHUNK, cleanRoll, cuts, HLC, IMAGE_TYPES, INIT_MAX, INIT_MIN, LOW_WATER, MAX_BLOB, MAX_MESSAGE, MAX_PACK, PLAYER_ID, size, type Aim, type GuestMsg, type PackOffer, type Preview, type UseOutcome } from './protocol.ts';
+import { BLOB_CHUNK, cleanRoll, cuts, HLC, IMAGE_TYPES, INIT_MAX, INIT_MIN, LOW_WATER, MAX_BLOB, MAX_MESSAGE, MAX_PACK, PLAYER_ID, size, type Aim, type GuestMsg, type PackOffer, type Preview, type SummonPick, type UseOutcome } from './protocol.ts';
 import { cleanScene, sceneBlobs, type PlayerScene } from './scene.ts';
 import { publicText, sign, TRUSTED_KEYS } from './signing.ts';
 
@@ -250,8 +250,8 @@ export class Guest {
   }
 
   /** Turn panel: the player's own character uses an action (or ends its turn), sent only while online. The DM's device checks it. */
-  sendUse(characterId: string, action: string, slot?: number, target?: string, aim?: Aim): void {
-    this.#own(characterId, () => this.#send({ t: 'use', characterId, action, ...(slot !== undefined && { slot }), ...(target !== undefined && { target }), ...(aim && { aim }) }));
+  sendUse(characterId: string, action: string, slot?: number, target?: string, aim?: Aim, summon?: SummonPick): void {
+    this.#own(characterId, () => this.#send({ t: 'use', characterId, action, ...(slot !== undefined && { slot }), ...(target !== undefined && { target }), ...(aim && { aim }), ...(summon && { summon }) }));
   }
   /** Targeting: the player's own save roll for their character's pending area save. */
   sendSave(resolution: string, characterId: string, d20: number): void { this.#own(characterId, () => this.#send({ t: 'save', resolution, characterId, d20 })); }
