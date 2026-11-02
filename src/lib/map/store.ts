@@ -137,7 +137,16 @@ export async function removeCombatant(cid: string, combatantId: string): ReturnT
   return out;
 }
 
-/** Before a fight ends: every scene of the campaign takes the fight's HP onto its linked tokens. */
+/** Before a fight ends (End combat, or a saved one resumed over it): its monsters leave every scene, as they leave the fight. */
+export async function clearFightTokens(cid: string): Promise<void> {
+  const fighters = new Set((await db.combat.get(cid))?.combatants.filter((x) => x.kind === 'monster').map((x) => x.id));
+  for (const s of await db.scenes.list(cid)) {
+    const ids = s.tokens.filter((t) => t.combatantId && fighters.has(t.combatantId)).map((t) => t.id);
+    if (ids.length) await editScene(s.id, (x) => removeTokens(x, ids));
+  }
+}
+
+/** Every scene of the campaign takes the fight's HP onto its linked tokens. */
 export async function endCombatWriteBack(cid: string): Promise<void> {
   const combat = await db.combat.get(cid);
   for (const s of await db.scenes.list(cid)) await editScene(s.id, (x) => tokensFromCombat(x, combat));

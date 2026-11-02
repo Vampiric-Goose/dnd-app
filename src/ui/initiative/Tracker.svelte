@@ -130,9 +130,9 @@
       else return;
     } else if (!confirm('End this combat? The order, monster HP and condition durations are cleared.')) return;
     void run(async () => {
-      // Stage 5: the fight's monster HP stays on the map's linked tokens. A failure there must not keep the fight going.
-      try { await (await import('../../lib/map/store.ts')).endCombatWriteBack(cid); } catch (e) { console.warn(e); toast('The map tokens kept their old HP.', true); }
-      await then?.();
+      await then?.(); // a kept encounter is saved with its map first
+      // One roster: the fight's monsters leave the map with it. A failure there must not keep the fight going.
+      try { await (await import('../../lib/map/store.ts')).clearFightTokens(cid); } catch (e) { console.warn(e); toast("The fight's monsters stayed on the map.", true); }
       await endCombat(cid);
     });
   }

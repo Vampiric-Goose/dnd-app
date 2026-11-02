@@ -87,8 +87,8 @@
           if (!a) return;
           if (typeof a === 'object') await saveFightAs(cid, a.name);
         }
-        // As at End combat: the old fight's monster HP stays on its map tokens.
-        try { await (await import('../../lib/map/store.ts')).endCombatWriteBack(cid); } catch (err) { console.warn(err); }
+        // As at End combat: the old fight's monsters leave the map (saved above with it, when kept).
+        try { await (await import('../../lib/map/store.ts')).clearFightTokens(cid); } catch (err) { console.warn(err); }
       }
       const fresh = await db.encounters.get(e.id); // saving back above may have just updated this very encounter
       if (!fresh?.fight) throw new Error('That encounter is gone.');

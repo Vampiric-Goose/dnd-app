@@ -5,7 +5,7 @@ import { monsterCombatant, newCombat } from '../../src/lib/combat/combat.ts';
 import { db, resetDb } from '../../src/lib/db.ts';
 import { footprint } from '../../src/lib/map/grid.ts';
 import { addTokens, newScene, tokensFromCombat } from '../../src/lib/map/scene.ts';
-import { addTokensToCombat, combatantsFromTokens, dropTokens, endCombatWriteBack, joinFight, placeCombatants, placeUnplaced, removeCombatant } from '../../src/lib/map/store.ts';
+import { addTokensToCombat, clearFightTokens, combatantsFromTokens, dropTokens, endCombatWriteBack, joinFight, placeCombatants, placeUnplaced, removeCombatant } from '../../src/lib/map/store.ts';
 import type { MonsterDef, Pack, Scene, Sheet } from '../../src/lib/types.ts';
 import { camp, char } from '../fixtures/records.ts';
 
@@ -136,6 +136,14 @@ describe('with the database', () => {
     const k = (await db.combat.get('c1'))!;
     expect(k.combatants.map((x) => x.name)).toEqual(['Goblin 1']);
     expect((await db.scenes.get(s.id))!.tokens[1].combatantId).toBe(k.combatants[0].id);
+  });
+
+  test('a fight that ends takes its monsters off the map; characters and map-only tokens stay', async () => {
+    const s = addTokens(prepared(), [{ name: 'Statue', size: 'M' }]);
+    await db.scenes.put(s);
+    await addTokensToCombat('c1', s.id, s.tokens.slice(0, 3).map((t) => t.id), { chars: [thorin], sheetOf, lookup, settings: camp('c1').settings });
+    await clearFightTokens('c1');
+    expect((await db.scenes.get(s.id))!.tokens.map((t) => t.name)).toEqual(['Thorin', 'Statue']);
   });
 
   test('tokens removed from the map leave the fight', async () => {
