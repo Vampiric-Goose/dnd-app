@@ -311,3 +311,24 @@ test('range Self: one creature within N feet saves at that reach; "has a range o
   expect(sp('You can make a ranged spell attack with the pebble. If thrown, it has a range of 60 feet. On a hit, the target takes 1d6 bludgeoning damage.', 'Touch').reach).toBe(60);
   expect(sp('A line of roaring flame 15 feet long and 5 feet wide extends from you. Each creature in the line must make a Dexterity saving throw, taking 4d8 fire damage on a failed save.').area).toEqual({ shape: 'line', feet: 15, width: 5, self: true });
 });
+
+// Every Spell, Task 3 (paraphrased wording): damage parts that are not a sum.
+describe('damage parts', () => {
+  const sp = (p: string, range = '60 feet') => readSpell({ level: 1, range, text: [{ p }] } as unknown as SpellDef);
+  test('a die used instead when the target is hurt is an alternative', () => {
+    const r = sp('The target must succeed on a Wisdom saving throw or take 1d8 necrotic damage. If the target is missing any of its hit points, it instead takes 1d12 necrotic damage.');
+    expect(r.damage.map((d) => [d.dice, d.part])).toEqual([['1d8', undefined], ['1d12', 'alt']]);
+  });
+  test('one of two types by the caster: one roll, two choices', () => {
+    const r = sp('An affected creature takes 3d8 radiant damage (if you are good or neutral) or 3d8 necrotic damage (if you are evil) on a failed Wisdom save.');
+    expect([r.damage.length, r.damage[0].type, r.choices]).toEqual([1, '', ['radiant', 'necrotic']]);
+  });
+  test('damage at the end of the target\'s next turn comes later; a miss deals half the first part', () => {
+    const r = sp('Make a ranged spell attack against the target. On a hit, the target takes 4d4 acid damage immediately and 2d4 acid damage at the end of its next turn. On a miss, the arrow splashes the target with acid for half as much of the initial damage and no damage at the end of its next turn.');
+    expect([r.damage.map((d) => d.part), r.missHalf]).toEqual([[undefined, 'later'], true]);
+  });
+});
+test('a cantrip\'s alternative die scales with it (Toll the Dead at 5th level)', () => {
+  const r = { damage: [{ dice: '1d8', type: 'necrotic' }, { dice: '1d12', type: 'necrotic', part: 'alt' }], scaling: { 1: '1d8', 5: '2d8' } } as never;
+  expect(diceAt(r, { level: 0, charLevel: 5 }).damage).toEqual(['2d8 necrotic', '2d12 necrotic']);
+});

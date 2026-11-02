@@ -88,17 +88,22 @@ export const updateCombat = (cid: string, fn: (c: Combat) => Combat): Promise<Co
  * Start the fight, or end the turn and start the next; PC conditions that expire are removed from their characters. `expect`: only
  * while that combatant holds the turn (a player's End turn that arrives after the turn moved on changes nothing).
  */
-export const turn = (cid: string, dir: 'start' | 'next', expect?: string): Promise<Step> => serial(async () => {
-  let expired: Expired[] = [], ended: string[] = [];
-  const combat = await update(cid, (c) => {
-    if (expect !== undefined && c.turn !== expect) return c;
-    if (dir === 'next') ended = turnIds(c);
-    const s = dir === 'start' ? start(c) : next(c); expired = s.expired; return s.combat;
+export const turn = async (cid: string, dir: 'start' | 'next', expect?: string): Promise<Step> => {
+  let ended: string[] = [];
+  const step = await serial(async () => {
+    let expired: Expired[] = [];
+    const combat = await update(cid, (c) => {
+      if (expect !== undefined && c.turn !== expect) return c;
+      if (dir === 'next') ended = turnIds(c);
+      const s = dir === 'start' ? start(c) : next(c); expired = s.expired; return s.combat;
+    });
+    const out = await clearExpired({ combat, expired });
+    for (const id of ended) await repeatSaves(cid, id);
+    return out;
   });
-  const step = await clearExpired({ combat, expired });
-  for (const id of ended) await repeatSaves(cid, id);
+  for (const id of ended) await laterHits(cid, id); // outside the queue: its damage goes through changeHp, which queues itself
   return ended.length ? { ...step, combat: (await db.combat.get(cid)) ?? step.combat } : step;
-});
+};
 
 /** removeCombatant, writing the PC side of any expiry the passed turn starts (see removeStep). */
 export const remove = (cid: string, combatantId: string): Promise<Step> => serial(async () => {
@@ -200,6 +205,20 @@ async function inflict<T extends { id: string; condition: string }>(cid: string,
  * The end of `id`'s turn: each repeat-save spell whose conditions it still has gets a new result. A monster rolls at once (its bonus kept
  * from the first save) and a success ends them; a PC's save is pending, for its player's pop-up (settleSave ends them on a success).
  */
+/** The end of `id`'s turn: damage a result held for then (Acid Arrow's second part) lands, once, as a result of its own (Undo-able). */
+async function laterHits(cid: string, id: string): Promise<void> {
+  const due = ((await db.combat.get(cid))?.resolutions ?? []).filter((r) => !r.laterDone && r.outcomes.some((o) => o.id === id && o.later));
+  if (!due.length) return;
+  const settings = (await db.campaigns.get(cid))?.settings;
+  if (!settings) return;
+  for (const r of due) {
+    const damage = r.outcomes.find((o) => o.id === id && o.later)!.later!, before = await snapNow(cid, [id]);
+    const applied = [await hurtOne(cid, id, damage, false, settings)], after = await snapNow(cid, [id]);
+    const next: Resolution = { id: uid(), actor: r.actor, action: `${r.action} (end of turn)`, outcomes: [{ id, part: 'hit', hit: true, damage }], applied, at: Date.now(), undo: { before, after } };
+    await update(cid, (c) => ({ ...c, resolutions: kept(c, [...(c.resolutions ?? []).map((y) => (y.id === r.id ? { ...y, laterDone: true as const } : y)), next]) }));
+  }
+}
+
 async function repeatSaves(cid: string, id: string): Promise<void> {
   const k = await db.combat.get(cid), x = k?.combatants.find((y) => y.id === id);
   if (!k || !x) return;

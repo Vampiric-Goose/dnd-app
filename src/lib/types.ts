@@ -166,11 +166,12 @@ export interface Outcome {
   /** its dice matched: the spell may leap to another creature (Chaos Bolt) */ leap?: true;
   /** a hit waiting for its caster's player to pick the die that sets the type (Chaos Bolt): each pick's damage, worked out already */
   choose?: { face: number; type: string; damage: number; note?: string }[];
+  /** damage still to come at the end of the target's next turn (Acid Arrow), applied then by turn() */ later?: number;
 }
 /** What a result took off a combatant (HP and temp HP), and a PC's dying state before it, so Undo puts back exactly that. */
 export interface Applied { id: string; hp: number; temp: number; dying?: { deathSaves: { success: number; fail: number }; stable: boolean; dead: boolean };
   /** the Con save DC to keep concentrating (the hit left it standing) */ conc?: number }
-export interface Resolution { id: string; actor: string /* combatant */; action: string /* its name */; dc?: number; ability?: Ability; onSave?: 'half' | 'none';
+export interface Resolution { id: string; actor: string /* combatant */; action: string /* its name */; dc?: number; ability?: Ability; onSave?: 'half' | 'none'; /** its `later` damage has landed */ laterDone?: true;
   outcomes: Outcome[]; applied: Applied[]; at: number; /** an area's catch (combatant ids), for the DM's list */ caught?: string[];
   /** Undo: the creatures it touched (combatants, and PCs' character state) before it was paid for, and after it landed. */ undo?: { before: Snap; after: Snap };
   /** A spell's area as cast, on scene `sceneId` in `round`; `lasting`: a concentration spell's, shown while its caster concentrates. */

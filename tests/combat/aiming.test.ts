@@ -191,3 +191,10 @@ describe('workOut on the DM\'s map', () => {
     expect(r).toMatchObject({ resolution: { outcomes: [{ hit: false, roll: 8 }] } });
   });
 });
+
+test('a lasting area of a chosen type asks for it and keeps it for the turns to come (Spirit Guardians)', () => {
+  const read = { save: 'Wis', onSave: 'half', damage: [{ dice: '3d8', type: '' }], choices: ['radiant', 'necrotic'], area: { shape: 'sphere', feet: 15, self: true }, lingering: true, range: 'self' };
+  const a = { id: 's', name: 'S', cost: 'action', group: 'spell', spell: { id: 's', level: 3, concentration: true }, cast: { read, attack: 5, dc: 13, charLevel: 5, mod: 3 } } as never;
+  expect(aimPlan(a)!.choices).toEqual(['radiant', 'necrotic']);
+  expect(aimPlan(a, { dtype: 'necrotic' })!.linger!.dice[0].type).toBe('necrotic');
+});

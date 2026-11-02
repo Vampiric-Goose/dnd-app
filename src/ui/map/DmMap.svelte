@@ -433,7 +433,7 @@
   });
   const infoOf = (z: Combatant) => {
     const c = z.characterId ? chars.find((y) => y.id === z.characterId) : undefined;
-    return c ? targetOf(z, { sheet: sheets.get(c.id) ?? computeSheet(c, { settings, viewer: 'dm' }) }) : targetOf(z, { monster: z.monsterId ? monsterById.get(z.monsterId) : undefined });
+    return c ? targetOf(z, { sheet: sheets.get(c.id) ?? computeSheet(c, { settings, viewer: 'dm' }), hp: c.state.hp }) : targetOf(z, { monster: z.monsterId ? monsterById.get(z.monsterId) : undefined });
   };
   // Damage over time: the areas the creature whose turn it is starts in (Moonbeam), each until it is rolled for this round
   const startOf = (r: Resolution) => `${r.action} (start of turn)`;

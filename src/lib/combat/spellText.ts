@@ -19,7 +19,9 @@ export interface SpellRead {
   /** The save it forces, short ('Dex'). */
   save?: string;
   /** Damage dice; `mod`: plus the spellcasting modifier; `on` (a spell with an attack and a save): which part deals it. */
-  damage: { dice: string; type: string; mod?: boolean; on?: 'hit' | 'save' }[];
+  damage: { dice: string; type: string; mod?: boolean; on?: 'hit' | 'save'; /** `alt`: instead of the part before it when the target is hurt (Toll the Dead); `later`: at the end of the target's next turn (Acid Arrow) */ part?: 'alt' | 'later' }[];
+  /** A miss still deals half the first part (Acid Arrow). */
+  missHalf?: true;
   /** The types to pick from for damage whose type is chosen or rolled (its `type` is ''). */
   choices?: string[];
   /** Darts that always hit (no attack, no save): `count` of them, one more for each slot level above `above`. */
@@ -82,9 +84,13 @@ export function readSpell(s: Pick<SpellDef, 'text' | 'level' | 'range'> & { name
     const end = t.indexOf('.', i);
     return /saving throw|failed save/i.test(t.slice(t.lastIndexOf('.', i) + 1, end < 0 ? t.length : end)) ? 'save' : 'hit';
   };
+  // the words before a roll in its sentence ("it instead takes"), and after it up to the next roll or the sentence's end ("at the end of its next turn")
+  const headAt = (i: number) => t.slice(t.lastIndexOf('.', i) + 1, i);
+  const tailAt = (i: number, len: number) => { const rest = t.slice(i + len), stop = rest.search(/\.|\d+d\d+/); return stop < 0 ? rest : rest.slice(0, stop); };
   const dmg = (dice: string, type: string, at: number, mod?: boolean) => {
     const key = `${dice}|${type}`.toLowerCase(), on = partAt(at);
-    if (!seen.has(key)) { seen.add(key); out.damage.push({ dice: dice.replace(/\s+/g, ''), type: type.toLowerCase(), ...(mod && { mod: true }), ...(on && { on }) }); }
+    const part = out.damage.length && /\binstead\b/i.test(headAt(at)) ? 'alt' as const : /\bat the end of (?:its|the target's) next turn\b/i.test(tailAt(at, dice.length)) ? 'later' as const : undefined;
+    if (!seen.has(key)) { seen.add(key); out.damage.push({ dice: dice.replace(/\s+/g, ''), type: type.toLowerCase(), ...(mod && { mod: true }), ...(on && { on }), ...(part && { part }) }); }
   };
   for (const m of t.matchAll(new RegExp(`(\\d+d\\d+(?:\\s*\\+\\s*\\d+)?)\\s+(${TYPES})\\s+damage`, 'gi'))) dmg(m[1], m[2], m.index);
   for (const m of t.matchAll(new RegExp(`(${TYPES}) damage equal to (\\d+d\\d+)( \\+ your spellcasting ability modifier)?`, 'gi'))) dmg(m[2], m[1], m.index, !!m[3]);
@@ -97,6 +103,10 @@ export function readSpell(s: Pick<SpellDef, 'text' | 'level' | 'range'> & { name
     const named = [...new Set([...t.matchAll(new RegExp(`\\b(${TYPES})\\b`, 'gi'))].map((x) => x[1].toLowerCase()))];
     out.choices = named.length > 1 ? named : TYPES.split('|'); // one type word is no list (often the verb "fire")
   }
+  // one roll of a type the caster's alignment picks (Spirit Guardians): "3d8 radiant damage (if you are good…) or 3d8 necrotic damage (if…)"
+  const byYou = new RegExp(`(\\d+d\\d+) (${TYPES}) damage \\(if you[^)]*\\) or \\1 (${TYPES}) damage`, 'i').exec(t);
+  if (byYou) { out.damage = [{ dice: byYou[1], type: '' }]; out.choices = [byYou[2].toLowerCase(), byYou[3].toLowerCase()]; }
+  if (out.attack && /\bon a miss\b[^.]*\bhalf\b/i.test(t)) out.missHalf = true;
   const darts = /each (?:dart|bolt|missile) hits/i.test(t) && /\b(two|three|four|five|\d+)(?: glowing)? (?:darts|bolts|missiles)\b/i.exec(t);
   if (darts) {
     const more = /one more (?:dart|bolt|missile) for each slot level above (\d)/i.exec(h);
@@ -194,6 +204,8 @@ function addDice(base: string, extra: string, times: number): string {
   return `${base}+${b ? `${+b[1] * times}d${b[2]}` : extra}`;
 }
 const signedMod = (n: number) => (n === 0 ? '' : n > 0 ? `+${n}` : `${n}`);
+/** A cantrip that grows with character level, by the book's table or the wording. */
+const s0 = (r: SpellRead) => !!(r.scaling || r.scales);
 
 /**
  * The dice to roll: at slot `slot` for a spell of `level` (higher slots add perSlot), a cantrip at character level `charLevel` (×2 at
@@ -206,7 +218,7 @@ export function diceAt(r: SpellRead, o: { slot?: number; level: number; charLeve
     let dice = d.dice;
     const lvl = r.scaling && Object.keys(r.scaling).map(Number).filter((k) => k <= (o.charLevel ?? 1)).sort((a, b) => b - a)[0];
     if (r.scaling && i === 0 && lvl !== undefined) dice = r.scaling[lvl];
-    else if (r.scales && i === 0) dice = dice.replace(/^(\d+)d/, (_, c) => `${+c * tier}d`);
+    else if ((r.scales && i === 0) || (s0(r) && d.part === 'alt')) dice = dice.replace(/^(\d+)d/, (_, c) => `${+c * tier}d`); // an alternative die scales with the first (Toll the Dead)
     if (!r.heal && i === 0 && r.perSlot) dice = addDice(dice, r.perSlot.dice, n);    return `${dice}${d.mod ? signedMod(o.mod ?? 0) : ''} ${d.type}`;
   });
   const heal = r.heal && `${r.perSlot ? addDice(r.heal.dice, r.perSlot.dice, n) : r.heal.dice}${r.heal.mod ? signedMod(o.mod ?? 0) : ''}`;

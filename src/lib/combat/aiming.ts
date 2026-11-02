@@ -24,7 +24,7 @@ export interface AimArea { shape: Shape; feet: number; width?: number; on: 'crea
 /** `ignore`: disadvantages a feat removes (Sharpshooter: long range; Crossbow Expert: a hostile within 5 ft). */
 /** `choices`: the damage types to pick from for dice whose type is chosen (their `type` stays '' until one is picked). */
 /** `mark`: a rider spell aimed at the creature it marks (no dice). A die's `vs`: it hurts only that creature (a marked rider). */
-export interface AimPlan { reach: Reach; line: boolean; attack: boolean; toHit?: number; area?: AimArea; dice: { expr: string; type: string; on?: 'hit' | 'save'; vs?: string }[]; read?: SpellRead;
+export interface AimPlan { reach: Reach; line: boolean; attack: boolean; toHit?: number; area?: AimArea; dice: { expr: string; type: string; on?: 'hit' | 'save'; vs?: string; part?: 'alt' | 'later' }[]; read?: SpellRead;
   ignore?: { long?: true; close?: true }; choices?: string[]; mark?: true; /** rays, beams or darts: a target each */ count?: number; /** damage over time, kept for the turns to come */ linger?: { dice: { expr: string; type: string }[]; read: SpellRead } }
 
 /**
@@ -115,11 +115,12 @@ export function aimPlan(a: TurnAction, o: { level?: number; toggles?: Toggle[]; 
   if (!read.save && !read.damage.length && !read.area && !read.burst && !read.conditions?.length) return undefined; // a save-only spell (Suggestion) still rolls the monster's save
   const picked = o.dtype && read.choices?.includes(o.dtype) ? o.dtype : '';
   const dice = diceAt(read, { slot: o.level ?? a.spell.level, level: a.spell.level, charLevel: a.cast!.charLevel, mod: a.cast!.mod }).damage
-    .map((d, i) => { const [expr, ...type] = d.split(' '); return { expr, type: type.join(' ') || picked, ...(read.damage[i]?.on && { on: read.damage[i].on }) }; });
+    .map((d, i) => { const [expr, ...type] = d.split(' '); return { expr, type: type.join(' ') || picked, ...(read.damage[i]?.on && { on: read.damage[i].on }), ...(read.damage[i]?.part && { part: read.damage[i].part }) }; });
   const area: AimArea | undefined = read.burst ? { shape: 'sphere', feet: read.burst, on: 'creature' }
     : read.area ? { shape: read.area.shape, feet: read.area.feet, ...(read.area.width && { width: read.area.width }), on: read.area.self ? 'self' : 'point',
       ...(reach !== 'self' && reach.spell !== undefined && { range: reach.spell }) } : undefined;
   if (read.lingering) return { reach, line: false, attack: false, ...(area && { area }), dice: [], read: { ...read, attack: undefined, save: undefined, damage: [] }, // placed and listed now
+    ...(read.choices && { choices: read.choices }), // a chosen type (Spirit Guardians) is picked now and kept
     ...(dice.length && { linger: { dice: dice.map(({ expr, type }) => ({ expr, type })), read } }) }; // rolled as a creature starts its turn there
   if (read.attack && o.rider?.anyAttack) dice.push({ expr: o.rider.dice, type: o.rider.type || dice[0]?.type || '', on: 'hit', ...(o.rider.target && { vs: o.rider.target }) }); // Hex on a spell attack
   const ignore = read.attack === 'ranged' && has('Crossbow Expert') ? { close: true as const } : undefined;
@@ -181,7 +182,7 @@ export async function workOut(i: WorkIn): Promise<Aimed | string> {
   const { a, aim, combat: k, scene: s, actor } = i;
   let plan = aimPlan(a, { level: i.level, features: i.features, toggles: attackToggles(a, i.features).filter((t) => aim.toggles.includes(t.id)), dtype: aim.dtype, rider: actor.rider });
   if (!plan) return 'that cannot be aimed';
-  if (plan.dice.some((d) => !d.type) && plan.choices && !plan.read?.typeFromDie) return 'pick a damage type';
+  if ([...plan.dice, ...(plan.linger?.dice ?? [])].some((d) => !d.type) && plan.choices && !plan.read?.typeFromDie) return 'pick a damage type';
   if (plan.count && !i.ray) { // rays, beams or darts: one aim each (two d20s and the dice each), worked out one by one
     const ts = aim.targets ?? [], n = plan.dice.length;
     if (ts.length !== plan.count) return 'pick a target';

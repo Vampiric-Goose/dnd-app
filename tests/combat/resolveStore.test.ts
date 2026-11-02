@@ -239,3 +239,19 @@ test('a player\'s Chaos Bolt pick: that option\'s damage lands, the wait ends; a
   await undoResolution('c1', 'r1', settings);
   expect(await hp('g1')).toBe(7);
 });
+
+test('damage held for later (Acid Arrow) lands once, at the end of the target\'s turn', async () => {
+  await updateCombat('c1', (c) => ({ ...c, round: 1, turn: 'pc:p', combatants: c.combatants.map((x) => ({ ...x, init: x.id === 'pc:p' ? 20 : x.id === 'g1' ? 15 : 10 })) }));
+  await applyResolution('c1', res('r1', [{ id: 'g1', part: 'hit', hit: true, damage: 1, later: 3 }]), settings);
+  expect(await hp('g1')).toBe(6);
+  await turn('c1', 'next'); // the caster's turn ends: nothing yet
+  expect(await hp('g1')).toBe(6);
+  const k = (await db.combat.get('c1'))!;
+  if (k.turn !== 'g1') await updateCombat('c1', (c) => ({ ...c, turn: 'g1' }));
+  await turn('c1', 'next'); // the goblin's turn ends: the acid lands
+  expect(await hp('g1')).toBe(3);
+  await turn('c1', 'next');
+  await updateCombat('c1', (c) => ({ ...c, turn: 'g1' }));
+  await turn('c1', 'next'); // and only once
+  expect(await hp('g1')).toBe(3);
+});

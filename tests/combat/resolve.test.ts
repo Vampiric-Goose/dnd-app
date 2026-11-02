@@ -105,3 +105,21 @@ test('damage over time with no save just lands; with a save, the usual save', ()
   const moon: SpellRead = { damage: [{ dice: '2d10', type: 'radiant' }], lingering: true, save: 'Con', onSave: 'half' };
   expect(resolveSpell(moon, [{ expr: '2d10', type: 'radiant' }], 13, undefined, goblin('g'), [], { dmg: [[5, 5]] }, always(2))[0]).toMatchObject({ save: { ok: false }, damage: 10 });
 });
+
+// Every Spell, Task 3: alternative and later parts, half on a miss.
+describe('damage parts when resolved', () => {
+  test('the alternative die hurts a hurt target instead of the first', () => {
+    const read = { save: 'Wis', onSave: 'none', damage: [{ dice: '1d8', type: 'necrotic' }, { dice: '1d12', type: 'necrotic', part: 'alt' }] } as never;
+    const dice = [{ expr: '1d8', type: 'necrotic' }, { expr: '1d12', type: 'necrotic', part: 'alt' as const }];
+    const fresh = resolveSpell(read, dice, 13, undefined, goblin('g'), [], { dmg: [[5], [11]] }, always(2));
+    const hurt = resolveSpell(read, dice, 13, undefined, goblin('g', { hurt: true }), [], { dmg: [[5], [11]] }, always(2));
+    expect([fresh[0].damage, hurt[0].damage]).toEqual([5, 11]);
+  });
+  test('a later part waits on the outcome; a miss with half deals half the first part only', () => {
+    const read = { attack: 'ranged', missHalf: true, damage: [{ dice: '4d4', type: 'acid' }, { dice: '2d4', type: 'acid', part: 'later' }] } as never;
+    const dice = [{ expr: '4d4', type: 'acid' }, { expr: '2d4', type: 'acid', part: 'later' as const }];
+    const hit = resolveSpell(read, dice, undefined, 5, goblin('g'), [], { d20: [15], dmg: [[4, 4, 4, 4], [3, 3]] }, always(1));
+    const miss = resolveSpell(read, dice, undefined, 5, goblin('g'), [], { d20: [2], dmg: [[4, 4, 4, 4], [3, 3]] }, always(1));
+    expect([hit[0].damage, hit[0].later, miss[0].damage, miss[0].later]).toEqual([16, 6, 8, undefined]);
+  });
+});

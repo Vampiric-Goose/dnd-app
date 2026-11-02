@@ -8,7 +8,11 @@ export type { Outcome };
 import type { SpellRead } from './spellText.ts';
 import { afterDefenses, type Defenses } from './targeting.ts';
 
-export interface TargetInfo { id: string; ac: number; save: Record<Ability, number>; defenses: Defenses; pc: boolean; hidden: boolean; conditionImmune?: string[] }
+export interface TargetInfo { id: string; ac: number; save: Record<Ability, number>; defenses: Defenses; pc: boolean; hidden: boolean; conditionImmune?: string[]; /** missing any hit points (Toll the Dead) */ hurt?: boolean }
+type Die = { expr: string; type: string; on?: 'hit' | 'save'; vs?: string; part?: 'alt' | 'later' };
+/** A list's alternatives (Toll the Dead): for a hurt target each `alt` replaces the part before it, else alternatives drop. */
+const pickAlt = <T extends Pick<Die, 'part'>>(list: T[], hurt?: boolean): T[] =>
+  !list.some((d) => d.part === 'alt') ? list : list.filter((d, i) => (d.part === 'alt' ? !!hurt : !(hurt && list[i + 1]?.part === 'alt')));
 /** Raw faces: `d20` one die, or two with advantage or disadvantage; `dmg[i]` the faces of damage expression i (twice the dice on a crit). */
 export interface Rolled { d20?: number[]; mode?: 'adv' | 'dis'; dmg: number[][] }
 
@@ -96,15 +100,18 @@ const ABILITY: Record<string, Ability> = { Str: 'str', Dex: 'dex', Con: 'con', I
  * A spell: its attack on `target` (hit damage), then its save for everyone `caught` (the target alone when there's no area). Save damage
  * is rolled once: a failure takes it all, a success half (rounded down) or none, each after its own defenses. Spell damage is magical.
  */
-export function resolveSpell(read: SpellRead, dice: { expr: string; type: string; on?: 'hit' | 'save'; vs?: string }[], dc: number | undefined, toHit: number | undefined,
+export function resolveSpell(read: SpellRead, dice: Die[], dc: number | undefined, toHit: number | undefined,
   target: TargetInfo | undefined, caught: TargetInfo[], r: Rolled, rng: () => number, autoCrit = false, ask = false): Outcome[] {
   const out: Outcome[] = [];
   const idx = dice.map((d, i) => ({ ...d, faces: r.dmg[i] ?? [] }));
   const hitDice = read.attack ? idx.filter((d) => d.on !== 'save') : [], saveDice = read.attack ? idx.filter((d) => d.on === 'save') : idx;
   if (read.attack && target && toHit !== undefined) {
     const a = attackRoll(target, toHit, r);
-    const live = hitDice.filter((d) => !d.vs || d.vs === target.id); // a marked rider (Hex) hurts only its mark
-    const h = a.hit ? hurt(target, live, live.map((d) => d.faces), a.nat === 20 || autoCrit, true, read.typeFromDie) : { damage: 0 };
+    const marked = pickAlt(hitDice.filter((d) => !d.vs || d.vs === target.id), target.hurt); // a marked rider (Hex) hurts only its mark
+    const live = marked.filter((d) => d.part !== 'later'), later = marked.filter((d) => d.part === 'later');
+    const h = a.hit ? hurt(target, live, live.map((d) => d.faces), a.nat === 20 || autoCrit, true, read.typeFromDie)
+      : read.missHalf ? (({ damage, ...rest }) => ({ ...rest, damage: roundDamage(damage / 2, target.pc) }))(hurt(target, live, live.map((d) => d.faces), false, true)) : { damage: 0 };
+    const due = a.hit && later.length ? hurt(target, later, later.map((d) => d.faces), a.nat === 20 || autoCrit, true).damage : 0;
     const { matched, ...dealt } = h as ReturnType<typeof hurt>;
     const pick = read.typeFromDie, open = live.find((d) => !d.type), crit = a.nat === 20 || autoCrit;
     // `ask` (a PC casts it): its player picks the die; each pick's damage is worked out here, where the defenses are known
@@ -112,17 +119,18 @@ export function resolveSpell(read: SpellRead, dice: { expr: string; type: string
       const type = pick.types[face - 1] ?? '', c = hurt(target, live.map((d) => (d.type ? d : { ...d, type })), live.map((d) => d.faces), crit, true);
       return { face, type, damage: c.damage, note: [`${type} (d${pick.sides} ${face})`, ...(c.note ? [c.note] : [])].join(', ') };
     }) : undefined;
-    out.push({ id: target.id, part: 'hit', ...a, ac: target.ac, ...(choose ? { damage: 0, choose } : dealt), ...(matched && read.leap && { leap: true as const }) }); // matching dice: it leaps (Chaos Bolt)
+    out.push({ id: target.id, part: 'hit', ...a, ac: target.ac, ...(choose ? { damage: 0, choose } : dealt), ...(matched && read.leap && { leap: true as const }), ...(due > 0 && { later: due }) }); // matching dice: it leaps (Chaos Bolt)
   }
   // ponytail: darts that always hit all go to the one target; split them between several when someone needs it
   if ((read.auto || (read.lingering && !read.save)) && target) out.push({ id: target.id, part: 'hit', hit: true, ...hurt(target, idx, idx.map((d) => d.faces), false, true, read.typeFromDie) });
   if (!read.save || dc === undefined) return out;
   const ability = ABILITY[read.save] ?? 'dex';
-  const owed = saveDice.map((d) => ({ amount: totalOf(d.expr, d.faces, false) ?? 0, type: d.type }));
+  const owedBy = (t: TargetInfo) => pickAlt(saveDice, t.hurt).map((d) => ({ amount: totalOf(d.expr, d.faces, false) ?? 0, type: d.type }));
   // the conditions a failure leaves, but none the target is immune to
   const lose = (t: TargetInfo) => (read.conditions ?? []).filter((c) => !t.conditionImmune?.some((i) => i.toLowerCase() === c.toLowerCase()));
   for (const t of caught.length ? caught : target ? [target] : []) {
     const would = lose(t);
+    const owed = owedBy(t);
     if (t.pc) { out.push({ id: t.id, part: 'save', pending: true, damage: 0, owed, ...(would.length && { inflicts: would }) }); continue; }
     const roll = 1 + Math.floor(rng() * 20), total = roll + t.save[ability], ok = total >= dc;
     out.push({ id: t.id, part: 'save', save: { roll, total, ok }, ...settle(t, owed, ok, read.onSave), ...(!ok && would.length && { inflict: would }) });
@@ -144,15 +152,15 @@ export function settle(t: Pick<TargetInfo, 'defenses'> & { pc?: boolean }, owed:
 
 const mod = (score: number) => Math.floor((score - 10) / 2);
 /** A combatant as a target: a monster's AC, saves (printed, else its ability modifier) and defenses; a PC's from its sheet. */
-export function targetOf(x: Combatant, o: { monster?: MonsterDef; sheet?: Sheet }): TargetInfo {
+export function targetOf(x: Combatant, o: { monster?: MonsterDef; sheet?: Sheet; /** a PC's current HP (its character's) */ hp?: number }): TargetInfo {
   const keys: Ability[] = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
   if (o.sheet) {
     const s = o.sheet;
-    return { id: x.id, ac: s.ac, pc: true, hidden: !!x.hidden, save: Object.fromEntries(keys.map((k) => [k, s.saves[k].bonus])) as Record<Ability, number>,
+    return { id: x.id, ac: s.ac, pc: true, hidden: !!x.hidden, ...(o.hp !== undefined && o.hp < s.maxHp && { hurt: true }), save: Object.fromEntries(keys.map((k) => [k, s.saves[k].bonus])) as Record<Ability, number>,
       defenses: { resist: s.resistances, immune: s.immunities, vulnerable: s.vulnerabilities } };
   }
   const m = o.monster;
-  return { id: x.id, ac: x.ac ?? m?.ac[0]?.value ?? 10, pc: false, hidden: !!x.hidden,
+  return { id: x.id, ac: x.ac ?? m?.ac[0]?.value ?? 10, pc: false, hidden: !!x.hidden, ...(x.hp !== undefined && x.maxHp !== undefined && x.hp < x.maxHp && { hurt: true }),
     save: Object.fromEntries(keys.map((k) => [k, m?.saves[k] ?? (m ? mod(m.scores[k]) : 0)])) as Record<Ability, number>,
     defenses: { resist: m?.resist ?? [], immune: m?.immune ?? [], vulnerable: m?.vulnerable ?? [] }, conditionImmune: m?.conditionImmune ?? [] };
 }
