@@ -1,9 +1,11 @@
 // Pure scene and token operations. Never imports combat/ (that would pull the combat engine into the host chunk).
 import type { Combat, Grid, Scene, Size, Token } from '../types.ts';
 import { uid } from '../uid.ts';
+import { resizeFog } from './fog.ts';
 import { cellAt, cellCenter, footprint, SIZE_CELLS, snap, type Pt } from './grid.ts';
 
-export const MAX_TOKENS = 200, MAX_SIDE = 4096, BLANK = { width: 1400, height: 1000 };
+// a scene's side, and an uploaded image's (each device decodes it to what it holds: images.ts deviceSide)
+export const MAX_TOKENS = 200, MAX_SIDE = 8192, MAX_IMAGE = 8192, BLANK = { width: 1400, height: 1000 };
 export const DEFAULT_GRID: Grid = { type: 'square', size: 70, offsetX: 0, offsetY: 0, color: '#000000', opacity: 0.35, feet: 5 };
 export type NewToken = Omit<Token, 'id' | 'x' | 'y' | 'color'> & Partial<Pick<Token, 'x' | 'y' | 'color'>>;
 
@@ -81,6 +83,14 @@ export function regrid(s: Scene, p: Partial<Grid>): Scene {
   const grid = { ...s.grid, ...p };
   if (grid.type === s.grid.type) return { ...s, grid };
   return { ...s, grid, tokens: s.tokens.map((t) => { const at = snap(grid, t, t.size); return inside(s, at) ? { ...t, ...at } : t; }) };
+}
+
+/** A blank scene `cols` × `rows` cells (whole cells, at most MAX_SIDE a side): its fog kept where it overlaps, tokens past a new edge moved in. */
+export function resizeScene(s: Scene, cols: number, rows: number): Scene {
+  const side = (n: number) => Math.round(Math.max(1, Math.min(Math.floor(MAX_SIDE / s.grid.size), Math.round(n))) * s.grid.size);
+  const width = side(cols), height = side(rows), half = s.grid.size / 2;
+  return { ...s, width, height, ...(s.fog !== undefined && { fog: resizeFog(s.fog, s.width, s.height, width, height) }),
+    tokens: s.tokens.map((t) => (t.x <= width && t.y <= height ? t : { ...t, x: Math.min(t.x, width - half), y: Math.min(t.y, height - half) })) };
 }
 
 export const patchToken =(s: Scene, id: string, patch: Partial<Token>): Scene => ({ ...s, tokens: s.tokens.map((t) => (t.id === id ? { ...t, ...patch, id } : t)) });

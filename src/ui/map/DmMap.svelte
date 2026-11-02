@@ -4,10 +4,10 @@
   import { numberedNames } from '../../lib/combat/combat.ts';
   import type { ContentIndex } from '../../lib/content/index.ts';
   import { db } from '../../lib/db.ts';
-  import { resizeImage } from '../../lib/images.ts';
+  import { deviceSide, resizeImage } from '../../lib/images.ts';
   import { encodeFog, newFog, paintFog, type FogEdit } from '../../lib/map/fog.ts';
   import { snap, type Pt } from '../../lib/map/grid.ts';
-  import { addTokens, liveHp, MAX_SIDE, MAX_TOKENS, moveTokens, newScene, patchToken, regrid, tokenColor, type NewToken } from '../../lib/map/scene.ts';
+  import { addTokens, liveHp, MAX_IMAGE, MAX_SIDE, MAX_TOKENS, moveTokens, newScene, patchToken, regrid, resizeScene, tokenColor, type NewToken } from '../../lib/map/scene.ts';
   import { arrowsOn } from '../../lib/map/actions.ts';
   import { addTokensToCombat, dropTokens, editScene, joinFight, placeUnplaced, startFight, summon, tokenForCharacter, tokenForMonster } from '../../lib/map/store.ts';
   import { scaleSummon } from '../../lib/combat/summons.ts';
@@ -98,9 +98,15 @@
     if (!name) return;
     let image: { hash: string; width: number; height: number } | undefined;
     if (newFile) {
-      let blob = await resizeImage(newFile, MAX_SIDE);
-      // I1: Safari can't encode WebP (it falls back to a huge PNG): JPEG then
-      if (blob.size > MAX_BLOB || blob.type !== 'image/webp') blob = await resizeImage(newFile, MAX_SIDE, 'image/jpeg', 0.85);
+      // as large as this device can encode (each device decodes it to its own size, MapCanvas), smaller until it fits a sync (8 MB)
+      let blob: Blob | undefined;
+      for (const side of [MAX_IMAGE, 6144, 4096, 3072].filter((n) => n <= Math.min(MAX_IMAGE, deviceSide()))) {
+        blob = await resizeImage(newFile, side);
+        // I1: Safari can't encode WebP (it falls back to a huge PNG): JPEG then
+        if (blob.size > MAX_BLOB || blob.type !== 'image/webp') blob = await resizeImage(newFile, side, 'image/jpeg', 0.85);
+        if (blob.size <= MAX_BLOB) break;
+      }
+      if (!blob) throw new Error('That image could not be read.');
       if (blob.size > MAX_BLOB) throw new Error('That image is too big, even shrunk (over 8 MB). Try a smaller image.');
       const bmp = await createImageBitmap(blob);
       image = { hash: await db.blobs.put(blob), width: bmp.width, height: bmp.height };
@@ -179,7 +185,8 @@
   const sheets = $derived(new Map(chars.flatMap((c): [string, Sheet][] => {
     try { return [[c.id, computeSheet(c, { settings, viewer: 'dm' })]]; } catch { return []; } // a damaged character just gets no speed
   })));
-  const pool = $derived<MonsterDef[]>(index ? [...own, ...index.all('monster')] : own);
+  // the campaign's own copy of a book monster (same id) stands in for it: listed once
+  const pool = $derived<MonsterDef[]>(index ? [...own, ...index.all('monster').filter((m) => !own.some((o) => o.id === m.id))] : own);
   const monsterById = $derived(new Map(pool.map((m) => [m.id, m])));
   const charSize = (c: Character): Size => ((c.embedded[c.build.raceId] ?? index?.get(c.build.raceId)) as RaceDef | undefined)?.size ?? 'M';
 
@@ -665,6 +672,14 @@
             {#if scene.image}<button type="button" class="detect" disabled={busy} onclick={detectGrid}>Detect grid from the image</button>{/if}
             <GridForm grid={scene.grid} onchange={(p) => edit((s) => regrid(s, p))} />
           </Drawer>
+          {#if !scene.image}
+            {@const cells = (px: number) => Math.round(px / scene!.grid.size)}
+            <div class="size">
+              <label class="field">Width (cells) <input type="number" min="1" max={Math.floor(MAX_SIDE / scene.grid.size)} value={cells(scene.width)} onchange={(e) => { const n = Number(e.currentTarget.value); edit((s) => resizeScene(s, n, cells(s.height))); }} /></label>
+              <label class="field">Height (cells) <input type="number" min="1" max={Math.floor(MAX_SIDE / scene.grid.size)} value={cells(scene.height)} onchange={(e) => { const n = Number(e.currentTarget.value); edit((s) => resizeScene(s, cells(s.width), n)); }} /></label>
+              <span class="muted small"><span class="num">{cells(scene.width) * scene.grid.feet}</span> × <span class="num">{cells(scene.height) * scene.grid.feet}</span> ft</span>
+            </div>
+          {/if}
           <div class="rule">
             <label class="check"><input type="checkbox" checked={settings.freeMovement} onchange={(e) => setFreeMovement((e.currentTarget as HTMLInputElement).checked)} /> Free movement</label>
           </div>

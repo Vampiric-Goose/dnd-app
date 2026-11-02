@@ -131,7 +131,7 @@ describe('backups carry scenes', () => {
     expect(await importBackup(backup({ campaigns: [camp('c1')] }))).toMatchObject({ campaigns: 1, scenes: 0 });
   });
   test('a damaged scene fails the import', async () => {
-    await expect(importBackup(backup({ scenes: [{ ...scene('a'), width: 5000 }] }))).rejects.toThrow('Backup file is damaged');
+    await expect(importBackup(backup({ scenes: [{ ...scene('a'), width: 9000 }] }))).rejects.toThrow('Backup file is damaged');
     await expect(importBackup(backup({ scenes: [{ ...scene('a'), grid: { ...scene('a').grid, color: 'red' } }] }))).rejects.toThrow('Backup file is damaged');
     await expect(importBackup(backup({ scenes: [{ ...scene('a'), tokens: [{ id: 't', name: 'x', x: 'NaN', y: 0, size: 'M', color: '#000000' }] }] }))).rejects.toThrow('Backup file is damaged');
     // M4: the limits and optional field types

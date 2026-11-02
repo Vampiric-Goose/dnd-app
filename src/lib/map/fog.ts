@@ -41,6 +41,18 @@ export function isRevealed(f: Uint8Array | undefined, w: number, h: number, p: P
   return ((f[i >> 3] >> (i & 7)) & 1) === 1;
 }
 
+/** The fog of a scene resized to w1 × h1 from w0 × h0: what was revealed stays revealed, new ground starts fogged. */
+export function resizeFog(fog: string | undefined, w0: number, h0: number, w1: number, h1: number): string {
+  const f = fog === undefined ? undefined : decodeFog(fog, w0, h0), out = newFog(w1, h1, false);
+  if (!f) return encodeFog(out);
+  const a = fogSize(w0, h0), b = fogSize(w1, h1);
+  for (let r = 0; r < Math.min(a.rows, b.rows); r++) for (let c = 0; c < Math.min(a.cols, b.cols); c++) {
+    const i = r * a.cols + c, j = r * b.cols + c;
+    if ((f[i >> 3] >> (i & 7)) & 1) out[j >> 3] |= 1 << (j & 7);
+  }
+  return encodeFog(out);
+}
+
 export const encodeFog = (f: Uint8Array): string => toBase64(f);
 
 /** Undefined for a string that is not base64 or not the length this scene's fog has. */

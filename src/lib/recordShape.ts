@@ -106,7 +106,7 @@ export function sceneProblem(r: unknown): string | undefined {
   if (!isRec(r) || typeof r.id !== 'string' || typeof r.campaignId !== 'string' || typeof r.name !== 'string') return 'is incomplete';
   if (r.name.length > 100) return 'has a name over 100 characters';
   if (!opt(r.image, 'string') || !opt(r.shown, 'boolean')) return 'has a damaged image or shown flag';
-  for (const k of ['width', 'height']) if (!Number.isInteger(r[k]) || !between(r[k], 1, 4096)) return `has a bad ${k}`;
+  for (const k of ['width', 'height']) if (!Number.isInteger(r[k]) || !between(r[k], 1, 8192)) return `has a bad ${k}`; // map/scene.ts MAX_SIDE
   const g = r.grid;
   if (!isRec(g) || !['square', 'hex-flat', 'hex-pointy'].includes(g.type as string) || !between(g.size, 10, 500) || !finite(g.offsetX) || !finite(g.offsetY)
     || typeof g.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(g.color) || !between(g.opacity, 0, 1) || !between(g.feet, 1, 100)) return 'has a damaged grid';

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { cellAt, cellCenter, footprint } from '../../src/lib/map/grid.ts';
-import { addTokens, DEFAULT_GRID, initials, liveHp, MAX_TOKENS, moveTokens, newScene, patchToken, regrid, removeTokens, tokenAt, tokenColor, tokensInRect } from '../../src/lib/map/scene.ts';
+import { addTokens, DEFAULT_GRID, initials, liveHp, MAX_TOKENS, moveTokens, newScene, patchToken, regrid, removeTokens, resizeScene, tokenAt, tokenColor, tokensInRect } from '../../src/lib/map/scene.ts';
+import { decodeFog, encodeFog, isRevealed, newFog, paintRect } from '../../src/lib/map/fog.ts';
 import type { Combat, Scene, Token } from '../../src/lib/types.ts';
 
 const tok = (id: string, x: number, y: number, o: Partial<Token> = {}): Token => ({ id, name: id, x, y, size: 'M', color: '#336699', ...o });
@@ -104,4 +105,18 @@ test('liveHp', () => {
     combatants: [{ id: 'g1', kind: 'monster', name: 'Goblin', initMod: 2, dex: 14, tie: 0, conSave: 0, hp: 3, maxHp: 7, conditions: ['Prone'] }] };
   expect(liveHp(t, combat)).toEqual({ hp: 3, maxHp: 7, conditions: ['Prone'] });
   expect(liveHp(t, undefined)).toEqual({ hp: 7, maxHp: 7, conditions: [] });
+});
+
+// A bigger (or smaller) blank scene: whole cells, at most 4096 px a side; revealed fog stays, new ground is fogged; tokens stay on it.
+test('resizing a scene keeps its revealed fog and its tokens on the map', () => {
+  const s0 = newScene('c', 'Field'); // 1400 × 1000 px, 70 px cells
+  const fog = encodeFog(paintRect(newFog(1400, 1000, false), 1400, 1000, { x: 0, y: 0 }, { x: 200, y: 200 }, true));
+  const s = { ...s0, fog, tokens: [{ id: 't', name: 'G', x: 1365, y: 35, size: 'M' as const, color: '#000000' }] };
+  const big = resizeScene(s, 40, 30);
+  expect([big.width, big.height]).toEqual([2800, 2100]);
+  const f = decodeFog(big.fog!, 2800, 2100)!;
+  expect([isRevealed(f, 2800, 2100, { x: 100, y: 100 }), isRevealed(f, 2800, 2100, { x: 2000, y: 1500 })]).toEqual([true, false]);
+  expect(resizeScene(s, 200, 200).width).toBe(8190); // 117 cells: the 8192 px limit
+  const small = resizeScene(s, 10, 10);
+  expect([small.width, small.tokens[0].x <= small.width, decodeFog(small.fog!, 700, 700)?.length]).toEqual([700, true, decodeFog(encodeFog(newFog(700, 700, false)), 700, 700)!.length]);
 });

@@ -10,6 +10,7 @@
   import { db } from '../../lib/db.ts';
   import type { Arrow } from '../../lib/map/actions.ts';
   import { decodeFog, FOG_CELL, fogSize, newFog, paintBrush, paintRect, type FogEdit } from '../../lib/map/fog.ts';
+  import { decodeWithin, deviceSide } from '../../lib/images.ts';
   import { cellCenter, cellsIn, feetBetween, hexCorners, snap, type Cell, type Pt } from '../../lib/map/grid.ts';
   import { clampMove, reachableCells } from '../../lib/combat/movement.ts';
   import { initials, radius, tokenAt, tokensInRect } from '../../lib/map/scene.ts';
@@ -192,7 +193,7 @@
     if (b === undefined) {
       bitmaps.set(hash, 'loading');
       db.blobs.get(hash)
-        .then((blob) => (blob ? createImageBitmap(blob) : undefined))
+        .then((blob) => (blob ? decodeWithin(blob, width, height, deviceSide()) : undefined)) // as sharp as this device holds
         .then((bmp) => { if (gone) return bmp?.close(); bitmaps.set(hash, bmp ?? 'failed'); schedule(); }, () => bitmaps.set(hash, 'failed'));
       return undefined;
     }
@@ -217,7 +218,7 @@
     // final M1: blobs are content-addressed, so only images that failed (not stored yet) are tried again; decoded ones stay
     untrack(() => { for (const [h, b] of bitmaps) if (b === 'failed') bitmaps.delete(h); schedule(); });
   });
-  // M2: a 4096 px background is ~64 MB decoded: freed when the canvas goes (a scene switch remounts it), not left to the GC
+  // M2: a 4096 px background is ~64 MB decoded (8192 px, ~256 MB, on a desktop): freed when the canvas goes (a scene switch remounts it), not left to the GC
   let gone = false;
   $effect(() => () => { gone = true; for (const b of bitmaps.values()) if (typeof b !== 'string') b.close(); bitmaps.clear(); });
 

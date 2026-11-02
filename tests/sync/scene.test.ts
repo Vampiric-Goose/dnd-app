@@ -170,7 +170,7 @@ test('cleanScene', () => {
   expect(cleanScene({ ...base, tokens: [{ ...t, health: 'Wounded', portrait: 'x', characterId: 7, hp: 3, monsterId: 'monster:x' }] })!.tokens).toEqual([t]);
   expect(cleanScene({ ...base, tokens: [{ ...t, color: 'red', conditions: [1, 'x'.repeat(41), 'Prone'] }] })!.tokens).toEqual([{ ...t, color: '#888888' }]);
   expect(cleanScene({ ...base, grid: { ...DEFAULT_GRID, type: 'triangle' } })).toBeUndefined();
-  expect(cleanScene({ ...base, width: 5000 })).toBeUndefined();
+  expect(cleanScene({ ...base, width: 9000 })).toBeUndefined();
   expect(cleanScene({ ...base, tokens: Array.from({ length: 300 }, (_, i) => ({ ...t, id: `t${i}` })) })!.tokens.length).toBe(200);
   expect(cleanScene({ ...base, image: 'abc' })!.image).toBeUndefined();
   expect(cleanScene({ ...base, tokens: [{ ...t, x: NaN }] })!.tokens).toEqual([]);
@@ -183,7 +183,7 @@ test('cleanScene', () => {
 
 test('the parse: move and blobWant shapes', () => {
   expect(parseGuestMessage({ t: 'move', sceneId: 's1', tokenId: 't', x: 1, y: 2, extra: 1 })).toEqual({ t: 'move', sceneId: 's1', tokenId: 't', x: 1, y: 2 });
-  for (const bad of [{ x: '5' }, { x: Infinity }, { x: -1 }, { x: 4097 }, { tokenId: 'x'.repeat(101) }, { sceneId: 3 }]) {
+  for (const bad of [{ x: '5' }, { x: Infinity }, { x: -1 }, { x: 8193 }, { tokenId: 'x'.repeat(101) }, { sceneId: 3 }]) {
     expect(parseGuestMessage({ t: 'move', sceneId: 's1', tokenId: 't', x: 1, y: 2, ...bad })).toEqual({ error: 'bad move' });
   }
   expect(parseGuestMessage({ t: 'blobWant', hashes: [IMG] })).toEqual({ t: 'blobWant', hashes: [IMG] });
