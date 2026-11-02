@@ -14,7 +14,7 @@
   import { currentActor } from '../../lib/sync/project.ts';
   import { sceneForPlayers, type PlayerScene } from '../../lib/sync/scene.ts';
   import { clearDeclared, declareAction, sendDrag, sendEndTurn, sendLeap, sendUse, sendMove, session } from '../../lib/sync/session.svelte.ts';
-  import { budgetFeet, effectiveSpeed, originOf, remainingFeet } from '../../lib/combat/movement.ts';
+  import { budgetFeet, effectiveSpeed, moveSpeed, originOf, remainingFeet } from '../../lib/combat/movement.ts';
   import { pcActions, slotsLeft, type TurnAction } from '../../lib/combat/turnActions.ts';
   import { featureList } from '../../lib/character/play.ts';
   import type { Campaign, Character, Combatant, MonsterDef } from '../../lib/types.ts';
@@ -72,7 +72,7 @@
     const c = mine(characterId), row = c && session.tracker?.rows.find((r) => r.characterId === c.id);
     if (!budget || !c || !row || !view) return undefined;
     try {
-      const speed = effectiveSpeed(computeSheet(c, { settings, viewer: 'player' }).speed.walk, c.state.conditions, c.state.exhaustion);
+      const speed = effectiveSpeed(moveSpeed(computeSheet(c, { settings, viewer: 'player' }).speed), c.state.conditions, c.state.exhaustion);
       const at = view.tokens.find((t) => t.characterId === c.id);
       return { left: remainingFeet(speed, row.moved, at, view.grid, settings.diagonal), from: originOf(row.moved), budget: budgetFeet(speed, row.moved), dashes: row.moved?.dashes ?? 0 };
     } catch { return undefined; }
@@ -195,7 +195,7 @@
   const speedOf = (id: string) => {
     const c = mine(tokenOf(id)?.characterId);
     if (!c) return undefined;
-    try { return computeSheet(c, { settings, viewer: 'player' }).speed.walk; } catch { return undefined; }
+    try { return moveSpeed(computeSheet(c, { settings, viewer: 'player' }).speed); } catch { return undefined; }
   };
   const onmove = (_ids: string[], primary: string, to: Pt) => {
     const t = tokenOf(primary);

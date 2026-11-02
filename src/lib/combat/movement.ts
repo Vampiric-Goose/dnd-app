@@ -1,7 +1,8 @@
 // Pure (no Svelte/Vite/DOM): the movement budget (spec 1). Combat.movement holds each combatant's turn origin (where its token stood
 // when its turn's movement began) and Dashes taken this turn; movement used = grid distance origin → token. combat.ts drops an entry where its own turn starts.
 import { cellAt, cellDistance, cellsIn, feetBetween, snap, type Cell, type Pt } from '../map/grid.ts';
-import type { Combat, Combatant, Grid, Movement, Size } from '../types.ts';
+import type { Combat, Combatant, Grid, MonsterDef, Movement, Size, Speeds } from '../types.ts';
+import { spellMods } from './spellEffects.ts';
 
 /** 2014 conditions that set speed to 0. */
 export const STOP_CONDITIONS: readonly string[] = ['grappled', 'restrained', 'paralyzed', 'petrified', 'stunned', 'unconscious'];
@@ -12,6 +13,15 @@ export function effectiveSpeed(walk: number, conditions: readonly string[], exha
   // a spell's slow is a condition that names its cut: "Ray of Frost (speed −10 ft)"
   const cut = conditions.reduce((n, c) => n + Number(/speed [−-](\d+) ft/i.exec(c)?.[1] ?? 0), 0), w = Math.max(0, walk - cut);
   return exhaustion >= 2 ? Math.floor(w / 10) * 5 : w;
+}
+
+/** The speed a creature moves by on the map: its walk, or its fly speed when that's faster (Fly, wings). ponytail: the map has no altitude. */
+export const moveSpeed = (s: Speeds): number => Math.max(s.walk, s.fly ?? 0);
+
+/** A monster's moving speed: its stat block's, with the spells it holds (Longstrider's +10 walk, Fly's 60 feet). */
+export function monsterSpeed(m: Pick<MonsterDef, 'speed'>, held: readonly string[]): number {
+  const sp = spellMods(held);
+  return moveSpeed({ walk: m.speed.walk + sp.speed, fly: Math.max(m.speed.fly ?? 0, sp.fly ?? 0) });
 }
 
 /** Where the token stood when its turn's movement began, if sound (an old saved fight's `{ feet, dashes }` entry has none). */

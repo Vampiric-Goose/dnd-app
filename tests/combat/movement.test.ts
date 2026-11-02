@@ -3,7 +3,7 @@ import { describe, expect, test } from 'vitest';
 import { currentRun, newCombat, next, prev, removeStep, start } from '../../src/lib/combat/combat.ts';
 import {
   addDash, budgetApplies, budgetFeet, clampMove, combatantForToken, effectiveSpeed, MAX_DASHES, originOf, reachableCells, recordMove, remainingFeet,
-  resetMovement, usedFeet,
+  monsterSpeed, moveSpeed, resetMovement, usedFeet,
 } from '../../src/lib/combat/movement.ts';
 import { cellAt, cellCenter, feetBetween, snap } from '../../src/lib/map/grid.ts';
 import type { Combat, Combatant, Grid, Movement } from '../../src/lib/types.ts';
@@ -170,4 +170,11 @@ test('reachableCells: the squares a token can reach with the feet left (the high
   expect(reachableCells(g, { x: 35, y: 35 }, 10, '5-10-5', 700, 700)).toHaveLength(8); // the far diagonal costs 15 ft
   expect(reachableCells(g, { x: 35, y: 35 }, 0, '5-5-5', 700, 700)).toEqual([]);
   expect(reachableCells(g, { x: 350, y: 350 }, 5, '5-5-5', 700, 700)).toHaveLength(9);
+});
+
+// A monster moves by its stat block's fastest of walk and fly, with the spells it holds (Fly's 60 feet, Longstrider's +10 walk).
+test('a monster\'s moving speed: its wings, a Fly spell, Longstrider', () => {
+  const mon = (speed: object) => ({ speed }) as never;
+  expect([monsterSpeed(mon({ walk: 30 }), []), monsterSpeed(mon({ walk: 40, fly: 80 }), []), monsterSpeed(mon({ walk: 30 }), ['Fly']), monsterSpeed(mon({ walk: 30 }), ['Longstrider'])]).toEqual([30, 80, 60, 40]);
+  expect(moveSpeed({ walk: 30, fly: 60 })).toBe(60);
 });

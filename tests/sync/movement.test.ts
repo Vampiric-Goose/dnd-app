@@ -290,3 +290,10 @@ describe('engine', () => {
     for (const moved of [{ from: cell(1), dashes: '0' }, { from: cell(1) }, 'x', { dashes: -1 }]) expect(cleanTracker({ round: 1, rows: [{ ...row, moved }] })!.rows[0].moved).toBeUndefined();
   });
 });
+
+// Fly: a flying creature moves by its fly speed when it's faster than its walk (the map has no altitude).
+test('a PC under Fly moves by its 60-foot fly speed; one grappled moves nowhere', () => {
+  const m = { tokenId: 't-thorin', ...cell(4, 1) }, flying = { ...thorin(), state: { ...thorin().state, conditions: ['Fly'] } };
+  expect(moveCost(scene(), m, flying, fight(), settings())?.budget).toBe(60);
+  expect(moveCost(scene(), m, { ...flying, state: { ...flying.state, conditions: ['Fly', 'Grappled'] } }, fight(), settings())?.budget).toBe(0);
+});

@@ -12,7 +12,7 @@
   import { addTokensToCombat, dropTokens, editScene, joinFight, placeUnplaced, startFight, summon, tokenForCharacter, tokenForMonster } from '../../lib/map/store.ts';
   import { scaleSummon } from '../../lib/combat/summons.ts';
   import { currentRun, patchCombatant } from '../../lib/combat/combat.ts';
-  import { budgetApplies, budgetFeet, combatantForToken, effectiveSpeed, originOf, recordMove } from '../../lib/combat/movement.ts';
+  import { budgetApplies, budgetFeet, combatantForToken, effectiveSpeed, monsterSpeed, moveSpeed, originOf, recordMove } from '../../lib/combat/movement.ts';
   import { applyResolution, editCharacter, settlePick, settleSave, turn, undoResolution, updateCombat } from '../../lib/combat/store.ts';
   import { aimPlan, ALL_HP, areaRollName, areaRolls, areasOn, foeWithin5, judge, moveArea, movableAreas, noteEntries, snapOf, touched, workOut, type AimPlan, type AreaKind } from '../../lib/combat/aiming.ts';
   import { monsterAc, resolveSpell, targetOf } from '../../lib/combat/resolve.ts';
@@ -289,9 +289,9 @@
   /** Speed after conditions, as the host's check counts it: a PC's player-view walk, a monster's stat block. */
   const speedFor = (x: Combatant): number | undefined => {
     const ch = x.characterId ? chars.find((c) => c.id === x.characterId) : undefined;
-    if (ch) { try { return effectiveSpeed(computeSheet(ch, { settings, viewer: 'player' }).speed.walk, ch.state.conditions, ch.state.exhaustion); } catch { return undefined; } }
-    const walk = x.monsterId ? monsterById.get(x.monsterId)?.speed.walk : undefined;
-    return walk === undefined ? undefined : effectiveSpeed(walk, x.conditions ?? []);
+    if (ch) { try { return effectiveSpeed(moveSpeed(computeSheet(ch, { settings, viewer: 'player' }).speed), ch.state.conditions, ch.state.exhaustion); } catch { return undefined; } }
+    const m = x.monsterId ? monsterById.get(x.monsterId) : undefined;
+    return m ? effectiveSpeed(monsterSpeed(m, x.conditions ?? []), x.conditions ?? []) : undefined;
   };
   const turnIds = $derived(combat ? currentRun(combat) : new Set<string>());
   const limitOf = (id: string) => {
@@ -304,8 +304,9 @@
   const onfog = (e: FogEdit) => edit((s) => ({ ...s, fog: paintFog(s.fog, s.width, s.height, e) }));
   const speedOf = (id: string) => {
     const t = scene?.tokens.find((x) => x.id === id);
-    if (t?.characterId) return sheets.get(t.characterId)?.speed.walk;
-    if (t?.monsterId) return monsterById.get(t.monsterId)?.speed.walk;
+    const sheet = t?.characterId ? sheets.get(t.characterId) : undefined, m = t?.monsterId ? monsterById.get(t.monsterId) : undefined;
+    if (sheet) return moveSpeed(sheet.speed);
+    if (m) return monsterSpeed(m, []);
   };
   const canvasTokens = $derived((scene?.tokens ?? []).map((t) => {
     const c = t.characterId ? chars.find((x) => x.id === t.characterId) : undefined;

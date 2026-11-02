@@ -1,7 +1,7 @@
 // Pure (no Svelte/Vite/DOM). Stage 5: the battle map scene as players get it (an allowlist, spec 3.6), the check on a player's token
 // move, and the guest's rebuild of what a host sent. Lazy: only host.ts and guest.ts import it.
 import { applyFog, cleanFog, decodeFog, isRevealed } from '../map/fog.ts';
-import { budgetApplies, budgetFeet, combatantForToken, effectiveSpeed, originOf } from '../combat/movement.ts';
+import { budgetApplies, budgetFeet, combatantForToken, effectiveSpeed, moveSpeed, originOf } from '../combat/movement.ts';
 import { feetBetween, snap } from '../map/grid.ts';
 import { liveHp } from '../map/scene.ts';
 import { isRec, sceneProblem } from '../recordShape.ts';
@@ -88,7 +88,7 @@ export function moveCost(s: Scene, m: { tokenId: string; x: number; y: number },
   const t = s.tokens.find((x) => x.id === m.tokenId);
   const x = t && budgetApplies(combat, settings) ? combatantForToken(combat!, { characterId: ch.id }) : undefined;
   if (!t || !x) return undefined;
-  const speed = effectiveSpeed(computeSheet(ch, { settings, viewer: 'player' }).speed.walk, ch.state.conditions, ch.state.exhaustion);
+  const speed = effectiveSpeed(moveSpeed(computeSheet(ch, { settings, viewer: 'player' }).speed), ch.state.conditions, ch.state.exhaustion);
   const mv = combat!.movement?.[x.id];
   return { combatantId: x.id, feet: feetBetween(s.grid, originOf(mv) ?? t, snap(s.grid, m, t.size), settings.diagonal), budget: budgetFeet(speed, mv) };
 }

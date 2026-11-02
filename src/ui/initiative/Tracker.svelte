@@ -1,7 +1,7 @@
 <script lang="ts">
   import { addCombatants, addMonsters, lairCombatant, MAX_COMBATANTS, pcCombatant, prev, rollInit, setInit } from '../../lib/combat/combat.ts';
   import { deleteEncounter, endCombat, saveFight, saveFightAs, turn, updateCombat } from '../../lib/combat/store.ts';
-  import { budgetApplies, budgetFeet, combatantForToken, effectiveSpeed, resetMovement, usedFeet } from '../../lib/combat/movement.ts';
+  import { budgetApplies, budgetFeet, combatantForToken, effectiveSpeed, monsterSpeed, moveSpeed, resetMovement, usedFeet } from '../../lib/combat/movement.ts';
   import type { ContentIndex } from '../../lib/content/index.ts';
   import { db } from '../../lib/db.ts';
   import { session } from '../../lib/sync/session.svelte.ts';
@@ -46,8 +46,8 @@
   function speedOf(x: Combatant): number | undefined {
     let walk: number | undefined, conds = x.conditions ?? [], exh = 0;
     const ch = x.characterId ? charById.get(x.characterId) : undefined;
-    if (ch) { try { walk = computeSheet(ch, { settings, viewer: 'player' }).speed.walk; } catch { /* a damaged character: no readout */ } conds = ch.state.conditions; exh = ch.state.exhaustion; }
-    else if (x.monsterId) walk = monById.get(x.monsterId)?.speed.walk;
+    if (ch) { try { walk = moveSpeed(computeSheet(ch, { settings, viewer: 'player' }).speed); } catch { /* a damaged character: no readout */ } conds = ch.state.conditions; exh = ch.state.exhaustion; }
+    else if (x.monsterId) { const m = monById.get(x.monsterId); walk = m && monsterSpeed(m, x.conditions ?? []); }
     return walk === undefined ? undefined : effectiveSpeed(walk, conds, exh);
   }
   // Movement used is the distance from the turn's origin to where the token stands, so the tokens' scenes are read too (the shown one first).
