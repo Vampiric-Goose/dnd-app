@@ -12,7 +12,8 @@ export const targetingOn = (s: CampaignSettings): boolean => s.targeting !== fal
 /** How far it reaches (ft): melee reach, a weapon's normal/long range (a thrown weapon has both), a spell's range, or Self. */
 export type Reach = { melee?: number; normal?: number; long?: number; spell?: number } | 'self';
 export type Disadvantage = 'long range' | 'hostile within 5 ft';
-export type Pickable = { ok: false } | { ok: true; disadvantage?: Disadvantage };
+/** `adv` / `dis`: every reason for advantage or disadvantage on an attack (attackEdge plus range), for the aiming bar. */
+export type Pickable = { ok: false } | { ok: true; disadvantage?: Disadvantage; adv?: string[]; dis?: string[]; autoCrit?: boolean };
 
 export function reachOf(a: TurnAction): Reach | undefined {
   if (a.attack) {
@@ -43,9 +44,32 @@ export function canTarget(reach: Reach, feet: number, foeWithin5: boolean, range
   return feet > reach.normal ? { ok: true, disadvantage: 'long range' } : { ok: true, ...close };
 }
 
+/** Any advantage and any disadvantage cancel out (PHB p.173, however many of each); the roller's own pick counts as one of either. */
+export function combineMode(r: { adv: readonly string[]; dis: readonly string[] }, pick?: 'adv' | 'dis'): 'adv' | 'dis' | undefined {
+  const a = r.adv.length + (pick === 'adv' ? 1 : 0), d = r.dis.length + (pick === 'dis' ? 1 : 0);
+  return a && d ? undefined : a ? 'adv' : d ? 'dis' : undefined;
+}
 /** The player's advantage pick against a forced disadvantage: one of each cancels out. */
-export const finalMode = (player: 'adv' | 'dis' | undefined, forced?: Disadvantage): 'adv' | 'dis' | undefined =>
-  !forced ? player : player === 'adv' ? undefined : 'dis';
+export const finalMode = (player: 'adv' | 'dis' | undefined, forced?: Disadvantage): 'adv' | 'dis' | undefined => combineMode({ adv: [], dis: forced ? [forced] : [] }, player);
+
+/** Both sides of an attack: their conditions, whether the attacker is within 5 ft, its exhaustion, the target's Dodge. */
+export interface Sides { attacker: readonly string[]; target: readonly string[]; within5: boolean; exhaustion?: number; dodging?: boolean }
+const hasCondition = (list: readonly string[], c: string) => list.some((x) => x.toLowerCase() === c);
+/**
+ * Advantage and disadvantage on an attack roll from the 2014 PHB: the conditions (Appendix A), exhaustion 3+, Dodge, and a prone target
+ * (advantage within 5 ft, disadvantage beyond). `autoCrit`: a hit on a paralyzed or unconscious creature from within 5 ft is a critical.
+ */
+export function attackEdge(s: Sides): { adv: string[]; dis: string[]; autoCrit: boolean } {
+  const adv: string[] = [], dis: string[] = [];
+  for (const c of ['blinded', 'frightened', 'poisoned', 'prone', 'restrained']) if (hasCondition(s.attacker, c)) dis.push(`you are ${c}`);
+  if ((s.exhaustion ?? 0) >= 3) dis.push(`exhaustion ${s.exhaustion}`);
+  if (hasCondition(s.attacker, 'invisible')) adv.push('you are invisible');
+  for (const c of ['blinded', 'paralyzed', 'petrified', 'restrained', 'stunned', 'unconscious']) if (hasCondition(s.target, c)) adv.push(`target is ${c}`);
+  if (hasCondition(s.target, 'prone')) (s.within5 ? adv : dis).push(`target is prone (${s.within5 ? 'within' : 'beyond'} 5 ft)`);
+  if (hasCondition(s.target, 'invisible')) dis.push('target is invisible');
+  if (s.dodging) dis.push('target is dodging');
+  return { adv, dis, autoCrit: s.within5 && (hasCondition(s.target, 'paralyzed') || hasCondition(s.target, 'unconscious')) };
+}
 
 export interface Toggle { id: 'gwm' | 'ss'; name: string; toHit: -5; damage: 10 }
 /** Great Weapon Master with a heavy melee weapon, Sharpshooter with a ranged weapon: -5 to hit, +10 damage, only with the feat. */

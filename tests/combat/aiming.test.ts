@@ -71,6 +71,18 @@ describe('workOut on the DM\'s map', () => {
   test('one d20 when disadvantage is forced is refused', async () => {
     expect(await workOut(base(bow, { d20: [18], dmg: [[4]] }))).toBe('bad d20');
   });
+  test('advantage against a prone PC within 5 ft: the higher d20 counts', async () => {
+    const claws = monster('Melee Weapon Attack: +4 to hit, reach 5 ft., one target. Hit: 5 (1d6 + 2) slashing damage.');
+    const r = await workOut({ ...base(claws, { d20: [3, 18], dmg: [[4]] }), aim: { target: 'pc:mira', rolled: { d20: [3, 18], dmg: [[4]] }, toggles: [] },
+      conditionsOf: (z) => (z.id === 'pc:mira' ? ['Prone'] : []) });
+    expect(r).toMatchObject({ resolution: { outcomes: [{ id: 'pc:mira', hit: true, roll: 22, edge: 'advantage: target is prone (within 5 ft)' }] } });
+  });
+  test('a hit on a paralyzed creature within 5 ft is a critical: its dice come doubled', async () => {
+    const claws = monster('Melee Weapon Attack: +4 to hit, reach 5 ft., one target. Hit: 5 (1d6 + 2) slashing damage.');
+    const r = await workOut({ ...base(claws, { d20: [12, 5], dmg: [[4, 6]] }), aim: { target: 'pc:mira', rolled: { d20: [12, 5], dmg: [[4, 6]] }, toggles: [] },
+      conditionsOf: (z) => (z.id === 'pc:mira' ? ['Paralyzed'] : []) });
+    expect(r).toMatchObject({ resolution: { outcomes: [{ id: 'pc:mira', hit: true, damage: 12 }] } });
+  });
   test('a ranged spell attack gets the close-combat disadvantage too', async () => {
     const r = await workOut(base(spell({ attack: 'ranged', damage: [{ dice: '1d10', type: 'fire' }] }), { d20: [19, 3], dmg: [[5]] }));
     expect(r).toMatchObject({ resolution: { outcomes: [{ hit: false, roll: 8 }] } });

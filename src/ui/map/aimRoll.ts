@@ -1,7 +1,7 @@
 // Targeting: an aimed use rolled on this device. The d20 is logged at once (the roller knows their roll); the damage dice are held until
 // the result says it hit (a save's damage, which lands hit or miss, can be shown at once).
 import type { AimPlan } from '../../lib/combat/aiming.ts';
-import { finalMode, type Disadvantage } from '../../lib/combat/targeting.ts';
+import { combineMode, type Pickable } from '../../lib/combat/targeting.ts';
 import { rollDice } from '../../lib/dice.ts';
 import { natD20, publish, roll, rollMode, type RollEntry } from '../../lib/rolls.svelte.ts';
 import { signed } from '../creator/labels.ts';
@@ -13,11 +13,12 @@ export interface AimRoll {
   held: { entry: RollEntry; part: 'hit' | 'save' }[];
 }
 
-export function rollAim(name: string, plan: AimPlan, forced?: Disadvantage): AimRoll {
-  const pick = rollMode.value === 'normal' ? undefined : rollMode.value;
-  const mode = plan.attack ? finalMode(pick, forced) : undefined;
+/** `judged`: the target as judge() saw it (its advantage and disadvantage reasons, a critical by itself). */
+export function rollAim(name: string, plan: AimPlan, judged?: Pickable): AimRoll {
+  const pick = rollMode.value === 'normal' ? undefined : rollMode.value, j = judged?.ok ? judged : undefined;
+  const mode = plan.attack ? combineMode({ adv: j?.adv ?? [], dis: j?.dis ?? (j?.disadvantage ? [j.disadvantage] : []) }, pick) : undefined;
   const d20 = plan.attack ? roll(`${name}: attack`, `1d20${signed(plan.toHit ?? 0)}`, { mode: mode ?? 'normal', shareAs: 'Attack' }) : undefined;
-  const crit = !!d20 && natD20(d20.detail) === 'nat20';
+  const crit = !!d20 && (natD20(d20.detail) === 'nat20' || !!j?.autoCrit);
   const dmg = plan.dice.map((d) => ({ d, r: roll(`${name}: ${d.type} damage`, d.expr, { crit: crit && d.on !== 'save', hold: true }) }));
   rollMode.value = 'normal';
   return {

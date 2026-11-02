@@ -13,7 +13,7 @@
   import { currentRun, patchCombatant } from '../../lib/combat/combat.ts';
   import { budgetApplies, budgetFeet, combatantForToken, effectiveSpeed, originOf, recordMove } from '../../lib/combat/movement.ts';
   import { applyResolution, editCharacter, settleSave, turn, undoResolution, updateCombat } from '../../lib/combat/store.ts';
-  import { aimPlan, foeWithin5, pickableAt, snapOf, touched, workOut, type AimPlan } from '../../lib/combat/aiming.ts';
+  import { aimPlan, foeWithin5, judge, snapOf, touched, workOut, type AimPlan } from '../../lib/combat/aiming.ts';
   import { targetOf } from '../../lib/combat/resolve.ts';
   import { targetingOn, type Pickable, type Toggle } from '../../lib/combat/targeting.ts';
   import { roll } from '../../lib/rolls.svelte.ts';
@@ -371,7 +371,8 @@
     const foe = foeWithin5(k, s, m.v.x, settings.diagonal, conditionsOf);
     const pickable = (id: string): Pickable => {
       const t = s.tokens.find((x) => x.id === id), z = t && combatantForToken(k, t);
-      return t && z && z.id !== m.v.x.id ? pickableAt(m.plan, s.grid, settings.diagonal, me, foe, t) : { ok: false };
+      return t && z && z.id !== m.v.x.id ? judge(m.plan, s.grid, settings.diagonal, me, foe, t,
+        { attacker: conditionsOf(m.v.x), target: conditionsOf(z), exhaustion: m.v.ch?.state.exhaustion, dodging: !!z.economy?.dodging }) : { ok: false };
     };
     return { from: { x: me.x, y: me.y }, line: m.plan.line, ...(m.plan.area && { area: m.plan.area }), pickable,
       onpick: (p: { tokenId?: string; point: Pt }) => void fire(p, pickable), oncancel: () => (aiming = undefined) };
@@ -381,11 +382,12 @@
     aiming = undefined;
     if (!m || !k || !s) return;
     const pick = p.tokenId ? pickable(p.tokenId) : undefined;
-    const r = rollAim(m.a.name, m.plan, pick?.ok ? pick.disadvantage : undefined);
+    const r = rollAim(m.a.name, m.plan, pick);
     const t = p.tokenId ? s.tokens.find((x) => x.id === p.tokenId) : undefined, target = t && combatantForToken(k, t), ch = m.v.ch;
     const res = await workOut({ a: m.a, level: m.slot, features: ch ? featureList(ch, settings).map((f) => f.name) : [], actor: m.v.x, combat: k, scene: s,
       diagonal: settings.diagonal, aim: { ...(target ? { target: target.id } : { point: p.point }), rolled: r.rolled, toggles: m.toggles.map((x) => x.id) },
       findTarget: (id) => k.combatants.find((z) => z.id === id), conditionsOf,
+      exhaustionOf: (z) => (z.characterId ? chars.find((c) => c.id === z.characterId)?.state.exhaustion : undefined) ?? 0,
       info: (z) => {
         const c = z.characterId ? chars.find((y) => y.id === z.characterId) : undefined;
         return c ? targetOf(z, { sheet: sheets.get(c.id) ?? computeSheet(c, { settings, viewer: 'dm' }) }) : targetOf(z, { monster: z.monsterId ? monsterById.get(z.monsterId) : undefined });
@@ -405,7 +407,7 @@
     await reload();
   });
   const describe = (o: Outcome) => [
-    o.part !== 'save' && o.roll !== undefined ? `${o.hit ? 'hit' : 'miss'} (${o.roll}${o.nat ? `, natural ${o.nat}` : ''} vs AC ${o.ac ?? '?'})` : '',
+    o.part !== 'save' && o.roll !== undefined ? `${o.hit ? 'hit' : 'miss'} (${o.roll}${o.nat ? `, natural ${o.nat}` : ''} vs AC ${o.ac ?? '?'}${o.edge ? `; ${o.edge}` : ''})` : '',
     o.save ? `${o.save.ok ? 'saved' : 'failed'} (${o.save.total})` : o.pending ? 'waiting for their save' : '',
     o.damage ? `${o.damage} damage` : '', o.note ?? '',
   ].filter(Boolean).join(', ');

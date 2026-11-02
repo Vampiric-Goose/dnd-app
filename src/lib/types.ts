@@ -135,7 +135,7 @@ export interface Combatant {
   conditions?: string[];                 // monsters only (a PC's are character.state.conditions)
   durations?: Record<string, Duration>;  // condition name → when it ends (PCs too)
   concentrating?: boolean; legendary?: { max: number; used: number }; reactionUsed?: boolean; notes?: string;
-  economy?: { used: number; extra: number; bonus: boolean; attacks: number; light?: boolean; surged?: boolean; haste?: boolean; object?: boolean; readied?: boolean; bonusSpell?: boolean; leveledSpell?: boolean }; // this turn: Actions used, extra Actions, Bonus action, attacks in the Attack action, attacked with a light melee weapon (two-weapon fighting), Action Surge used, one extra Action is Haste's, the free object interaction used, an action readied, a bonus-action spell cast, a spell other than an action cantrip cast (absent: fresh)
+  economy?: { used: number; extra: number; bonus: boolean; attacks: number; light?: boolean; surged?: boolean; haste?: boolean; object?: boolean; readied?: boolean; bonusSpell?: boolean; leveledSpell?: boolean; dodging?: boolean }; // this turn (dodging: took the Dodge action; it lasts until this resets at its next turn): Actions used, extra Actions, Bonus action, attacks in the Attack action, attacked with a light melee weapon (two-weapon fighting), Action Surge used, one extra Action is Haste's, the free object interaction used, an action readied, a bonus-action spell cast, a spell other than an action cantrip cast (absent: fresh)
   hasted?: { by: string; round: number; ended?: true };
   spellsUsed?: Record<string, number>; // a monster's spell slots ('slot:3') and per-day spells ('day:<spell id>') used this fight // the Hasted condition: the caster's combatant id and the round cast; ended: the caster cast another concentration spell
 }
@@ -152,7 +152,7 @@ export interface Combat { campaignId: string; combatants: Combatant[]; round: nu
 /** One target's part of a targeted use: an attack's hit, or a save. `pending`: a PC's save its player still rolls (`owed`: the damage before it). */
 export interface Outcome {
   id: string /* combatant */; part?: 'hit' | 'save';
-  hit?: boolean; nat?: 20 | 1; roll?: number; ac?: number /* the DM's Results list (a Combat never reaches players) */;
+  hit?: boolean; nat?: 20 | 1; roll?: number; ac?: number /* the DM's Results list (a Combat never reaches players) */; edge?: string /* why it had advantage or disadvantage */;
   save?: { roll: number; total: number; ok: boolean };
   damage: number; note?: string;
   pending?: true; owed?: { amount: number; type: string }[];

@@ -5,7 +5,7 @@
   import { db } from '../../lib/db.ts';
   import { feetBetween, snap, type Pt } from '../../lib/map/grid.ts';
   import { untrack } from 'svelte';
-  import { aimPlan, pickableAt, type AimPlan } from '../../lib/combat/aiming.ts';
+  import { aimPlan, judge, type AimPlan } from '../../lib/combat/aiming.ts';
   import { targetingOn, type Pickable, type Toggle } from '../../lib/combat/targeting.ts';
   import { rollAim, reveal, type AimRoll } from './aimRoll.ts';
   import { actionsForPlayers, arrowsOn, type DeclaredAction } from '../../lib/map/actions.ts';
@@ -122,7 +122,8 @@
     const foe = v.tokens.some((t) => t.id !== me.id && t.characterId === undefined && !t.conditions.some((c) => OUT.test(c)) && feetBetween(v.grid, me, t, settings.diagonal) <= 5);
     const pickable = (id: string): Pickable => {
       const t = v.tokens.find((x) => x.id === id);
-      return t && t.id !== me.id ? pickableAt(m.plan, v.grid, settings.diagonal, me, foe, t) : { ok: false };
+      // its conditions as the player's map shows them; a monster's Dodge only the DM's device knows (two d20s are sent either way)
+      return t && t.id !== me.id ? judge(m.plan, v.grid, settings.diagonal, me, foe, t, { attacker: m.c.state.conditions, target: t.conditions, exhaustion: m.c.state.exhaustion }) : { ok: false };
     };
     return { from: { x: me.x, y: me.y }, line: m.plan.line, ...(m.plan.area && { area: m.plan.area }), pickable,
       onpick: (p: { tokenId?: string; point: Pt }) => fire(p, pickable), oncancel: () => (aiming = undefined) };
@@ -132,7 +133,7 @@
     aiming = undefined;
     if (!m || offline()) return;
     const pick = p.tokenId ? pickable(p.tokenId) : undefined;
-    const r = rollAim(m.a.name, m.plan, pick?.ok ? pick.disadvantage : undefined);
+    const r = rollAim(m.a.name, m.plan, pick);
     held = { action: m.a.name, roll: r };
     sentUnder = session.tracker;
     sendUse(m.c.id, m.a.id, m.slot, undefined, { ...(p.tokenId ? { target: p.tokenId } : { point: p.point }), rolled: r.rolled, toggles: m.toggles.map((t) => t.id) });

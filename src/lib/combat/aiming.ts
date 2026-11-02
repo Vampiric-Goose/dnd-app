@@ -6,9 +6,9 @@ import { feetBetween, tokenFeet, type Pt } from '../map/grid.ts';
 import { tokensInTemplate, type Shape } from '../map/templates.ts';
 import type { Ability, Character, Combat, Combatant, Grid, Resolution, Scene, Size, Snap } from '../types.ts';
 import { combatantForToken } from './movement.ts';
-import { checkFaces, keptD20, resolveAttack, resolveSpell, type TargetInfo } from './resolve.ts';
+import { checkFaces, keptD20, resolveAttack, resolveSpell, type Outcome, type TargetInfo } from './resolve.ts';
 import { diceAt, type SpellRead } from './spellText.ts';
-import { attackToggles, canTarget, finalMode, monsterAttack, reachOf, type Pickable, type Reach, type Toggle } from './targeting.ts';
+import { attackEdge, attackToggles, canTarget, combineMode, monsterAttack, reachOf, type Pickable, type Reach, type Sides, type Toggle } from './targeting.ts';
 import type { TurnAction } from './turnActions.ts';
 
 /** What a use aims at (a creature's id, or a map point for an area) and the roller's own raw dice (resolve.ts Rolled). */
@@ -72,6 +72,18 @@ export function pickableAt(plan: AimPlan, g: Grid, diagonal: '5-5-5' | '5-10-5',
   return p.ok && p.disadvantage === 'long range' && plan.ignore?.long ? { ok: true } : p;
 }
 
+/**
+ * Whether a creature can be picked, with every reason for advantage or disadvantage on the attack (attackEdge, range, close combat) and
+ * whether a hit is a critical by itself. A spell without an attack roll gets none.
+ */
+export function judge(plan: AimPlan, g: Grid, diagonal: '5-5-5' | '5-10-5', me: Pt & { size: Size }, foeWithin5: boolean, t: Pt & { size: Size },
+  sides: Omit<Sides, 'within5'>): Pickable {
+  const p = pickableAt(plan, g, diagonal, me, foeWithin5, t);
+  if (!p.ok || !plan.attack) return p;
+  const e = attackEdge({ ...sides, within5: tokenFeet(g, me, t, diagonal) <= 5 });
+  return { ...p, adv: e.adv, dis: [...e.dis, ...(p.disadvantage ? [p.disadvantage] : [])], autoCrit: e.autoCrit };
+}
+
 const OUT = /incapacitated|paralyzed|petrified|stunned|unconscious/i;
 /** A hostile creature (a PC's foes are monsters; a monster's, PCs) that isn't incapacitated within 5 ft of the actor's token. */
 export function foeWithin5(k: Combat, s: Scene, actor: Combatant, diagonal: '5-5-5' | '5-10-5', conditionsOf: (z: Combatant) => readonly string[] = (z) => z.conditions ?? []): boolean {
@@ -87,6 +99,8 @@ export interface WorkIn {
   info: (z: Combatant) => TargetInfo | Promise<TargetInfo>;
   nameOf: (z: Combatant) => string;
   conditionsOf?: (z: Combatant) => readonly string[];
+  /** A PC's exhaustion level (its character's). */
+  exhaustionOf?: (z: Combatant) => number;
   /** Whether the roller sees it (a player: its token is on their map, not hidden or fogged); unseen ones are caught but never named. */
   seen?: (z: Combatant) => boolean;
   /** A weapon attack's weapon is magical (it beats "nonmagical" resistance). */
@@ -104,18 +118,23 @@ export async function workOut(i: WorkIn): Promise<Aimed | string> {
   const target = aim.target === undefined ? undefined : i.findTarget(aim.target), tt = target && tokenOf(target.id);
   if (aim.target !== undefined && !tt) return 'pick a target';
   const foe = foeWithin5(k, s, actor, i.diagonal, i.conditionsOf);
-  const pick = tt ? pickableAt(plan, s.grid, i.diagonal, me, foe, tt) : undefined;
+  const cond = (z: Combatant) => i.conditionsOf?.(z) ?? z.conditions ?? [];
+  const pick = tt && target ? judge(plan, s.grid, i.diagonal, me, foe, tt, { attacker: cond(actor), target: cond(target), exhaustion: i.exhaustionOf?.(actor), dodging: !!target.economy?.dodging }) : undefined;
   if (pick && !pick.ok) return 'out of range';
   if (plan.attack && !tt) return 'pick a target';
-  const rolled = { ...aim.rolled, mode: plan.attack ? finalMode(aim.rolled.mode, pick?.ok ? pick.disadvantage : undefined) : aim.rolled.mode };
+  const edge = pick?.ok ? { adv: pick.adv ?? [], dis: pick.dis ?? [] } : { adv: [], dis: [] };
+  const rolled = { ...aim.rolled, mode: plan.attack ? combineMode(edge, aim.rolled.mode) : aim.rolled.mode };
   if (plan.attack && (!rolled.d20?.length || (rolled.mode && rolled.d20.length < 2))) return 'bad d20';
-  const crit = plan.attack && keptD20(rolled) === 20;
+  const autoCrit = !!(pick?.ok && pick.autoCrit);
+  const why = rolled.mode ? `${rolled.mode === 'adv' ? 'advantage' : 'disadvantage'}: ${(rolled.mode === 'adv' ? edge.adv : edge.dis).join(', ') || 'chosen'}` : undefined;
+  const withWhy = (o: Outcome): Outcome => (why && o.roll !== undefined ? { ...o, edge: why } : o);
+  const crit = plan.attack && (keptD20(rolled) === 20 || autoCrit); // a critical's dice come doubled
   const base = { id: i.id, actor: actor.id, action: a.name, at: i.now };
   if (!plan.read) { // a weapon or a monster's attack
     const bad = checkFaces(plan.dice.map((d) => ({ expr: d.expr, crit })), rolled);
     if (bad) return bad;
-    const o = resolveAttack(await i.info(target!), plan.toHit ?? 0, plan.dice, rolled, i.magical);
-    return { resolution: { ...base, outcomes: [o] }, outcome: { action: a.name, hit: !!o.hit } };
+    const o = resolveAttack(await i.info(target!), plan.toHit ?? 0, plan.dice, rolled, i.magical, autoCrit);
+    return { resolution: { ...base, outcomes: [withWhy(o)] }, outcome: { action: a.name, hit: !!o.hit } };
   }
   const read = plan.read, area = plan.area;
   const point = area?.on === 'creature' ? (tt && { x: tt.x, y: tt.y }) : aim.point ?? (tt && { x: tt.x, y: tt.y });
@@ -126,10 +145,10 @@ export async function workOut(i: WorkIn): Promise<Aimed | string> {
     .map((id) => combatantForToken(k, s.tokens.find((t) => t.id === id)!)).filter((z): z is Combatant => !!z && !(area.on === 'self' && z.id === actor.id)) : [];
   const bad = checkFaces(plan.dice.map((d) => ({ expr: d.expr, crit: crit && d.on !== 'save' })), rolled);
   if (bad) return bad;
-  const outcomes = resolveSpell(read, plan.dice, a.cast!.dc, plan.toHit, target && await i.info(target), await Promise.all(caught.map(i.info)), rolled, i.rng);
+  const outcomes = resolveSpell(read, plan.dice, a.cast!.dc, plan.toHit, target && await i.info(target), await Promise.all(caught.map(i.info)), rolled, i.rng, autoCrit);
   const hit = outcomes.find((o) => o.part === 'hit')?.hit;
   return {
-    resolution: { ...base, outcomes, ...(area && { caught: caught.map((z) => z.id) }), ...(read.save && { dc: a.cast!.dc, ability: read.save.toLowerCase() as Ability, onSave: read.onSave }) },
+    resolution: { ...base, outcomes: outcomes.map(withWhy), ...(area && { caught: caught.map((z) => z.id) }), ...(read.save && { dc: a.cast!.dc, ability: read.save.toLowerCase() as Ability, onSave: read.onSave }) },
     outcome: { action: a.name, ...(hit !== undefined && { hit }), ...(read.save && a.cast!.dc !== undefined && { dc: a.cast!.dc }),
       ...(area && { caught: caught.filter((z) => !z.hidden && (i.seen?.(z) ?? true)).map(i.nameOf) }) },
   };

@@ -16,7 +16,7 @@
   import { affectedCells, tokensInTemplate, type Shape, type Template } from '../../lib/map/templates.ts';
   import { fit, pinch, toScreen, toWorld, zoomAt, type View } from '../../lib/map/view.ts';
   import type { Grid, Scene } from '../../lib/types.ts';
-  import type { Pickable } from '../../lib/combat/targeting.ts';
+  import { combineMode, type Pickable } from '../../lib/combat/targeting.ts';
 
   // fog: drawn only when set (the caller passes it only with the Fog of war setting on); black for players, a shade for the DM.
   // onfog: the DM's fog tools, shown only when it is set; one call per stroke, rectangle or Reveal all / Hide all.
@@ -95,6 +95,14 @@
   const aimFocus = $derived(aimPick ?? (aimAt ? aimFor(aimAt) : undefined));
   const aimTpl = $derived(aimTemplate(aimFocus));
   const aimCaught = $derived(aimTpl ? tokensInTemplate(aimTpl, grid, tokens) : []);
+  /** Why the creature under the pointer would be rolled against with advantage or disadvantage. */
+  const aimWhy = $derived.by(() => {
+    const k = aimFocus?.tokenId !== undefined ? aim?.pickable(aimFocus.tokenId) : undefined;
+    if (!k?.ok) return '';
+    const adv = k.adv ?? [], dis = k.dis ?? (k.disadvantage ? [k.disadvantage] : []), net = combineMode({ adv, dis });
+    if (!adv.length && !dis.length) return '';
+    return `${net === 'adv' ? 'Advantage' : net === 'dis' ? 'Disadvantage' : 'They cancel'}: ${[...adv.map((r) => `+ ${r}`), ...dis.map((r) => `− ${r}`)].join(', ')}${k.autoCrit ? '; a hit is a critical' : ''}.`;
+  });
   let aimCells: Cell[] = [];
   $effect(() => { aimCells = aimTpl ? affectedCells(aimTpl, grid, width, height) : []; untrack(schedule); });
   let tplCells: Cell[] = [];
@@ -450,7 +458,8 @@
       if (!aim.area || aim.area.on === 'creature') for (const t of tokens) {
         const k = aim.pickable(t.id);
         if (!k.ok) continue;
-        ctx.strokeStyle = k.disadvantage ? pal.danger : accent;
+        const net = k.adv || k.dis ? combineMode({ adv: k.adv ?? [], dis: k.dis ?? [] }) : k.disadvantage ? 'dis' : undefined;
+        ctx.strokeStyle = net === 'dis' ? pal.danger : net === 'adv' ? '#5fd38d' : accent;
         ctx.beginPath();
         ctx.arc(t.x, t.y, radius(grid, t.size) + 6 * px, 0, Math.PI * 2);
         ctx.stroke();
@@ -820,6 +829,7 @@
     {/if}
     {#if aim}
       <div class="strip" role="group" aria-label="Aiming">
+        {#if aimWhy}<span class="inside" role="status">{aimWhy}</span>{/if}
         {#if aim.area}<span class="inside" role="status">In the area: {aimCaught.length ? tokens.filter((t) => aimCaught.includes(t.id)).map((t) => t.name).join(', ') : 'none'}</span>{/if}
         <span class="hint">{aim.area?.on === 'point' ? 'Tap where it lands' : aim.area?.on === 'self' ? 'Tap the direction' : 'Tap a ringed creature'}{aimPick ? ' — tap again to confirm' : ''}.</span>
         <button type="button" onclick={() => aim?.oncancel()}>Cancel</button>

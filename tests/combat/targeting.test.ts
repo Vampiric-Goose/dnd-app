@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { afterDefenses, attackToggles, canTarget, finalMode, monsterAttack, reachOf, targetingOn } from '../../src/lib/combat/targeting.ts';
+import { afterDefenses, attackEdge, attackToggles, canTarget, combineMode, finalMode, monsterAttack, reachOf, targetingOn } from '../../src/lib/combat/targeting.ts';
 import type { TurnAction } from '../../src/lib/combat/turnActions.ts';
 import { DEFAULT_SETTINGS } from '../../src/lib/settings.ts';
 import type { Attack } from '../../src/lib/types.ts';
@@ -67,6 +67,30 @@ describe('targeting', () => {
     expect(monsterAttack(monster('Ranged Weapon Attack: +6 to hit, range 150/600 ft., one target. Hit: 7 (1d8 + 3) piercing damage plus 7 (2d6) fire damage.')))
       .toEqual({ toHit: 6, dmg: [{ expr: '1d8+3', type: 'piercing' }, { expr: '2d6', type: 'fire' }], ranged: true });
     expect(monsterAttack(monster('The goblin hides.'))).toBeUndefined();
+  });
+
+  test('advantage and disadvantage from conditions (PHB Appendix A), Dodge and exhaustion, with the reasons', () => {
+    const edge = (o: Partial<Parameters<typeof attackEdge>[0]>) => attackEdge({ attacker: [], target: [], within5: true, ...o });
+    expect(edge({ attacker: ['Prone'] }).dis).toEqual(['you are prone']);
+    expect(edge({ attacker: ['Poisoned', 'Blinded'] }).dis).toEqual(['you are blinded', 'you are poisoned']);
+    expect(edge({ attacker: ['Invisible'] }).adv).toEqual(['you are invisible']);
+    expect(edge({ target: ['prone'] })).toMatchObject({ adv: ['target is prone (within 5 ft)'], dis: [] });
+    expect(edge({ target: ['prone'], within5: false })).toMatchObject({ adv: [], dis: ['target is prone (beyond 5 ft)'] });
+    expect(edge({ target: ['Restrained'] }).adv).toEqual(['target is restrained']);
+    expect(edge({ target: ['Invisible'] }).dis).toEqual(['target is invisible']);
+    expect(edge({ dodging: true }).dis).toEqual(['target is dodging']);
+    expect(edge({ exhaustion: 3 }).dis).toEqual(['exhaustion 3']);
+    expect(edge({ exhaustion: 2 }).dis).toEqual([]);
+    // a hit on a paralyzed or unconscious creature within 5 ft is a critical hit
+    expect(edge({ target: ['Paralyzed'] })).toMatchObject({ adv: ['target is paralyzed'], autoCrit: true });
+    expect(edge({ target: ['Unconscious'], within5: false }).autoCrit).toBe(false);
+  });
+
+  test('any advantage and any disadvantage cancel out; the roller\'s own pick counts as one of either', () => {
+    expect(combineMode({ adv: ['a'], dis: [] })).toBe('adv');
+    expect(combineMode({ adv: ['a'], dis: ['b', 'c'] })).toBeUndefined();
+    expect(combineMode({ adv: [], dis: [] }, 'dis')).toBe('dis');
+    expect(combineMode({ adv: [], dis: ['long range'] }, 'adv')).toBeUndefined();
   });
 
   test('forced disadvantage meets the player\'s pick: advantage and disadvantage cancel', () => {

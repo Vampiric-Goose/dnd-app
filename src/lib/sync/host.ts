@@ -410,6 +410,7 @@ export class Host {
       },
       nameOf: (z) => (z.characterId ? chars.find((c) => c.id === z.characterId)?.name : undefined) ?? z.name,
       conditionsOf: (z) => (z.characterId ? chars.find((c) => c.id === z.characterId)?.state.conditions : undefined) ?? z.conditions ?? [],
+      exhaustionOf: (z) => (z.characterId ? chars.find((c) => c.id === z.characterId)?.state.exhaustion : undefined) ?? 0,
       seen, magical: ch.inventory.find((e) => e.id === a.attack?.entryId)?.item.magic ?? false,
       id: uid(), now: this.#deps.now?.() ?? Date.now(), rng: Math.random,
     });

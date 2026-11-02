@@ -63,9 +63,9 @@ const attackRoll = (t: TargetInfo, toHit: number, r: Rolled): { hit: boolean; ro
 };
 
 /** A weapon attack (or a monster's): hit or miss against AC, and its damage on a hit. Extra damage (GWM's +10) is one more expression. */
-export function resolveAttack(t: TargetInfo, toHit: number, dmg: { expr: string; type: string }[], r: Rolled, magical: boolean): Outcome {
+export function resolveAttack(t: TargetInfo, toHit: number, dmg: { expr: string; type: string }[], r: Rolled, magical: boolean, autoCrit = false): Outcome {
   const a = attackRoll(t, toHit, r);
-  return { id: t.id, ...a, ac: t.ac, ...(a.hit ? hurt(t, dmg, r.dmg, a.nat === 20, magical) : { damage: 0 }) };
+  return { id: t.id, ...a, ac: t.ac, ...(a.hit ? hurt(t, dmg, r.dmg, a.nat === 20 || autoCrit, magical) : { damage: 0 }) };
 }
 
 const ABILITY: Record<string, Ability> = { Str: 'str', Dex: 'dex', Con: 'con', Int: 'int', Wis: 'wis', Cha: 'cha' };
@@ -75,13 +75,13 @@ const ABILITY: Record<string, Ability> = { Str: 'str', Dex: 'dex', Con: 'con', I
  * is rolled once: a failure takes it all, a success half (rounded down) or none, each after its own defenses. Spell damage is magical.
  */
 export function resolveSpell(read: SpellRead, dice: { expr: string; type: string; on?: 'hit' | 'save' }[], dc: number | undefined, toHit: number | undefined,
-  target: TargetInfo | undefined, caught: TargetInfo[], r: Rolled, rng: () => number): Outcome[] {
+  target: TargetInfo | undefined, caught: TargetInfo[], r: Rolled, rng: () => number, autoCrit = false): Outcome[] {
   const out: Outcome[] = [];
   const idx = dice.map((d, i) => ({ ...d, faces: r.dmg[i] ?? [] }));
   const hitDice = read.attack ? idx.filter((d) => d.on !== 'save') : [], saveDice = read.attack ? idx.filter((d) => d.on === 'save') : idx;
   if (read.attack && target && toHit !== undefined) {
     const a = attackRoll(target, toHit, r);
-    out.push({ id: target.id, part: 'hit', ...a, ac: target.ac, ...(a.hit ? hurt(target, hitDice, hitDice.map((d) => d.faces), a.nat === 20, true) : { damage: 0 }) });
+    out.push({ id: target.id, part: 'hit', ...a, ac: target.ac, ...(a.hit ? hurt(target, hitDice, hitDice.map((d) => d.faces), a.nat === 20 || autoCrit, true) : { damage: 0 }) });
   }
   if (!read.save || dc === undefined) return out;
   const ability = ABILITY[read.save] ?? 'dex';

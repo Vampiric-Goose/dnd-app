@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import { describe, expect, test } from 'vitest';
+import { freshTurn } from '../../src/lib/combat/combat.ts';
 import { applyUse, attacksPerAction, castingCost, costOfText, traitCost, monsterActions, offhandDamage, payment, pcActions, primaryAction, problemOf, slotsLeft, spendOn, type TurnAction } from '../../src/lib/combat/turnActions.ts';
 import type { Attack, Character, Combat, Combatant, MonsterDef, Pack, Sheet, SpellDef } from '../../src/lib/types.ts';
 
@@ -107,6 +108,13 @@ describe('using an action', () => {
     const k = applyUse(fight(cb()), cb(), dash);
     expect(k.combatants[0].economy?.bonus).toBe(true);
     expect(k.movement?.x?.dashes).toBe(1);
+  });
+
+  test('Dodge lasts until the start of its next turn (its economy resets there)', () => {
+    const dodge = { id: 'std:dodge', name: 'Dodge', cost: 'action', group: 'standard' } as TurnAction;
+    const y = applyUse(fight(cb()), cb(), dodge).combatants[0];
+    expect(y.economy?.dodging).toBe(true);
+    expect(freshTurn(y).economy).toBeUndefined();
   });
 
   test('two-weapon fighting: the off-hand attack only after an Attack action with a light melee weapon', () => {

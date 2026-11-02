@@ -21,7 +21,7 @@ test('two d20 faces sent, one logged; the damage shows only on a hit', () => {
 
 test('a forced disadvantage rolls and logs both d20s', () => {
   rollLog.length = 0;
-  const r = rollAim('Longbow', { ...sword, line: true }, 'long range');
+  const r = rollAim('Longbow', { ...sword, line: true }, { ok: true, disadvantage: 'long range', adv: [], dis: ['long range'] });
   expect(r.rolled.d20).toHaveLength(2);
   expect(rollLog[0].detail).toMatch(/2d20kl1/);
 });

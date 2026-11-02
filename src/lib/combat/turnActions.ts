@@ -265,6 +265,7 @@ export function applyUse(k: Combat, x: Combatant, a: TurnAction, perAction = 1, 
   if (attackOf(a, perAction) && a.attack && lightMelee(a.attack)) y = mark({ light: true });
   if (OBJECT.includes(a.id)) y = mark({ object: true });
   if (a.id === 'std:ready') y = mark({ readied: true });
+  if (a.id === 'std:dodge') y = mark({ dodging: true }); // attacks against it have disadvantage until its next turn
   if (a.spell && a.cost === 'bonus') y = mark({ bonusSpell: true });
   if (a.spell && !(a.cost === 'action' && a.spell.level === 0)) y = mark({ leveledSpell: true });
   if (a.spend) y = { ...y, spellsUsed: { ...y.spellsUsed, [a.spend]: (y.spellsUsed?.[a.spend] ?? 0) + 1 } };
