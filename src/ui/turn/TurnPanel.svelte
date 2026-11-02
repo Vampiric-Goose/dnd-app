@@ -225,7 +225,7 @@
         </select>
       {/if}
       {#if a.cast?.read.save && a.cast.dc !== undefined}<span class="save">DC <span class="num">{a.cast.dc}</span> {a.cast.read.save} save</span>{/if}
-      <button type="button" class="use" disabled={!!why || busy} onclick={() => onaim(a, slotted(a) ? slotOf(a) : undefined, toggles.filter((t) => toggleFor[a.id]?.includes(t.id)))}>Target</button>
+      <button type="button" class="use" disabled={!!why || busy} onclick={() => { dialog?.close(); onaim(a, slotted(a) ? slotOf(a) : undefined, toggles.filter((t) => toggleFor[a.id]?.includes(t.id))); }}>Target</button>
     {:else if a.attack}
       <button type="button" disabled={!!why || busy} aria-label="Roll {a.name} attack, {signed(a.attack.toHit)}" onclick={() => attack(a)}>Attack <span class="num">{signed(a.attack.toHit)}</span></button>
       <button type="button" aria-label="Roll {a.name} damage, {a.attack.damage}" onclick={() => damage(`${a.attack!.name} damage`, a.attack!.damage)}>Damage <span class="num">{a.attack.damage}</span></button>
