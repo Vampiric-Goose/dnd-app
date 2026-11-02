@@ -16,6 +16,7 @@
   import { affectedCells, tokensInTemplate, type Shape, type Template } from '../../lib/map/templates.ts';
   import { fit, pinch, toScreen, toWorld, zoomAt, type View } from '../../lib/map/view.ts';
   import type { Grid, Scene } from '../../lib/types.ts';
+  import type { Pickable } from '../../lib/combat/targeting.ts';
 
   // fog: drawn only when set (the caller passes it only with the Fog of war setting on); black for players, a shade for the DM.
   // onfog: the DM's fog tools, shown only when it is set; one call per stroke, rectangle or Reveal all / Hide all.
@@ -26,7 +27,7 @@
   // arrow (bindable): the arrow picked with the Select tool (a tap on its line or head); onclear: Delete / Backspace with a clearable one picked.
   // ondelete: Delete / Backspace with tokens selected (unset = the key does nothing, as for players).
   // ondrag: the dragged token's ghost moved to a new cell (`at` undefined: the drag ended).
-  let { width, height, image, grid, tokens, dm, diagonal, selected, canDrag, speedOf, limitOf, onselect, onmove, rev = 0, fog, fogStyle = dm ? 'shade' : 'black', onfog, corner, arrows = [], ondeclare, onclear, ondelete, arrow = $bindable(), ondrag, preset }: {
+  let { width, height, image, grid, tokens, dm, diagonal, selected, canDrag, speedOf, limitOf, onselect, onmove, rev = 0, fog, fogStyle = dm ? 'shade' : 'black', onfog, corner, arrows = [], ondeclare, onclear, ondelete, arrow = $bindable(), ondrag, preset, aim }: {
     width: number; height: number; image?: string; grid: Grid; tokens: CanvasToken[]; dm: boolean; diagonal: '5-5-5' | '5-10-5'; selected: string[];
     canDrag: (id: string) => boolean; speedOf?: (id: string) => number | undefined; limitOf?: (id: string) => { from?: Pt; budget: number; clamp: boolean } | undefined;
     onselect: (ids: string[]) => void; onmove: (ids: string[], primary: string, to: Pt) => void; rev?: number;
@@ -36,6 +37,13 @@
     ondrag?: (id: string, at: Pt | undefined) => void;
     /** An area spell's template (`n` changes on each request): the Template tool with its shape and size, at `origin` when given. */
     preset?: { shape: Shape; feet: number; width?: number; origin?: Pt; n: number };
+    /**
+     * Targeting: picking what a use aims at. Pickable tokens get a ring (red: with disadvantage); `line` draws a dashed line from `from` to
+     * the target; `area` previews where it lands (on a creature, on any point within `range` ft, or from `from` toward the pointer) and
+     * lists who is inside. A mouse click picks; on touch a tap shows it and a second tap on the same spot picks. Escape cancels.
+     */
+    aim?: { from: Pt; pickable: (id: string) => Pickable; line: boolean; area?: { shape: Shape; feet: number; width?: number; on: 'creature' | 'point' | 'self'; range?: number };
+      onpick: (p: { tokenId?: string; point: Pt; caught: string[] }) => void; oncancel: () => void };
   } = $props();
   // One selection at a time: picking tokens drops the arrow; an arrow that went (cleared, turn ended) is no longer picked.
   $effect(() => { if (selected.length || (arrow !== undefined && !arrows.some((a) => a.id === arrow))) untrack(() => (arrow = undefined)); });
@@ -65,6 +73,30 @@
   const template = $derived<Template | undefined>(tplAt && { shape, ...tplAt, feet: ft(tplFeet, 1, 1000, 20), ...(shape === 'line' && { width: ft(lineWidth, 1, 100, 5) }) });
   const inside = $derived(template ? new Set(tokensInTemplate(template, grid, tokens)) : new Set<string>());
   const insideNames = $derived(tokens.filter((t) => inside.has(t.id)).map((t) => t.name));
+  // Targeting: where the pointer aims (mouse hover) and, on touch, the first tap waiting for its confirming second tap.
+  let aimAt: Pt | undefined = $state.raw();
+  let aimPick: { tokenId?: string; point: Pt } | undefined = $state.raw();
+  $effect(() => { void aim; untrack(() => { aimAt = undefined; aimPick = undefined; schedule(); }); });
+  /** What a press at `w` would aim at: a pickable creature, a point in range, or (self) a direction; undefined: nothing there. */
+  function aimFor(w: Pt): { tokenId?: string; point: Pt } | undefined {
+    const a = aim;
+    if (!a) return undefined;
+    if (a.area?.on === 'self') return { point: w };
+    if (a.area?.on === 'point') { const pt = snap(grid, w, 'M'); return a.area.range === undefined || feetBetween(grid, a.from, pt, diagonal) <= a.area.range ? { point: pt } : undefined; }
+    const t = tokenAt(scene(), w, dm);
+    return t && a.pickable(t.id).ok ? { tokenId: t.id, point: { x: t.x, y: t.y } } : undefined;
+  }
+  const aimTemplate = (c: { point: Pt } | undefined): Template | undefined => {
+    const ar = aim?.area;
+    if (!ar || !c || !aim) return undefined;
+    const origin = ar.on === 'self' ? aim.from : c.point;
+    return { shape: ar.shape, origin, aim: ar.on === 'self' ? c.point : { x: origin.x + 1, y: origin.y }, feet: ar.feet, ...(ar.width && { width: ar.width }) };
+  };
+  const aimFocus = $derived(aimPick ?? (aimAt ? aimFor(aimAt) : undefined));
+  const aimTpl = $derived(aimTemplate(aimFocus));
+  const aimCaught = $derived(aimTpl ? tokensInTemplate(aimTpl, grid, tokens) : []);
+  let aimCells: Cell[] = [];
+  $effect(() => { aimCells = aimTpl ? affectedCells(aimTpl, grid, width, height) : []; untrack(schedule); });
   let tplCells: Cell[] = [];
   $effect(() => { tplCells = template ? affectedCells(template, grid, width, height) : []; untrack(schedule); });
   let wrap: HTMLDivElement;
@@ -410,6 +442,45 @@
       ctx.restore();
     }
 
+    // targeting: rings on what can be picked, the area where it would land, the line to the target
+    if (aim) {
+      ctx.save();
+      ctx.lineWidth = 2.5 * px;
+      ctx.setLineDash([6 * px, 4 * px]);
+      if (!aim.area || aim.area.on === 'creature') for (const t of tokens) {
+        const k = aim.pickable(t.id);
+        if (!k.ok) continue;
+        ctx.strokeStyle = k.disadvantage ? pal.danger : accent;
+        ctx.beginPath();
+        ctx.arc(t.x, t.y, radius(grid, t.size) + 6 * px, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      if (aimCells.length) {
+        ctx.globalAlpha = 0.3;
+        ctx.fillStyle = pal.danger;
+        ctx.beginPath();
+        for (const c of aimCells) {
+          if (grid.type === 'square') { const p = cellCenter(grid, c); ctx.rect(p.x - grid.size / 2, p.y - grid.size / 2, grid.size, grid.size); continue; }
+          const [first, ...rest] = hexCorners(grid, c);
+          ctx.moveTo(first.x, first.y);
+          for (const p of rest) ctx.lineTo(p.x, p.y);
+          ctx.closePath();
+        }
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+      if (aim.line && aimFocus?.tokenId !== undefined) {
+        ctx.strokeStyle = '#f0c040';
+        ctx.lineWidth = 3 * px;
+        ctx.setLineDash([8 * px, 6 * px]);
+        ctx.beginPath();
+        ctx.moveTo(aim.from.x, aim.from.y);
+        ctx.lineTo(aimFocus.point.x, aimFocus.point.y);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
     // screen-space overlays: box, fog rectangle, ruler, drag label
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     if (mode.k === 'box' || mode.k === 'fogRect') {
@@ -544,6 +615,18 @@
     if (pointers.size > 2) return;
     const w = toWorld(view, p), shift = e.shiftKey || e.ctrlKey || e.metaKey;
     if (e.button === 2) { mode = { k: 'none' }; if (ondeclare) startArrow(w); return; } // the right button points, in any tool
+    if (aim && e.button === 0) {
+      const c = aimFor(w);
+      if (c) {
+        const same = aimPick && aimPick.tokenId === c.tokenId && aimPick.point.x === c.point.x && aimPick.point.y === c.point.y;
+        const t = aimTemplate(c);
+        if (e.pointerType === 'mouse' || same) { aim.onpick({ ...c, caught: t ? tokensInTemplate(t, grid, tokens) : [] }); aimPick = undefined; }
+        else aimPick = c;
+        mode = { k: 'none' };
+        schedule();
+        return;
+      }
+    }
     if (ruler) { ruler = undefined; schedule(); } // the next tap clears the ruler
     if (tool === 'ruler') { ruler = { a: w, b: w }; mode = { k: 'ruler' }; return; }
     if (tool === 'fog') {
@@ -575,6 +658,7 @@
   function move(e: PointerEvent) {
     const p = local(e);
     if (!pointers.has(e.pointerId)) { // hover (mouse, no button)
+      if (aim && e.pointerType === 'mouse') { aimAt = toWorld(view, p); schedule(); }
       if (tool === 'fog' && fogTool === 'brush') { brushAt = toWorld(view, p); schedule(); return; }
       if (!dm || e.pointerType !== 'mouse') return;
       const id = tokenAt(scene(), toWorld(view, p), dm)?.id;
@@ -668,6 +752,7 @@
 
   /** Delete / Backspace, unless the focus is somewhere that types. */
   function key(e: KeyboardEvent) {
+    if (e.key === 'Escape' && aim && !e.defaultPrevented) { aim.oncancel(); return; }
     if ((e.key !== 'Delete' && e.key !== 'Backspace') || e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey) return;
     const el = e.target as HTMLElement | null;
     // typing, or a dialog/menu has focus: the key is theirs, not the map's
@@ -733,7 +818,13 @@
         <button type="button" onclick={() => confirm('Hide the whole scene under fog?') && onfog({ k: 'all', reveal: false })}>Hide all</button>
       </div>
     {/if}
-    {#if tool === 'template' || template}
+    {#if aim}
+      <div class="strip" role="group" aria-label="Aiming">
+        {#if aim.area}<span class="inside" role="status">In the area: {aimCaught.length ? tokens.filter((t) => aimCaught.includes(t.id)).map((t) => t.name).join(', ') : 'none'}</span>{/if}
+        <span class="hint">{aim.area?.on === 'point' ? 'Tap where it lands' : aim.area?.on === 'self' ? 'Tap the direction' : 'Tap a ringed creature'}{aimPick ? ' — tap again to confirm' : ''}.</span>
+        <button type="button" onclick={() => aim?.oncancel()}>Cancel</button>
+      </div>
+    {:else if tool === 'template' || template}
       <div class="strip" role="group" aria-label="Template">
         {#if tool === 'template'}
           <label class="opt">Shape
