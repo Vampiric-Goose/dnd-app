@@ -53,22 +53,25 @@
   });
   const primary = $derived(primaryAction(actions) ?? actions.find((a) => a.group === 'monster' && a.cost === 'action'));
   // The pop-up's sections; each entry says what it costs.
-  type Section = 'attacks' | 'utility' | 'unique' | 'spells';
-  const SECTIONS: [Section, string][] = [['attacks', 'Attacks'], ['utility', 'Utility'], ['unique', 'Unique'], ['spells', 'Spells']];
+  type Section = 'attacks' | 'utility' | 'unique';
+  const SECTIONS: [Section, string][] = [['attacks', 'Attacks'], ['utility', 'Utility'], ['unique', 'Unique']];
   // Separate lists: Actions (what costs an Action, then free things such as Action Surge), Bonus actions, Reactions. A Bonus action is
-  // never in Actions.
-  type Kind = 'action' | 'bonus' | 'reaction';
-  const KINDS: [Kind, string][] = [['action', 'Actions'], ['bonus', 'Bonus actions'], ['reaction', 'Reactions']];
-  const inKind = (a: TurnAction, k: Kind) => (k === 'action' ? a.cost === 'action' || a.cost === 'none' : a.cost === k);
+  // never in Actions. Spells have their own list (only a creature with spells shows it), split the same way by casting time.
+  type Cost = 'action' | 'bonus' | 'reaction';
+  type Kind = Cost | 'spell';
+  const COSTS: [Cost, string][] = [['action', 'Actions'], ['bonus', 'Bonus actions'], ['reaction', 'Reactions']];
+  const KINDS: [Kind, string][] = [...COSTS, ['spell', 'Spells']];
+  const costIs = (a: TurnAction, k: Cost) => (k === 'action' ? a.cost === 'action' || a.cost === 'none' : a.cost === k);
+  const inKind = (a: TurnAction, k: Kind) => (k === 'spell' ? a.group === 'spell' : a.group !== 'spell' && costIs(a, k));
+  const bySpellLevel = (p: TurnAction, q: TurnAction) => (p.spell?.level ?? 0) - (q.spell?.level ?? 0) || p.name.localeCompare(q.name);
   let kind: Kind = $state('action');
   const kindLabel = $derived(KINDS.find(([k]) => k === kind)![1]);
   const shown = $derived(actions.filter((a) => visible(a, conditions))); // Escape only while grappled, Stand up only while prone
-  /** Attacks: weapons, off-hand, a monster's attacks (a to-hit roll, or Multiattack); Utility: the standard actions; Spells; the rest
+  /** Attacks: weapons, off-hand, a monster's attacks (a to-hit roll, or Multiattack); Utility: the standard actions; the rest
    * (class and race features, resources, a monster's traits, reactions and legendary actions) is Unique. */
   function sectionOf(a: TurnAction): Section {
     if (a.group === 'attack') return 'attacks';
     if (a.group === 'standard') return 'utility';
-    if (a.group === 'spell') return 'spells';
     if (a.group === 'monster' && !a.legendary && a.cost === 'action' && (/multiattack/i.test(a.name) || (a.text && rollParts(richToPlain(a.text)).some((p) => 'hit' in p && p.hit)))) return 'attacks';
     return 'unique';
   }
@@ -159,8 +162,13 @@
     <h2 id="actions-title">{name}: {kindLabel.toLowerCase()}</h2>
     <button type="button" aria-label="Close" onclick={() => dialog?.close()}>✕</button>
   </div>
-  {#each SECTIONS as [sec, label]}
-    {@const list = shown.filter((a) => inKind(a, kind) && sectionOf(a) === sec).sort((p, q) => Number(p.cost === 'none') - Number(q.cost === 'none'))}
+  {#if kind === 'spell' && slots.some((n) => n > 0)}
+    <p class="muted small">Slots left: {slots.flatMap((n, i) => (n > 0 ? [`level ${i + 1}: ${n}`] : [])).join(' · ')}</p>
+  {/if}
+  {#each kind === 'spell' ? COSTS : SECTIONS as [sec, label]}
+    {@const list = kind === 'spell'
+      ? shown.filter((a) => inKind(a, 'spell') && costIs(a, sec as Cost)).sort(bySpellLevel)
+      : shown.filter((a) => inKind(a, kind) && sectionOf(a) === sec).sort((p, q) => Number(p.cost === 'none') - Number(q.cost === 'none'))}
     {#if list.length}
       {@const shared = list.every((a) => problem(a) === problem(list[0])) ? problem(list[0]) : undefined}
       <h3>{label}{#if shared}<span class="small">{` · ${shared}`}</span>{/if}</h3>
@@ -188,6 +196,7 @@
   {@const parts = a.group === 'monster' && a.text ? rollParts(richToPlain(a.text)).filter((p) => 'expr' in p) : []}
   <div class="what">
     <strong>{a.name}</strong>
+    {#if full && a.spell}<span class="muted small">{a.spell.level ? `Level ${a.spell.level}` : 'Cantrip'}</span>{/if}
     {#if full && a.cost === 'none'}<span class="cost small">{a.legendary ? `Legendary ×${a.legendary}` : 'Free'}</span>{/if}
     {#if a.uses}<span class="muted small"><span class="num">{a.uses.left}</span>/<span class="num">{a.uses.max}</span> left</span>{/if}
     {#if a.legendary}<span class="muted small">{x.legendary ? `${x.legendary.max - x.legendary.used} legendary left` : ''}</span>{/if}
