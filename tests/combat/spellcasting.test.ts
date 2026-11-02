@@ -239,5 +239,5 @@ test('damage over time: only entering the area stays by hand', () => {
 });
 
 test('damage over time with no area to place stays by hand', () => {
-  expect(readSpell(fix('Self', 'Spirits surround you. A creature that starts its turn near you takes 1d8 cold damage.')).manual).toBe('Damage over time isn’t automated: apply it by hand.');
+  expect(readSpell(fix('Self', 'Spirits surround you. A creature that starts its turn within 10 feet of you takes 1d8 cold damage.')).manual).toBe('Damage over time isn’t automated: apply it by hand.');
 });
