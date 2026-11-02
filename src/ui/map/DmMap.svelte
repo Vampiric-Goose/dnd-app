@@ -14,7 +14,7 @@
   import { currentRun, patchCombatant } from '../../lib/combat/combat.ts';
   import { budgetApplies, budgetFeet, combatantForToken, effectiveSpeed, originOf, recordMove } from '../../lib/combat/movement.ts';
   import { applyResolution, editCharacter, settlePick, settleSave, turn, undoResolution, updateCombat } from '../../lib/combat/store.ts';
-  import { aimPlan, areasOn, entersIn, foeWithin5, judge, snapOf, startsIn, touched, workOut, type AimPlan } from '../../lib/combat/aiming.ts';
+  import { aimPlan, areaRollName, areaRolls, areasOn, foeWithin5, judge, snapOf, touched, workOut, type AimPlan } from '../../lib/combat/aiming.ts';
   import { monsterAc, resolveSpell, targetOf } from '../../lib/combat/resolve.ts';
   import { targetingOn, type Pickable, type Toggle } from '../../lib/combat/targeting.ts';
   import { roll } from '../../lib/rolls.svelte.ts';
@@ -456,21 +456,14 @@
     const c = z.characterId ? chars.find((y) => y.id === z.characterId) : undefined;
     return c ? targetOf(z, { sheet: sheets.get(c.id) ?? computeSheet(c, { settings, viewer: 'dm' }), hp: c.state.hp, conditions: c.state.conditions }) : targetOf(z, { monster: z.monsterId ? monsterById.get(z.monsterId) : undefined });
   };
-  // Damage over time: the areas the creature whose turn it is starts in (Moonbeam), or walked into (Cloudkill), each once a turn: a start of
-  // turn there or entering it, not both
-  const startOf = (r: Resolution) => `${r.action} (start of turn)`, enterOf = (r: Resolution) => `${r.action} (entering)`;
-  const hurtsNow = $derived.by((): { r: Resolution; enters: boolean }[] => {
-    const k = combat, s = scene, id = k?.turn;
-    if (!k || !s || !id) return [];
-    const done = (r: Resolution) => (k.resolutions ?? []).some((y) => (y.action === startOf(r) || y.action === enterOf(r)) && y.round === k.round && y.outcomes[0]?.id === id);
-    return [...startsIn(k, s, id).map((r) => ({ r, enters: false })), ...entersIn(k, s, id).map((r) => ({ r, enters: true }))].filter((x) => !done(x.r));
-  });
+  // Damage over time owed on this turn (aiming.ts areaRolls): starting it in an area (Moonbeam), entering one (Cloudkill), each once a turn
+  const hurtsNow = $derived(combat && scene && combat.turn ? areaRolls(combat, scene, combat.turn) : []);
   const lingerRoll = (r: Resolution, enters = false) => run(async () => {
     const k = combat, z = k?.combatants.find((x) => x.id === k.turn), l = r.linger;
     if (!k || !z || !l) return;
     const rolled = { dmg: l.dice.map((d) => roll(`${r.action}: ${d.type} damage`, d.expr).faces) };
     const outcomes = resolveSpell(l.read, l.dice, l.dc, undefined, infoOf(z), [], rolled, Math.random);
-    await applyResolution(cid, { id: uid(), actor: r.actor, action: enters ? enterOf(r) : startOf(r), outcomes, at: Date.now(), round: k.round,
+    await applyResolution(cid, { id: uid(), actor: r.actor, action: areaRollName(r, enters), outcomes, at: Date.now(), round: k.round,
       ...(l.dc !== undefined && l.read.save && { dc: l.dc, ability: l.read.save.toLowerCase() as Ability, onSave: l.read.onSave }) }, settings);
     await reload();
   });

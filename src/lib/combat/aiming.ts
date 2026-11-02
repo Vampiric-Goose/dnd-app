@@ -67,6 +67,18 @@ export function startsIn(k: Combat, s: Scene, id: string): Resolution[] {
  * began outside of: it walked in this turn. ponytail: the turn's origin and where it stands, so a path through and out isn't caught, nor a
  * creature pushed in on another's turn (by hand).
  */
+/** The result name of an area's roll: as a turn starts there, or on entering it. */
+export const areaRollName = (r: Pick<Resolution, 'action'>, enters: boolean): string => `${r.action} (${enters ? 'entering' : 'start of turn'})`;
+
+/**
+ * The area rolls creature `id` is owed on its turn (k.turn): starting it in a damage-over-time area, and entering one for the first time
+ * that turn, each once a turn and apart (Cloudkill). Its turn is this round's: a roll it got last round doesn't count.
+ */
+export function areaRolls(k: Combat, s: Scene, id: string): { r: Resolution; enters: boolean }[] {
+  const done = (r: Resolution, enters: boolean) => (k.resolutions ?? []).some((y) => y.action === areaRollName(r, enters) && y.round === k.round && y.outcomes[0]?.id === id);
+  return [...startsIn(k, s, id).map((r) => ({ r, enters: false })), ...entersIn(k, s, id).map((r) => ({ r, enters: true }))].filter((x) => !done(x.r, x.enters));
+}
+
 export function entersIn(k: Combat, s: Scene, id: string): Resolution[] {
   const t = s.tokens.find((x) => combatantForToken(k, x)?.id === id), from = k.movement?.[id]?.from;
   if (!t || !from) return [];

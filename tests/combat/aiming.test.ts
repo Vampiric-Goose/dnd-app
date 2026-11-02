@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { aimPlan, entersIn, pickableAt, startsIn, workOut, type WorkIn } from '../../src/lib/combat/aiming.ts';
+import { aimPlan, areaRolls, areaRollName, entersIn, pickableAt, startsIn, workOut, type WorkIn } from '../../src/lib/combat/aiming.ts';
 import { targetOf } from '../../src/lib/combat/resolve.ts';
 import { readSpell } from '../../src/lib/combat/spellText.ts';
 import type { TurnAction } from '../../src/lib/combat/turnActions.ts';
@@ -302,4 +302,24 @@ test('who has entered a lasting area this turn', () => {
   const cloud = { ...from(3), resolutions: [{ ...fog(true), linger: { ...fog(true).linger!, read: { ...fog(true).linger!.read, noStart: true as const } } }] };
   expect(startsIn(cloud, sc, 'g')).toEqual([]); // Incendiary Cloud: the end of a turn, not its start
   expect(startsIn({ ...from(3), movement: { g: { from: cell(3), dashes: 0 } } }, { ...sc, tokens: sc.tokens.map((t) => (t.id === 't-g' ? { ...t, ...cell(6) } : t)) }, 'g').map((r) => r.id)).toEqual(['r']);
+});
+
+// Cloudkill is per turn: starting a turn in it and entering it for the first time on a turn are each rolled once that turn, apart.
+test('area rolls owed this turn: the start of it and entering, each once', () => {
+  const k0: Combat = { campaignId: 'c1', round: 2, turn: 'g', groupMonsters: false, updatedAt: 0,
+    combatants: [cb({ id: 'pc:mira', kind: 'pc', name: 'Mira', concentrating: true, concentratingOn: 'Cloudkill' }), cb({ id: 'g', kind: 'monster', name: 'Goblin' })] };
+  const fog: Resolution = { id: 'r', actor: 'pc:mira', action: 'Cloudkill', outcomes: [], applied: [], at: 0, sceneId: 's1', round: 1, lasting: true,
+    area: { shape: 'cylinder', origin: cell(3), aim: cell(3), feet: 5 }, linger: { dice: [{ expr: '5d8', type: 'poison' }], read: { damage: [], save: 'Con', onSave: 'half', enters: true }, dc: 13 } };
+  const sc = (q: number): Scene => ({ id: 's1', campaignId: 'c1', name: 'F', width: 1400, height: 700, grid: { ...DEFAULT_GRID }, shown: true, updatedAt: 0,
+    tokens: [{ id: 't-g', name: 'G', ...cell(q), size: 'M', color: '#000000', combatantId: 'g' }] });
+  const rolled = (how: 'start' | 'enter', round = 2): Resolution => ({ id: `x-${how}-${round}`, actor: 'pc:mira', action: areaRollName(fog, how === 'enter'), outcomes: [{ id: 'g', damage: 3 }], applied: [], at: 1, round });
+  const owed = (k: Combat, q: number) => areaRolls(k, sc(q), 'g').map((x) => (x.enters ? 'enter' : 'start'));
+  // walked in from outside: entering; began its turn there: the start of it
+  expect(owed({ ...k0, resolutions: [fog], movement: { g: { from: cell(0), dashes: 0 } } }, 3)).toEqual(['enter']);
+  expect(owed({ ...k0, resolutions: [fog] }, 3)).toEqual(['start']);
+  // rolled at the start of its turn: that's done, an entering roll this turn isn't (and last round's rolls don't count)
+  expect(owed({ ...k0, resolutions: [fog, rolled('start'), rolled('enter', 1)], movement: { g: { from: cell(3), dashes: 0 } } }, 3)).toEqual([]);
+  expect(owed({ ...k0, resolutions: [fog, rolled('start')] }, 3)).toEqual([]);
+  expect(owed({ ...k0, resolutions: [fog, rolled('enter')], movement: { g: { from: cell(0), dashes: 0 } } }, 3)).toEqual([]);
+  expect(owed({ ...k0, resolutions: [fog, rolled('enter', 1)], movement: { g: { from: cell(0), dashes: 0 } } }, 3)).toEqual(['enter']);
 });
