@@ -396,7 +396,10 @@ export class Host {
     const chars = await this.#deps.loadCharacters();
     return workOut({
       a, level, features: features.map((f) => f.name), actor: x, combat: k, scene: s, diagonal: camp.settings.diagonal, aim,
-      findTarget: (id) => k.combatants.find((z) => !z.hidden && (z.id === id || this.#aliases.get(z.id) === id)), // players pick visible ones only
+      findTarget: (id) => { // a visible token's id (the player's map) or a tracker row's; players pick visible creatures only
+        const t = s.tokens.find((x) => x.id === id && !x.hidden), z = t ? combatantForToken(k, t) : k.combatants.find((y) => y.id === id || this.#aliases.get(y.id) === id);
+        return z && !z.hidden ? z : undefined;
+      },
       info: async (z): Promise<TargetInfo> => {
         const pc = z.characterId ? chars.find((c) => c.id === z.characterId) : undefined;
         return pc ? targetOf(z, { sheet: computeSheet(pc, { settings: camp.settings, viewer: 'dm' }) }) : targetOf(z, { monster: z.monsterId ? await this.#deps.loadMonster?.(z.monsterId) : undefined });

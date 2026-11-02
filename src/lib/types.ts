@@ -152,7 +152,7 @@ export interface Combat { campaignId: string; combatants: Combatant[]; round: nu
 /** One target's part of a targeted use: an attack's hit, or a save. `pending`: a PC's save its player still rolls (`owed`: the damage before it). */
 export interface Outcome {
   id: string /* combatant */; part?: 'hit' | 'save';
-  hit?: boolean; nat?: 20 | 1; roll?: number;
+  hit?: boolean; nat?: 20 | 1; roll?: number; ac?: number /* the DM's Results list (a Combat never reaches players) */;
   save?: { roll: number; total: number; ok: boolean };
   damage: number; note?: string;
   pending?: true; owed?: { amount: number; type: string }[];
@@ -160,7 +160,7 @@ export interface Outcome {
 /** What a result took off a combatant (HP and temp HP), and a PC's dying state before it, so Undo puts back exactly that. */
 export interface Applied { id: string; hp: number; temp: number; dying?: { deathSaves: { success: number; fail: number }; stable?: boolean; dead?: boolean } }
 export interface Resolution { id: string; actor: string /* combatant */; action: string /* its name */; dc?: number; ability?: Ability; onSave?: 'half' | 'none';
-  outcomes: Outcome[]; applied: Applied[]; at: number }
+  outcomes: Outcome[]; applied: Applied[]; at: number; /** an area's catch (combatant ids), for the DM's list */ caught?: string[] }
 /** Map ↔ combat: where the token stood when its turn's movement began (set by its first move) and Dashes taken this turn. */
 export interface Movement { from?: { x: number; y: number }; dashes: number; /** speed multiplier this turn: 2 Hasted, 0 after Haste ends */ mult?: number;
   /** stood up from prone this turn: half the speed spent */ stood?: true }

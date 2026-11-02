@@ -97,6 +97,15 @@ describe('targeting over sync', () => {
     expect(d.combat!.resolutions).toHaveLength(1);
   });
 
+  test('a player map names its target by token id; a hidden token is no target', async () => {
+    const { d, host, a } = await joined();
+    a.deliver(strike('t-g1', [17], [[]]));
+    a.deliver(strike('t-x1', [17], [[]]));
+    await settle(host);
+    expect(hp(d, 'g1')).toBe(3);
+    expect(refusals(a)).toEqual(['pick a target']);
+  });
+
   test('a miss: no damage, no damage in the outcome', async () => {
     const { d, host, a } = await joined();
     a.deliver(strike(aliasOf(a, 'Goblin 1'), [2], [[]]));

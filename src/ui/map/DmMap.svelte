@@ -12,7 +12,13 @@
   import { addTokensToCombat, editScene, startFight, tokenForCharacter, tokenForMonster } from '../../lib/map/store.ts';
   import { currentRun, patchCombatant } from '../../lib/combat/combat.ts';
   import { budgetApplies, budgetFeet, combatantForToken, effectiveSpeed, originOf, recordMove } from '../../lib/combat/movement.ts';
-  import { editCharacter, turn, updateCombat } from '../../lib/combat/store.ts';
+  import { applyResolution, editCharacter, settleSave, turn, undoResolution, updateCombat } from '../../lib/combat/store.ts';
+  import { aimPlan, foeWithin5, pickableAt, workOut, type AimPlan } from '../../lib/combat/aiming.ts';
+  import { targetOf } from '../../lib/combat/resolve.ts';
+  import { targetingOn, type Pickable, type Toggle } from '../../lib/combat/targeting.ts';
+  import { roll } from '../../lib/rolls.svelte.ts';
+  import { uid } from '../../lib/uid.ts';
+  import { rollAim, reveal } from './aimRoll.ts';
   import { setPip } from '../../lib/combat/economy.ts';
   import { applyUse, attacksPerAction, characterEffect, editsCharacter, monsterActions, payment, pcActions, problemOf, slotsLeft, spendOn, type TurnAction } from '../../lib/combat/turnActions.ts';
   import { featureList } from '../../lib/character/play.ts';
@@ -25,7 +31,7 @@
   import { getIndex, saveCampaign } from '../../lib/store.svelte.ts';
   import { MAX_BLOB } from '../../lib/sync/protocol.ts';
   import { clearDeclared, declareAction, sendDrag, session } from '../../lib/sync/session.svelte.ts';
-  import type { Campaign, Character, Combat, Combatant, MonsterDef, RaceDef, Scene, Sheet, Size, Token } from '../../lib/types.ts';
+  import type { Campaign, Character, Combat, Combatant, MonsterDef, Outcome, RaceDef, Scene, Sheet, Size, Token } from '../../lib/types.ts';
   import GridForm from './GridForm.svelte';
   import { detectSquareGrid } from '../../lib/map/detectGrid.ts';
   import MapCanvas from './MapCanvas.svelte';
@@ -332,6 +338,11 @@
   const useAction = (a: TurnAction, slot?: number, target?: string) => run(async () => {
     const v = view;
     if (!v || !combat) return;
+    await pay(v, a, slot, target);
+    await reload();
+  });
+  /** Pays for a use (the pip on the fresh fight, then a slot or resource on the character); throws why when it can't. */
+  async function pay(v: NonNullable<typeof view>, a: TurnAction, slot?: number, target?: string) {
     const pay = v.ch && v.sheet ? payment(a, v.sheet, v.ch, slot) : {};
     if (pay.problem) throw new Error(`Not done: ${pay.problem}.`);
     let why: string | undefined;
@@ -342,8 +353,61 @@
     });
     if (why) throw new Error(`Not done: ${why}.`);
     if (v.ch && editsCharacter(a, pay.level)) await editCharacter(v.ch.id, (c) => characterEffect(spendOn(c, pay.level, a.resource, pay.pact), a, target));
+  }
+
+  // Targeting (the DM's setting): the action being aimed on the map, then rolled here and worked out by the same rules as a player's use.
+  let aiming: { a: TurnAction; slot?: number; toggles: Toggle[]; plan: AimPlan; v: NonNullable<typeof view> } | undefined = $state.raw();
+  const onaim = (a: TurnAction, slot: number | undefined, toggles: Toggle[]) => {
+    const plan = aimPlan(a, { level: slot, toggles });
+    if (plan && view) { aiming = { a, slot, toggles, plan, v: view }; sheet = false; selected = []; }
+  };
+  const conditionsOf = (z: Combatant) => (z.characterId ? chars.find((c) => c.id === z.characterId)?.state.conditions : undefined) ?? z.conditions ?? [];
+  const nameOfCombatant = (id: string) => { const z = combat?.combatants.find((y) => y.id === id); return (z?.characterId ? chars.find((c) => c.id === z.characterId)?.name : undefined) ?? z?.name ?? '?'; };
+  const aim = $derived.by(() => {
+    const m = aiming, k = combat, s = scene;
+    if (!m || !k || !s) return undefined;
+    const me = s.tokens.find((t) => combatantForToken(k, t)?.id === m.v.x.id);
+    if (!me) return undefined;
+    const foe = foeWithin5(k, s, m.v.x, settings.diagonal, conditionsOf);
+    const pickable = (id: string): Pickable => {
+      const t = s.tokens.find((x) => x.id === id), z = t && combatantForToken(k, t);
+      return t && z && z.id !== m.v.x.id ? pickableAt(m.plan, s.grid, settings.diagonal, me, foe, t) : { ok: false };
+    };
+    return { from: { x: me.x, y: me.y }, line: m.plan.line, ...(m.plan.area && { area: m.plan.area }), pickable,
+      onpick: (p: { tokenId?: string; point: Pt }) => void fire(p, pickable), oncancel: () => (aiming = undefined) };
+  });
+  const fire = (p: { tokenId?: string; point: Pt }, pickable: (id: string) => Pickable) => run(async () => {
+    const m = aiming, k = combat, s = scene;
+    aiming = undefined;
+    if (!m || !k || !s) return;
+    const pick = p.tokenId ? pickable(p.tokenId) : undefined;
+    const r = rollAim(m.a.name, m.plan, pick?.ok ? pick.disadvantage : undefined);
+    const t = p.tokenId ? s.tokens.find((x) => x.id === p.tokenId) : undefined, target = t && combatantForToken(k, t), ch = m.v.ch;
+    const res = await workOut({ a: m.a, level: m.slot, features: ch ? featureList(ch, settings).map((f) => f.name) : [], actor: m.v.x, combat: k, scene: s,
+      diagonal: settings.diagonal, aim: { ...(target ? { target: target.id } : { point: p.point }), rolled: r.rolled, toggles: m.toggles.map((x) => x.id) },
+      findTarget: (id) => k.combatants.find((z) => z.id === id), conditionsOf,
+      info: (z) => {
+        const c = z.characterId ? chars.find((y) => y.id === z.characterId) : undefined;
+        return c ? targetOf(z, { sheet: sheets.get(c.id) ?? computeSheet(c, { settings, viewer: 'dm' }) }) : targetOf(z, { monster: z.monsterId ? monsterById.get(z.monsterId) : undefined });
+      },
+      nameOf: (z) => nameOfCombatant(z.id), magical: !!ch?.inventory.find((e) => e.id === m.a.attack?.entryId)?.item.magic, id: uid(), now: Date.now(), rng: Math.random });
+    if (typeof res === 'string') throw new Error(`Not done: ${res}.`);
+    await pay(m.v, m.a, m.slot);
+    reveal(r.held, res.outcome.hit);
+    await applyResolution(cid, res.resolution, settings);
     await reload();
   });
+  const undo = (rid: string) => run(async () => { await undoResolution(cid, rid, settings); await reload(); });
+  const rollFor = (rid: string, target: string) => run(async () => {
+    const d = roll(`${nameOfCombatant(target)}: save (rolled by the DM)`, '1d20', { mode: 'normal' });
+    await settleSave(cid, rid, target, d.faces[0], settings);
+    await reload();
+  });
+  const describe = (o: Outcome) => [
+    o.part !== 'save' && o.roll !== undefined ? `${o.hit ? 'hit' : 'miss'} (${o.roll}${o.nat ? `, natural ${o.nat}` : ''} vs AC ${o.ac ?? '?'})` : '',
+    o.save ? `${o.save.ok ? 'saved' : 'failed'} (${o.save.total})` : o.pending ? 'waiting for their save' : '',
+    o.damage ? `${o.damage} damage` : '', o.note ?? '',
+  ].filter(Boolean).join(', ');
   const onpip = (pip: 'action' | 'bonus' | 'reaction', used: boolean) => run(async () => {
     const id = view?.x.id;
     await updateCombat(cid, (k) => ({ ...k, combatants: k.combatants.map((z) => (z.id !== id ? z : setPip(z, pip, used))) }));
@@ -383,6 +447,7 @@
         bind:arrow={picked}
         ondrag={(id, at) => { if (scene?.shown) sendDrag(scene.id, id, at); }}
         {preset}
+        {aim}
       />
     {/key}
     <button type="button" class="sheet-btn" onclick={() => (sheet = true)}>{fighting ? 'Turn and tokens' : 'Tokens and scene'}</button>
@@ -451,7 +516,8 @@
             ac={view.ac} hp={view.hp} maxHp={view.maxHp} tempHp={view.tempHp} tone={view.ch ? 'accent' : 'danger'} conditions={[...view.conditions, ...(view.x.hasted && !view.x.hasted.ended ? ['Hasted'] : [])]}
             x={view.x} perAction={view.perAction} onTurn={turnIds.has(view.x.id)} actions={view.actions} slots={view.slots}
             concentrating={!!view.x.concentrating} {busy} canEnd={!busy} endLabel="Next turn ▶" onuse={(a, slot, target) => void useAction(a, slot, target)} onend={nextTurn} {onpip}
-            onstrip={(id) => (viewId = id)} ontemplate={placeTemplate}>
+            onstrip={(id) => (viewId = id)} ontemplate={placeTemplate}
+            targeting={targetingOn(settings)} features={view.ch ? featureList(view.ch, settings).map((f) => f.name) : []} {onaim}>
             {#snippet top()}
               {#if runList.length > 1}
                 <div class="row switch" role="group" aria-label="This group">
@@ -460,6 +526,25 @@
               {/if}
             {/snippet}
           </TurnPanel>
+          {#if combat?.resolutions?.length}
+            <section class="results" aria-labelledby="res-h">
+              <h3 id="res-h">Results</h3>
+              <ol class="plain">
+                {#each [...combat.resolutions].reverse().slice(0, 6) as r (r.id)}
+                  <li>
+                    <div class="row"><strong>{nameOfCombatant(r.actor)}: {r.action}</strong>{#if r.dc !== undefined}<span class="muted small">DC {r.dc} {r.ability?.toUpperCase()}</span>{/if}
+                      <button type="button" disabled={busy} onclick={() => undo(r.id)}>Undo</button></div>
+                    {#if r.caught?.length}<p class="muted small">In the area: {r.caught.map(nameOfCombatant).join(', ')}</p>{/if}
+                    <ul class="plain small">
+                      {#each r.outcomes as o, i (i)}
+                        <li>{nameOfCombatant(o.id)}: {describe(o)}{#if o.pending} <button type="button" disabled={busy} onclick={() => rollFor(r.id, o.id)}>Roll for them</button>{/if}</li>
+                      {/each}
+                    </ul>
+                  </li>
+                {/each}
+              </ol>
+            </section>
+          {/if}
         {:else if id === 'turn' && waiting}
           <div class="waiting">
             <h2>Rolling initiative</h2>

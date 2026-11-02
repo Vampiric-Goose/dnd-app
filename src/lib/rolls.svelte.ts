@@ -23,15 +23,24 @@ export const rollVisibility: { dm: boolean; player: boolean } = $state({ dm: fal
  * private). `shareAs`: what players see of a DM-view roll that is shared (R12: a sheet roll in DM view can carry a hidden item's real name
  * or bonus, so only this label and the total leave the device). Throws the parser's message on bad input.
  */
-export function roll(label: string, expr: string, opts: { crit?: boolean; public?: boolean; shareAs?: string } = {}): RollEntry {
-  const advantage = rollMode.value === 'normal' ? undefined : rollMode.value;
-  const { total, detail } = rollDice(expr, { advantage, crit: opts.crit });
+export function roll(label: string, expr: string, opts: { crit?: boolean; public?: boolean; shareAs?: string; mode?: 'normal' | 'adv' | 'dis'; hold?: boolean } = {}): RollEntry & { faces: number[] } {
+  const m = opts.mode ?? rollMode.value, advantage = m === 'normal' ? undefined : m;
+  const { total, detail, faces } = rollDice(expr, { advantage, crit: opts.crit });
   const entry: RollEntry = { id: uid(), label, expr, total, detail, at: Date.now(), public: opts.public ?? rollVisibility[rollViewer.value] };
-  log(entry);
+  if (!opts.hold) publish(entry, opts.shareAs);
   rollMode.value = 'normal';
+  return { ...entry, faces };
+}
+
+/**
+ * Logs a roll (and shares it when public). `roll` with `hold` leaves this to the caller: targeting shows a damage roll only once the DM's
+ * device says it hit.
+ */
+export function publish(entry: RollEntry, shareAs?: string): void {
+  const { faces: _f, ...e } = entry as RollEntry & { faces?: number[] };
+  log(e);
   // R6: a private roll never reaches the session
-  if (entry.public) rollHooks.public?.(rollViewer.value === 'dm' && opts.shareAs !== undefined ? { ...entry, label: opts.shareAs, expr: '', detail: '' } : entry);
-  return entry;
+  if (e.public) rollHooks.public?.(rollViewer.value === 'dm' && shareAs !== undefined ? { ...e, label: shareAs, expr: '', detail: '' } : e);
 }
 
 function log(entry: RollEntry): void {

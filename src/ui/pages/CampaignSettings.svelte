@@ -175,6 +175,11 @@
           <span>{label}</span>
         </label>
       {/each}
+      <!-- On unless turned off, so campaigns made before it have it on too. -->
+      <label class="check">
+        <input type="checkbox" checked={c.settings.targeting !== false} onchange={(e) => { const v = e.currentTarget.checked; return change((n) => (n.settings.targeting = v)); }} />
+        <span>Targeting: pick targets on the map; hits, saves and damage are worked out for you</span>
+      </label>
     </Drawer>
 
     <Drawer title="Initiative tracker modules">

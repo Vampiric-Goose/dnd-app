@@ -105,7 +105,7 @@ export async function workOut(i: WorkIn): Promise<Aimed | string> {
   const outcomes = resolveSpell(read, plan.dice, a.cast!.dc, plan.toHit, target && await i.info(target), await Promise.all(caught.map(i.info)), rolled, i.rng);
   const hit = outcomes.find((o) => o.part === 'hit')?.hit;
   return {
-    resolution: { ...base, outcomes, ...(read.save && { dc: a.cast!.dc, ability: read.save.toLowerCase() as Ability, onSave: read.onSave }) },
+    resolution: { ...base, outcomes, ...(area && { caught: caught.map((z) => z.id) }), ...(read.save && { dc: a.cast!.dc, ability: read.save.toLowerCase() as Ability, onSave: read.onSave }) },
     outcome: { action: a.name, ...(hit !== undefined && { hit }), ...(read.save && a.cast!.dc !== undefined && { dc: a.cast!.dc }),
       ...(area && { caught: caught.filter((z) => !z.hidden).map(i.nameOf) }) },
   };

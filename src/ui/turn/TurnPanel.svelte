@@ -4,6 +4,8 @@
   // what a use does (a player sends it to the DM's device, the DM applies it); this only checks what is greyed out and rolls.
   import { CONDITION_TEXT } from '../../lib/combat/economy.ts';
   import { primaryAction, problemOf, visible, type TurnAction } from '../../lib/combat/turnActions.ts';
+  import { aimPlan } from '../../lib/combat/aiming.ts';
+  import { attackToggles, type Toggle } from '../../lib/combat/targeting.ts';
   import { richToPlain } from '../../lib/content/richtext.ts';
   import { rollParts } from '../../lib/monsters/library.ts';
   import { diceAt, type SpellArea } from '../../lib/combat/spellText.ts';
@@ -19,6 +21,7 @@
   let {
     name, order, self, current, round, ac, hp, maxHp, tempHp = 0, tone = 'accent', conditions, moveLeft, x, perAction = 1, onTurn, actions,
     slots = [], concentrating = false, dm = false, busy = false, canEnd, endLabel = 'End turn', onuse, onend, onpip, onstrip, ontemplate, top,
+    targeting = false, features = [], onaim,
   }: {
     name: string;
     /** The turn order as the viewer sees it; `self` is the creature shown, `current` the one acting. */
@@ -40,6 +43,8 @@
     onstrip?: (id: string) => void;
     /** Place an area spell's template on the map. */
     ontemplate?: (area: SpellArea) => void;
+    /** Targeting (the DM's setting): an aimable action shows Target, which hands it to the map with its slot and the toggles picked. */
+    targeting?: boolean; features?: string[]; onaim?: (a: TurnAction, slot: number | undefined, toggles: Toggle[]) => void;
     top?: Snippet;
   } = $props();
 
@@ -81,6 +86,8 @@
   let slotFor: Record<string, number> = $state({});
   /** Who a spell that needs a target goes to (default: the creature shown). */
   let targetFor: Record<string, string> = $state({});
+  /** Targeting: the attack toggles ticked per action (Great Weapon Master, Sharpshooter). */
+  let toggleFor: Record<string, string[]> = $state({});
   /** A character's levelled spell uses a slot it picks; a monster's spends its own slots or per-day uses (a.spend). */
   const slotted = (a: TurnAction) => !!a.spell && a.spell.level > 0 && !a.spend;
   const problem = (a: TurnAction) => problemOf(x, a, conditions, onTurn, perAction) ?? (slotted(a) && !freeSlots(a).length ? 'no slot left' : undefined);
@@ -90,7 +97,7 @@
 
   let dialog: HTMLDialogElement | undefined = $state();
   let crit = $state(false);
-  $effect(() => { void self; untrack(() => { slotFor = {}; targetFor = {}; crit = false; }); }); // another creature: its own slot picks, no carried crit
+  $effect(() => { void self; untrack(() => { slotFor = {}; targetFor = {}; toggleFor = {}; crit = false; }); }); // another creature: its own slot picks, no carried crit
   /** The slot picked for it while still free, else the lowest free one. */
   const slotOf = (a: TurnAction) => (freeSlots(a).includes(slotFor[a.id]) ? slotFor[a.id] : freeSlots(a)[0]);
 
@@ -205,7 +212,21 @@
     {#if a.attack && a.cost === 'action' && perAction > 1 && inAttack}<span class="muted small">Attack <span class="num">{e.attacks + 1}</span> of <span class="num">{perAction}</span></span>{/if}
   </div>
   <div class="rolls">
-    {#if a.attack}
+    {#if targeting && onaim && aimPlan(a, { level: slotted(a) ? slotOf(a) : undefined })}
+      {@const toggles = attackToggles(a, features)}
+      {#each toggles as t (t.id)}
+        <label class="check small" class:on={toggleFor[a.id]?.includes(t.id)}><input type="checkbox" checked={toggleFor[a.id]?.includes(t.id) ?? false}
+          onchange={(ev) => (toggleFor[a.id] = (ev.currentTarget as HTMLInputElement).checked ? [...(toggleFor[a.id] ?? []), t.id] : (toggleFor[a.id] ?? []).filter((k) => k !== t.id))} />
+          {t.name} (−5 / +10)</label>
+      {/each}
+      {#if slotted(a) && freeSlots(a).length > 1}
+        <select aria-label="{a.name} slot level" value={slotOf(a)} onchange={(ev) => (slotFor[a.id] = Number((ev.currentTarget as HTMLSelectElement).value))}>
+          {#each freeSlots(a) as l}<option value={l}>Level {l}</option>{/each}
+        </select>
+      {/if}
+      {#if a.cast?.read.save && a.cast.dc !== undefined}<span class="save">DC <span class="num">{a.cast.dc}</span> {a.cast.read.save} save</span>{/if}
+      <button type="button" class="use" disabled={!!why || busy} onclick={() => onaim(a, slotted(a) ? slotOf(a) : undefined, toggles.filter((t) => toggleFor[a.id]?.includes(t.id)))}>Target</button>
+    {:else if a.attack}
       <button type="button" disabled={!!why || busy} aria-label="Roll {a.name} attack, {signed(a.attack.toHit)}" onclick={() => attack(a)}>Attack <span class="num">{signed(a.attack.toHit)}</span></button>
       <button type="button" aria-label="Roll {a.name} damage, {a.attack.damage}" onclick={() => damage(`${a.attack!.name} damage`, a.attack!.damage)}>Damage <span class="num">{a.attack.damage}</span></button>
       {#if a.attack.versatile}<button type="button" onclick={() => damage(`${a.attack!.name} damage (two-handed)`, a.attack!.versatile!)}>Two-handed <span class="num">{a.attack.versatile}</span></button>{/if}

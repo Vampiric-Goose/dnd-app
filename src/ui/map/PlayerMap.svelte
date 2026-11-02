@@ -3,7 +3,11 @@
   // their turn: the drop moves it here at once, then goes to the DM, whose next scene replaces it (a refusal snaps it back). On the
   // DM's device in Player view (R12) the same player scene is built locally, read-only.
   import { db } from '../../lib/db.ts';
-  import { snap, type Pt } from '../../lib/map/grid.ts';
+  import { feetBetween, snap, type Pt } from '../../lib/map/grid.ts';
+  import { untrack } from 'svelte';
+  import { aimPlan, pickableAt, type AimPlan } from '../../lib/combat/aiming.ts';
+  import { targetingOn, type Pickable, type Toggle } from '../../lib/combat/targeting.ts';
+  import { rollAim, reveal, type AimRoll } from './aimRoll.ts';
   import { actionsForPlayers, arrowsOn, type DeclaredAction } from '../../lib/map/actions.ts';
   import { tokenColor } from '../../lib/map/scene.ts';
   import { computeSheet } from '../../lib/rules/sheet.ts';
@@ -100,6 +104,54 @@
     return true;
   }
   $effect(() => () => clearTimeout(sentTimer));
+
+  // Targeting: the action being aimed on the map. The dice roll here (the d20 shows at once); the DM's device works it out and answers.
+  let aiming: { a: TurnAction; slot?: number; toggles: Toggle[]; plan: AimPlan; c: Character } | undefined = $state.raw();
+  let held: { action: string; roll: AimRoll } | undefined;
+  const onaim = (a: TurnAction, slot: number | undefined, toggles: Toggle[]) => {
+    const plan = aimPlan(a, { level: slot, toggles });
+    if (plan && turn && joined) { aiming = { a, slot, toggles, plan, c: turn.c }; selected = []; }
+  };
+  const OUT = /incapacitated|paralyzed|petrified|stunned|unconscious/i;
+  const aim = $derived.by(() => {
+    const m = aiming, v = view;
+    if (!m || !v) return undefined;
+    const me = v.tokens.find((t) => t.characterId === m.c.id);
+    if (!me) return undefined;
+    // the DM's device decides; this only rolls two d20s when it will see a hostile creature within 5 ft (one with no character)
+    const foe = v.tokens.some((t) => t.id !== me.id && t.characterId === undefined && !t.conditions.some((c) => OUT.test(c)) && feetBetween(v.grid, me, t, settings.diagonal) <= 5);
+    const pickable = (id: string): Pickable => {
+      const t = v.tokens.find((x) => x.id === id);
+      return t && t.id !== me.id ? pickableAt(m.plan, v.grid, settings.diagonal, me, foe, t) : { ok: false };
+    };
+    return { from: { x: me.x, y: me.y }, line: m.plan.line, ...(m.plan.area && { area: m.plan.area }), pickable,
+      onpick: (p: { tokenId?: string; point: Pt }) => fire(p, pickable), oncancel: () => (aiming = undefined) };
+  });
+  function fire(p: { tokenId?: string; point: Pt }, pickable: (id: string) => Pickable) {
+    const m = aiming;
+    aiming = undefined;
+    if (!m || offline()) return;
+    const pick = p.tokenId ? pickable(p.tokenId) : undefined;
+    const r = rollAim(m.a.name, m.plan, pick?.ok ? pick.disadvantage : undefined);
+    held = { action: m.a.name, roll: r };
+    sentUnder = session.tracker;
+    sendUse(m.c.id, m.a.id, m.slot, undefined, { ...(p.tokenId ? { target: p.tokenId } : { point: p.point }), rolled: r.rolled, toggles: m.toggles.map((t) => t.id) });
+    clearTimeout(sentTimer);
+    sentTimer = setTimeout(() => (sentUnder = undefined), 3000);
+  }
+  // The DM's answer: hit or miss (the damage shows only on a hit), a spell's DC and the creatures its area caught.
+  const opened = Date.now();
+  $effect(() => {
+    const o = session.outcome;
+    if (!o || o.at < opened) return;
+    untrack(() => {
+      const h = held;
+      held = undefined;
+      if (h?.action === o.action) reveal(h.roll.held, o.hit);
+      toast([o.action, o.hit === undefined ? '' : o.hit ? 'Hit!' : 'Missed.', o.dc !== undefined ? `Save DC ${o.dc}.` : '',
+        o.caught ? `In the area: ${o.caught.join(', ') || 'no one'}.` : ''].filter(Boolean).join(' '));
+    });
+  });
   /** An area spell's template on the map (local, as the Template tool), from the caster's cell for Self spells. */
   let preset: { shape: SpellArea['shape']; feet: number; width?: number; origin?: Pt; n: number } | undefined = $state.raw();
   const placeTemplate = (area: SpellArea) => {
@@ -176,6 +228,7 @@
         onclear={() => clearDeclared()}
         bind:arrow={picked}
         {preset}
+        {aim}
         ondrag={(id, at) => { if (joined && base && (at ? canDrag(id) : !!mine(tokenOf(id)?.characterId))) sendDrag(base.id, id, at); }}
       />
     {/key}
@@ -188,7 +241,8 @@
           ac={turn.sheet.ac} hp={turn.c.state.hp} maxHp={turn.sheet.maxHp} tempHp={turn.c.state.tempHp} conditions={[...turn.c.state.conditions, ...(turn.econ.hasted ? ['Hasted'] : [])]}
           moveLeft={turn.c.id === actor ? turnBudget?.left : undefined} x={turn.x} perAction={turn.econ.perAction} onTurn={turn.c.id === actor}
           actions={turn.actions} slots={slotsLeft(turn.sheet, turn.c)} concentrating={turn.econ.conc}
-          busy={!!sentUnder && sentUnder === session.tracker} canEnd={turn.c.id === actor} onuse={useAction} onend={() => { if (!offline()) sendEndTurn(turn!.c.id); }} ontemplate={placeTemplate}>
+          busy={!!sentUnder && sentUnder === session.tracker} canEnd={turn.c.id === actor} onuse={useAction} onend={() => { if (!offline()) sendEndTurn(turn!.c.id); }} ontemplate={placeTemplate}
+          targeting={joined && targetingOn(settings)} features={featureList(turn.c, settings).map((f) => f.name)} {onaim}>
           {#snippet top()}
             {#if myRows.length > 1}
               <div class="row switch" role="group" aria-label="Your characters">
