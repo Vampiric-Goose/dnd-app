@@ -35,10 +35,29 @@ export function areasOn(k: Combat | undefined, sceneId: string): Area[] {
   const order = k.combatants.map((x) => x.id), now = order.indexOf(k.turn ?? '');
   return (k.resolutions ?? []).flatMap((r) => {
     if (!r.area || r.sceneId !== sceneId) return [];
-    const on = r.lasting ? !!k.combatants.find((x) => x.id === r.actor)?.concentrating
+    const caster = k.combatants.find((x) => x.id === r.actor);
+    const on = r.lasting ? !!caster?.concentrating && (caster.concentratingOn === undefined || caster.concentratingOn === r.action)
       : r.round === k.round || (r.round === k.round - 1 && now < order.indexOf(r.actor));
     return on ? [r.area] : [];
   });
+}
+
+/**
+ * A write's concentration spells that ended (the caster stopped concentrating, left the fight, or started another one) and the conditions
+ * they leave behind: `combat` has them gone from its monsters, `drop` lists every one (a PC's are on its character, for the caller).
+ */
+export function endedSpells(prev: Combat | undefined, next: Combat): { combat: Combat; drop: { id: string; condition: string }[] } {
+  const ended = (prev?.combatants ?? []).filter((x) => x.concentrating && x.concentratingOn).filter((x) => {
+    const y = next.combatants.find((z) => z.id === x.id);
+    return !y?.concentrating || y.concentratingOn !== x.concentratingOn;
+  });
+  const drop = (next.resolutions ?? []).filter((r) => r.lasting && ended.some((x) => x.id === r.actor && x.concentratingOn === r.action)).flatMap((r) => r.inflicted ?? []);
+  if (!drop.length) return { combat: next, drop };
+  return { drop, combat: { ...next, combatants: next.combatants.map((y) => {
+    const gone = drop.filter((d) => d.id === y.id).map((d) => d.condition);
+    if (!gone.length || y.kind === 'pc') return y;
+    return { ...y, conditions: (y.conditions ?? []).filter((n) => !gone.includes(n)), durations: Object.fromEntries(Object.entries(y.durations ?? {}).filter(([n]) => !gone.includes(n))) };
+  }) } };
 }
 
 /** The creatures a result touches: its actor (who paid), everyone it rolled for, and everyone its area caught. */
@@ -169,8 +188,12 @@ export async function workOut(i: WorkIn): Promise<Aimed | string> {
   if (bad) return bad;
   const outcomes = resolveSpell(read, plan.dice, a.cast!.dc, plan.toHit, target && await i.info(target), await Promise.all(caught.map(i.info)), rolled, i.rng, autoCrit);
   const hit = outcomes.find((o) => o.part === 'hit')?.hit;
+  // a lasting spell's effect also leaves a condition named after the spell (the user's standard: Hold Monster, Hex, Haste)
+  const lasts = !!(a.spell?.concentration || read.rounds);
+  const named = (o: Outcome): Outcome => (!lasts ? o : o.inflict ? { ...o, inflict: [...o.inflict, a.name] } : o.inflicts ? { ...o, inflicts: [...o.inflicts, a.name] } : o);
   return {
-    resolution: { ...base, outcomes: outcomes.map(withWhy), ...(placed && { caught: caught.map((z) => z.id), area: placed, sceneId: s.id, round: k.round, ...(a.spell?.concentration && { lasting: true as const }) }), ...(read.save && { dc: a.cast!.dc, ability: read.save.toLowerCase() as Ability, onSave: read.onSave }) },
+    resolution: { ...base, outcomes: outcomes.map(withWhy).map(named), ...(placed && { caught: caught.map((z) => z.id), area: placed, sceneId: s.id, round: k.round }),
+      ...(a.spell?.concentration ? { lasting: true as const } : read.rounds && { rounds: read.rounds }), ...(read.save && { dc: a.cast!.dc, ability: read.save.toLowerCase() as Ability, onSave: read.onSave }) },
     outcome: { action: a.name, ...(hit !== undefined && { hit }), ...(read.save && a.cast!.dc !== undefined && { dc: a.cast!.dc }),
       ...(area && { caught: caught.filter((z) => !z.hidden && (i.seen?.(z) ?? true)).map(i.nameOf) }) },
   };

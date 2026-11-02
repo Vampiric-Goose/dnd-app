@@ -96,6 +96,11 @@ describe('reading a spell: one-off rule, then book mechanics, then wording', () 
   });
 });
 
+test('how long a spell lasts, in rounds', () => {
+  const at = (duration: string) => readSpell({ ...fix('60 feet', 'Something happens.'), duration }).rounds;
+  expect([at('Concentration, up to 1 minute'), at('1 round'), at('8 hours'), at('Instantaneous')]).toEqual([10, 1, 4800, undefined]);
+});
+
 describe('never silently wrong', () => {
   test('what can’t be automated says so', () => {
     expect(readSpell(fix('Self', 'The next time you hit a creature with a weapon attack, the attack deals an extra 2d6 radiant damage.')).manual)

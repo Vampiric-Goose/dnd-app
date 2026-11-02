@@ -26,6 +26,12 @@ describe('spell areas on the map', () => {
     expect(areasOn(k(true), 's1')).toEqual([area]);
     expect(areasOn(k(false), 's1')).toEqual([]);
   });
+  test('a new concentration spell hides the old spell\'s area', () => {
+    const k = (on: string) => fight('m', 5, { resolutions: [res('r1', { lasting: true, action: 'Moonbeam' })],
+      combatants: fight('m', 5).combatants.map((x) => (x.id === 'm' ? { ...x, concentrating: true, concentratingOn: on } : x)) });
+    expect(areasOn(k('Moonbeam'), 's1')).toEqual([area]);
+    expect(areasOn(k('Fly'), 's1')).toEqual([]);
+  });
   test('players get the areas with the scene, and a guest keeps only well-formed ones', () => {
     const s: Scene = { id: 's1', campaignId: 'c1', name: 'F', width: 700, height: 490, grid: { ...DEFAULT_GRID }, shown: true, updatedAt: 0, tokens: [] };
     const v = sceneForPlayers(s, [], fight('m', 2, { resolutions: [res('r1')] }), DEFAULT_SETTINGS)!;

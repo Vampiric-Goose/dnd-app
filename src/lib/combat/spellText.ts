@@ -44,11 +44,13 @@ export interface SpellRead {
   typeFromDie?: { sides: number; types: string[] };
   /** Why it can't be fully automated, shown where it is cast. */
   manual?: string;
+  /** How long it lasts, in rounds (a minute is 10); none for an instantaneous or open-ended spell. */
+  rounds?: number;
   area?: SpellArea;
 }
 
 /** What a spell does. Trust: a one-off rule (spellRules.ts), then the book's tags (`mech`), then the wording. */
-export function readSpell(s: Pick<SpellDef, 'text' | 'level' | 'range'> & { name?: string; mech?: SpellMech; higherLevels?: RichText }): SpellRead {
+export function readSpell(s: Pick<SpellDef, 'text' | 'level' | 'range'> & { name?: string; mech?: SpellMech; duration?: string; higherLevels?: RichText }): SpellRead {
   const t = richToPlain(s.text), h = s.higherLevels ? richToPlain(s.higherLevels) : t;
   const out: SpellRead = { damage: [] };
   const atk = /make a (melee|ranged) spell attack/i.exec(t);
@@ -93,6 +95,8 @@ export function readSpell(s: Pick<SpellDef, 'text' | 'level' | 'range'> & { name
     .map((x) => x[1].charAt(0).toUpperCase() + x[1].slice(1).toLowerCase()))];
   if (conds.length) out.conditions = conds;
   if (mech?.scaling && s.level === 0) out.scaling = mech.scaling;
+  const lasts = /(\d+) (round|minute|hour)s?/i.exec(s.duration ?? '');
+  if (lasts) out.rounds = +lasts[1] * ({ round: 1, minute: 10, hour: 600 } as Record<string, number>)[lasts[2].toLowerCase()];
   if (out.save) out.onSave = /half as much damage on a successful/i.test(t) ? 'half' : 'none';
   const burst = /each creature within (\d+) feet of (?:it|the target|that creature)\b/i.exec(t);
   if (burst) out.burst = +burst[1];

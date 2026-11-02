@@ -5,7 +5,7 @@ import { db, DeletedError } from '../db.ts';
 import { computeSheet } from '../rules/sheet.ts';
 import type { Applied, CampaignSettings, Character, Combat, Combatant, Duration, Encounter, MonsterDef, Outcome, Resolution, Scene, Snap } from '../types.ts';
 import { settle } from './resolve.ts';
-import { snapOf, touched } from './aiming.ts';
+import { endedSpells, snapOf, touched } from './aiming.ts';
 import { canon } from '../sync/merge.ts';
 import { uid } from '../uid.ts';
 import { addMonsters, concentrationDc, encounterPicks, initOk, monsterHp, newCombat, next, patchCombatant, removeStep, rollInit, setInit, start, type Expired, type HpOp, type Step } from './combat.ts';
@@ -20,8 +20,20 @@ function serial<T>(fn: () => Promise<T>): Promise<T> {
   return p;
 }
 
-const update = async (cid: string, fn: (c: Combat) => Combat): Promise<Combat> =>
-  (await db.combat.update(cid, (c) => ({ ...fn(c ?? newCombat(cid)), updatedAt: Date.now() })))!;
+/** Every combat write. A concentration spell that ends with it takes its conditions along (a PC's off its character, after the write). */
+const update = async (cid: string, fn: (c: Combat) => Combat): Promise<Combat> => {
+  let drop: { id: string; condition: string }[] = [];
+  const out = (await db.combat.update(cid, (c) => {
+    const r = endedSpells(c, { ...fn(c ?? newCombat(cid)), updatedAt: Date.now() });
+    drop = r.drop;
+    return r.combat;
+  }))!;
+  for (const x of out.combatants) {
+    const gone = drop.filter((d) => d.id === x.id).map((d) => d.condition);
+    if (gone.length && x.kind === 'pc' && x.characterId) await editCharacter(x.characterId, (c) => (c.state.conditions.some((n) => gone.includes(n)) ? { ...c, state: { ...c.state, conditions: c.state.conditions.filter((n) => !gone.includes(n)) } } : c));
+  }
+  return out;
+};
 
 /** Reads the character fresh, changes it, saves it (stamped). False when it is gone (missing or deleted in its campaign). */
 export async function editCharacter(id: string, fn: (c: Character) => Character): Promise<boolean> {
@@ -154,8 +166,16 @@ export async function applyResolution(cid: string, r: Omit<Resolution, 'applied'
   const ids = touched(r), was = before ?? await snapNow(cid, ids);
   const applied: Applied[] = [];
   for (const o of r.outcomes) if (o.damage > 0 && !o.pending) applied.push(await hurtOne(cid, o.id, o.damage, o.nat === 20 && o.part !== 'save', settings));
+  const inflicted = await inflict(cid, r, r.outcomes.flatMap((o) => (o.inflict ?? []).map((condition) => ({ id: o.id, condition }))));
   const after = await snapNow(cid, ids);
-  return serial(() => update(cid, (c) => ({ ...c, resolutions: [...(c.resolutions ?? []), { ...r, applied, undo: { before: was, after } }].slice(-20) })));
+  return serial(() => update(cid, (c) => ({ ...c, resolutions: [...(c.resolutions ?? []), { ...r, applied, ...(inflicted.length && { inflicted }), undo: { before: was, after } }].slice(-20) })));
+}
+
+/** The conditions a result's failed saves leave, put on; a non-concentration spell's last its rounds (to the start of its caster's turn). */
+async function inflict(cid: string, r: Pick<Resolution, 'actor' | 'rounds' | 'lasting'>, list: { id: string; condition: string }[]): Promise<{ id: string; condition: string }[]> {
+  const lasts: Duration | undefined = !r.lasting && r.rounds ? { rounds: r.rounds, at: 'start', of: r.actor } : undefined;
+  for (const x of list) await conditionOn(cid, x.id, x.condition, true, lasts);
+  return list;
 }
 
 type Rec = Record<string, unknown>;
@@ -210,18 +230,20 @@ export async function settleSave(cid: string, rid: string, target: string, d20: 
   if (!r || r.dc === undefined || !ch) return undefined;
   const sheet = computeSheet(ch, { settings, viewer: 'dm' });
   const total = d20 + sheet.saves[r.ability ?? 'dex'].bonus, ok = total >= r.dc;
-  let owed: Outcome['owed'];
+  let owed: Outcome['owed'], lost: string[] = [];
   await serial(() => update(cid, (c) => ({ ...c, resolutions: (c.resolutions ?? []).map((y) => y.id !== rid ? y : { ...y, outcomes: y.outcomes.map((o) => {
     if (o.id !== target || !o.pending) return o;
     owed = o.owed;
-    const { pending: _p, owed: _o, ...rest } = o;
-    return { ...rest, save: { roll: d20, total, ok }, ...settle({ pc: true, defenses: { resist: sheet.resistances, immune: sheet.immunities, vulnerable: sheet.vulnerabilities } }, o.owed ?? [], ok, y.onSave) };
+    const { pending: _p, owed: _o, inflicts, ...rest } = o;
+    if (!ok && inflicts) lost = inflicts;
+    return { ...rest, ...(!ok && inflicts && { inflict: inflicts }), save: { roll: d20, total, ok }, ...settle({ pc: true, defenses: { resist: sheet.resistances, immune: sheet.immunities, vulnerable: sheet.vulnerabilities } }, o.owed ?? [], ok, y.onSave) };
   }) }) })));
   if (!owed) return undefined; // already settled
   const damage = (await db.combat.get(cid))?.resolutions?.find((y) => y.id === rid)?.outcomes.find((o) => o.id === target && o.part === 'save')?.damage ?? 0;
   const applied = damage > 0 ? await hurtOne(cid, target, damage, false, settings) : undefined;
+  const inflicted = await inflict(cid, r, lost.map((condition) => ({ id: target, condition })));
   const now = await snapNow(cid, [target]); // Undo's "after" follows the save's damage
-  return serial(() => update(cid, (c) => ({ ...c, resolutions: (c.resolutions ?? []).map((y) => (y.id !== rid ? y : { ...y, ...(applied && { applied: [...y.applied, applied] }),
+  return serial(() => update(cid, (c) => ({ ...c, resolutions: (c.resolutions ?? []).map((y) => (y.id !== rid ? y : { ...y, ...(applied && { applied: [...y.applied, applied] }), ...(inflicted.length && { inflicted: [...(y.inflicted ?? []), ...inflicted] }),
     ...(y.undo && { undo: { before: y.undo.before, after: { combatants: { ...y.undo.after.combatants, ...now.combatants }, states: { ...y.undo.after.states, ...now.states } } } }) })) })));
 }
 
@@ -229,7 +251,8 @@ export async function settleSave(cid: string, rid: string, target: string, d20: 
 export const endCombat = (cid: string): Promise<unknown> => serial(() => db.combat.update(cid, () => undefined));
 
 /** A PC's condition is on its character, a monster's on the combatant; the duration is on the combatant either way (off drops it). */
-export const setCondition = (cid: string, combatantId: string, name: string, on: boolean, duration?: Duration): Promise<Combat> => serial(async () => {
+export const setCondition = (cid: string, combatantId: string, name: string, on: boolean, duration?: Duration): Promise<Combat> => serial(() => conditionOn(cid, combatantId, name, on, duration));
+async function conditionOn(cid: string, combatantId: string, name: string, on: boolean, duration?: Duration): Promise<Combat> {
   const { combat, x } = await combatant(cid, combatantId);
   if (x.kind === 'pc' && x.characterId) {
     const live = await editCharacter(x.characterId, (c) => (c.state.conditions.includes(name) === on ? c
@@ -245,7 +268,7 @@ export const setCondition = (cid: string, combatantId: string, name: string, on:
     const conditions = (y.conditions ?? []).filter((n) => n !== name);
     return { ...y, durations, conditions: on ? [...conditions, name] : conditions, ...stop };
   }) }));
-});
+}
 
 /**
  * P1: a prepared encounter's monsters join the live fight (a new one when there is none), whose link stays. `missing`: names of lines

@@ -4,7 +4,7 @@ import { beforeEach, expect, test } from 'vitest';
 import { addCombatants, monsterCombatant } from '../../src/lib/combat/combat.ts';
 import { targetOf } from '../../src/lib/combat/resolve.ts';
 import { snapOf } from '../../src/lib/combat/aiming.ts';
-import { applyResolution, settleSave, undoResolution, updateCombat } from '../../src/lib/combat/store.ts';
+import { applyResolution, changeHp, settleSave, undoResolution, updateCombat } from '../../src/lib/combat/store.ts';
 import { db, resetDb } from '../../src/lib/db.ts';
 import { computeSheet } from '../../src/lib/rules/sheet.ts';
 import type { Character, Combatant, MonsterDef, Pack, Resolution } from '../../src/lib/types.ts';
@@ -108,4 +108,38 @@ test('what a target brings: a monster\'s AC, saves (printed, else its ability mo
   expect(m).toMatchObject({ id: 'g1', ac: 15, pc: false, save: { dex: 2, str: -1 } });
   const sheet = computeSheet(pc(), { settings, viewer: 'dm' });
   expect(targetOf(pcC, { sheet })).toMatchObject({ id: 'pc:p', ac: sheet.ac, pc: true, save: { dex: sheet.saves.dex.bonus } });
+});
+
+const held = (id: string, o: Partial<Resolution> = {}) => res(id, [{ id: 'g1', part: 'save', save: { roll: 2, total: 2, ok: false }, damage: 0, inflict: ['Paralyzed', 'Hold Monster'] }],
+  { actor: 'g2', action: 'Hold Monster', lasting: true, dc: 13, ability: 'wis', ...o });
+const conds = async (id: string) => (await db.combat.get('c1'))!.combatants.find((x) => x.id === id)!.conditions ?? [];
+
+test('a failed save leaves its conditions, the spell\'s own name too; Undo takes them back', async () => {
+  await applyResolution('c1', held('r1'), settings);
+  expect(await conds('g1')).toEqual(['Paralyzed', 'Hold Monster']);
+  expect((await db.combat.get('c1'))!.resolutions![0].inflicted).toEqual([{ id: 'g1', condition: 'Paralyzed' }, { id: 'g1', condition: 'Hold Monster' }]);
+  await undoResolution('c1', 'r1', settings);
+  expect(await conds('g1')).toEqual([]);
+});
+
+test('a PC who fails the save from the pop-up gets the conditions; Undo takes them back', async () => {
+  await applyResolution('c1', res('r1', [{ id: 'pc:p', part: 'save', pending: true, damage: 0, owed: [], inflicts: ['Paralyzed', 'Hold Person'] }],
+    { actor: 'g2', action: 'Hold Person', lasting: true, dc: 13, ability: 'wis' }), settings);
+  await settleSave('c1', 'r1', 'pc:p', 2, settings);
+  expect((await db.characters.get('p'))!.state.conditions).toEqual(['Paralyzed', 'Hold Person']);
+  await undoResolution('c1', 'r1', settings);
+  expect((await db.characters.get('p'))!.state.conditions).toEqual([]);
+});
+
+test.each([
+  ['the DM unticks Concentrating', () => updateCombat('c1', (c) => ({ ...c, combatants: c.combatants.map((x) => (x.id === 'g2' ? { ...x, concentrating: false } : x)) }))],
+  ['damage drops the caster', () => changeHp('c1', 'g2', { damage: 20 }, settings)],
+  ['the caster starts another concentration spell', () => updateCombat('c1', (c) => ({ ...c, combatants: c.combatants.map((x) => (x.id === 'g2' ? { ...x, concentratingOn: 'Fly' } : x)) }))],
+])('when %s, the spell\'s conditions end, on monsters and PCs alike', async (_, end) => {
+  await updateCombat('c1', (c) => ({ ...c, combatants: c.combatants.map((x) => (x.id === 'g2' ? { ...x, concentrating: true, concentratingOn: 'Hold Monster' } : x)) }));
+  await applyResolution('c1', { ...held('r1'), outcomes: [...held('r1').outcomes, { id: 'pc:p', part: 'save', save: { roll: 2, total: 2, ok: false }, damage: 0, inflict: ['Paralyzed'] }] }, settings);
+  expect((await db.characters.get('p'))!.state.conditions).toEqual(['Paralyzed']);
+  await end();
+  expect(await conds('g1')).toEqual([]);
+  expect((await db.characters.get('p'))!.state.conditions).toEqual([]);
 });

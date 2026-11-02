@@ -96,6 +96,11 @@ describe('workOut on the DM\'s map', () => {
     expect(await workOut(at('fire'))).toMatchObject({ resolution: { outcomes: [{ hit: true, damage: 6 }] } });
     expect(await workOut(at('acid'))).toMatchObject({ resolution: { outcomes: [{ hit: true, damage: 12 }] } });
   });
+  test('a lasting spell\'s failed save also leaves a condition named after it; an instant one only its own', async () => {
+    const at = (read: object) => workOut({ ...base({ ...spell({ save: 'Wis', ...read }), name: 'Hold Monster' }, { dmg: [] }), aim: { target: 'g', rolled: { dmg: [] }, toggles: [] } });
+    expect(await at({ conditions: ['Paralyzed'], rounds: 10 })).toMatchObject({ resolution: { outcomes: [{ id: 'g', inflict: ['Paralyzed', 'Hold Monster'] }] } });
+    expect(await at({ conditions: ['Prone'] })).toMatchObject({ resolution: { outcomes: [{ id: 'g', inflict: ['Prone'] }] } });
+  });
   test('Chaos Bolt: of the two d8s, the type that hurts more', async () => {
     const bolt = spell({ attack: 'ranged', damage: [{ dice: '2d8+1d6', type: '' }], choices: ['acid', 'cold', 'fire'],
       typeFromDie: { sides: 8, types: ['acid', 'cold', 'fire', 'force', 'lightning', 'poison', 'psychic', 'thunder'] } });

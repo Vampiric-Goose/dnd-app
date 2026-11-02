@@ -517,7 +517,7 @@
       {#snippet panel(id)}
         {#if id === 'turn' && view && combat}
           <TurnPanel dm name={view.name} order={combat.combatants} self={view.x.id} current={combat.turn} round={combat.round}
-            ac={view.ac} hp={view.hp} maxHp={view.maxHp} tempHp={view.tempHp} tone={view.ch ? 'accent' : 'danger'} conditions={[...view.conditions, ...(view.x.hasted && !view.x.hasted.ended ? ['Hasted'] : [])]}
+            ac={view.ac} hp={view.hp} maxHp={view.maxHp} tempHp={view.tempHp} tone={view.ch ? 'accent' : 'danger'} conditions={[...view.conditions, ...(view.x.hasted && !view.x.hasted.ended ? ['Haste'] : [])]}
             x={view.x} perAction={view.perAction} onTurn={turnIds.has(view.x.id)} actions={view.actions} slots={view.slots}
             concentrating={!!view.x.concentrating} {busy} canEnd={!busy} endLabel="Next turn ▶" onuse={(a, slot, target) => void useAction(a, slot, target)} onend={nextTurn} {onpip}
             onstrip={(id) => (viewId = id)} ontemplate={placeTemplate}
@@ -541,7 +541,7 @@
                     {#if r.caught?.length}<p class="muted small">In the area: {r.caught.map(nameOfCombatant).join(', ')}</p>{/if}
                     <ul class="plain small">
                       {#each r.outcomes as o, i (i)}
-                        <li>{nameOfCombatant(o.id)}: {describe(o)}{#if o.pending} <button type="button" disabled={busy} onclick={() => rollFor(r.id, o.id)}>Roll for them</button>{/if}</li>
+                        <li>{nameOfCombatant(o.id)}: {describe(o)}{#if o.inflict?.length}; {o.inflict.join(', ').toLowerCase()}{/if}{#if o.pending} <button type="button" disabled={busy} onclick={() => rollFor(r.id, o.id)}>Roll for them</button>{/if}</li>
                       {/each}
                       {#each r.applied.filter((x) => x.conc) as x (x.id)}<li><strong>{nameOfCombatant(x.id)}</strong>: Con save DC {x.conc} to keep concentrating</li>{/each}
                     </ul>

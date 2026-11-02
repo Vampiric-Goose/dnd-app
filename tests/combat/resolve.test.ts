@@ -84,3 +84,16 @@ describe('a spell', () => {
     expect(out.map((o) => [o.id, o.save?.ok, o.damage])).toEqual([['a', true, 11], ['b', true, 11]]);
   });
 });
+
+describe('conditions on a failed save', () => {
+  const hold: SpellRead = { damage: [], save: 'Wis', onSave: 'none', conditions: ['Paralyzed'] };
+  const one = (t: TargetInfo, d20: number) => resolveSpell(hold, [], 13, undefined, t, [], { dmg: [] }, always(d20))[0];
+  test('a failed save inflicts them; a success or an immunity does not', () => {
+    expect(one(goblin('g'), 2)).toMatchObject({ id: 'g', save: { ok: false }, inflict: ['Paralyzed'] });
+    expect(one(goblin('g'), 19).inflict).toBeUndefined();
+    expect(one(goblin('g', { conditionImmune: ['paralyzed'] }), 2).inflict).toBeUndefined();
+  });
+  test('a PC\'s pending save carries what a failure would inflict', () => {
+    expect(one(goblin('p', { pc: true }), 2)).toMatchObject({ pending: true, inflicts: ['Paralyzed'] });
+  });
+});

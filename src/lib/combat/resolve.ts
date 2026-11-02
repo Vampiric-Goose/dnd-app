@@ -8,7 +8,7 @@ export type { Outcome };
 import type { SpellRead } from './spellText.ts';
 import { afterDefenses, type Defenses } from './targeting.ts';
 
-export interface TargetInfo { id: string; ac: number; save: Record<Ability, number>; defenses: Defenses; pc: boolean; hidden: boolean }
+export interface TargetInfo { id: string; ac: number; save: Record<Ability, number>; defenses: Defenses; pc: boolean; hidden: boolean; conditionImmune?: string[] }
 /** Raw faces: `d20` one die, or two with advantage or disadvantage; `dmg[i]` the faces of damage expression i (twice the dice on a crit). */
 export interface Rolled { d20?: number[]; mode?: 'adv' | 'dis'; dmg: number[][] }
 
@@ -108,10 +108,13 @@ export function resolveSpell(read: SpellRead, dice: { expr: string; type: string
   if (!read.save || dc === undefined) return out;
   const ability = ABILITY[read.save] ?? 'dex';
   const owed = saveDice.map((d) => ({ amount: totalOf(d.expr, d.faces, false) ?? 0, type: d.type }));
+  // the conditions a failure leaves, but none the target is immune to
+  const lose = (t: TargetInfo) => (read.conditions ?? []).filter((c) => !t.conditionImmune?.some((i) => i.toLowerCase() === c.toLowerCase()));
   for (const t of caught.length ? caught : target ? [target] : []) {
-    if (t.pc) { out.push({ id: t.id, part: 'save', pending: true, damage: 0, owed }); continue; }
-    const roll = 1 + Math.floor(rng() * 20), total = roll + t.save[ability];
-    out.push({ id: t.id, part: 'save', save: { roll, total, ok: total >= dc }, ...settle(t, owed, total >= dc, read.onSave) });
+    const would = lose(t);
+    if (t.pc) { out.push({ id: t.id, part: 'save', pending: true, damage: 0, owed, ...(would.length && { inflicts: would }) }); continue; }
+    const roll = 1 + Math.floor(rng() * 20), total = roll + t.save[ability], ok = total >= dc;
+    out.push({ id: t.id, part: 'save', save: { roll, total, ok }, ...settle(t, owed, ok, read.onSave), ...(!ok && would.length && { inflict: would }) });
   }
   return out;
 }
@@ -140,5 +143,5 @@ export function targetOf(x: Combatant, o: { monster?: MonsterDef; sheet?: Sheet 
   const m = o.monster;
   return { id: x.id, ac: x.ac ?? m?.ac[0]?.value ?? 10, pc: false, hidden: !!x.hidden,
     save: Object.fromEntries(keys.map((k) => [k, m?.saves[k] ?? (m ? mod(m.scores[k]) : 0)])) as Record<Ability, number>,
-    defenses: { resist: m?.resist ?? [], immune: m?.immune ?? [], vulnerable: m?.vulnerable ?? [] } };
+    defenses: { resist: m?.resist ?? [], immune: m?.immune ?? [], vulnerable: m?.vulnerable ?? [] }, conditionImmune: m?.conditionImmune ?? [] };
 }
