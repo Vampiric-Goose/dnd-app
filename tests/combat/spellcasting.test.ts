@@ -339,3 +339,27 @@ test('a helpful spell\'s target count, its upcast, and temp HP', () => {
   expect(sp('You bless up to three creatures of your choice within range.', 'You can target one additional creature for each slot level above 1st.').targets).toEqual({ count: 3, above: 1 });
   expect(sp('You gain 1d4 + 4 temporary hit points for the duration.', 'You gain 5 additional temporary hit points for each slot level above 1st.').temp).toEqual({ dice: '1d4+4', perSlot: 5 });
 });
+
+// Every Spell, Task 9 (paraphrased wording): conditions by "falls"/"knocked", square and cylinder areas, and saves in a lingering area.
+describe('the audit at zero: wording classes', () => {
+  const sp = (p: string, name?: string) => readSpell({ level: 1, range: '60 feet', text: [{ p }], ...(name && { name }) } as unknown as SpellDef);
+  test('a creature that falls or is knocked prone is Prone', () => {
+    expect(sp('Each creature there must succeed on a Dexterity saving throw or fall prone.').conditions).toEqual(['Prone']);
+    expect(sp('Each creature must make a Strength saving throw. On a failed save, the creature is knocked prone.').conditions).toEqual(['Prone']);
+  });
+  test('a square is a cube on the ground, a cylinder can give its radius after', () => {
+    expect(sp('Ice covers the ground in a 10-foot square centered on a point within range. Each creature there must make a Dexterity saving throw.').area).toEqual({ shape: 'cube', feet: 10, self: false });
+    expect(sp('Hail falls in a 20-foot-tall cylinder with a 40-foot radius centered on a point within range. Each creature there must make a Dexterity saving throw.').area).toEqual({ shape: 'cylinder', feet: 40, self: false });
+  });
+  test('saves a lingering area calls for, with no damage, say they are by hand', () => {
+    expect(sp('Each creature that enters the area or ends its turn there must succeed on a Dexterity saving throw or fall prone.').manual).toMatch(/by hand/);
+  });
+  test('an "either … or" condition is the caster\'s pick: the save rolls, the condition is by hand', () => {
+    const r = sp('The target must make a Constitution saving throw. If it fails, the target is either blinded or deafened (your choice).');
+    expect([r.save, r.conditions, r.manual]).toEqual(['Con', undefined, expect.stringMatching(/by hand/)]);
+  });
+});
+test('a flat amount of healing is read as healing (Heal)', () => {
+  expect(readSpell({ level: 6, range: '60 feet', text: [{ p: 'A creature you choose within range regains 70 hit points.' }] } as unknown as SpellDef).heal).toEqual({ dice: '70', mod: false });
+  expect(readSpell({ level: 7, range: 'Touch', text: [{ p: 'The target regains 4d8 + 15 hit points.' }] } as unknown as SpellDef).heal).toEqual({ dice: '4d8+15', mod: false });
+});

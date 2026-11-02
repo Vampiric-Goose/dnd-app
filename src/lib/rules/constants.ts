@@ -57,6 +57,8 @@ export const CONDITIONS = [
  */
 const ALL_SAVES = (mode: 'adv' | 'dis'): Effect[] => ABILITIES.map((a) => ({ type: 'edge', on: `save.${a}`, mode }));
 const resist = (...types: string[]): Effect[] => types.map((damageType) => ({ type: 'damage', kind: 'resistance', damageType }));
+const DAMAGE_TYPES = ['acid', 'bludgeoning', 'cold', 'fire', 'force', 'lightning', 'necrotic', 'piercing', 'poison', 'psychic', 'radiant', 'slashing', 'thunder'];
+const INVISIBLE: Effect[] = [{ type: 'edge', on: 'attacksBy', mode: 'adv' }, { type: 'edge', on: 'attacksAgainst', mode: 'dis' }];
 export const SPELL_EFFECTS: Record<string, Effect[]> = {
   'Mage Armor': [{ type: 'acBase', base: 13, abilities: ['dex'], shieldAllowed: true }], // ends if the target dons armor: worn armor wins (sheet.ts)
   Shield: [{ type: 'bonus', target: 'ac', value: 5 }],
@@ -70,8 +72,20 @@ export const SPELL_EFFECTS: Record<string, Effect[]> = {
   'Faerie Fire': [{ type: 'edge', on: 'attacksAgainst', mode: 'adv' }],
   Blur: [{ type: 'edge', on: 'attacksAgainst', mode: 'dis' }],
   Stoneskin: resist('bludgeoning, piercing, and slashing from nonmagical attacks'),
+  'Investiture of Stone': resist('bludgeoning, piercing, and slashing from nonmagical attacks'),
+  "Tenser's Transformation": [{ type: 'edge', on: 'attacksBy', mode: 'adv' }], // ponytail: weapon attacks in the book; it bars spellcasting, so any attack here
   'Blade Ward': resist('bludgeoning', 'piercing', 'slashing'), // ponytail: from weapon attacks in the book; any of those types here
   Longstrider: [{ type: 'speed', mode: 'walk', value: 10 }],
+  Fly: [{ type: 'speed', mode: 'fly', value: 60 }],
+  'Beacon of Hope': [{ type: 'edge', on: 'save.wis', mode: 'adv' }], // its death-save advantage and maximum healing: by hand
+  'Greater Invisibility': INVISIBLE,
+  Invisibility: INVISIBLE, // it ends when the target attacks or casts: by hand
+  'True Strike': [{ type: 'edge', on: 'attacksBy', mode: 'adv' }], // ponytail: the first attack on its target in the book; any attack here
+  'Warding Bond': [{ type: 'bonus', target: 'ac', value: 1 }, { type: 'bonus', target: 'save.all', value: 1 }, ...resist(...DAMAGE_TYPES)],
+  'Gaseous Form': [...resist('bludgeoning, piercing, and slashing from nonmagical attacks'), ...(['str', 'dex', 'con'] as const).map((a): Effect => ({ type: 'edge', on: `save.${a}`, mode: 'adv' }))],
+  'Primordial Ward': resist('acid', 'cold', 'fire', 'lightning', 'thunder'),
+  'Intellect Fortress': [...resist('psychic'), ...(['int', 'wis', 'cha'] as const).map((a): Effect => ({ type: 'edge', on: `save.${a}`, mode: 'adv' }))],
+  "Tasha's Otherworldly Guise": [{ type: 'bonus', target: 'ac', value: 2 }, { type: 'speed', mode: 'fly', value: 40 }],
   Aid: [{ type: 'bonus', target: 'hpMax', value: 5 }], // ponytail: the 2nd-level amount; higher slots add 5 more each (by hand)
   Foresight: [{ type: 'edge', on: 'attacksBy', mode: 'adv' }, { type: 'edge', on: 'attacksAgainst', mode: 'dis' }, ...ALL_SAVES('adv')],
   'Holy Aura': [{ type: 'edge', on: 'attacksAgainst', mode: 'dis' }, ...ALL_SAVES('adv')],

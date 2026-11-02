@@ -20,6 +20,11 @@ const cell = (q: number) => ({ x: 35 + 70 * q, y: 35 });
 const cb = (o: Partial<Combatant> & Pick<Combatant, 'id' | 'kind' | 'name'>): Combatant => ({ initMod: 0, dex: 10, tie: 0.5, conSave: 0, ...o });
 const maxFaces = (expr: string) => parseDice(expr).flatMap((t) => ('const' in t ? [] : Array(t.count).fill(t.sides)));
 
+// Disagreements ruled harmless (Task 9): the PHB's tags name conditions its utility spells mention but never inflict by a save (the SRD
+// wording doesn't); Light's and Reverse Gravity's saves are an object holder's and a grab at something fixed, not damage or a condition;
+// Lightning Lure pulls one creature, then the 15-foot radius is only where it takes the damage.
+const RULED = new Set(['Greater Invisibility conditions', 'Invisibility conditions', 'Mislead conditions', 'Project Image conditions', 'Sequester conditions',
+  'Silence conditions', 'Light no save', 'Reverse Gravity no save', 'Lightning Lure no area']);
 const SHORT: Record<string, string> = { strength: 'Str', dexterity: 'Dex', constitution: 'Con', intelligence: 'Int', wisdom: 'Wis', charisma: 'Cha' };
 /** Where the read and the book's own tags disagree: damage types, save, attack kind, area shape and size. */
 export function disagree(s: SpellDef): string[] {
@@ -50,15 +55,16 @@ export async function audit(s: SpellDef): Promise<string> {
     { id: 't-c', name: 'Caster', ...cell(5), size: 'M', color: '#000000', combatantId: 'c' }, { id: 't-o', name: 'Orc', ...cell(6), size: 'M', color: '#000000', combatantId: 'o' }] };
   const k: Combat = { campaignId: 'c', round: 1, turn: 'c', groupMonsters: false, updatedAt: 0, combatants: [cb({ id: 'c', kind: 'monster', name: 'Caster' }), cb({ id: 'o', kind: 'monster', name: 'Orc' })] };
   const n = plan.count ?? 1;
-  const aim: WorkIn['aim'] = { ...(n > 1 ? { targets: Array(n).fill('o') } : plan.area?.on === 'self' ? {} : { target: 'o' }), point: cell(6),
+  const aim: WorkIn['aim'] = { ...(n > 1 ? { targets: Array(n).fill('o') } : plan.area?.on === 'self' ? {} : { target: plan.helps && plan.reach === 'self' ? 'c' : 'o' }), point: cell(6),
     rolled: { ...(plan.attack && { d20: Array(2 * n).fill(15) }), dmg: Array.from({ length: n }, () => plan.dice.map((d) => maxFaces(d.expr))).flat() }, toggles: [], ...(plan.choices && { dtype: plan.choices[0] }) };
   const r = await workOut({ a, features: [], actor: k.combatants[0], combat: k, scene, diagonal: '5-5-5', aim, findTarget: (id) => k.combatants.find((z) => z.id === id),
     info: (z) => ({ ...targetOf(z, {}), ac: 10 }), nameOf: (z) => z.name, magical: false, id: 'r', now: 0, rng: () => 0.01 });
-  if (typeof r === 'string') return `BROKEN: ${r}`;
+  if (typeof r === 'string') return read.manual ? `manual: ${read.manual}` : `BROKEN: ${r}`;
   const o = r.resolution.outcomes, dealt = o.reduce((t, x) => t + (x.damage ?? 0), 0), inflicted = o.some((x) => x.inflict?.length);
   if (r.resolution.linger) return `ok: placed, ${r.resolution.linger.dice.map((d) => d.expr + ' ' + d.type).join(' + ')} as a turn starts there${read.manual ? ` (${read.manual})` : ''}`;
   const bits = [`${plan.dice.map((d) => `${d.expr} ${d.type}`).join(' + ') || 'no dice'}`, `dealt ${dealt}`, ...(inflicted ? [`inflicts ${[...new Set(o.flatMap((x) => x.inflict ?? []))].join(', ')}`] : []),
     ...(read.save ? [`${read.save} save, ${read.onSave} on success`] : []), ...(read.manual ? [`note: ${read.manual}`] : [])];
+  if (read.manual && !dealt && !inflicted) return `manual: ${read.manual}`;
   if (hurts && !dealt) return `BROKEN: no damage dealt (${bits.join('; ')})`;
   if (conds && !inflicted) return `BROKEN: conditions not inflicted (${bits.join('; ')})`;
   return `ok: ${bits.join('; ')}`;
@@ -77,11 +83,11 @@ test.skipIf(!dir)('spell audit', async () => {
     const twin = phb.get(s.name.toLowerCase());
     if (!twin) continue;
     const a = key(readSpell(s)), b = key(twin);
-    for (const f of Object.keys(a) as (keyof typeof a)[]) if (String(a[f]) !== String(b[f])) dis.push(`DISAGREE\tSRD\t${s.name}\t${f} ${a[f] ?? '-'} vs PHB ${b[f] ?? '-'}`);
+    for (const f of Object.keys(a) as (keyof typeof a)[]) if (String(a[f]) !== String(b[f]) && !RULED.has(`${s.name} ${f}`)) dis.push(`DISAGREE\tSRD\t${s.name}\t${f} ${a[f] ?? '-'} vs PHB ${b[f] ?? '-'}`);
   }
   for (const [book, list] of books) for (const s of list) {
     out.push(`${book}\tL${s.level}\t${s.name}\t${await audit(s)}`);
-    for (const d of disagree(s)) dis.push(`DISAGREE\t${book}\t${s.name}\t${d}`);
+    for (const d of disagree(s)) if (!RULED.has(`${s.name} ${d.split(" vs ")[0]}`)) dis.push(`DISAGREE\t${book}\t${s.name}\t${d}`);
   }
   writeFileSync(process.env.AUDIT_OUT ?? 'spell-audit.tsv', [...out, ...dis].join('\n'));
   const count = (p: string) => out.filter((l) => l.split('\t')[3].startsWith(p)).length;

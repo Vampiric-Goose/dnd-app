@@ -94,3 +94,11 @@ test('a Hasted creature (kept on the combatant) has +2 AC and saves on Dex with 
   expect([t.ac, t.conditions]).toEqual([14, ['Haste']]);
   expect(targetOf(cb({ id: 'm', kind: 'monster', name: 'M', ac: 12, hasted: { by: 'c', round: 1, ended: true } }), {}).ac).toBe(12);
 });
+
+// Every Spell, Task 9: the buffs the audit found with no fight numbers.
+test('Warding Bond, Greater Invisibility and Investiture of Stone change the numbers', () => {
+  const ward = spellMods(['Warding Bond']), inv = spellMods(['Greater Invisibility']), stone = spellMods(['Investiture of Stone']);
+  expect([ward.ac, ward.resist.includes('fire'), ward.resist.includes('psychic')]).toEqual([1, true, true]);
+  expect(inv.edges.map((e) => `${e.on} ${e.mode}`)).toEqual(['attacksBy adv', 'attacksAgainst dis']);
+  expect(stone.resist).toEqual(['bludgeoning, piercing, and slashing from nonmagical attacks']);
+});

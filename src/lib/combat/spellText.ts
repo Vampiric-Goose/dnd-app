@@ -130,15 +130,18 @@ export function readSpell(s: Pick<SpellDef, 'text' | 'level' | 'range'> & { name
     for (const d of out.damage) if (!d.type) d.type = mech.types[0];
     delete out.choices;
   } else if (mech?.types && mech.types.length > 1 && out.damage.some((d) => !d.type)) out.choices = mech.types;
-  const conds = mech?.conditions ?? [...new Set([...t.matchAll(/\b(?:be|is|becomes?) (blinded|charmed|deafened|frightened|incapacitated|paralyzed|petrified|poisoned|prone|restrained|stunned|unconscious)\b/gi)]
+  const CONDS = 'blinded|charmed|deafened|frightened|incapacitated|paralyzed|petrified|poisoned|prone|restrained|stunned|unconscious';
+  const conds = mech?.conditions ?? [...new Set([...t.matchAll(new RegExp(`\\b(?:be|is|becomes?|falls?|knocked) (${CONDS})\\b`, 'gi'))]
     .map((x) => x[1].charAt(0).toUpperCase() + x[1].slice(1).toLowerCase()))];
-  if (conds.length) out.conditions = conds;
+  // "is either blinded or deafened (your choice)": the save rolls, the caster applies the one they pick
+  const pick = new RegExp(`\\bis either (?:${CONDS}) or (?:${CONDS})\\b`, 'i').test(t);
+  if (conds.length && !pick) out.conditions = conds;
   if (mech?.scaling && s.level === 0) out.scaling = mech.scaling;
   if (/at the end of each of its turns[^.]*saving throw/i.test(t)) out.repeat = true;
   const slow = /speed is reduced by (\d+) feet until the start of your next turn/i.exec(t);
   if (slow) out.slow = { feet: +slow[1] };
-  const lasts = /(\d+) (round|minute|hour)s?/i.exec(s.duration ?? '');
-  if (lasts) out.rounds = +lasts[1] * ({ round: 1, minute: 10, hour: 600 } as Record<string, number>)[lasts[2].toLowerCase()];
+  const lasts = /(\d+) (round|minute|hour|day)s?/i.exec(s.duration ?? '');
+  if (lasts) out.rounds = +lasts[1] * ({ round: 1, minute: 10, hour: 600, day: 14400 } as Record<string, number>)[lasts[2].toLowerCase()];
   // Light: the only save is one an object's holder makes to avoid it, with nothing to deal or inflict
   if (out.save && sv && !out.damage.length && !out.conditions?.length && /\bobject\b/i.test(sentenceAt(sv.index))) delete out.save;
   // half on a success, however the sentence words it ("takes half as much damage and isn't pushed", "half damage, but…")
@@ -150,7 +153,9 @@ export function readSpell(s: Pick<SpellDef, 'text' | 'level' | 'range'> & { name
   if (range) out.range = range;
   if (/starts its turn there|enters the (?:spell's )?area|starts its turn (?:with)?in/i.test(t)) out.lingering = true;
   const heal = /regains? (?:a number of )?hit points equal to (\d+d\d+)( \+ your spellcasting ability modifier)?/i.exec(t);
+  const flatHeal = /\bregains? (\d+(?:d\d+)?(?:\s*\+\s*\d+)?) hit points\b/i.exec(t); // Heal's 70, Regenerate's 4d8 + 15
   if (heal) out.heal = { dice: heal[1], mod: !!heal[2] };
+  else if (flatHeal) out.heal = { dice: flatHeal[1].replace(/\s+/g, ''), mod: false };
   const temp = /\bgains? (\d+d\d+(?:\s*\+\s*\d+)?) temporary hit points\b/i.exec(t), tempUp = /\b(\d+) additional temporary hit points for each slot level above\b/i.exec(h);
   if (temp) out.temp = { dice: temp[1].replace(/\s+/g, ''), ...(tempUp && { perSlot: +tempUp[1] }) };
   const many = /\bup to (two|three|four|five|six|\d+) (?:willing )?creatures\b/i.exec(t), more = /\bone additional creature for each slot level above (\d)/i.exec(h);
@@ -164,7 +169,8 @@ export function readSpell(s: Pick<SpellDef, 'text' | 'level' | 'range'> & { name
   let m: RegExpExecArray | null;
   if ((m = /(\d+)-foot[- ]radius,?\s*(?:\d+-foot[- ]high\s+)?(sphere|cylinder)/i.exec(t))) out.area = { shape: m[2].toLowerCase() as Shape, feet: +m[1], self };
   else if ((m = /(\d+)-foot cone/i.exec(t))) out.area = { shape: 'cone', feet: +m[1], self };
-  else if ((m = /(\d+)-foot cube/i.exec(t))) out.area = { shape: 'cube', feet: +m[1], self };
+  else if ((m = /(\d+)-foot (?:cube|square)/i.exec(t))) out.area = { shape: 'cube', feet: +m[1], self }; // a square on the ground (Grease)
+  else if ((m = /\bcylinder with an? (\d+)-foot radius/i.exec(t))) out.area = { shape: 'cylinder', feet: +m[1], self };
   else if ((m = /\bline (?:of [^.]*?)?(\d+) feet long and (\d+) feet wide/i.exec(t)) || (m = /(\d+)-foot[- ]long,? (\d+)-foot[- ]wide line/i.exec(t))) out.area = { shape: 'line', feet: +m[1], width: +m[2], self };
   else if ((m = /(\d+)-foot-wide,? (\d+)-foot-long line/i.exec(t))) out.area = { shape: 'line', feet: +m[2], width: +m[1], self };
   else if ((m = /within (\d+) feet of a point you choose/i.exec(t))) out.area = { shape: 'sphere', feet: +m[1], self }; // Sleep
@@ -203,6 +209,8 @@ export function readSpell(s: Pick<SpellDef, 'text' | 'level' | 'range'> & { name
     out.manual = 'Extra damage on weapon hits isn’t automated: apply it by hand.';
   else if (hurts && !(out.damage.length && (out.attack || out.save || out.auto))) out.manual = 'Its damage isn’t automated: apply it by hand.';
   else if (out.conditions?.length && !out.save) out.manual = 'Its effect isn’t automated: apply it by hand.';
+  else if (out.lingering && out.conditions?.length) out.manual = 'Its saves in the area aren’t automated: roll them by hand.'; // Grease, Sleet Storm
+  else if (pick) out.manual = 'On a failed save, apply the condition you choose by hand.';
   const called = summonOptions(s.text, s.higherLevels);
   if (called) out.summon = called;
   const rule = s.name ? SPELL_RULES[s.name.toLowerCase()] : undefined;
