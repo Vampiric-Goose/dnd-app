@@ -4,7 +4,7 @@
 // area catches every token in it, hidden ones too; the acting player hears only hit or miss, a spell's DC and the visible names caught.
 import { feetBetween, tokenFeet, type Pt } from '../map/grid.ts';
 import { tokensInTemplate, type Shape } from '../map/templates.ts';
-import type { Ability, Area, Character, Combat, Combatant, Grid, Resolution, Scene, Size, Snap } from '../types.ts';
+import type { Ability, Area, Character, Combat, Combatant, Grid, Resolution, Scene, Size, Snap, Token } from '../types.ts';
 import { combatantForToken } from './movement.ts';
 import { checkFaces, keptD20, resolveAttack, resolveSpell, totalOf, type Outcome, type TargetInfo } from './resolve.ts';
 import { SPELL_EFFECTS } from '../rules/constants.ts';
@@ -39,8 +39,17 @@ export function castLive(k: Combat, r: Resolution): boolean {
   return !!c?.concentrating && (c.concentratingOn === undefined || c.concentratingOn === r.action) && (r.cast === undefined || c.concentrationCount === r.cast);
 }
 
-export function areasOn(k: Combat | undefined, sceneId: string): Area[] {
-  return liveAreas(k, sceneId).map((r) => r.area!);
+/** A lasting area as it stands now: one that goes with its caster (Spirit Guardians) is centered on the caster's token on that scene. */
+export function areaNow(k: Combat, r: Resolution, s?: Scene): Area {
+  const a = r.area!, t = r.follows && s ? s.tokens.find((x) => combatantForToken(k, x)?.id === r.actor) : undefined;
+  if (!t) return a;
+  const dx = t.x - a.origin.x, dy = t.y - a.origin.y;
+  return { ...a, origin: { x: t.x, y: t.y }, aim: { x: a.aim.x + dx, y: a.aim.y + dy } };
+}
+
+/** The areas up on a scene (its id, or the scene itself so areas that go with their caster are where the caster stands). */
+export function areasOn(k: Combat | undefined, s: Scene | string): Area[] {
+  return k ? liveAreas(k, typeof s === 'string' ? s : s.id).map((r) => areaNow(k, r, typeof s === 'string' ? undefined : s)) : [];
 }
 
 /** The results whose area is still up on that scene (areasOn). */
@@ -54,36 +63,83 @@ function liveAreas(k: Combat | undefined, sceneId: string): Resolution[] {
   });
 }
 
-/** The damage-over-time areas (Moonbeam, Cloudkill) that creature `id`'s token stands in: what hurts it as its turn starts. */
+const tokenOfCombatant = (k: Combat, s: Scene, id: string) => s.tokens.find((x) => combatantForToken(k, x)?.id === id);
+const inArea = (k: Combat, s: Scene, r: Resolution, t: Token, at: Pt = t) => tokensInTemplate(areaNow(k, r, s), s.grid, [{ ...t, x: at.x, y: at.y }]).length > 0;
+
+/** The lasting areas that act as a turn starts there (Moonbeam) which creature `id`'s turn began in: where it stood then, once it has moved. */
 export function startsIn(k: Combat, s: Scene, id: string): Resolution[] {
-  const t = s.tokens.find((x) => combatantForToken(k, x)?.id === id);
-  if (!t) return [];
-  const from = k.movement?.[id]?.from, at = from ? { ...t, x: from.x, y: from.y } : t; // where its turn began, once it has moved
-  return liveAreas(k, s.id).filter((r) => r.linger && !r.linger.read.noStart && tokensInTemplate(r.area!, s.grid, [at]).length > 0);
+  const t = tokenOfCombatant(k, s, id), from = k.movement?.[id]?.from;
+  return t ? liveAreas(k, s.id).filter((r) => r.linger && !r.linger.read.noStart && inArea(k, s, r, t, from ?? t)) : [];
+}
+
+/** The lasting areas that act as a turn ends there (Incendiary Cloud) which creature `id`'s token stands in now. */
+export function endsIn(k: Combat, s: Scene, id: string): Resolution[] {
+  const t = tokenOfCombatant(k, s, id);
+  return t ? liveAreas(k, s.id).filter((r) => r.linger?.read.ends && inArea(k, s, r, t)) : [];
 }
 
 /**
- * The damage-over-time areas that also hurt a creature entering them (Cloudkill) which creature `id`'s token now stands in but its turn
- * began outside of: it walked in this turn. ponytail: the turn's origin and where it stands, so a path through and out isn't caught, nor a
- * creature pushed in on another's turn (by hand).
+ * Moved tokens' creatures that entered a lasting area which acts on entering (Cloudkill): the move's path crosses it from outside it. Noted
+ * once per creature, area and turn ("the first time on a turn"), on anyone's turn (pushed in). ponytail: the path is the move's straight line,
+ * sampled every half cell; an area moving onto a creature isn't its entering (2014: the creature enters).
  */
-/** The result name of an area's roll: as a turn starts there, or on entering it. */
-export const areaRollName = (r: Pick<Resolution, 'action'>, enters: boolean): string => `${r.action} (${enters ? 'entering' : 'start of turn'})`;
-
-/**
- * The area rolls creature `id` is owed on its turn (k.turn): starting it in a damage-over-time area, and entering one for the first time
- * that turn, each once a turn and apart (Cloudkill). Its turn is this round's: a roll it got last round doesn't count.
- */
-export function areaRolls(k: Combat, s: Scene, id: string): { r: Resolution; enters: boolean }[] {
-  const done = (r: Resolution, enters: boolean) => (k.resolutions ?? []).some((y) => y.action === areaRollName(r, enters) && y.round === k.round && y.outcomes[0]?.id === id);
-  return [...startsIn(k, s, id).map((r) => ({ r, enters: false })), ...entersIn(k, s, id).map((r) => ({ r, enters: true }))].filter((x) => !done(x.r, x.enters));
+export function noteEntries(k: Combat, s: Scene, moves: { t: Token; from: Pt }[]): Combat {
+  const areas = liveAreas(k, s.id).filter((r) => r.linger?.read.enters), turn = k.turn ?? '';
+  const kept = (k.entered ?? []).filter((e) => e.round >= k.round - 1), add: NonNullable<Combat['entered']> = [];
+  for (const { t, from } of moves) {
+    const x = combatantForToken(k, t), n = Math.max(1, Math.ceil(Math.hypot(t.x - from.x, t.y - from.y) / (s.grid.size / 2)));
+    if (x) for (const r of areas) {
+      if (inArea(k, s, r, t, from) || [...kept, ...add].some((e) => e.rid === r.id && e.id === x.id && e.round === k.round && e.turn === turn)) continue;
+      for (let i = 1; i <= n; i++) if (inArea(k, s, r, t, { x: from.x + ((t.x - from.x) * i) / n, y: from.y + ((t.y - from.y) * i) / n })) { add.push({ rid: r.id, id: x.id, round: k.round, turn }); break; }
+    }
+  }
+  return add.length || kept.length !== (k.entered ?? []).length ? { ...k, entered: [...kept, ...add] } : k;
 }
 
-export function entersIn(k: Combat, s: Scene, id: string): Resolution[] {
-  const t = s.tokens.find((x) => combatantForToken(k, x)?.id === id), from = k.movement?.[id]?.from;
-  if (!t || !from) return [];
-  return liveAreas(k, s.id).filter((r) => r.linger?.read.enters && tokensInTemplate(r.area!, s.grid, [t]).length
-    && !tokensInTemplate(r.area!, s.grid, [{ ...t, x: from.x, y: from.y }]).length);
+/** The lasting areas on a scene their caster moves (Moonbeam, Flaming Sphere): up to `move` feet a time, by the DM (moveArea). */
+export const movableAreas = (k: Combat | undefined, sceneId: string): Resolution[] => liveAreas(k, sceneId).filter((r) => r.linger?.read.move);
+
+/** That result's area put with its center at `to` (it keeps its shape). */
+export function moveArea(k: Combat, rid: string, to: Pt): Combat {
+  return { ...k, resolutions: (k.resolutions ?? []).map((r) => (r.id !== rid || !r.area ? r
+    : { ...r, area: { ...r.area, origin: { x: to.x, y: to.y }, aim: { x: r.area.aim.x + to.x - r.area.origin.x, y: r.area.aim.y + to.y - r.area.origin.y } } })) };
+}
+
+/**
+ * As its caster's turn starts, a drifting area (Cloudkill, Incendiary Cloud) moves `drift` feet straight away from the caster, in whole cells
+ * along the grid (diagonally when it lies that way), once a round. ponytail: Incendiary Cloud's "direction you choose" is straight away.
+ */
+export function driftAreas(k: Combat, s: Scene): Combat {
+  const me = k.turn ? tokenOfCombatant(k, s, k.turn) : undefined;
+  if (!me) return k;
+  let moved = false;
+  const rs = (k.resolutions ?? []).map((r) => {
+    const d = r.linger?.read.drift;
+    if (!d || r.actor !== k.turn || r.drifted === k.round || !liveAreas(k, s.id).includes(r)) return r;
+    const a = r.area!, dx = a.origin.x - me.x, dy = a.origin.y - me.y, len = Math.hypot(dx, dy);
+    const steps = Math.round(d.feet / s.grid.feet), ux = len ? Math.round(dx / len) : 1, uy = len ? Math.round(dy / len) : 0;
+    const to = { x: Math.min(s.width, Math.max(0, a.origin.x + ux * steps * s.grid.size)), y: Math.min(s.height, Math.max(0, a.origin.y + uy * steps * s.grid.size)) };
+    moved = true;
+    return { ...moveArea({ ...k, resolutions: [r] }, r.id, to).resolutions![0], drifted: k.round };
+  });
+  return moved ? { ...k, resolutions: rs } : k;
+}
+
+export type AreaKind = 'start' | 'enter' | 'end';
+/** The result name of an area's roll: as a turn starts there, on entering it, as a turn ends there. */
+export const areaRollName = (r: Pick<Resolution, 'action'>, kind: AreaKind): string => `${r.action} (${kind === 'enter' ? 'entering' : kind === 'end' ? 'end of turn' : 'start of turn'})`;
+
+/**
+ * The area rolls owed on this turn (Cloudkill, Incendiary Cloud), each once a turn and apart: the creature whose turn it is starting it or
+ * ending it in an area, and any creature that entered one this turn. Last round's rolls don't count.
+ */
+export function areaRolls(k: Combat, s: Scene): { r: Resolution; kind: AreaKind; id: string }[] {
+  const id = k.turn, live = liveAreas(k, s.id);
+  const done = (r: Resolution, kind: AreaKind, who: string) => (k.resolutions ?? []).some((y) => y.action === areaRollName(r, kind) && y.round === k.round
+    && y.outcomes[0]?.id === who && (kind !== 'enter' || (y.turn ?? id) === id));
+  const owed = [...(id ? [...startsIn(k, s, id).map((r) => ({ r, kind: 'start' as const, id })), ...endsIn(k, s, id).map((r) => ({ r, kind: 'end' as const, id }))] : []),
+    ...(k.entered ?? []).filter((e) => e.round === k.round && e.turn === id).flatMap((e) => { const r = live.find((y) => y.id === e.rid); return r ? [{ r, kind: 'enter' as const, id: e.id }] : []; })];
+  return owed.filter((x) => !done(x.r, x.kind, x.id));
 }
 
 /**
@@ -155,9 +211,12 @@ export function aimPlan(a: TurnAction, o: { level?: number; toggles?: Toggle[]; 
   const area: AimArea | undefined = read.burst ? { shape: 'sphere', feet: read.burst, on: 'creature' }
     : read.area ? { shape: read.area.shape, feet: read.area.feet, ...(read.area.width && { width: read.area.width }), on: read.area.self ? 'self' : 'point',
       ...(reach !== 'self' && reach.spell !== undefined && { range: reach.spell }) } : undefined;
-  if (read.lingering) return { reach, line: false, attack: false, ...(area && { area }), dice: [], read: { ...read, attack: undefined, save: undefined, damage: [] }, // placed and listed now
+  // placed and listed now (rolled now too on those in it, when it acts "as it appears"), then rolled as it acts (areaRolls): its damage, or
+  // its save alone (Grease, Stinking Cloud)
+  if (read.lingering) return { reach, line: false, attack: false, ...(area && { area }), dice: read.appears ? dice : [],
+    read: read.appears ? read : { ...read, attack: undefined, save: undefined, damage: [], conditions: undefined },
     ...(read.choices && { choices: read.choices }), // a chosen type (Spirit Guardians) is picked now and kept
-    ...(dice.length && { linger: { dice: dice.map(({ expr, type }) => ({ expr, type })), read } }) }; // rolled as a creature starts its turn there
+    ...((dice.length || read.save || read.conditions?.length) && { linger: { dice: dice.map(({ expr, type }) => ({ expr, type })), read } }) };
   if (read.attack && o.rider?.anyAttack) dice.push({ expr: o.rider.dice, type: o.rider.type || dice[0]?.type || '', on: 'hit', ...(o.rider.target && { vs: o.rider.target }) }); // Hex on a spell attack
   const ignore = read.attack === 'ranged' && has('Crossbow Expert') ? { close: true as const } : undefined;
   const slot = o.level ?? a.spell.level, lvl = a.cast!.charLevel ?? 1, up = (above?: number) => (above !== undefined && slot > above ? slot - above : 0);
@@ -312,7 +371,8 @@ export async function workOut(i: WorkIn): Promise<Aimed | string> {
   const rounds = read.rounds ?? (read.slow ? 1 : undefined);
   return {
     resolution: { ...base, outcomes: outcomes.map(withWhy).map(named).map(slowed), ...(placed && { caught: caught.map((z) => z.id), area: placed, sceneId: s.id, round: k.round }),
-      ...(plan.linger && { linger: { ...plan.linger, ...(plan.linger.read.save && a.cast!.dc !== undefined && { dc: a.cast!.dc }) } }),
+      ...(plan.linger && { linger: { ...plan.linger, ...((plan.linger.read.save || plan.linger.read.atEnd?.save) && a.cast!.dc !== undefined && { dc: a.cast!.dc }) } }),
+      ...(plan.linger && area?.on === 'self' && { follows: true as const }), // an area around its caster goes with it (Spirit Guardians)
       ...(read.leap && target && { chain: [...(i.leapFrom?.exclude ?? []), target.id] }),
       ...(a.spell?.concentration ? { lasting: true as const } : rounds && { rounds }), ...(read.repeat && { repeat: true as const }), ...(read.save && { dc: a.cast!.dc, ability: read.save.toLowerCase() as Ability, onSave: read.onSave }) },
     outcome: { action: a.name, ...(hit !== undefined && { hit }), ...(read.save && a.cast!.dc !== undefined && { dc: a.cast!.dc }),

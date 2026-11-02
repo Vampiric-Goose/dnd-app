@@ -155,6 +155,7 @@ export interface Combat { campaignId: string; combatants: Combatant[]; round: nu
   /** S4-R2: the DM reordered by hand since the last Sort or add, so Start keeps the order. */ reordered?: boolean;
   /** M1: turn boundaries already applied (`round:e|s:turnId`), so Previous then Next never ticks one twice. */ done?: string[];
   /** Combatant id → its movement this turn (dropped where its own turn starts). */ movement?: Record<string, Movement>;
+  /** creatures that entered a lasting area (Cloudkill) on a turn: `turn` is whose turn it was, in `round` (aiming.ts noteEntries) */ entered?: { rid: string; id: string; round: number; turn: string }[];
   /** The saved encounter this fight was resumed from (Group C). */ encounterId?: string;
   /** This fight's identity: new when a fight is made or resumed, kept by saves (the map's arrows end with it). */ fightId?: string;
   /** The map's Start combat: round 1 starts by itself once every initiative is in (the players' rolls). */ autoStart?: true;
@@ -181,7 +182,7 @@ export interface Resolution { id: string; actor: string /* combatant */; action:
   outcomes: Outcome[]; applied: Applied[]; at: number; /** an area's catch (combatant ids), for the DM's list */ caught?: string[];
   /** Undo: the creatures it touched (combatants, and PCs' character state) before it was paid for, and after it landed. */ undo?: { before: Snap; after: Snap };
   /** A spell's area as cast, on scene `sceneId` in `round`; `lasting`: a concentration spell's, shown while its caster concentrates. */
-  area?: Area; sceneId?: string; round?: number; lasting?: true;
+  area?: Area; sceneId?: string; round?: number; lasting?: true; /** its area goes with its caster (Spirit Guardians) */ follows?: true; /** whose turn an area roll was on */ turn?: string; /** the round its area last drifted (Cloudkill) */ drifted?: number;
   /** the conditions it left, which end with the spell; `rounds`: a non-concentration spell's length */ inflicted?: { id: string; condition: string; /** a monster's save bonus, for its repeat saves */ bonus?: number }[]; rounds?: number;
   /** its targets save again at the end of each of their turns */ repeat?: true;
   /** a marked rider spell (Hex): the creature marked and the rider its caster now has; `spent`: a hit used a once-only rider */ mark?: string; rider?: Combatant['rider']; spent?: true;

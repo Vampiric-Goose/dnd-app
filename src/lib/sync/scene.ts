@@ -42,7 +42,7 @@ export function sceneForPlayers(s: Scene | undefined, characters: Character[], c
     const health = gate ? healthStatus(live.hp, live.maxHp) : undefined;
     tokens.push({ ...base, conditions: [...live.conditions], ...(health && { health }) });
   }
-  const areas = areasOn(combat, s.id);
+  const areas = areasOn(combat, s);
   const v: PlayerScene = { id: s.id, name: s.name, ...(s.image !== undefined && { image: s.image }), width: s.width, height: s.height, grid: gridOf(s.grid), tokens, ...(areas.length && { areas }) };
   return settings.fog ? applyFog(v, s) : v; // C2: no token whose centre is fogged; the fog (or all fogged) goes along
 }

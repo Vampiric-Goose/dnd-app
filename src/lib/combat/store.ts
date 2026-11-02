@@ -6,7 +6,7 @@ import { computeSheet } from '../rules/sheet.ts';
 import type { Applied, CampaignSettings, Character, Combat, Combatant, Duration, Encounter, MonsterDef, Outcome, Resolution, Scene, Snap } from '../types.ts';
 import { settle } from './resolve.ts';
 import { rollSpellDice, spellMods } from './spellEffects.ts';
-import { castLive, endedSpells, snapOf, touched } from './aiming.ts';
+import { castLive, driftAreas, endedSpells, snapOf, touched } from './aiming.ts';
 import { canon } from '../sync/merge.ts';
 import { uid } from '../uid.ts';
 import { addCombatants, addMonsters, concentrationDc, turnIds, encounterPicks, initOk, monsterHp, newCombat, next, patchCombatant, removeStep, rollInit, setInit, start, type Expired, type HpOp, type Step } from './combat.ts';
@@ -107,7 +107,10 @@ export const turn = async (cid: string, dir: 'start' | 'next', expect?: string):
     return out;
   });
   for (const id of ended) await laterHits(cid, id); // outside the queue: its damage goes through changeHp, which queues itself
-  return ended.length ? { ...step, combat: (await db.combat.get(cid)) ?? step.combat } : step;
+  // a drifting area (Cloudkill) moves away from its caster as the caster's turn starts
+  const sc = step.combat.resolutions?.some((r) => r.linger?.read.drift) ? await fightScene(cid) : undefined;
+  if (sc) await serial(() => update(cid, (c) => driftAreas(c, sc)));
+  return ended.length || sc ? { ...step, combat: (await db.combat.get(cid)) ?? step.combat } : step;
 };
 
 /** removeCombatant, writing the PC side of any expiry the passed turn starts (see removeStep). */

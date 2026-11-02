@@ -275,3 +275,18 @@ test('Aid on a PC at full HP raises its current HP by 5', async () => {
   const after = (await db.characters.get('p'))!;
   expect([after.state.conditions, computeSheet(after, { settings, viewer: 'dm' }).maxHp, after.state.hp]).toEqual([['Aid'], max + 5, max + 5]);
 });
+
+// Cloudkill drifts as its caster's turn starts, through the turn itself (store.ts turn).
+test('ending the turn before its caster\'s moves Cloudkill 10 feet away from the caster', async () => {
+  await db.scenes.put({ id: 'sc1', campaignId: 'c1', name: 'F', width: 1400, height: 700, grid: { type: 'square', size: 70, offsetX: 0, offsetY: 0, color: '#000000', opacity: 0.35, feet: 5 }, shown: true, updatedAt: 0,
+    tokens: [{ id: 't-p', name: 'p', x: 665, y: 35, size: 'M', color: '#000000', characterId: 'p' }] });
+  await db.scenes.show('c1', 'sc1');
+  const fog: Resolution = { id: 'ck', actor: 'pc:p', action: 'Cloudkill', outcomes: [], applied: [], at: 0, sceneId: 'sc1', round: 1, lasting: true,
+    area: { shape: 'sphere', origin: { x: 315, y: 35 }, aim: { x: 315, y: 35 }, feet: 20 }, linger: { dice: [{ expr: '5d8', type: 'poison' }], read: { damage: [], save: 'Con', onSave: 'half', enters: true, drift: { feet: 10 } }, dc: 13 } };
+  await updateCombat('c1', (c) => ({ ...c, round: 1, resolutions: [fog], combatants: c.combatants.map((x) => (x.id === 'pc:p' ? { ...x, init: 5, concentrating: true, concentratingOn: 'Cloudkill' } : { ...x, init: 15 })) }));
+  const order = (await db.combat.get('c1'))!.combatants.map((x) => x.id);
+  await updateCombat('c1', (c) => ({ ...c, turn: order[order.indexOf('pc:p') - 1] ?? order.at(-1) }));
+  await turn('c1', 'next');
+  const k = (await db.combat.get('c1'))!;
+  expect([k.turn, k.resolutions!.find((r) => r.id === 'ck')!.area!.origin]).toEqual(['pc:p', { x: 175, y: 35 }]);
+});

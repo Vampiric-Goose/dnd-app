@@ -10,7 +10,7 @@ import { Host } from '../../src/lib/sync/host.ts';
 import { memoryPair } from '../../src/lib/sync/link.ts';
 import { BLOB_CHUNK, MAX_BLOB, MAX_MESSAGE, parseGuestMessage, size } from '../../src/lib/sync/protocol.ts';
 import { cleanScene, moveProblem, sceneBlobs, sceneForPlayers, type PlayerScene } from '../../src/lib/sync/scene.ts';
-import type { Campaign, CampaignSettings, Character, Combat, Combatant, Scene } from '../../src/lib/types.ts';
+import type { Campaign, CampaignSettings, Character, Combat, Combatant, Resolution, Scene } from '../../src/lib/types.ts';
 import { mkChar } from '../fixtures/content.ts';
 import { camp, char } from '../fixtures/records.ts';
 import { connect, Device, rawLink, settle, tap } from './fakes.ts';
@@ -208,6 +208,20 @@ describe('engine', () => {
   const scenes = (down: string[]) => down.filter((m) => JSON.parse(m).t === 'scene');
   const chunks = (down: string[]) => down.filter((m) => JSON.parse(m).t === 'blobChunk');
   const thorinAt = (d: Device) => d.scene!.tokens.find((t) => t.id === 't-thorin')!;
+
+  // a player walking their own token into a lasting area (Cloudkill) is noted on the DM's device, like a DM drag
+  test('a player’s move into a lasting area is noted as entering it', async () => {
+    const cloud: Resolution = { id: 'ck', actor: 'g1', action: 'Cloudkill', outcomes: [], applied: [], at: 0, sceneId: 's1', round: 1, lasting: true,
+      area: { shape: 'cylinder', origin: { x: 315, y: 315 }, aim: { x: 315, y: 315 }, feet: 5 }, linger: { dice: [{ expr: '5d8', type: 'poison' }], read: { damage: [], save: 'Con', onSave: 'half', enters: true }, dc: 13 } };
+    const { d, host } = setup(scene(), fight({ resolutions: [cloud], combatants: [cb({ id: 'pc:thorin', kind: 'pc', name: 'Thorin', characterId: 'thorin', init: 17 }),
+      cb({ id: 'g1', kind: 'monster', name: 'Goblin 1', monsterId: 'monster:goblin@SRD', init: 12, hp: 7, maxHp: 7, concentrating: true, concentratingOn: 'Cloudkill' })] }));
+    const a = player('A1');
+    connect(host, a.guest);
+    await settle(host, a.guest);
+    a.guest.sendMove('s1', 't-thorin', { x: 240, y: 240 }); // 15 ft, to the cell beside the cloud's: in its 5-foot radius
+    await settle(host, a.guest);
+    expect([thorinAt(d).x, d.combat!.entered]).toEqual([245, [{ rid: 'ck', id: 'pc:thorin', round: 1, turn: 'pc:thorin' }]]);
+  });
 
   test('the shown scene reaches players, live and after a welcome; nothing hidden is in any message', async () => {
     const { d, host } = setup(scene({ shown: false }));

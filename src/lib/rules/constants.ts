@@ -73,6 +73,9 @@ export const SPELL_EFFECTS: Record<string, Effect[]> = {
   Blur: [{ type: 'edge', on: 'attacksAgainst', mode: 'dis' }],
   Stoneskin: resist('bludgeoning, piercing, and slashing from nonmagical attacks'),
   'Investiture of Stone': resist('bludgeoning, piercing, and slashing from nonmagical attacks'),
+  'Investiture of Flame': [{ type: 'damage', kind: 'immunity', damageType: 'fire' }, ...resist('cold')],
+  'Investiture of Ice': [{ type: 'damage', kind: 'immunity', damageType: 'cold' }, ...resist('fire')],
+  'Investiture of Wind': [{ type: 'speed', mode: 'fly', value: 60 }],
   "Tenser's Transformation": [{ type: 'edge', on: 'attacksBy', mode: 'adv' }], // ponytail: weapon attacks in the book; it bars spellcasting, so any attack here
   'Blade Ward': resist('bludgeoning', 'piercing', 'slashing'), // ponytail: from weapon attacks in the book; any of those types here
   Longstrider: [{ type: 'speed', mode: 'walk', value: 10 }],

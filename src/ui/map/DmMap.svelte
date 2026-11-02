@@ -14,7 +14,7 @@
   import { currentRun, patchCombatant } from '../../lib/combat/combat.ts';
   import { budgetApplies, budgetFeet, combatantForToken, effectiveSpeed, originOf, recordMove } from '../../lib/combat/movement.ts';
   import { applyResolution, editCharacter, settlePick, settleSave, turn, undoResolution, updateCombat } from '../../lib/combat/store.ts';
-  import { aimPlan, areaRollName, areaRolls, areasOn, foeWithin5, judge, snapOf, touched, workOut, type AimPlan } from '../../lib/combat/aiming.ts';
+  import { aimPlan, areaRollName, areaRolls, areasOn, foeWithin5, judge, moveArea, movableAreas, noteEntries, snapOf, touched, workOut, type AimPlan, type AreaKind } from '../../lib/combat/aiming.ts';
   import { monsterAc, resolveSpell, targetOf } from '../../lib/combat/resolve.ts';
   import { targetingOn, type Pickable, type Toggle } from '../../lib/combat/targeting.ts';
   import { roll } from '../../lib/rolls.svelte.ts';
@@ -268,20 +268,21 @@
   /** One scene write; then a moved token whose combatant is taking its turn gets the turn's origin, where it stood (its first move only; P2). */
   const onmove = (ids: string[], primary: string, to: Pt) => run(async () => {
     if (!scene) return;
-    let walked: { t: Token; from: Pt }[] = [];
+    let walked: { t: Token; from: Pt }[] = [], after: Scene | undefined;
     await editScene(scene.id, (s) => {
-      const out = moveTokens(s, ids, primary, to);
+      const out = (after = moveTokens(s, ids, primary, to));
       walked = out.tokens.flatMap((t) => {
         const o = s.tokens.find((x) => x.id === t.id);
         return o && (o.x !== t.x || o.y !== t.y) ? [{ t, from: { x: o.x, y: o.y } }] : [];
       });
       return out;
     });
-    if (walked.length && budgetApplies(combat, settings)) await updateCombat(cid, (c) => {
-      if (!budgetApplies(c, settings)) return c;
-      const now = currentRun(c);
-      for (const { t, from } of walked) { const x = combatantForToken(c, t); if (x && now.has(x.id)) c = recordMove(c, x.id, from); }
-      return c;
+    if (walked.length && combat) await updateCombat(cid, (c) => {
+      if (budgetApplies(c, settings)) {
+        const now = currentRun(c);
+        for (const { t, from } of walked) { const x = combatantForToken(c, t); if (x && now.has(x.id)) c = recordMove(c, x.id, from); }
+      }
+      return after ? noteEntries(c, after, walked) : c; // entering a lasting area (Cloudkill), on anyone's turn
     });
     await reload();
   });
@@ -426,6 +427,17 @@
       ...((m.plan.helps || m.plan.upTo) && picks.length && { ondone: () => void fire(picks, pickable) }), // a helpful spell may take fewer than it could
       oncancel: () => (aiming = undefined) };
   });
+  // Moving a lasting area its caster moves (Moonbeam, Flaming Sphere) on the caster's turn: its new center, within its move of where it is
+  let moving: Resolution | undefined = $state.raw();
+  const movable = $derived(combat && scene ? movableAreas(combat, scene.id).filter((r) => r.actor === combat!.turn) : []);
+  const moveAim = $derived.by(() => {
+    const r = moving, a = r?.area, mv = r?.linger?.read.move;
+    if (!r || !a || !mv) return undefined;
+    return { from: a.origin, line: false, area: { shape: a.shape, feet: a.feet, ...(a.width && { width: a.width }), on: 'point' as const, range: mv.feet },
+      pickable: (): Pickable => ({ ok: false }), status: `Move ${r.action} up to ${mv.feet} ft`,
+      onpick: (p: Pick) => run(async () => { moving = undefined; await updateCombat(cid, (c) => moveArea(c, r.id, p.point)); await reload(); }),
+      oncancel: () => (moving = undefined) };
+  });
   const fire = (ps: Pick[], pickable: (id: string) => Pickable) => run(async () => {
     const m = aiming, k = combat, s = scene;
     aiming = undefined;
@@ -456,15 +468,19 @@
     const c = z.characterId ? chars.find((y) => y.id === z.characterId) : undefined;
     return c ? targetOf(z, { sheet: sheets.get(c.id) ?? computeSheet(c, { settings, viewer: 'dm' }), hp: c.state.hp, conditions: c.state.conditions }) : targetOf(z, { monster: z.monsterId ? monsterById.get(z.monsterId) : undefined });
   };
-  // Damage over time owed on this turn (aiming.ts areaRolls): starting it in an area (Moonbeam), entering one (Cloudkill), each once a turn
-  const hurtsNow = $derived(combat && scene && combat.turn ? areaRolls(combat, scene, combat.turn) : []);
-  const lingerRoll = (r: Resolution, enters = false) => run(async () => {
-    const k = combat, z = k?.combatants.find((x) => x.id === k.turn), l = r.linger;
+  // Lasting areas owed a roll this turn (aiming.ts areaRolls): starting or ending a turn in one, entering one (on anyone's turn), each once
+  const hurtsNow = $derived(combat && scene ? areaRolls(combat, scene) : []);
+  const AREA_WHEN: Record<AreaKind, string> = { start: 'starts its turn in', enter: 'entered', end: 'ends its turn in' };
+  const lingerRoll = (r: Resolution, kind: AreaKind, id: string) => run(async () => {
+    const k = combat, z = k?.combatants.find((x) => x.id === id), l = r.linger;
     if (!k || !z || !l) return;
-    const rolled = { dmg: l.dice.map((d) => roll(`${r.action}: ${d.type} damage`, d.expr).faces) };
-    const outcomes = resolveSpell(l.read, l.dice, l.dc, undefined, infoOf(z), [], rolled, Math.random);
-    await applyResolution(cid, { id: uid(), actor: r.actor, action: areaRollName(r, enters), outcomes, at: Date.now(), round: k.round,
-      ...(l.dc !== undefined && l.read.save && { dc: l.dc, ability: l.read.save.toLowerCase() as Ability, onSave: l.read.onSave }) }, settings);
+    // a part of its own at the end of a turn (Hunger of Hadar's acid), else the same roll
+    const read = kind === 'end' && l.read.atEnd ? { ...l.read, ...l.read.atEnd } : l.read;
+    const dice = kind === 'end' && l.read.atEnd ? l.read.atEnd.damage.map((d) => ({ expr: d.dice, type: d.type })) : l.dice;
+    const rolled = { dmg: dice.map((d) => roll(`${r.action}: ${d.type} damage`, d.expr).faces) };
+    const outcomes = resolveSpell(read, dice, l.dc, undefined, infoOf(z), [], rolled, Math.random);
+    await applyResolution(cid, { id: uid(), actor: r.actor, action: areaRollName(r, kind), outcomes, at: Date.now(), round: k.round, ...(k.turn && { turn: k.turn }),
+      ...(l.dc !== undefined && read.save && { dc: l.dc, ability: read.save.toLowerCase() as Ability, onSave: read.onSave }) }, settings);
     await reload();
   });
   /** A leaping spell's next target (Chaos Bolt): aimed from the creature it hit, while its caster's turn panel is open. */
@@ -527,8 +543,8 @@
         bind:arrow={picked}
         ondrag={(id, at) => { if (scene?.shown) sendDrag(scene.id, id, at); }}
         {preset}
-        {aim}
-        areas={areasOn(combat, scene.id)}
+        aim={moveAim ?? aim}
+        areas={areasOn(combat, scene)}
       />
     {/key}
     <button type="button" class="sheet-btn" onclick={() => (sheet = true)}>{fighting ? 'Turn and tokens' : 'Tokens and scene'}</button>
@@ -610,8 +626,10 @@
           {#if combat?.resolutions?.length}
             <section class="results" aria-labelledby="res-h">
               <h3 id="res-h">Results</h3>
-              {#each hurtsNow as h (h.r.id + h.enters)}<p class="row small"><span><strong>{nameOfCombatant(combat.turn ?? '')}</strong> {h.enters ? 'entered' : 'starts its turn in'} {h.r.action}</span>
-                <button type="button" disabled={busy} onclick={() => lingerRoll(h.r, h.enters)}>Roll</button></p>{/each}
+              {#each hurtsNow as h (h.r.id + h.kind + h.id)}<p class="row small"><span><strong>{nameOfCombatant(h.id)}</strong> {AREA_WHEN[h.kind]} {h.r.action}</span>
+                <button type="button" disabled={busy} onclick={() => lingerRoll(h.r, h.kind, h.id)}>Roll</button></p>{/each}
+              {#each movable as r (r.id)}<p class="row small"><span>{r.action}</span>
+                <button type="button" disabled={busy} onclick={() => { aiming = undefined; moving = r; }}>Move ({r.linger?.read.move?.cost === 'bonus' ? 'bonus action' : 'action'})</button></p>{/each}
               <ol class="plain">
                 {#each [...combat.resolutions].reverse().slice(0, 6) as r (r.id)}
                   <li>

@@ -11,7 +11,7 @@ import { toBase64 } from '../base64.ts';
 import { budgetApplies, combatantForToken, recordMove } from '../combat/movement.ts';
 import { applyUse, attacksPerAction, characterEffect, editsCharacter, payment, pcActions, problemOf, spendOn, type TurnAction } from '../combat/turnActions.ts';
 import { targetOf, type TargetInfo } from '../combat/resolve.ts';
-import { snapOf, touched, workOut, type Aim, type Aimed, type WorkIn } from '../combat/aiming.ts';
+import { noteEntries, snapOf, touched, workOut, type Aim, type Aimed, type WorkIn } from '../combat/aiming.ts';
 import { targetingOn } from '../combat/targeting.ts';
 import { featureList } from '../character/play.ts';
 import { computeSheet } from '../rules/sheet.ts';
@@ -782,16 +782,21 @@ export class Host {
     const why = moveProblem(await this.#deps.loadScene(), m, pid, chars, combat, camp.settings);
     if (why?.violation) return this.#violation(c, why.error);
     // checked again on the fresh record, in the write (the DM may have hidden the token since); its cost is measured on that record too
-    let moved: { combatantId: string; from: { x: number; y: number } } | undefined;
+    let moved: { combatantId: string; from: { x: number; y: number } } | undefined, walked: { s: Scene; from: { x: number; y: number } } | undefined;
     if (!why) await this.#deps.updateScene(m.sceneId, (s) => {
       if (moveProblem(s, m, pid, chars, combat, camp.settings)) return s;
       const t = s.tokens.find((x) => x.id === m.tokenId)!;
       const cost = moveCost(s, m, chars.find((ch) => ch.id === t.characterId)!, combat, camp.settings);
       if (cost) moved = { combatantId: cost.combatantId, from: { x: t.x, y: t.y } };
-      return moveTokens(s, [m.tokenId], m.tokenId, m);
+      const out = moveTokens(s, [m.tokenId], m.tokenId, m);
+      walked = { s: out, from: { x: t.x, y: t.y } };
+      return out;
     });
-    const k = moved;
-    if (k) await this.#deps.updateCombat?.((x) => recordMove(x, k.combatantId, k.from)); // the turn's first move sets its origin (the db change re-sends the tracker)
+    const k = moved, w = walked;
+    if (k || w) await this.#deps.updateCombat?.((x) => { // the turn's first move sets its origin (the db change re-sends the tracker); entering a lasting area
+      const y = k ? recordMove(x, k.combatantId, k.from) : x, t = w?.s.tokens.find((z) => z.id === m.tokenId);
+      return w && t ? noteEntries(y, w.s, [{ t, from: w.from }]) : y;
+    });
     await this.#sendScene(camp, c);
   }
 

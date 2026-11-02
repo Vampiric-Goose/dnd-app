@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { aimPlan, areaRolls, areaRollName, entersIn, pickableAt, startsIn, workOut, type WorkIn } from '../../src/lib/combat/aiming.ts';
+import { aimPlan, areaNow, areaRollName, areaRolls, driftAreas, moveArea, movableAreas, noteEntries, pickableAt, startsIn, workOut, type WorkIn } from '../../src/lib/combat/aiming.ts';
 import { targetOf } from '../../src/lib/combat/resolve.ts';
 import { readSpell } from '../../src/lib/combat/spellText.ts';
 import type { TurnAction } from '../../src/lib/combat/turnActions.ts';
@@ -285,41 +285,85 @@ test('Toll the Dead deals its d12 only to a target missing hit points', async ()
   expect([await dealt(10), await dealt(6)]).toEqual([5, 11]);
 });
 
-// Entering a damage-over-time area (Cloudkill, Moonbeam): a creature whose token now stands in it but whose turn began outside it.
-test('who has entered a lasting area this turn', () => {
-  const k0: Combat = { campaignId: 'c1', round: 2, turn: 'g', groupMonsters: false, updatedAt: 0,
-    combatants: [cb({ id: 'pc:mira', kind: 'pc', name: 'Mira', concentrating: true, concentratingOn: 'Cloudkill' }), cb({ id: 'g', kind: 'monster', name: 'Goblin' })] };
-  const sc: Scene = { id: 's1', campaignId: 'c1', name: 'F', width: 1400, height: 700, grid: { ...DEFAULT_GRID }, shown: true, updatedAt: 0,
-    tokens: [{ id: 't-g', name: 'G', ...cell(3), size: 'M', color: '#000000', combatantId: 'g' }, { id: 't-m', name: 'M', ...cell(9), size: 'M', color: '#000000', characterId: 'mira' }] };
-  const fog = (enters: boolean): Resolution => ({ id: 'r', actor: 'pc:mira', action: 'Cloudkill', outcomes: [], applied: [], at: 0, sceneId: 's1', round: 1, lasting: true,
-    area: { shape: 'cylinder', origin: cell(3), aim: cell(3), feet: 5 }, linger: { dice: [{ expr: '5d8', type: 'poison' }], read: { damage: [], save: 'Con', onSave: 'half', ...(enters && { enters: true }) }, dc: 13 } });
-  const from = (q: number, enters = true) => ({ ...k0, resolutions: [fog(enters)], movement: { g: { from: cell(q), dashes: 0 } } });
-  expect(entersIn(from(0), sc, 'g').map((r) => r.id)).toEqual(['r']); // walked in
-  expect(entersIn(from(3), sc, 'g')).toEqual([]); // began its turn there: the start of its turn already counted
-  expect(entersIn(from(0, false), sc, 'g')).toEqual([]); // a spell that hurts only at the start of a turn
-  // where its turn began decides the start of its turn: walked in, it didn't start there; walked out, it did
-  expect(startsIn(from(0), sc, 'g')).toEqual([]);
-  const cloud = { ...from(3), resolutions: [{ ...fog(true), linger: { ...fog(true).linger!, read: { ...fog(true).linger!.read, noStart: true as const } } }] };
-  expect(startsIn(cloud, sc, 'g')).toEqual([]); // Incendiary Cloud: the end of a turn, not its start
-  expect(startsIn({ ...from(3), movement: { g: { from: cell(3), dashes: 0 } } }, { ...sc, tokens: sc.tokens.map((t) => (t.id === 't-g' ? { ...t, ...cell(6) } : t)) }, 'g').map((r) => r.id)).toEqual(['r']);
-});
 
-// Cloudkill is per turn: starting a turn in it and entering it for the first time on a turn are each rolled once that turn, apart.
-test('area rolls owed this turn: the start of it and entering, each once', () => {
+// Lasting areas over time (Cloudkill, Incendiary Cloud, Spirit Guardians): who owes which roll this turn, and entering on any move.
+describe('lasting areas over time', () => {
   const k0: Combat = { campaignId: 'c1', round: 2, turn: 'g', groupMonsters: false, updatedAt: 0,
-    combatants: [cb({ id: 'pc:mira', kind: 'pc', name: 'Mira', concentrating: true, concentratingOn: 'Cloudkill' }), cb({ id: 'g', kind: 'monster', name: 'Goblin' })] };
-  const fog: Resolution = { id: 'r', actor: 'pc:mira', action: 'Cloudkill', outcomes: [], applied: [], at: 0, sceneId: 's1', round: 1, lasting: true,
-    area: { shape: 'cylinder', origin: cell(3), aim: cell(3), feet: 5 }, linger: { dice: [{ expr: '5d8', type: 'poison' }], read: { damage: [], save: 'Con', onSave: 'half', enters: true }, dc: 13 } };
-  const sc = (q: number): Scene => ({ id: 's1', campaignId: 'c1', name: 'F', width: 1400, height: 700, grid: { ...DEFAULT_GRID }, shown: true, updatedAt: 0,
-    tokens: [{ id: 't-g', name: 'G', ...cell(q), size: 'M', color: '#000000', combatantId: 'g' }] });
-  const rolled = (how: 'start' | 'enter', round = 2): Resolution => ({ id: `x-${how}-${round}`, actor: 'pc:mira', action: areaRollName(fog, how === 'enter'), outcomes: [{ id: 'g', damage: 3 }], applied: [], at: 1, round });
-  const owed = (k: Combat, q: number) => areaRolls(k, sc(q), 'g').map((x) => (x.enters ? 'enter' : 'start'));
-  // walked in from outside: entering; began its turn there: the start of it
-  expect(owed({ ...k0, resolutions: [fog], movement: { g: { from: cell(0), dashes: 0 } } }, 3)).toEqual(['enter']);
-  expect(owed({ ...k0, resolutions: [fog] }, 3)).toEqual(['start']);
-  // rolled at the start of its turn: that's done, an entering roll this turn isn't (and last round's rolls don't count)
-  expect(owed({ ...k0, resolutions: [fog, rolled('start'), rolled('enter', 1)], movement: { g: { from: cell(3), dashes: 0 } } }, 3)).toEqual([]);
-  expect(owed({ ...k0, resolutions: [fog, rolled('start')] }, 3)).toEqual([]);
-  expect(owed({ ...k0, resolutions: [fog, rolled('enter')], movement: { g: { from: cell(0), dashes: 0 } } }, 3)).toEqual([]);
-  expect(owed({ ...k0, resolutions: [fog, rolled('enter', 1)], movement: { g: { from: cell(0), dashes: 0 } } }, 3)).toEqual(['enter']);
+    combatants: [cb({ id: 'pc:mira', kind: 'pc', name: 'Mira', characterId: 'mira', concentrating: true, concentratingOn: 'Cloudkill' }), cb({ id: 'g', kind: 'monster', name: 'Goblin' }), cb({ id: 'o', kind: 'monster', name: 'Orc' })] };
+  const sc = (g: number, o = 8, m = 9): Scene => ({ id: 's1', campaignId: 'c1', name: 'F', width: 1400, height: 700, grid: { ...DEFAULT_GRID }, shown: true, updatedAt: 0,
+    tokens: [{ id: 't-g', name: 'G', ...cell(g), size: 'M', color: '#000000', combatantId: 'g' }, { id: 't-o', name: 'O', ...cell(o), size: 'M', color: '#000000', combatantId: 'o' },
+      { id: 't-m', name: 'M', ...cell(m), size: 'M', color: '#000000', characterId: 'mira' }] });
+  const zone = (read: object, o: Partial<Resolution> = {}): Resolution => ({ id: 'r', actor: 'pc:mira', action: 'Cloudkill', outcomes: [], applied: [], at: 0, sceneId: 's1', round: 1, lasting: true,
+    area: { shape: 'cylinder', origin: cell(3), aim: cell(3), feet: 5 }, linger: { dice: [{ expr: '5d8', type: 'poison' }], read: { damage: [], save: 'Con', onSave: 'half', ...read }, dc: 13 }, ...o });
+  const cloudkill = zone({ enters: true });
+  // a move as the map makes it: the mover's first move on its own turn records where that turn began (movement.ts recordMove)
+  const moved = (k: Combat, from: number, to: number, who = 'g') => {
+    const s = sc(who === 'g' ? to : 0, who === 'o' ? to : 8), m = who === k.turn && !k.movement?.[who] ? { movement: { ...k.movement, [who]: { from: cell(from), dashes: 0 } } } : {};
+    return noteEntries({ ...k, ...m }, s, [{ t: s.tokens.find((t) => t.combatantId === who)!, from: cell(from) }]);
+  };
+  const owed = (k: Combat, s: Scene) => areaRolls(k, s).map((x) => `${x.id} ${x.kind}`);
+  test('walking in, walking through and out, and being pushed in on another’s turn are entering; walking out isn’t', () => {
+    expect(owed(moved({ ...k0, resolutions: [cloudkill] }, 0, 3), sc(3))).toEqual(['g enter']);
+    expect(owed(moved({ ...k0, resolutions: [cloudkill] }, 0, 6), sc(6))).toEqual(['g enter']); // through the cloud and out the far side
+    expect(owed(moved({ ...k0, resolutions: [cloudkill] }, 3, 6), sc(6))).toEqual(['g start']); // walked out: no entering, but its turn began there
+    expect(owed(moved({ ...k0, resolutions: [cloudkill] }, 5, 3, 'o'), sc(0, 3))).toEqual(['o enter']); // pushed in on the goblin's turn
+  });
+  test('the first time on a turn: once per creature and turn; out and back in after a start-of-turn roll is owed', () => {
+    const once = moved(moved({ ...k0, resolutions: [cloudkill] }, 0, 3), 3, 0);
+    expect(owed(moved(once, 0, 3), sc(3))).toEqual(['g enter']); // back in: still the one entering this turn
+    expect((moved(once, 0, 3).entered ?? []).length).toBe(1);
+    const started: Combat = { ...k0, resolutions: [cloudkill, { id: 'x', actor: 'pc:mira', action: areaRollName(cloudkill, 'start'), outcomes: [{ id: 'g', damage: 3 }], applied: [], at: 1, round: 2 }],
+      movement: { g: { from: cell(3), dashes: 0 } } };
+    expect(owed(started, sc(3))).toEqual([]); // rolled as its turn started
+    expect(owed(moved(moved(started, 3, 0), 0, 3), sc(3))).toEqual(['g enter']); // walked out and back in
+    const next = { ...moved({ ...k0, resolutions: [cloudkill] }, 0, 3), turn: 'o' };
+    expect(owed(next, sc(3))).toEqual([]); // the goblin's entering was its own turn's
+  });
+  test('the end of a turn there (Incendiary Cloud), never its start; a start-only area (Maddening Darkness) never on entering', () => {
+    const cloud = zone({ enters: true, ends: true, noStart: true });
+    expect(owed({ ...k0, resolutions: [cloud] }, sc(3))).toEqual(['g end']);
+    expect(owed({ ...k0, resolutions: [zone({})] }, sc(3))).toEqual(['g start']);
+    expect(owed(moved({ ...k0, resolutions: [zone({})] }, 0, 3), sc(3))).toEqual([]);
+  });
+  test('an area that goes with its caster (Spirit Guardians) is where the caster stands', () => {
+    const guard = zone({ enters: true }, { follows: true });
+    expect(areaNow(k0, guard, sc(0, 8, 6)).origin).toEqual(cell(6));
+    expect(owed({ ...k0, resolutions: [guard], turn: 'o' }, sc(0, 6, 6))).toEqual(['o start']);
+  });
+  test('an area that acts as it appears (Incendiary Cloud) rolls on those in it as it is cast, and stays for later', async () => {
+    const a = { ...spell({ save: 'Dex', onSave: 'half', lingering: true, appears: true, enters: true, ends: true, noStart: true, damage: [{ dice: '10d8', type: 'fire' }], area: { shape: 'sphere', feet: 20, self: false } }, { feet: 150 }), name: 'Incendiary Cloud' };
+    const plan = aimPlan(a)!;
+    expect([plan.dice.length, !!plan.linger]).toEqual([1, true]);
+    const s = sc(3), k = { ...k0, turn: 'pc:mira' };
+    const r = await workOut({ a, features: [], actor: k.combatants[0], combat: k, scene: s, diagonal: '5-5-5', aim: { point: cell(3), rolled: { dmg: [Array(10).fill(4)] }, toggles: [] },
+      findTarget: (id) => k.combatants.find((z) => z.id === id), info: (z) => targetOf(z, {}), nameOf: (z) => z.name, magical: false, id: 'r', now: 0, rng: () => 0.01 });
+    if (typeof r === 'string') throw new Error(r);
+    expect([r.resolution.outcomes.map((o) => [o.id, o.damage]), !!r.resolution.linger]).toEqual([[['g', 40]], true]);
+  });
+  test('Cloudkill drifts 10 feet straight away from its caster as the caster’s turn starts, once a round; Moonbeam moves where it’s put', () => {
+    const fog = zone({ enters: true, drift: { feet: 10 } }); // Mira at cell 9, the fog at cell 3: away is west
+    const k = { ...k0, turn: 'pc:mira', resolutions: [fog] };
+    const once = driftAreas(k, sc(0));
+    expect(once.resolutions![0].area!.origin).toEqual(cell(1));
+    expect(driftAreas(once, sc(0)).resolutions![0].area!.origin).toEqual(cell(1)); // not again this round
+    const goblins = { ...k, turn: 'g' };
+    expect(driftAreas(goblins, sc(0))).toBe(goblins); // only on its caster's turn
+    const beam = zone({ move: { feet: 60, cost: 'action' } }, { action: 'Moonbeam' });
+    const onBeam = { ...k0, combatants: k0.combatants.map((c) => (c.id === 'pc:mira' ? { ...c, concentratingOn: 'Moonbeam' } : c)) };
+    expect(movableAreas({ ...onBeam, resolutions: [beam, fog] }, 's1').map((r) => r.action)).toEqual(['Moonbeam']);
+    expect(moveArea({ ...k0, resolutions: [beam] }, 'r', cell(5)).resolutions![0].area).toMatchObject({ origin: cell(5), aim: cell(5) });
+  });
+  test('an area around its caster (Spirit Guardians) is cast to go with it', async () => {
+    const a = { ...spell({ save: 'Wis', onSave: 'half', lingering: true, enters: true, damage: [{ dice: '3d8', type: 'radiant' }], area: { shape: 'sphere', feet: 15, self: true } }, 'self' as never), name: 'Spirit Guardians' };
+    a.spell = { ...a.spell!, concentration: true };
+    const k = { ...k0, turn: 'pc:mira' }, s = sc(0);
+    const r = await workOut({ a, features: [], actor: k.combatants[0], combat: k, scene: s, diagonal: '5-5-5', aim: { rolled: { dmg: [] }, toggles: [] },
+      findTarget: (id) => k.combatants.find((z) => z.id === id), info: (z) => targetOf(z, {}), nameOf: (z) => z.name, magical: false, id: 'r', now: 0, rng: () => 0.01 });
+    if (typeof r === 'string') throw new Error(r);
+    expect([r.resolution.follows, !!r.resolution.linger]).toEqual([true, true]);
+  });
+  test('a save with no damage still lingers (Grease, Stinking Cloud)', () => {
+    expect(aimPlan({ ...spell({ save: 'Dex', onSave: 'none', lingering: true, enters: true, ends: true, noStart: true, conditions: ['Prone'], area: { shape: 'cube', feet: 10, self: false } }), name: 'Grease' })!.linger).toBeTruthy();
+    expect(aimPlan({ ...spell({ save: 'Con', onSave: 'none', lingering: true, area: { shape: 'sphere', feet: 20, self: false } }), name: 'Stinking Cloud' })!.linger).toBeTruthy();
+  });
 });

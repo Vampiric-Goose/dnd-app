@@ -106,7 +106,7 @@ describe('never silently wrong', () => {
     expect(readSpell(fix('Touch', 'Until the spell ends, the weapon deals an extra 1d4 damage of the chosen type when it hits.')).manual)
       .toBe('Extra damage on weapon hits isn’t automated: apply it by hand.');
     expect(readSpell(fix('120 feet', 'A ring of light rises. A creature that enters the area for the first time on a turn makes a Constitution saving throw or takes 2d10 radiant damage.')).manual)
-      .toBe('Damage over time isn’t automated: apply it by hand.');
+      .toMatch(/isn’t one the map can place/);
     expect(readSpell({ ...fix('Touch', 'The target is wreathed in energy for the duration.'), mech: { types: ['fire'] } }).manual)
       .toBe('Its damage isn’t automated: apply it by hand.');
     expect(readSpell({ ...fix('Self', 'You vanish from sight.'), mech: { conditions: ['Invisible'] } }).manual)
@@ -247,7 +247,7 @@ test('damage over time: entering the area and starting a turn there are both aut
 });
 
 test('damage over time with no area to place stays by hand', () => {
-  expect(readSpell(fix('Self', 'Spirits surround you. A creature that starts its turn within 10 feet of you takes 1d8 cold damage.')).manual).toBe('Damage over time isn’t automated: apply it by hand.');
+  expect(readSpell(fix('Self', 'Spirits surround you. A creature that starts its turn within 10 feet of you takes 1d8 cold damage.')).manual).toMatch(/isn’t one the map can place/);
 });
 
 test('a mark that pays off on any attack (Hex) rides spell attacks too; one on weapon attacks (Hunter\'s Mark) does not', () => {
@@ -376,7 +376,38 @@ test('an area that hurts a creature entering it is marked so, and says nothing i
   const r = readSpell({ level: 5, range: '120 feet', duration: 'Concentration, up to 10 minutes', text: [{ p: 'You create a 20-foot-radius sphere of fog centered on a point within range. When a creature enters the spell\'s area for the first time on a turn or starts its turn there, that creature must make a Constitution saving throw. The creature takes 5d8 poison damage on a failed save, or half as much damage on a successful one.' }] } as unknown as SpellDef);
   expect([r.lingering, r.enters, r.manual]).toEqual([true, true, undefined]);
 });
-test('an area that hurts on entering and at the end of a turn (Incendiary Cloud): entering automated, never the start of a turn', () => {
+test('an area that hurts as it appears, on entering and at the end of a turn (Incendiary Cloud): all automated, never the start of a turn', () => {
   const r = readSpell({ level: 8, range: '150 feet', duration: 'Concentration, up to 1 minute', text: [{ p: 'A cloud fills a 20-foot-radius sphere centered on a point within range. When the cloud appears, each creature in it must make a Dexterity saving throw, taking 10d8 fire damage on a failed save, or half as much on a successful one. A creature must also make this saving throw when it enters the spell\'s area for the first time on a turn or ends its turn there.' }] } as unknown as SpellDef);
-  expect([r.lingering, r.enters, r.noStart, r.manual]).toEqual([true, true, true, expect.stringMatching(/appears and at the end of a turn/)]);
+  expect([r.lingering, r.enters, r.noStart, r.ends, r.appears, r.manual]).toEqual([true, true, true, true, true, undefined]);
+});
+
+// Areas over time (paraphrased wording): when each acts — the start of a turn there, entering it, the end of a turn there, as it appears.
+describe('when a lasting area acts', () => {
+  const sp = (p: string) => readSpell({ level: 3, range: '120 feet', duration: 'Concentration, up to 1 minute', text: [{ p }] } as unknown as SpellDef);
+  const when = (r: ReturnType<typeof readSpell>) => ({ lingering: !!r.lingering, start: !r.noStart, enters: !!r.enters, ends: !!r.ends, appears: !!r.appears });
+  test('start, enter, end and appear phrasings', () => {
+    expect(when(sp('Fog fills a 20-foot-radius sphere. When a creature enters the spell\'s area for the first time on a turn or starts its turn there, it must make a Constitution saving throw, taking 5d8 poison damage on a failed save.')))
+      .toEqual({ lingering: true, start: true, enters: true, ends: false, appears: false });
+    expect(when(sp('A cloud fills a 20-foot-radius sphere. When the cloud appears, each creature in it must make a Dexterity saving throw, taking 10d8 fire damage on a failed save. A creature must also make this saving throw when it enters the spell\'s area for the first time on a turn or ends its turn there.')))
+      .toEqual({ lingering: true, start: false, enters: true, ends: true, appears: true });
+    expect(when(sp('A bonfire fills a 5-foot cube. Any creature in the bonfire\'s space when you cast the spell must succeed on a Dexterity saving throw or take 1d8 fire damage. A creature must also make the saving throw when it moves into the bonfire\'s space for the first time on a turn or ends its turn there.')))
+      .toEqual({ lingering: true, start: false, enters: true, ends: true, appears: true });
+    expect(when(sp('A 20-foot-radius sphere of whirling air appears. Each creature in the sphere when it appears or that ends its turn there must succeed on a Strength saving throw or take 2d6 bludgeoning damage.')))
+      .toEqual({ lingering: true, start: false, enters: false, ends: true, appears: true });
+    expect(when(sp('Gas fills a 20-foot-radius sphere. Each creature that is completely within the cloud at the start of its turn must make a Constitution saving throw.')))
+      .toEqual({ lingering: true, start: true, enters: false, ends: false, appears: false });
+    expect(when(sp('Webs fill a 20-foot cube. Each creature that starts its turn in the webs or that enters them during its turn must make a Dexterity saving throw or be restrained.')))
+      .toEqual({ lingering: true, start: true, enters: true, ends: false, appears: false });
+  });
+  test('an area with no damage still rolls its save (Grease, Sleet Storm); one the map can\'t place says so', () => {
+    expect(sp('Grease covers the ground in a 10-foot square. A creature that enters the area or ends its turn there must succeed on a Dexterity saving throw or fall prone.').manual).toBeUndefined();
+    expect(sp('A wall of whirling blades appears. When a creature enters the wall\'s area for the first time on a turn or starts its turn there, it must make a Dexterity saving throw, taking 6d10 slashing damage on a failed save.').manual).toMatch(/by hand/);
+  });
+  test('a creature merely told to enter an area doesn\'t make one (Antipathy)', () => {
+    expect(sp('A creature in a 200-foot cube must succeed on a Wisdom saving throw or be frightened, and use its movement on each of its turns to enter the area.').lingering).toBeUndefined();
+  });
+  test('a cube given by its sides (Cloud of Daggers) and a bare radius on the ground (Maelstrom)', () => {
+    expect(sp('Daggers fill a cube 5 feet on each side. A creature takes 4d4 slashing damage when it enters the spell\'s area for the first time on a turn or starts its turn there.').area).toEqual({ shape: 'cube', feet: 5, self: false });
+    expect(sp('Water swirls in a 30-foot radius centered on a point within range. Any creature that starts its turn there must succeed on a Strength saving throw or take 6d6 bludgeoning damage.').area).toEqual({ shape: 'cylinder', feet: 30, self: false });
+  });
 });

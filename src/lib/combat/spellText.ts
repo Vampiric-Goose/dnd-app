@@ -40,6 +40,16 @@ export interface SpellRead {
   enters?: true;
   /** it never hurts as a turn starts there (Incendiary Cloud: the end of one) */
   noStart?: true;
+  /** it acts on a creature ending its turn there (Incendiary Cloud) */
+  ends?: true;
+  /** it acts on those in it as it's cast ("when the cloud appears") */
+  appears?: true;
+  /** what it does as a turn ends there, when that differs (Hunger of Hadar's acid save; its start is cold, no save) */
+  atEnd?: { damage: { dice: string; type: string }[]; save?: string; onSave?: 'half' | 'none' };
+  /** it drifts this far from its caster as the caster's turn starts (Cloudkill) */
+  drift?: { feet: number };
+  /** its caster can move it this far, for that cost (Moonbeam: 60 ft, an action) */
+  move?: { feet: number; cost: 'action' | 'bonus' };
   heal?: { dice: string; mod: boolean };
   /** Temporary hit points it gives (False Life), `perSlot` more for each slot level above the spell's. */
   temp?: { dice: string; perSlot?: number };
@@ -155,7 +165,19 @@ export function readSpell(s: Pick<SpellDef, 'text' | 'level' | 'range'> & { name
   const r = s.range.trim(), feet = /(\d+)\s*(?:feet|foot)/i.exec(r), miles = /(\d+)\s*miles?/i.exec(r);
   const range = /^self/i.test(r) ? 'self' as const : /^touch/i.test(r) ? 'touch' as const : feet ? { feet: +feet[1] } : miles ? { feet: +miles[1] * 5280 } : undefined;
   if (range) out.range = range;
-  if (/starts its turn there|enters the (?:spell's )?area|starts its turn (?:with)?in/i.test(t)) out.lingering = true;
+  // a lasting area, by when it acts: the start of a turn there, entering it (a creature "enters" or "moves into" it), the end of a turn there;
+  // "when it appears" it acts on those in it too, as it's cast
+  const START = /\bstarts? its turn (?:there|in|with|within)\b|\bat the start of its turn\b/i;
+  const ENTER = /\benters (?:the |its |that )?(?:spell's |affected |wall's )?(?:area|webs?|vortex|cloud|sphere|cylinder|whirlwind|wall)\b|\bmoves into (?:the |its )?(?:spell's |bonfire's |spirit's )?(?:area|space)\b|\benters them\b|\bwhirlwind enters its space\b/i;
+  const END = /\bends its turn (?:there|in (?:the |that )?(?:area|cylinder|sphere|cloud|webs?)|inside)\b/i;
+  const APPEAR = /\bwhen (?:the |this )?(?:\w+ )?(?:first )?appears\b|\bin the \w+ when it appears\b|\bin the (?:bonfire's |spell's )?(?:space|area) when you cast\b/i;
+  if (START.test(t) || ENTER.test(t) || END.test(t)) {
+    out.lingering = true;
+    if (ENTER.test(t)) out.enters = true;
+    if (END.test(t)) out.ends = true;
+    if (!START.test(t)) out.noStart = true;
+    if (APPEAR.test(t)) out.appears = true;
+  }
   const heal = /regains? (?:a number of )?hit points equal to (\d+d\d+)( \+ your spellcasting ability modifier)?/i.exec(t);
   const flatHeal = /\bregains? (\d+(?:d\d+)?(?:\s*\+\s*\d+)?) hit points\b/i.exec(t); // Heal's 70, Regenerate's 4d8 + 15
   if (heal) out.heal = { dice: heal[1], mod: !!heal[2] };
@@ -176,6 +198,8 @@ export function readSpell(s: Pick<SpellDef, 'text' | 'level' | 'range'> & { name
   else if ((m = /(\d+)-foot cone/i.exec(t))) out.area = { shape: 'cone', feet: +m[1], self };
   else if ((m = /(\d+)-foot (?:cube|square)/i.exec(t))) out.area = { shape: 'cube', feet: +m[1], self }; // a square on the ground (Grease)
   else if ((m = /\bcylinder with an? (\d+)-foot radius/i.exec(t))) out.area = { shape: 'cylinder', feet: +m[1], self };
+  else if ((m = /\bcube (\d+) feet on each side\b/i.exec(t))) out.area = { shape: 'cube', feet: +m[1], self }; // Cloud of Daggers
+  else if (out.lingering && (m = /\bin an? (\d+)-foot radius centered on a point\b/i.exec(t))) out.area = { shape: 'cylinder', feet: +m[1], self }; // Maelstrom, on the ground
   else if ((m = /\bline (?:of [^.]*?)?(\d+) feet long and (\d+) feet wide/i.exec(t)) || (m = /(\d+)-foot[- ]long,? (\d+)-foot[- ]wide line/i.exec(t))) out.area = { shape: 'line', feet: +m[1], width: +m[2], self };
   else if ((m = /(\d+)-foot-wide,? (\d+)-foot-long line/i.exec(t))) out.area = { shape: 'line', feet: +m[2], width: +m[1], self };
   else if ((m = /within (\d+) feet of a point you choose/i.exec(t))) out.area = { shape: 'sphere', feet: +m[1], self }; // Sleep
@@ -206,22 +230,13 @@ export function readSpell(s: Pick<SpellDef, 'text' | 'level' | 'range'> & { name
   // never silently wrong: what the targeting can't deliver says so
   const hurts = out.damage.length > 0 || !!mech?.types?.length;
   if (out.rider) { /* delivered on the caster's weapon hits */ }
-  else if (out.lingering && hurts) { // the start of a turn there (aiming.ts startsIn) and entering it on a turn (entersIn) are automated
-    if (!out.area && !out.burst) out.manual = 'Damage over time isn’t automated: apply it by hand.';
-    else {
-      if (/\benters?\b/i.test(t)) out.enters = true;
-      // Incendiary Cloud: entering it, as it appears and at the end of a turn there; only entering is automated
-      if (!/starts its turn/i.test(t)) {
-        out.noStart = true;
-        out.manual = /ends its turn/i.test(t) ? 'Its damage as it appears and at the end of a turn there is by hand.' : 'Damage over time isn’t automated: apply it by hand.';
-      }
-    }
+  else if (out.lingering && (hurts || out.save || out.conditions?.length)) { // rolled as it acts (aiming.ts areaRolls), its save alone too
+    if (!out.area && !out.burst) out.manual = 'Its area isn’t one the map can place (a wall, a vortex): apply its effects by hand.';
   }
   else if (!out.attack && !out.save && t.split(/(?<=\.)\s+/).some((x) => /\bextra \d+d\d+/i.test(x) && /\b(?:hits?|weapon)\b/i.test(x)))
     out.manual = 'Extra damage on weapon hits isn’t automated: apply it by hand.';
   else if (hurts && !(out.damage.length && (out.attack || out.save || out.auto))) out.manual = 'Its damage isn’t automated: apply it by hand.';
   else if (out.conditions?.length && !out.save) out.manual = 'Its effect isn’t automated: apply it by hand.';
-  else if (out.lingering && out.conditions?.length) out.manual = 'Its saves in the area aren’t automated: roll them by hand.'; // Grease, Sleet Storm
   else if (pick) out.manual = 'On a failed save, apply the condition you choose by hand.';
   const called = summonOptions(s.text, s.higherLevels);
   if (called) out.summon = called;
