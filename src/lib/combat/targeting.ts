@@ -63,12 +63,12 @@ export interface Defenses { resist: string[]; immune: string[]; vulnerable: stri
 const names = (list: string[], type: string, magical: boolean) =>
   list.some((s) => new RegExp(`\\b${type}\\b`, 'i').test(s) && (!/nonmagical/i.test(s) || !magical));
 
-/** Damage after the target's defenses (PHB p.197: resistance halves, rounded down; vulnerability doubles), and why it changed. */
+/** Damage after the target's defenses (PHB p.197: resistance halves, vulnerability doubles), unrounded, and why it changed. */
 export function afterDefenses(amount: number, type: string, d: Defenses, magical: boolean): { amount: number; note?: string } {
   if (names(d.immune, type, magical)) return { amount: 0, note: `immune to ${type}` };
   let n = amount;
   const notes: string[] = [];
-  if (names(d.resist, type, magical)) { n = Math.floor(n / 2); notes.push(`resistant to ${type}`); }
+  if (names(d.resist, type, magical)) { n /= 2; notes.push(`resistant to ${type}`); } // exact: the total is rounded once (resolve.ts)
   if (names(d.vulnerable, type, magical)) { n *= 2; notes.push(`vulnerable to ${type}`); }
   return { amount: n, ...(notes.length && { note: notes.join(', ') }) };
 }

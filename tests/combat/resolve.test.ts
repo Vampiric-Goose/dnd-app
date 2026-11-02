@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { checkFaces, keptD20, resolveAttack, resolveSpell, totalOf, type TargetInfo } from '../../src/lib/combat/resolve.ts';
+import { checkFaces, keptD20, resolveAttack, resolveSpell, settle, totalOf, type TargetInfo } from '../../src/lib/combat/resolve.ts';
 import type { SpellRead } from '../../src/lib/combat/spellText.ts';
 
 // PHB 2014 p.194-196: an attack hits when d20 + bonus >= AC; a natural 20 always hits (a critical: damage dice twice), a natural 1
@@ -43,6 +43,22 @@ describe('an attack against AC 15', () => {
   test('resistance halves the damage and says why', () => {
     const resistant = goblin('g', { defenses: { resist: ['slashing'], immune: [], vulnerable: [] } });
     expect(resolveAttack(resistant, 5, sword, { d20: [12], dmg: [[3, 4]] }, false)).toMatchObject({ damage: 5, note: 'resistant to slashing' });
+  });
+});
+
+describe('rounding (the table ruling): modify the total, round once, in the enemy favour', () => {
+  const fire = (o: Partial<TargetInfo>) => goblin('x', { defenses: { resist: ['fire'], immune: [], vulnerable: [] }, ...o });
+  test('a resisted 7 is 3 for a monster, 4 for a PC', () => {
+    const r = { d20: [15], dmg: [[4]] }, dice = [{ expr: '1d4+3', type: 'fire' }];
+    expect(resolveAttack(fire({}), 5, dice, r, false).damage).toBe(3);
+    expect(resolveAttack(fire({ pc: true }), 5, dice, r, false).damage).toBe(4);
+  });
+  test('half on a save halves the total, not each type: 7 cold + 6 fire saved is 6 for a monster, 7 for a PC', () => {
+    const owed = [{ amount: 7, type: 'cold' }, { amount: 6, type: 'fire' }], none = { resist: [], immune: [], vulnerable: [] };
+    expect(settle({ defenses: none }, owed, true, 'half').damage).toBe(6);
+    expect(settle({ defenses: none, pc: true }, owed, true, 'half').damage).toBe(7);
+    // resistance stays with its type, still rounded once: 3.5 cold + 1.5 fire = 5
+    expect(settle({ defenses: { ...none, resist: ['fire'] } }, owed, true, 'half').damage).toBe(5);
   });
 });
 

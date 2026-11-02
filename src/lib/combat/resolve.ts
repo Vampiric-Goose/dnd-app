@@ -40,6 +40,12 @@ export const keptD20 = (r: Rolled): number => {
 };
 
 /** Damage of these expressions (faces already checked) after the target's defenses, with the notes why it changed. */
+/**
+ * The table's ruling: halves apply to the total and it is rounded once, in the enemy's favour: up when a PC takes it, down for a monster
+ * (a monster's 6.5 deals 7 to a PC; a PC's 6.5 deals 6 to a monster).
+ */
+export const roundDamage = (x: number, pc: boolean): number => (pc ? Math.ceil(x - 1e-9) : Math.floor(x + 1e-9));
+
 function hurt(t: TargetInfo, dice: { expr: string; type: string }[], faces: number[][], crit: boolean, magical: boolean): { damage: number; note?: string } {
   let damage = 0;
   const notes: string[] = [];
@@ -48,7 +54,7 @@ function hurt(t: TargetInfo, dice: { expr: string; type: string }[], faces: numb
     damage += r.amount;
     if (r.note && !notes.includes(r.note)) notes.push(r.note);
   });
-  return { damage, ...(notes.length && { note: notes.join(', ') }) };
+  return { damage: roundDamage(damage, t.pc), ...(notes.length && { note: notes.join(', ') }) };
 }
 
 const attackRoll = (t: TargetInfo, toHit: number, r: Rolled): { hit: boolean; roll: number; nat?: 20 | 1 } => {
@@ -89,15 +95,15 @@ export function resolveSpell(read: SpellRead, dice: { expr: string; type: string
 }
 
 /** What a save leaves of the owed damage: all on a failure, half or none on a success, each type after the target's defenses. */
-export function settle(t: Pick<TargetInfo, 'defenses'>, owed: { amount: number; type: string }[], ok: boolean, onSave: SpellRead['onSave']): { damage: number; note?: string } {
+export function settle(t: Pick<TargetInfo, 'defenses'> & { pc?: boolean }, owed: { amount: number; type: string }[], ok: boolean, onSave: SpellRead['onSave']): { damage: number; note?: string } {
   let damage = 0;
   const notes: string[] = [];
-  for (const o of owed) {
-    const r = afterDefenses(!ok ? o.amount : onSave === 'half' ? Math.floor(o.amount / 2) : 0, o.type, t.defenses, true);
+  for (const o of owed) { // half of the total = half of each part, kept exact; resistance stays with its type
+    const r = afterDefenses(!ok ? o.amount : onSave === 'half' ? o.amount / 2 : 0, o.type, t.defenses, true);
     damage += r.amount;
     if (r.note && !notes.includes(r.note)) notes.push(r.note);
   }
-  return { damage, ...(notes.length && { note: notes.join(', ') }) };
+  return { damage: roundDamage(damage, !!t.pc), ...(notes.length && { note: notes.join(', ') }) };
 }
 
 const mod = (score: number) => Math.floor((score - 10) / 2);

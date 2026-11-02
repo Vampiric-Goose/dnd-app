@@ -174,7 +174,7 @@ export async function settleSave(cid: string, rid: string, target: string, d20: 
     if (o.id !== target || !o.pending) return o;
     owed = o.owed;
     const { pending: _p, owed: _o, ...rest } = o;
-    return { ...rest, save: { roll: d20, total, ok }, ...settle({ defenses: { resist: sheet.resistances, immune: sheet.immunities, vulnerable: sheet.vulnerabilities } }, o.owed ?? [], ok, y.onSave) };
+    return { ...rest, save: { roll: d20, total, ok }, ...settle({ pc: true, defenses: { resist: sheet.resistances, immune: sheet.immunities, vulnerable: sheet.vulnerabilities } }, o.owed ?? [], ok, y.onSave) };
   }) }) })));
   if (!owed) return undefined; // already settled
   const damage = (await db.combat.get(cid))?.resolutions?.find((y) => y.id === rid)?.outcomes.find((o) => o.id === target && o.part === 'save')?.damage ?? 0;
