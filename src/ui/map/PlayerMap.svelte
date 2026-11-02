@@ -230,6 +230,7 @@
         bind:arrow={picked}
         {preset}
         {aim}
+        areas={view.areas}
         ondrag={(id, at) => { if (joined && base && (at ? canDrag(id) : !!mine(tokenOf(id)?.characterId))) sendDrag(base.id, id, at); }}
       />
     {/key}

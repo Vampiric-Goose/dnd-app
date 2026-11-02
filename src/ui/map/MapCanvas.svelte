@@ -27,7 +27,7 @@
   // arrow (bindable): the arrow picked with the Select tool (a tap on its line or head); onclear: Delete / Backspace with a clearable one picked.
   // ondelete: Delete / Backspace with tokens selected (unset = the key does nothing, as for players).
   // ondrag: the dragged token's ghost moved to a new cell (`at` undefined: the drag ended).
-  let { width, height, image, grid, tokens, dm, diagonal, selected, canDrag, speedOf, limitOf, onselect, onmove, rev = 0, fog, fogStyle = dm ? 'shade' : 'black', onfog, corner, arrows = [], ondeclare, onclear, ondelete, arrow = $bindable(), ondrag, preset, aim }: {
+  let { width, height, image, grid, tokens, dm, diagonal, selected, canDrag, speedOf, limitOf, onselect, onmove, rev = 0, fog, fogStyle = dm ? 'shade' : 'black', onfog, corner, arrows = [], ondeclare, onclear, ondelete, arrow = $bindable(), ondrag, preset, aim, areas = [] }: {
     width: number; height: number; image?: string; grid: Grid; tokens: CanvasToken[]; dm: boolean; diagonal: '5-5-5' | '5-10-5'; selected: string[];
     canDrag: (id: string) => boolean; speedOf?: (id: string) => number | undefined; limitOf?: (id: string) => { from?: Pt; budget: number; clamp: boolean } | undefined;
     onselect: (ids: string[]) => void; onmove: (ids: string[], primary: string, to: Pt) => void; rev?: number;
@@ -44,6 +44,8 @@
      */
     aim?: { from: Pt; pickable: (id: string) => Pickable; line: boolean; area?: { shape: Shape; feet: number; width?: number; on: 'creature' | 'point' | 'self'; range?: number };
       onpick: (p: { tokenId?: string; point: Pt; caught: string[] }) => void; oncancel: () => void };
+    /** Spell areas cast on this scene, drawn for everyone under the tokens. */
+    areas?: Template[];
   } = $props();
   // One selection at a time: picking tokens drops the arrow; an arrow that went (cleared, turn ended) is no longer picked.
   $effect(() => { if (selected.length || (arrow !== undefined && !arrows.some((a) => a.id === arrow))) untrack(() => (arrow = undefined)); });
@@ -103,6 +105,8 @@
     if (!adv.length && !dis.length) return '';
     return `${net === 'adv' ? 'Advantage' : net === 'dis' ? 'Disadvantage' : 'They cancel'}: ${[...adv.map((r) => `+ ${r}`), ...dis.map((r) => `− ${r}`)].join(', ')}${k.autoCrit ? '; a hit is a critical' : ''}.`;
   });
+  let castCells: Cell[] = [];
+  $effect(() => { castCells = areas.flatMap((a) => affectedCells(a, grid, width, height)); untrack(schedule); });
   let aimCells: Cell[] = [];
   $effect(() => { aimCells = aimTpl ? affectedCells(aimTpl, grid, width, height) : []; untrack(schedule); });
   let tplCells: Cell[] = [];
@@ -322,6 +326,21 @@
       ctx.beginPath();
       for (const c of reachableCells(grid, lim.from ?? mover, lim.budget, diagonal, width, height)) {
         if (grid.type === 'square') { const p = cellCenter(grid, c); ctx.rect(p.x - grid.size / 2 + px, p.y - grid.size / 2 + px, grid.size - 2 * px, grid.size - 2 * px); continue; }
+        const [first, ...rest] = hexCorners(grid, c);
+        ctx.moveTo(first.x, first.y);
+        for (const p of rest) ctx.lineTo(p.x, p.y);
+        ctx.closePath();
+      }
+      ctx.fill();
+      ctx.restore();
+    }
+    if (castCells.length) { // spell areas as cast, under the tokens
+      ctx.save();
+      ctx.globalAlpha = 0.28;
+      ctx.fillStyle = '#b07be0';
+      ctx.beginPath();
+      for (const c of castCells) {
+        if (grid.type === 'square') { const p = cellCenter(grid, c); ctx.rect(p.x - grid.size / 2, p.y - grid.size / 2, grid.size, grid.size); continue; }
         const [first, ...rest] = hexCorners(grid, c);
         ctx.moveTo(first.x, first.y);
         for (const p of rest) ctx.lineTo(p.x, p.y);

@@ -4,7 +4,7 @@
 // area catches every token in it, hidden ones too; the acting player hears only hit or miss, a spell's DC and the visible names caught.
 import { feetBetween, tokenFeet, type Pt } from '../map/grid.ts';
 import { tokensInTemplate, type Shape } from '../map/templates.ts';
-import type { Ability, Character, Combat, Combatant, Grid, Resolution, Scene, Size, Snap } from '../types.ts';
+import type { Ability, Area, Character, Combat, Combatant, Grid, Resolution, Scene, Size, Snap } from '../types.ts';
 import { combatantForToken } from './movement.ts';
 import { checkFaces, keptD20, resolveAttack, resolveSpell, type Outcome, type TargetInfo } from './resolve.ts';
 import { diceAt, type SpellRead } from './spellText.ts';
@@ -23,6 +23,21 @@ export interface AimArea { shape: Shape; feet: number; width?: number; on: 'crea
 /** `ignore`: disadvantages a feat removes (Sharpshooter: long range; Crossbow Expert: a hostile within 5 ft). */
 export interface AimPlan { reach: Reach; line: boolean; attack: boolean; toHit?: number; area?: AimArea; dice: { expr: string; type: string; on?: 'hit' | 'save' }[]; read?: SpellRead;
   ignore?: { long?: true; close?: true } }
+
+/**
+ * The spell areas to draw on a scene, for everyone: an instant one until its caster's next turn, a concentration one while its caster
+ * keeps concentrating. Undo drops the result, and its area with it.
+ */
+export function areasOn(k: Combat | undefined, sceneId: string): Area[] {
+  if (!k) return [];
+  const order = k.combatants.map((x) => x.id), now = order.indexOf(k.turn ?? '');
+  return (k.resolutions ?? []).flatMap((r) => {
+    if (!r.area || r.sceneId !== sceneId) return [];
+    const on = r.lasting ? !!k.combatants.find((x) => x.id === r.actor)?.concentrating
+      : r.round === k.round || (r.round === k.round - 1 && now < order.indexOf(r.actor));
+    return on ? [r.area] : [];
+  });
+}
 
 /** The creatures a result touches: its actor (who paid), everyone it rolled for, and everyone its area caught. */
 export const touched = (r: Pick<Resolution, 'actor' | 'outcomes' | 'caught'>): string[] => [...new Set([r.actor, ...r.outcomes.map((o) => o.id), ...(r.caught ?? [])])];
@@ -141,14 +156,15 @@ export async function workOut(i: WorkIn): Promise<Aimed | string> {
   if (area && area.on !== 'self' && (!point || (area.range !== undefined && feetBetween(s.grid, me, point, i.diagonal) > area.range))) return area.on === 'creature' ? 'pick a target' : 'out of range';
   if (!area && !target) return 'pick a target';
   const origin = area?.on === 'self' ? { x: me.x, y: me.y } : point!;
-  const caught = area ? tokensInTemplate({ shape: area.shape, origin, aim: aim.point ?? origin, feet: area.feet, ...(area.width && { width: area.width }) }, s.grid, s.tokens)
-    .map((id) => combatantForToken(k, s.tokens.find((t) => t.id === id)!)).filter((z): z is Combatant => !!z && !(area.on === 'self' && z.id === actor.id)) : [];
+  const placed: Area | undefined = area && { shape: area.shape, origin: { x: origin.x, y: origin.y }, aim: aim.point ?? { x: origin.x, y: origin.y }, feet: area.feet, ...(area.width && { width: area.width }) };
+  const caught = placed ? tokensInTemplate(placed, s.grid, s.tokens)
+    .map((id) => combatantForToken(k, s.tokens.find((t) => t.id === id)!)).filter((z): z is Combatant => !!z && !(area?.on === 'self' && z.id === actor.id)) : [];
   const bad = checkFaces(plan.dice.map((d) => ({ expr: d.expr, crit: crit && d.on !== 'save' })), rolled);
   if (bad) return bad;
   const outcomes = resolveSpell(read, plan.dice, a.cast!.dc, plan.toHit, target && await i.info(target), await Promise.all(caught.map(i.info)), rolled, i.rng, autoCrit);
   const hit = outcomes.find((o) => o.part === 'hit')?.hit;
   return {
-    resolution: { ...base, outcomes: outcomes.map(withWhy), ...(area && { caught: caught.map((z) => z.id) }), ...(read.save && { dc: a.cast!.dc, ability: read.save.toLowerCase() as Ability, onSave: read.onSave }) },
+    resolution: { ...base, outcomes: outcomes.map(withWhy), ...(placed && { caught: caught.map((z) => z.id), area: placed, sceneId: s.id, round: k.round, ...(a.spell?.concentration && { lasting: true as const }) }), ...(read.save && { dc: a.cast!.dc, ability: read.save.toLowerCase() as Ability, onSave: read.onSave }) },
     outcome: { action: a.name, ...(hit !== undefined && { hit }), ...(read.save && a.cast!.dc !== undefined && { dc: a.cast!.dc }),
       ...(area && { caught: caught.filter((z) => !z.hidden && (i.seen?.(z) ?? true)).map(i.nameOf) }) },
   };

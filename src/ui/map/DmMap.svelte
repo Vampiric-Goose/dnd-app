@@ -13,7 +13,7 @@
   import { currentRun, patchCombatant } from '../../lib/combat/combat.ts';
   import { budgetApplies, budgetFeet, combatantForToken, effectiveSpeed, originOf, recordMove } from '../../lib/combat/movement.ts';
   import { applyResolution, editCharacter, settleSave, turn, undoResolution, updateCombat } from '../../lib/combat/store.ts';
-  import { aimPlan, foeWithin5, judge, snapOf, touched, workOut, type AimPlan } from '../../lib/combat/aiming.ts';
+  import { aimPlan, areasOn, foeWithin5, judge, snapOf, touched, workOut, type AimPlan } from '../../lib/combat/aiming.ts';
   import { targetOf } from '../../lib/combat/resolve.ts';
   import { targetingOn, type Pickable, type Toggle } from '../../lib/combat/targeting.ts';
   import { roll } from '../../lib/rolls.svelte.ts';
@@ -451,6 +451,7 @@
         ondrag={(id, at) => { if (scene?.shown) sendDrag(scene.id, id, at); }}
         {preset}
         {aim}
+        areas={areasOn(combat, scene.id)}
       />
     {/key}
     <button type="button" class="sheet-btn" onclick={() => (sheet = true)}>{fighting ? 'Turn and tokens' : 'Tokens and scene'}</button>

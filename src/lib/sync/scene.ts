@@ -6,12 +6,14 @@ import { feetBetween, snap } from '../map/grid.ts';
 import { liveHp } from '../map/scene.ts';
 import { isRec, sceneProblem } from '../recordShape.ts';
 import { computeSheet } from '../rules/sheet.ts';
-import type { CampaignSettings, Character, Combat, Grid, Scene, Size } from '../types.ts';
+import type { Area, CampaignSettings, Character, Combat, Grid, Scene, Size } from '../types.ts';
+import { areasOn } from '../combat/aiming.ts';
 import { currentActor, healthStatus, trackerForPlayers, type HealthStatus } from './project.ts';
 import { HASH } from './protocol.ts';
 
 export interface PlayerToken { id: string; name: string; x: number; y: number; size: Size; color: string; portrait?: string; characterId?: string; conditions: string[]; health?: HealthStatus }
-export interface PlayerScene { id: string; name: string; image?: string; width: number; height: number; grid: Grid; fog?: string /* C */; tokens: PlayerToken[] }
+export interface PlayerScene { id: string; name: string; image?: string; width: number; height: number; grid: Grid; fog?: string /* C */; tokens: PlayerToken[];
+  /** Spell areas cast on this scene (areasOn): everyone sees them. */ areas?: Area[] }
 
 const gridOf = (g: Grid): Grid => ({ type: g.type, size: g.size, offsetX: g.offsetX, offsetY: g.offsetY, color: g.color, opacity: g.opacity, feet: g.feet });
 
@@ -40,7 +42,8 @@ export function sceneForPlayers(s: Scene | undefined, characters: Character[], c
     const health = gate ? healthStatus(live.hp, live.maxHp) : undefined;
     tokens.push({ ...base, conditions: [...live.conditions], ...(health && { health }) });
   }
-  const v: PlayerScene = { id: s.id, name: s.name, ...(s.image !== undefined && { image: s.image }), width: s.width, height: s.height, grid: gridOf(s.grid), tokens };
+  const areas = areasOn(combat, s.id);
+  const v: PlayerScene = { id: s.id, name: s.name, ...(s.image !== undefined && { image: s.image }), width: s.width, height: s.height, grid: gridOf(s.grid), tokens, ...(areas.length && { areas }) };
   return settings.fog ? applyFog(v, s) : v; // C2: no token whose centre is fogged; the fog (or all fogged) goes along
 }
 
@@ -96,6 +99,7 @@ const str = (v: unknown, max: number): v is string => typeof v === 'string' && v
 const fin = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 
 /** A host's scene rebuilt from its known fields (a crafted host stands in for the DM too). Undefined when its frame or grid is bad. */
+const AREA_SHAPES = ['cone', 'sphere', 'cube', 'line', 'cylinder'];
 export function cleanScene(v: unknown): PlayerScene | undefined {
   if (!isRec(v) || !str(v.id, 100) || !str(v.name, 200) || !Array.isArray(v.tokens)) return undefined;
   if (sceneProblem({ id: v.id, campaignId: '', name: v.name, width: v.width, height: v.height, grid: v.grid, tokens: [] })) return undefined;
@@ -109,6 +113,10 @@ export function cleanScene(v: unknown): PlayerScene | undefined {
       conditions, ...(typeof t.health === 'string' && HEALTH.includes(t.health) && { health: t.health as HealthStatus }) }];
   }).slice(0, 200);
   const w = v.width as number, h = v.height as number, fog = cleanFog(v.fog, w, h); // a bad fog: all fogged
+  const pt = (p: unknown): p is { x: number; y: number } => isRec(p) && fin(p.x) && fin(p.y);
+  const areas = (Array.isArray(v.areas) ? v.areas : []).slice(0, 20).flatMap((a): Area[] => isRec(a) && AREA_SHAPES.includes(a.shape as string) && pt(a.origin) && pt(a.aim)
+    && fin(a.feet) && (a.feet as number) > 0 && (a.feet as number) <= 1000 && (a.width === undefined || (fin(a.width) && (a.width as number) > 0 && (a.width as number) <= 100))
+    ? [{ shape: a.shape as Area['shape'], origin: { x: a.origin.x, y: a.origin.y }, aim: { x: a.aim.x, y: a.aim.y }, feet: a.feet as number, ...(a.width !== undefined && { width: a.width as number }) }] : []);
   return { id: v.id, name: v.name, ...(typeof v.image === 'string' && HASH.test(v.image) && { image: v.image }), width: w, height: h,
-    grid: gridOf(v.grid as Grid), ...(fog !== undefined && { fog }), tokens };
+    grid: gridOf(v.grid as Grid), ...(fog !== undefined && { fog }), tokens, ...(areas.length && { areas }) };
 }
