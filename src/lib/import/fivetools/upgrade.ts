@@ -5,18 +5,28 @@ import type { ItemDef, Pack } from '../../types.ts';
 import { CONVERTER_5E } from '../version.ts';
 import { import5etools, mergePack } from './index.ts';
 
+/** Empty: missing, '', [] or {}. */
+const blank = (v: unknown) => v === undefined || v === '' || (Array.isArray(v) ? !v.length : typeof v === 'object' && v !== null && !Object.keys(v).length);
+/**
+ * Never blank what the stored copy has filled: a field the re-conversion leaves empty keeps its stored value. An upgrade can only miss
+ * data (side files it didn't get, a converter slip), never mean to delete it, so a bad upgrade can't cost anyone a re-import.
+ */
+// ponytail: a converter fix that must remove a field reaches stored books only by a re-import
+function keepFilled<T extends object>(fresh: T, old: T | undefined): T {
+  if (!old) return fresh;
+  const out = { ...fresh } as Record<string, unknown>;
+  for (const [k, v] of Object.entries(old)) if (blank(out[k]) && !blank(v)) out[k] = v;
+  return out as T;
+}
+
 /** The stored pack with the re-converted one merged in. A stored item made from a base that the converter no longer makes (a doubled
- * "Adamantine Adamantine Longsword") goes; everything else stays (merged as a re-import is). */
+ * "Adamantine Adamantine Longsword") goes; everything else stays (merged as a re-import is), and nothing filled is blanked. */
 export function upgradedPack(stored: Pack, fresh: Pack): Pack {
   const made = new Set(fresh.entities.map((e) => e.id));
   const kept = { ...stored, entities: stored.entities.filter((e) => !(e.kind === 'item' && (e as ItemDef).baseItemId && !made.has(e.id))) };
-  // A spell's class lists come from the spell-source file, which isn't kept raw: a re-converted spell keeps the lists it was imported with.
-  const was = new Map(stored.entities.map((e) => [e.id, e]));
-  const entities = fresh.entities.map((e) => {
-    const old = was.get(e.id);
-    return e.kind === 'spell' && !e.classes.length && old?.kind === 'spell' && old.classes.length ? { ...e, classes: old.classes } : e;
-  });
-  return mergePack(kept, { ...fresh, entities });
+  const was = new Map(stored.entities.map((e) => [e.id, e])), wasPatch = new Map(stored.patches.map((p) => [`${p.targetId}|${p.alias}`, p]));
+  return mergePack(kept, { ...fresh, entities: fresh.entities.map((e) => keepFilled(e, was.get(e.id))),
+    patches: fresh.patches.map((p) => keepFilled(p, wasPatch.get(`${p.targetId}|${p.alias}`))) });
 }
 
 /** Groups raw records by their 5etools key (the raw key's first part) into one file the importer reads; the homebrew sources this device

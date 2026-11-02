@@ -128,6 +128,9 @@ export async function import5etools(
       continue;
     }
     const declared = declaredIn(j);
+    // spell-source entries kept raw by an earlier import (the stored books an upgrade re-converts): a lookup like the source files
+    if (Array.isArray(j.spellClasses)) lookups.push(new Map(j.spellClasses.flatMap((e: Raw): [string, ClassRef[]][] =>
+      e && typeof e.name === 'string' && typeof e.source === 'string' && Array.isArray(e.refs) ? [[spellKey(e.name, e.source), e.refs.filter((x: Raw) => x && typeof x.name === 'string')]] : [])));
     for (const s of declared) allDeclared.add(s);
     for (const k of META_KEYS) for (const b of arr(j[k])) if (b?.id && b?.name) packNames.set(up(b.id), String(b.name));
     for (const k of CONTENT_KEYS) for (const r of arr(j[k])) {
@@ -231,6 +234,9 @@ export async function import5etools(
       live.push({ ...e, r, label });
       const rk = keyOf(e.key, r);
       if (rk) raw.push([rk, r]);
+      // a spell's class lists live in the spell-source files, not its record: kept raw too, so an upgrade can rebuild them
+      const refs = e.key === 'spell' ? lookups.flatMap((l) => l.get(spellKey(r.name, r.source)) ?? []) : [];
+      if (refs.length) raw.push([`spellClasses|${String(r.name).toLowerCase()}|${up(r.source)}`, { name: r.name, source: r.source, refs }]);
     } catch (err) {
       if (err instanceof CopyRejected) {
         tally(err.why, err.source, e.file, e.key);

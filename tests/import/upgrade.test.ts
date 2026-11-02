@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, expect, test } from 'vitest';
 import { db, resetDb } from '../../src/lib/db.ts';
-import { rawFile, upgradeImports } from '../../src/lib/import/fivetools/upgrade.ts';
+import { rawFile, upgradedPack, upgradeImports } from '../../src/lib/import/fivetools/upgrade.ts';
 import { CONVERTER_5E } from '../../src/lib/import/version.ts';
 import type { ItemDef, Pack, RaceDef, SpellDef, SubraceDef } from '../../src/lib/types.ts';
 import { readFixture, run, srdIdx } from '../fixtures/import.ts';
@@ -55,4 +55,26 @@ test('an upgrade keeps a spell\'s class lists: they came from the spell-source f
   await db.raw5e.putMany(res.raw);
   await upgradeImports(async () => srdIdx);
   expect([...spellOf((await db.packs.get(p.id))!).classes].sort()).toEqual(['sorcerer', 'wizard']);
+});
+
+test('an import keeps the spell-source entries it read, so an upgrade rebuilds class lists from them (a list that changes is followed)', async () => {
+  const res = await run({
+    'spells.json': { spell: [{ name: 'Testpult', source: 'TST', level: 1, school: 'V', time: [{ number: 1, unit: 'action' }], range: { type: 'point', distance: { type: 'feet', amount: 60 } }, entries: ['Fling.'] }] },
+    'gendata-spell-source-lookup.json': { tst: { testpult: { class: { PHB: { Wizard: true } } } } },
+  });
+  expect(res.raw.find(([k]) => k.startsWith('spellClasses|'))).toEqual(['spellClasses|testpult|TST', { name: 'Testpult', source: 'TST', refs: [{ name: 'Wizard', source: 'PHB' }] }]);
+  const p = res.packs.find((x) => x.source === 'TST')!;
+  const stale = { ...p, hash: 'old', entities: p.entities.map((e) => (e.name === 'Testpult' ? { ...e, classes: [] } : e)) }; // what the bad upgrade left
+  await db.packs.put(stale);
+  await db.raw5e.putMany(res.raw);
+  await upgradeImports(async () => srdIdx);
+  expect(((await db.packs.get(p.id))!.entities.find((e) => e.name === 'Testpult') as SpellDef).classes).toEqual(['wizard']);
+});
+
+test('an upgrade never blanks a field the stored copy has filled', () => {
+  const spell = (o: object) => ({ kind: 'spell', id: 'spell:x@TST', name: 'X', source: 'TST', text: [{ p: 'T.' }], level: 1, school: 'evocation', castingTime: '', range: '', components: {}, duration: '',
+    concentration: false, ritual: false, classes: ['wizard'], ...o });
+  const pack = (e: object): Pack => ({ id: 'tst', name: 'T', source: 'TST', importedAt: 0, hash: 'h', patches: [], entities: [e as SpellDef] });
+  const out = upgradedPack(pack(spell({ higherLevels: [{ p: 'More.' }] })), pack(spell({ classes: [], text: [], level: 2 })));
+  expect(out.entities[0]).toMatchObject({ classes: ['wizard'], text: [{ p: 'T.' }], higherLevels: [{ p: 'More.' }], level: 2 });
 });
