@@ -53,7 +53,7 @@ export interface SpellRead {
   /** It leaps this far from its target to another when its dice match (Chaos Bolt). */
   leap?: number;
   /** Extra damage on the caster's weapon hits (`type` '' = the weapon's): the next hit only (`once`), or hits on a creature it marks. */
-  rider?: { dice: string; type: string; once?: true; marked?: true };
+  rider?: { dice: string; type: string; once?: true; marked?: true; anyAttack?: true };
   area?: SpellArea;
 }
 
@@ -144,7 +144,8 @@ export function readSpell(s: Pick<SpellDef, 'text' | 'level' | 'range'> & { name
   const every = new RegExp(`weapon attacks deal an extra (\\d+d\\d+) ${ty}damage`, 'i').exec(t);
   const nextHit = /next time you hit/i.test(t) ? extra.exec(t) : null;
   const rm = marked ?? every ?? nextHit;
-  if (rm) out.rider = { dice: rm[1], type: (rm[2] ?? '').toLowerCase(), ...(rm === nextHit && { once: true as const }), ...(rm === marked && { marked: true as const }) };
+  if (rm) out.rider = { dice: rm[1], type: (rm[2] ?? '').toLowerCase(), ...(rm === nextHit && { once: true as const }), ...(rm === marked && { marked: true as const }),
+    ...(rm === marked && /whenever you hit it with an attack/i.test(t) && { anyAttack: true as const }) }; // Hex: any attack; Hunter's Mark: weapon attacks
   // never silently wrong: what the targeting can't deliver says so
   const hurts = out.damage.length > 0 || !!mech?.types?.length;
   if (out.rider) { /* delivered on the caster's weapon hits */ }

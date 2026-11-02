@@ -130,6 +130,17 @@ describe('workOut on the DM\'s map', () => {
     const r = await workOut({ ...base(moon, { dmg: [] }), aim: { point: cell(0), rolled: { dmg: [] }, toggles: [] } });
     expect(r).toMatchObject({ resolution: { outcomes: [], linger: { dice: [{ expr: '2d10', type: 'radiant' }], read: { save: 'Con' }, dc: 13 } } });
   });
+  test('Hex on a spell attack: its dice ride each hit on the marked creature', async () => {
+    const bolt = spell({ attack: 'ranged', damage: [{ dice: '1d10', type: 'fire' }] });
+    const hexed = (on: string) => workOut({ ...base(bolt, { d20: [18, 18], dmg: [[5], [3]] }), actor: { ...k.combatants[0], rider: { spell: 'Hex', dice: '1d6', type: 'necrotic', target: on, anyAttack: true } } });
+    expect(await hexed('pc:thorin')).toMatchObject({ resolution: { outcomes: [{ id: 'pc:thorin', hit: true, damage: 8 }] } });
+    expect(await hexed('pc:mira')).toMatchObject({ resolution: { outcomes: [{ id: 'pc:thorin', hit: true, damage: 5 }] } });
+  });
+  test('a concentration spell\'s result knows which casting it is (the caster\'s next)', async () => {
+    const hold = { ...spell({ save: 'Wis', conditions: ['Paralyzed'] }), spell: { id: 's', level: 2, concentration: true } };
+    const r = await workOut({ ...base(hold, { dmg: [] }), actor: { ...k.combatants[0], concentrationCount: 4 }, aim: { target: 'pc:thorin', rolled: { dmg: [] }, toggles: [] } });
+    expect(r).toMatchObject({ resolution: { lasting: true, cast: 5 } });
+  });
   test('Chaos Bolt: of the two d8s, the type that hurts more', async () => {
     const bolt = spell({ attack: 'ranged', damage: [{ dice: '2d8+1d6', type: '' }], choices: ['acid', 'cold', 'fire'],
       typeFromDie: { sides: 8, types: ['acid', 'cold', 'fire', 'force', 'lightning', 'poison', 'psychic', 'thunder'] } });

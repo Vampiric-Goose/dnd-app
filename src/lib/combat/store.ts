@@ -5,7 +5,7 @@ import { db, DeletedError } from '../db.ts';
 import { computeSheet } from '../rules/sheet.ts';
 import type { Applied, CampaignSettings, Character, Combat, Combatant, Duration, Encounter, MonsterDef, Outcome, Resolution, Scene, Snap } from '../types.ts';
 import { settle } from './resolve.ts';
-import { endedSpells, snapOf, touched } from './aiming.ts';
+import { castLive, endedSpells, snapOf, touched } from './aiming.ts';
 import { canon } from '../sync/merge.ts';
 import { uid } from '../uid.ts';
 import { addMonsters, concentrationDc, turnIds, encounterPicks, initOk, monsterHp, newCombat, next, patchCombatant, removeStep, rollInit, setInit, start, type Expired, type HpOp, type Step } from './combat.ts';
@@ -165,14 +165,28 @@ async function snapNow(cid: string, ids: string[]): Promise<Snap> {
  * Targeting: a use worked out by resolve.ts. Its damage goes on (not a PC's pending save), and it joins the last 20 results with what it
  * touched before (`before`: taken before it was paid for; else now) and after, for Undo.
  */
+/** The last 20 results, and older ones whose spell still runs (a concentration casting still up, a timed spell still in its rounds). */
+function kept(c: Combat, list: Resolution[]): Resolution[] {
+  const recent = new Set(list.slice(-20).map((r) => r.id));
+  return list.filter((r) => recent.has(r.id) || (r.lasting && castLive(c, r)) || (r.rounds !== undefined && r.round !== undefined && c.round - r.round < r.rounds));
+}
+
+/** Who holds conditions from the live concentration spells of these casters: a result that ends one of them changes those creatures too. */
+function holders(k: Combat | undefined, ids: string[]): string[] {
+  return [...new Set((k?.resolutions ?? []).filter((r) => r.lasting && ids.includes(r.actor) && castLive(k!, r)).flatMap((r) => (r.inflicted ?? []).map((d) => d.id)))].filter((id) => !ids.includes(id));
+}
+
 export async function applyResolution(cid: string, r: Omit<Resolution, 'applied'>, settings: CampaignSettings, before?: Snap): Promise<Combat> {
-  const ids = touched(r), was = before ?? await snapNow(cid, ids);
+  // Undo also gives back what ending a caster's concentration took off other creatures, so those are in the snapshots too
+  const more = holders(await db.combat.get(cid), touched(r)), ids = [...touched(r), ...more];
+  const extra = await snapNow(cid, more), was0 = before ?? await snapNow(cid, touched(r));
+  const was: Snap = { combatants: { ...extra.combatants, ...was0.combatants }, states: { ...extra.states, ...was0.states } };
   const applied: Applied[] = [];
   for (const o of r.outcomes) if (o.damage > 0 && !o.pending) applied.push(await hurtOne(cid, o.id, o.damage, o.nat === 20 && o.part !== 'save', settings));
   const inflicted = await inflict(cid, r, r.outcomes.flatMap((o) => (o.inflict ?? []).map((condition) => ({ id: o.id, condition, ...(o.save && { bonus: o.save.total - o.save.roll }) }))));
   if (r.rider || r.spent) await update(cid, (c) => ({ ...c, combatants: c.combatants.map((x) => (x.id !== r.actor ? x : r.rider ? { ...x, rider: r.rider } : (({ rider: _r, ...rest }) => rest)(x))) }));
   const after = await snapNow(cid, ids);
-  return serial(() => update(cid, (c) => ({ ...c, resolutions: [...(c.resolutions ?? []), { ...r, applied, ...(inflicted.length && { inflicted }), undo: { before: was, after } }].slice(-20) })));
+  return serial(() => update(cid, (c) => ({ ...c, resolutions: kept(c, [...(c.resolutions ?? []), { ...r, applied, ...(inflicted.length && { inflicted }), undo: { before: was, after } }]) })));
 }
 
 /** The conditions a result's failed saves leave, put on; a non-concentration spell's last its rounds (to the start of its caster's turn). */
@@ -202,7 +216,7 @@ async function repeatSaves(cid: string, id: string): Promise<void> {
     }
     const after = await snapNow(cid, [id]);
     const next: Resolution = { id: uid(), actor: r.actor, action: `${r.action} (repeat save)`, dc: r.dc, ...(r.ability && { ability: r.ability }), outcomes: [o], applied: [], at: Date.now(), undo: { before, after } };
-    await update(cid, (c) => ({ ...c, resolutions: [...(c.resolutions ?? []), next].slice(-20) }));
+    await update(cid, (c) => ({ ...c, resolutions: kept(c, [...(c.resolutions ?? []), next]) }));
   }
 }
 
@@ -270,7 +284,8 @@ export async function settleSave(cid: string, rid: string, target: string, d20: 
   if (!owed) return undefined; // already settled
   const damage = (await db.combat.get(cid))?.resolutions?.find((y) => y.id === rid)?.outcomes.find((o) => o.id === target && o.part === 'save')?.damage ?? 0;
   const applied = damage > 0 ? await hurtOne(cid, target, damage, false, settings) : undefined;
-  const inflicted = await inflict(cid, r, lost.map((condition) => ({ id: target, condition })));
+  const live = !r.lasting || castLive((await db.combat.get(cid)) ?? k!, r); // a failure after the spell ended leaves nothing
+  const inflicted = await inflict(cid, r, live ? lost.map((condition) => ({ id: target, condition })) : []);
   for (const c of freed) await conditionOn(cid, target, c, false);
   const now = await snapNow(cid, [target]); // Undo's "after" follows the save's damage
   return serial(() => update(cid, (c) => ({ ...c, resolutions: (c.resolutions ?? []).map((y) => (y.id !== rid ? y : { ...y, ...(applied && { applied: [...y.applied, applied] }), ...(inflicted.length && { inflicted: [...(y.inflicted ?? []), ...inflicted] }),

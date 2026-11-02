@@ -207,3 +207,12 @@ test('a race feat (Variant Human), picked from Choices to make: the feat is on t
   expect(embedStale(reverted, ix, S)).toBe(true);
   expect(featureList(embedContent(reverted, ix), S).map((f) => f.name)).toContain('Sturdy');
 });
+
+test('a spell copied before the import kept book mechanics is stale: the sheet re-embeds it', () => {
+  const ixOf = (mm: Entity) => new ContentIndex([{ id: 'p', name: 'P', source: 'FIX', importedAt: 0, hash: '', patches: [], entities: [...fixtureEntities.filter((e) => e.id !== magicMissile.id), mm] }]);
+  const old = ixOf(magicMissile), now = ixOf({ ...magicMissile, mech: { types: ['force'] } } as Entity);
+  const m = mkChar({ race: 'human', base: {}, levels: ['wizard'] });
+  const c = embedContent({ ...m, build: { ...m.build, spells: { [m.build.levels[0].classId]: { known: [magicMissile.id], prepared: [magicMissile.id] } } } }, old);
+  expect(embedStale(c, now, S)).toBe(true);
+  expect(embedStale(embedContent(c, now), now, S)).toBe(false);
+});

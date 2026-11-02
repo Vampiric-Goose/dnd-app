@@ -273,7 +273,7 @@ export function applyUse(k: Combat, x: Combatant, a: TurnAction, perAction = 1, 
     y = { ...y, conditions: [...(y.conditions ?? []).filter((n) => n.toLowerCase() !== 'prone'), ...(a.id === 'free:prone' ? ['Prone'] : [])] };
   }
   if (a.grants === 'action') { y = grantAction(y); y = { ...y, economy: { ...y.economy!, surged: true } }; }
-  if (a.spell?.concentration) y = { ...y, concentrating: true, concentratingOn: a.name };
+  if (a.spell?.concentration) y = { ...y, concentrating: true, concentratingOn: a.name, concentrationCount: (y.concentrationCount ?? 0) + 1 };
   const rd = a.cast?.read.rider;
   if (rd && !rd.marked) y = { ...y, rider: { spell: a.name, dice: rd.dice, type: rd.type, ...(rd.once && { once: true as const }) } }; // a marked one comes with its mark (aiming.ts)
   if (a.legendary && y.legendary) y = { ...y, legendary: { ...y.legendary, used: y.legendary.used + a.legendary } };

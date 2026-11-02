@@ -22,8 +22,12 @@ const sheetOf = (c: Character, index: ContentIndex, settings: CampaignSettings) 
 
 export const listChoices = (c: Character, index: ContentIndex, settings: CampaignSettings): PendingChoice[] => enumerateChoices(c, lookupOf(c, index), settings);
 
-/** An answered choice the character's own snapshots no longer offer (a sync once kept an older copy of the content): re-embed it. */
+/**
+ * Re-embed when an answered choice is one the character's own snapshots no longer offer (a sync once kept an older copy of the content),
+ * or a spell was copied before its book's mechanics were kept on import (the index's copy has `mech`, the character's doesn't).
+ */
 export function embedStale(c: Character, index: ContentIndex, settings: CampaignSettings): boolean {
+  if (Object.values(c.embedded).some(e => e?.kind === 'spell' && !e.mech && (index.get(e.id) as SpellDef | undefined)?.mech)) return true;
   const mine = new Set(enumerateChoices(c, id => c.embedded[id], settings).map(p => p.key));
   return listChoices(c, index, settings).some(p => p.answer && !mine.has(p.key));
 }

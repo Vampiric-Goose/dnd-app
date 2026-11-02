@@ -249,3 +249,8 @@ test('damage over time: only entering the area stays by hand', () => {
 test('damage over time with no area to place stays by hand', () => {
   expect(readSpell(fix('Self', 'Spirits surround you. A creature that starts its turn within 10 feet of you takes 1d8 cold damage.')).manual).toBe('Damage over time isn’t automated: apply it by hand.');
 });
+
+test('a mark that pays off on any attack (Hex) rides spell attacks too; one on weapon attacks (Hunter\'s Mark) does not', () => {
+  expect(readSpell(fix('90 feet', 'You curse a creature. Until the spell ends, you deal an extra 1d6 necrotic damage to the target whenever you hit it with an attack.')).rider)
+    .toEqual({ dice: '1d6', type: 'necrotic', marked: true, anyAttack: true });
+});

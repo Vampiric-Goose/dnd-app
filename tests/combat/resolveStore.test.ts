@@ -123,6 +123,7 @@ test('a failed save leaves its conditions, the spell\'s own name too; Undo takes
 });
 
 test('a PC who fails the save from the pop-up gets the conditions; Undo takes them back', async () => {
+  await updateCombat('c1', (c) => ({ ...c, combatants: c.combatants.map((x) => (x.id === 'g2' ? { ...x, concentrating: true, concentratingOn: 'Hold Person' } : x)) }));
   await applyResolution('c1', res('r1', [{ id: 'pc:p', part: 'save', pending: true, damage: 0, owed: [], inflicts: ['Paralyzed', 'Hold Person'] }],
     { actor: 'g2', action: 'Hold Person', lasting: true, dc: 13, ability: 'wis' }), settings);
   await settleSave('c1', 'r1', 'pc:p', 2, settings);
@@ -183,4 +184,38 @@ test('a once-only rider (a smite) is spent by a hit, kept after a miss', async (
   expect(await rider()).toBeUndefined();
   await undoResolution('c1', 'r2', settings);
   expect(await rider()).toEqual(smite);
+});
+
+describe('final review fixes: a running spell is keyed to its casting', () => {
+  const concentrating = (n: number) => updateCombat('c1', (c) => ({ ...c, combatants: c.combatants.map((x) => (x.id === 'g2' ? { ...x, concentrating: true, concentratingOn: 'Hold Monster', concentrationCount: n } : x)) }));
+  test('casting the same spell again ends the first casting', async () => {
+    await concentrating(1);
+    await applyResolution('c1', held('r1', { cast: 1 }), settings);
+    await concentrating(2);
+    expect(await conds('g1')).toEqual([]);
+  });
+  test('a spell still running is never dropped from the results, however many come after', async () => {
+    await concentrating(1);
+    await applyResolution('c1', held('r1', { cast: 1 }), settings);
+    for (let n = 0; n < 25; n++) await applyResolution('c1', res(`f${n}`, []), settings);
+    const ids = (await db.combat.get('c1'))!.resolutions!.map((r) => r.id);
+    expect(ids).toContain('r1');
+    expect(ids).not.toContain('f0');
+  });
+  test('a PC who fails the save after the spell ended gets nothing', async () => {
+    await concentrating(1);
+    await applyResolution('c1', res('r1', [{ id: 'pc:p', part: 'save', pending: true, damage: 0, owed: [], inflicts: ['Paralyzed', 'Hold Monster'] }],
+      { actor: 'g2', action: 'Hold Monster', lasting: true, cast: 1, dc: 13, ability: 'wis' }), settings);
+    await updateCombat('c1', (c) => ({ ...c, combatants: c.combatants.map((x) => (x.id === 'g2' ? { ...x, concentrating: false } : x)) }));
+    await settleSave('c1', 'r1', 'pc:p', 2, settings);
+    expect((await db.characters.get('p'))!.state.conditions).toEqual([]);
+  });
+  test('undoing the hit that broke concentration gives the held creature its conditions back', async () => {
+    await concentrating(1);
+    await applyResolution('c1', held('r1', { cast: 1 }), settings);
+    await applyResolution('c1', res('r2', [{ id: 'g2', hit: true, damage: 20 }]), settings);
+    expect(await conds('g1')).toEqual([]);
+    await undoResolution('c1', 'r2', settings);
+    expect(await conds('g1')).toEqual(['Paralyzed', 'Hold Monster']);
+  });
 });

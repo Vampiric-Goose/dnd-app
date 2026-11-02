@@ -96,14 +96,15 @@ const ABILITY: Record<string, Ability> = { Str: 'str', Dex: 'dex', Con: 'con', I
  * A spell: its attack on `target` (hit damage), then its save for everyone `caught` (the target alone when there's no area). Save damage
  * is rolled once: a failure takes it all, a success half (rounded down) or none, each after its own defenses. Spell damage is magical.
  */
-export function resolveSpell(read: SpellRead, dice: { expr: string; type: string; on?: 'hit' | 'save' }[], dc: number | undefined, toHit: number | undefined,
+export function resolveSpell(read: SpellRead, dice: { expr: string; type: string; on?: 'hit' | 'save'; vs?: string }[], dc: number | undefined, toHit: number | undefined,
   target: TargetInfo | undefined, caught: TargetInfo[], r: Rolled, rng: () => number, autoCrit = false): Outcome[] {
   const out: Outcome[] = [];
   const idx = dice.map((d, i) => ({ ...d, faces: r.dmg[i] ?? [] }));
   const hitDice = read.attack ? idx.filter((d) => d.on !== 'save') : [], saveDice = read.attack ? idx.filter((d) => d.on === 'save') : idx;
   if (read.attack && target && toHit !== undefined) {
     const a = attackRoll(target, toHit, r);
-    const h = a.hit ? hurt(target, hitDice, hitDice.map((d) => d.faces), a.nat === 20 || autoCrit, true, read.typeFromDie) : { damage: 0 };
+    const live = hitDice.filter((d) => !d.vs || d.vs === target.id); // a marked rider (Hex) hurts only its mark
+    const h = a.hit ? hurt(target, live, live.map((d) => d.faces), a.nat === 20 || autoCrit, true, read.typeFromDie) : { damage: 0 };
     const { matched, ...dealt } = h as ReturnType<typeof hurt>;
     out.push({ id: target.id, part: 'hit', ...a, ac: target.ac, ...dealt, ...(matched && read.leap && { leap: true as const }) }); // matching dice: it leaps (Chaos Bolt)
   }

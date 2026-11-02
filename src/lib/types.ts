@@ -138,9 +138,9 @@ export interface Combatant {
   hp?: number; maxHp?: number; tempHp?: number;  // monsters only (a PC's live on the character)
   conditions?: string[];                 // monsters only (a PC's are character.state.conditions)
   durations?: Record<string, Duration>;  // condition name → when it ends (PCs too)
-  concentrating?: boolean; /** the spell it concentrates on (its name) */ concentratingOn?: string;
+  concentrating?: boolean; /** the spell it concentrates on (its name), and how many concentration spells it has cast (which casting it is) */ concentratingOn?: string; concentrationCount?: number;
   /** extra damage on its weapon hits from a spell it cast (`type` '' = the weapon's): the next hit only (`once`), or hits on `target` */
-  rider?: { spell: string; dice: string; type: string; once?: true; target?: string }; legendary?: { max: number; used: number }; reactionUsed?: boolean; notes?: string;
+  rider?: { spell: string; dice: string; type: string; once?: true; target?: string; /** spell attacks too (Hex) */ anyAttack?: true }; legendary?: { max: number; used: number }; reactionUsed?: boolean; notes?: string;
   economy?: { used: number; extra: number; bonus: boolean; attacks: number; light?: boolean; surged?: boolean; haste?: boolean; object?: boolean; readied?: boolean; bonusSpell?: boolean; leveledSpell?: boolean; dodging?: boolean }; // this turn (dodging: took the Dodge action; it lasts until this resets at its next turn): Actions used, extra Actions, Bonus action, attacks in the Attack action, attacked with a light melee weapon (two-weapon fighting), Action Surge used, one extra Action is Haste's, the free object interaction used, an action readied, a bonus-action spell cast, a spell other than an action cantrip cast (absent: fresh)
   hasted?: { by: string; round: number; ended?: true };
   spellsUsed?: Record<string, number>; // a monster's spell slots ('slot:3') and per-day spells ('day:<spell id>') used this fight // the Hasted condition: the caster's combatant id and the round cast; ended: the caster cast another concentration spell
@@ -177,6 +177,7 @@ export interface Resolution { id: string; actor: string /* combatant */; action:
   /** its targets save again at the end of each of their turns */ repeat?: true;
   /** a marked rider spell (Hex): the creature marked and the rider its caster now has; `spent`: a hit used a once-only rider */ mark?: string; rider?: Combatant['rider']; spent?: true;
   /** a leaping spell (Chaos Bolt): the creatures it has hit so far this casting, and whether this hit's leap was taken; `slot`: the slot it was cast with */ chain?: string[]; leapt?: true; slot?: number;
+  /** a concentration spell's casting: its caster's concentrationCount once it is paid for */ cast?: number;
   /** damage over time (Moonbeam): its dice, reading and DC, rolled when a creature starts its turn in the area */ linger?: { dice: { expr: string; type: string }[]; read: SpellRead; dc?: number } }
 /** An area on the map (as a map template: a cone's or line's length, a sphere's or cylinder's radius, a cube's side, in ft). */
 export interface Area { shape: 'cone' | 'sphere' | 'cube' | 'line' | 'cylinder'; origin: { x: number; y: number }; aim: { x: number; y: number }; feet: number; width?: number }

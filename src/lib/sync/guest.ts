@@ -133,7 +133,7 @@ export function cleanTracker(v: unknown): TrackerView | undefined {
       ...(isRec(r.econ) && [r.econ.used, r.econ.extra, r.econ.attacks, r.econ.perAction].every((v) => fin(v) && (v as number) >= 0 && (v as number) <= 20)
         && { econ: { used: r.econ.used as number, extra: r.econ.extra as number, attacks: r.econ.attacks as number, perAction: r.econ.perAction as number, bonus: r.econ.bonus === true, light: r.econ.light === true, surged: r.econ.surged === true, haste: r.econ.haste === true, hasted: r.econ.hasted === true, object: r.econ.object === true, readied: r.econ.readied === true, bonusSpell: r.econ.bonusSpell === true, leveledSpell: r.econ.leveledSpell === true, reaction: r.econ.reaction === true, conc: r.econ.conc === true,
           ...(isRec(r.econ.rider) && typeof r.econ.rider.dice === 'string' && DICE.test(r.econ.rider.dice) && typeof r.econ.rider.type === 'string' && r.econ.rider.type.length <= 20
-            && { rider: { dice: r.econ.rider.dice, type: r.econ.rider.type } }) } })}];
+            && { rider: { dice: r.econ.rider.dice, type: r.econ.rider.type, ...(r.econ.rider.anyAttack === true && { anyAttack: true as const }) } }) } })}];
   })).slice(0, MAX_ROWS);
   const current = rows.some((r) => r.id === v.current) ? v.current as string : undefined;
   const saves = Array.isArray(v.saves) ? v.saves.slice(0, 20).flatMap((x): SavePrompt[] =>
