@@ -53,25 +53,27 @@
   });
   const primary = $derived(primaryAction(actions) ?? actions.find((a) => a.group === 'monster' && a.cost === 'action'));
   // The pop-up's sections; each entry says what it costs.
-  type Section = 'attacks' | 'utility' | 'unique';
-  const SECTIONS: [Section, string][] = [['attacks', 'Attacks'], ['utility', 'Utility'], ['unique', 'Unique']];
+  type Section = 'attacks' | 'utility' | 'unique' | 'spells';
+  const SECTIONS: [Section, string][] = [['attacks', 'Attacks'], ['utility', 'Utility'], ['unique', 'Unique'], ['spells', 'Spells']];
   // Separate lists: Actions (what costs an Action, then free things such as Action Surge), Bonus actions, Reactions. A Bonus action is
-  // never in Actions. Spells have their own list (only a creature with spells shows it), split the same way by casting time.
+  // never in Actions. Each list has its spells too (a bonus-action spell keeps the Bonus actions list), and a creature with spells
+  // also gets a Spells list of all of them, split the same way by casting time.
   type Cost = 'action' | 'bonus' | 'reaction';
   type Kind = Cost | 'spell';
   const COSTS: [Cost, string][] = [['action', 'Actions'], ['bonus', 'Bonus actions'], ['reaction', 'Reactions']];
   const KINDS: [Kind, string][] = [...COSTS, ['spell', 'Spells']];
   const costIs = (a: TurnAction, k: Cost) => (k === 'action' ? a.cost === 'action' || a.cost === 'none' : a.cost === k);
-  const inKind = (a: TurnAction, k: Kind) => (k === 'spell' ? a.group === 'spell' : a.group !== 'spell' && costIs(a, k));
+  const inKind = (a: TurnAction, k: Kind) => (k === 'spell' ? a.group === 'spell' : costIs(a, k));
   const bySpellLevel = (p: TurnAction, q: TurnAction) => (p.spell?.level ?? 0) - (q.spell?.level ?? 0) || p.name.localeCompare(q.name);
   let kind: Kind = $state('action');
   const kindLabel = $derived(KINDS.find(([k]) => k === kind)![1]);
   const shown = $derived(actions.filter((a) => visible(a, conditions))); // Escape only while grappled, Stand up only while prone
-  /** Attacks: weapons, off-hand, a monster's attacks (a to-hit roll, or Multiattack); Utility: the standard actions; the rest
+  /** Attacks: weapons, off-hand, a monster's attacks (a to-hit roll, or Multiattack); Utility: the standard actions; Spells; the rest
    * (class and race features, resources, a monster's traits, reactions and legendary actions) is Unique. */
   function sectionOf(a: TurnAction): Section {
     if (a.group === 'attack') return 'attacks';
     if (a.group === 'standard') return 'utility';
+    if (a.group === 'spell') return 'spells';
     if (a.group === 'monster' && !a.legendary && a.cost === 'action' && (/multiattack/i.test(a.name) || (a.text && rollParts(richToPlain(a.text)).some((p) => 'hit' in p && p.hit)))) return 'attacks';
     return 'unique';
   }
