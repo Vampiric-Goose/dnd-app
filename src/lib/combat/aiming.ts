@@ -71,6 +71,7 @@ export function aimPlan(a: TurnAction, o: { level?: number; toggles?: Toggle[]; 
   if (ma) return { reach, line: ma.ranged, attack: true, toHit: ma.toHit, dice: ma.dmg };
   const read = a.cast?.read;
   if (!read || !a.spell || !(read.attack || read.save || read.area || read.burst || read.auto)) return undefined;
+  if (!read.damage.length && !read.area && !read.burst && !read.conditions?.length) return undefined; // a save that does nothing here (Light)
   const picked = o.dtype && read.choices?.includes(o.dtype) ? o.dtype : '';
   const dice = diceAt(read, { slot: o.level ?? a.spell.level, level: a.spell.level, charLevel: a.cast!.charLevel, mod: a.cast!.mod }).damage
     .map((d, i) => { const [expr, ...type] = d.split(' '); return { expr, type: type.join(' ') || picked, ...(read.damage[i]?.on && { on: read.damage[i].on }) }; });

@@ -118,6 +118,13 @@ export function readSpell(s: Pick<SpellDef, 'text' | 'level' | 'range'> & { name
   else if (out.save && typeof range === 'object' && /each creature (?:within range|other than you in that area)/i.test(t)) out.area = { shape: 'sphere', feet: range.feet, self: true };
   // ponytail: a bare "N-foot radius" is often light or an aura (Light), not an area of effect: only an explicit sphere or cylinder counts
   if (out.save && mech?.area && !out.area && !out.burst) out.area = { shape: mech.area.shape, feet: mech.area.feet, self: true };
+  // never silently wrong: what the targeting can't deliver says so
+  const hurts = out.damage.length > 0 || !!mech?.types?.length;
+  if (out.lingering && hurts) out.manual = 'Damage over time isn’t automated: apply it by hand.';
+  else if (!out.attack && !out.save && t.split(/(?<=\.)\s+/).some((x) => /\bextra \d+d\d+/i.test(x) && /\b(?:hits?|weapon)\b/i.test(x)))
+    out.manual = 'Extra damage on weapon hits isn’t automated: apply it by hand.';
+  else if (hurts && !(out.damage.length && (out.attack || out.save || out.auto))) out.manual = 'Its damage isn’t automated: apply it by hand.';
+  else if (out.conditions?.length && !out.save) out.manual = 'Its effect isn’t automated: apply it by hand.';
   const rule = s.name ? SPELL_RULES[s.name.toLowerCase()] : undefined;
   return rule ? { ...out, ...rule } : out;
 }

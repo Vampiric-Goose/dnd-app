@@ -26,6 +26,8 @@ describe('aimPlan', () => {
     expect(aimPlan(spell({ area: { shape: 'sphere', feet: 20, self: false } }, { feet: 90 }))!.area).toEqual({ shape: 'sphere', feet: 20, on: 'point', range: 90 });
     expect(aimPlan(spell({ save: 'Dex', area: { shape: 'cone', feet: 15, self: true } }, 'self' as never))!.area).toEqual({ shape: 'cone', feet: 15, on: 'self' });
     expect(aimPlan(spell({}))).toBeUndefined();
+    expect(aimPlan(spell({ save: 'Dex' }))).toBeUndefined(); // a save that does nothing here (Light): no Target
+    expect(aimPlan(spell({ save: 'Wis', conditions: ['Paralyzed'] }))).toBeDefined();
   });
 });
 

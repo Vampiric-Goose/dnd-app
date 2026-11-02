@@ -277,6 +277,7 @@
     {/if}
   </div>
   {#if why && why !== hide}<p class="why muted small">{why}</p>{/if}
+  {#if a.cast?.read.manual}<p class="why muted small">{a.cast.read.manual}</p>{/if}
   {#if full && a.text?.length}<details><summary class="small">What it does</summary><RichText text={a.text} /></details>{/if}
 {/snippet}
 

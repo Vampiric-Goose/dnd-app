@@ -96,6 +96,20 @@ describe('reading a spell: one-off rule, then book mechanics, then wording', () 
   });
 });
 
+describe('never silently wrong', () => {
+  test('what can’t be automated says so', () => {
+    expect(readSpell(fix('Self', 'The next time you hit a creature with a weapon attack, the attack deals an extra 2d6 radiant damage.')).manual)
+      .toBe('Extra damage on weapon hits isn’t automated: apply it by hand.');
+    expect(readSpell(fix('120 feet', 'A beam of light shines down. A creature that starts its turn there makes a Constitution saving throw or takes 2d10 radiant damage.')).manual)
+      .toBe('Damage over time isn’t automated: apply it by hand.');
+    expect(readSpell({ ...fix('Touch', 'The target is wreathed in energy for the duration.'), mech: { types: ['fire'] } }).manual)
+      .toBe('Its damage isn’t automated: apply it by hand.');
+    expect(readSpell({ ...fix('Self', 'You vanish from sight.'), mech: { conditions: ['Invisible'] } }).manual)
+      .toBe('Its effect isn’t automated: apply it by hand.');
+    expect(readSpell(spell('Fireball')).manual).toBeUndefined();
+  });
+});
+
 describe('reading a spell: wording without a named shape', () => {
   test('a save against every creature within N feet of you is a burst around the caster; an aura with no save is not', () => {
     expect(readSpell(fix('Self (10-foot radius)', 'Shadows lash all creatures within 10 feet of you. Each one must make a Strength saving throw or take 2d6 necrotic damage.')).area)
