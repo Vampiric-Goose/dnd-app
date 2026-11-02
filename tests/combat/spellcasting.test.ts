@@ -12,6 +12,29 @@ const spell = (n: string) => srd.entities.find((e) => e.kind === 'spell' && e.na
 const mage = srd.entities.find((e) => e.id === 'monster:mage@SRD') as MonsterDef;
 const byName = new Map(srd.entities.filter((e) => e.kind === 'spell').map((s) => [s.name.toLowerCase(), s as SpellDef]));
 
+// Paraphrased fixtures (no book text): an attack-plus-burst spell like Ice Knife, which no SRD spell is.
+const shard = { level: 1, range: '60 feet', text: [{ p: 'You fling a shard. Make a ranged spell attack against the target. On a hit, the target takes 1d10 piercing damage. Hit or miss, the shard bursts: the target and each creature within 5 feet of it must succeed on a Dexterity saving throw or take 2d6 cold damage.' }] } as unknown as SpellDef;
+
+describe('reading a spell for targeting', () => {
+  test('attack plus burst: hit damage, save damage, a 5-foot burst, nothing on a successful save', () => {
+    expect(readSpell(shard)).toMatchObject({ attack: 'ranged', save: 'Dex', burst: 5, onSave: 'none', range: { feet: 60 },
+      damage: [{ dice: '1d10', type: 'piercing', on: 'hit' }, { dice: '2d6', type: 'cold', on: 'save' }] });
+  });
+  test('Fireball: half on a success, 150 feet', () => {
+    expect(readSpell(spell('Fireball'))).toMatchObject({ onSave: 'half', range: { feet: 150 } });
+  });
+  test('Sleep: a pure area, no damage', () => {
+    const r = readSpell(spell('Sleep'));
+    expect(r.area).toMatchObject({ shape: 'sphere', feet: 20 });
+    expect(r.damage).toEqual([]);
+  });
+  test('ranges: self, touch, miles', () => {
+    expect(readSpell(spell('Burning Hands')).range).toBe('self');
+    expect(readSpell(spell('Cure Wounds')).range).toBe('touch');
+    expect(readSpell({ ...shard, range: '1 mile' }).range).toEqual({ feet: 5280 });
+  });
+});
+
 describe('reading a spell (the interpreter)', () => {
   test('Fireball: a Dex save, 8d6 fire, +1d6 a slot above 3rd, a 20-foot sphere', () => {
     const r = readSpell(spell('Fireball'));

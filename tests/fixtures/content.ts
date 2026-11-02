@@ -251,6 +251,8 @@ export const longsword = item('Longsword', { type: 'weapon', magic: false, weigh
   weapon: { category: 'martial', ranged: false, damage: '1d8', damageType: 'slashing', versatile: '1d10', properties: ['versatile'] } });
 export const quarterstaff = item('Quarterstaff', { type: 'weapon', magic: false, weight: 4, costCp: 20,
   weapon: { category: 'simple', ranged: false, damage: '1d6', damageType: 'bludgeoning', versatile: '1d8', properties: ['versatile'] } });
+export const longbow = item('Longbow', { type: 'weapon', magic: false, weight: 2, costCp: 5000,
+  weapon: { category: 'martial', ranged: true, damage: '1d8', damageType: 'piercing', properties: ['ammunition', 'heavy', 'two-handed'], range: [150, 600] } });
 export const halfPlate =item('Half Plate', { type: 'armor', magic: false, weight: 40, costCp: 75000, armor: { category: 'medium', ac: 15, dexCap: 2, stealthDisadvantage: true } });
 export const ringOfProtection = item('Ring of Protection', { type: 'ring', magic: true, rarity: 'rare', attunement: true, bonuses: { ac: 1, save: 1 } });
 export const gauntletsOfOgrePower = item('Gauntlets of Ogre Power', { type: 'wondrous', magic: true, rarity: 'uncommon', attunement: true, effects: [{ type: 'setScore', ability: 'str', value: 19 }] });
@@ -265,7 +267,7 @@ export const shatter = spell('Shatter', 2, ['bard', 'sorcerer', 'warlock', 'wiza
 
 export const fixtureEntities: Entity[] = [
   human, dwarf, hillDwarf, halfElf, fighter, champion, battleMaster, monk, barbarian, bard, rogue, wizard, cleric, warlock, sorcerer, draconic, ...features, defense,
-  chainMail, shield, longsword, quarterstaff, halfPlate, ringOfProtection, gauntletsOfOgrePower, potionFixture, sack60, magicMissile, shatter,
+  chainMail, shield, longsword, longbow, quarterstaff, halfPlate, ringOfProtection, gauntletsOfOgrePower, potionFixture, sack60, magicMissile, shatter,
 ];
 const byId = new Map(fixtureEntities.map(e => [e.id, e]));
 export const fixtureIndex = (): ContentIndex =>

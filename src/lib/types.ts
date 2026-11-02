@@ -154,7 +154,7 @@ export interface Movement { from?: { x: number; y: number }; dashes: number; /**
 export interface SavedFight { combat: Combat; map?: { sceneId: string; tokens: Token[]; fog?: string }; savedAt: number }
 /** A prepared encounter (at most 50 lines, each count 1–99), or a saved fight (`fight`, with `monsters` empty). */
 export interface Encounter { id: string; campaignId: string; name: string; monsters: { monsterId: string; name?: string /* when prepared, to name it once it is gone */; count: number }[]; fight?: SavedFight; updatedAt: number }
-export interface Attack { entryId: string; name: string; toHit: number; damage: string; damageType: string; versatile?: string; properties: string[]; ranged?: true }
+export interface Attack { entryId: string; name: string; toHit: number; damage: string; damageType: string; versatile?: string; properties: string[]; ranged?: true; range?: [number, number] /* normal, long (ft) */ }
 export interface Sheet {
   totalLevel: number; prof: number; scores: Scores; mods: Scores;
   saves: Record<Ability, { bonus: number; proficient: boolean }>;

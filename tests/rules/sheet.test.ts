@@ -8,6 +8,11 @@ import type { Character, SubraceDef } from '../../src/lib/types.ts';
 import { halfElf, human, mkChar } from '../fixtures/content.ts';
 
 const S = DEFAULT_SETTINGS, dm = { settings: S, viewer: 'dm' as const };
+test('a ranged weapon attack carries its normal and long range', () => {
+  const c = mkChar({ race: 'human', base: { dex: 14 }, levels: ['fighter'], inventory: [['longbow', true]] });
+  expect(computeSheet(c, dm).attacks.find(a => a.name === 'Longbow')).toMatchObject({ ranged: true, range: [150, 600] });
+});
+
 test('hill dwarf fighter 1', () => {
   const c = mkChar({ race: 'dwarf', subrace: 'hill-dwarf', base: { str: 15, dex: 13, con: 14, int: 8, wis: 12, cha: 10 }, levels: ['fighter'],
     answers: { optionalFeature: ['optionalFeature:defense@FIX'], skill: ['athletics', 'perception'] }, inventory: [['chain-mail', true], ['shield', true], ['longsword', true]] });

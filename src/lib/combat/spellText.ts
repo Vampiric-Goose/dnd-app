@@ -14,8 +14,13 @@ export interface SpellRead {
   attack?: 'melee' | 'ranged';
   /** The save it forces, short ('Dex'). */
   save?: string;
-  /** Damage dice; `mod`: plus the spellcasting modifier. */
-  damage: { dice: string; type: string; mod?: boolean }[];
+  /** Damage dice; `mod`: plus the spellcasting modifier; `on` (a spell with an attack and a save): which part deals it. */
+  damage: { dice: string; type: string; mod?: boolean; on?: 'hit' | 'save' }[];
+  /** A save's damage on a success: half ("half as much damage on a successful one"), else none. */
+  onSave?: 'half' | 'none';
+  /** "each creature within N feet of it": a burst of N feet around the target. */
+  burst?: number;
+  range?: { feet: number } | 'self' | 'touch';
   heal?: { dice: string; mod: boolean };
   /** Dice added for every `step` slot levels above `above` (to the healing, else the first damage). */
   perSlot?: { dice: string; above: number; step: number };
@@ -32,12 +37,24 @@ export function readSpell(s: Pick<SpellDef, 'text' | 'level' | 'range'> & { high
   const sv = /(strength|dexterity|constitution|intelligence|wisdom|charisma) saving throw/i.exec(t);
   if (sv) out.save = SAVES[sv[1].toLowerCase()];
   const seen = new Set<string>();
-  const dmg = (dice: string, type: string, mod?: boolean) => {
-    const key = `${dice}|${type}`.toLowerCase();
-    if (!seen.has(key)) { seen.add(key); out.damage.push({ dice: dice.replace(/\s+/g, ''), type: type.toLowerCase(), ...(mod && { mod: true }) }); }
+  // the sentence a damage roll sits in says which part deals it, when the spell has both an attack and a save
+  const partAt = (i: number): 'hit' | 'save' | undefined => {
+    if (!out.attack || !out.save) return undefined;
+    const end = t.indexOf('.', i);
+    return /saving throw|failed save/i.test(t.slice(t.lastIndexOf('.', i) + 1, end < 0 ? t.length : end)) ? 'save' : 'hit';
   };
-  for (const m of t.matchAll(new RegExp(`(\\d+d\\d+(?:\\s*\\+\\s*\\d+)?)\\s+(${TYPES})\\s+damage`, 'gi'))) dmg(m[1], m[2]);
-  for (const m of t.matchAll(new RegExp(`(${TYPES}) damage equal to (\\d+d\\d+)( \\+ your spellcasting ability modifier)?`, 'gi'))) dmg(m[2], m[1], !!m[3]);
+  const dmg = (dice: string, type: string, at: number, mod?: boolean) => {
+    const key = `${dice}|${type}`.toLowerCase(), on = partAt(at);
+    if (!seen.has(key)) { seen.add(key); out.damage.push({ dice: dice.replace(/\s+/g, ''), type: type.toLowerCase(), ...(mod && { mod: true }), ...(on && { on }) }); }
+  };
+  for (const m of t.matchAll(new RegExp(`(\\d+d\\d+(?:\\s*\\+\\s*\\d+)?)\\s+(${TYPES})\\s+damage`, 'gi'))) dmg(m[1], m[2], m.index);
+  for (const m of t.matchAll(new RegExp(`(${TYPES}) damage equal to (\\d+d\\d+)( \\+ your spellcasting ability modifier)?`, 'gi'))) dmg(m[2], m[1], m.index, !!m[3]);
+  if (out.save) out.onSave = /half as much damage on a successful/i.test(t) ? 'half' : 'none';
+  const burst = /each creature within (\d+) feet of (?:it|the target|that creature)\b/i.exec(t);
+  if (burst) out.burst = +burst[1];
+  const r = s.range.trim(), feet = /(\d+)\s*(?:feet|foot)/i.exec(r), miles = /(\d+)\s*miles?/i.exec(r);
+  const range = /^self/i.test(r) ? 'self' as const : /^touch/i.test(r) ? 'touch' as const : feet ? { feet: +feet[1] } : miles ? { feet: +miles[1] * 5280 } : undefined;
+  if (range) out.range = range;
   const heal = /regains? (?:a number of )?hit points equal to (\d+d\d+)( \+ your spellcasting ability modifier)?/i.exec(t);
   if (heal) out.heal = { dice: heal[1], mod: !!heal[2] };
   const up = /increases by (\d+d\d+) for (each|every two) (?:slot )?levels? (?:above|of higher spell slot) (?:the )?(\d)/i.exec(h);
@@ -49,6 +66,7 @@ export function readSpell(s: Pick<SpellDef, 'text' | 'level' | 'range'> & { high
   else if ((m = /(\d+)-foot cone/i.exec(t))) out.area = { shape: 'cone', feet: +m[1], self };
   else if ((m = /(\d+)-foot cube/i.exec(t))) out.area = { shape: 'cube', feet: +m[1], self };
   else if ((m = /line (\d+) feet long and (\d+) feet wide/i.exec(t)) || (m = /(\d+)-foot[- ]long,? (\d+)-foot[- ]wide line/i.exec(t))) out.area = { shape: 'line', feet: +m[1], width: +m[2], self };
+  else if ((m = /within (\d+) feet of a point you choose/i.exec(t))) out.area = { shape: 'sphere', feet: +m[1], self }; // Sleep
   // ponytail: a bare "N-foot radius" is often light or an aura (Light), not an area of effect: only an explicit sphere or cylinder counts
   return out;
 }

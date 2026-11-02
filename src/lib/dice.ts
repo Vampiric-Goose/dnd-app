@@ -24,7 +24,8 @@ export function parseDice(expr: string): DiceTerm[] {
   });
 }
 
-export function rollDice(expr: string, opts: { rng?: () => number; advantage?: 'adv' | 'dis'; crit?: boolean } = {}): { total: number; detail: string } {
+/** `faces`: every die rolled, in term order (both d20s with advantage), so another device can check and total them. */
+export function rollDice(expr: string, opts: { rng?: () => number; advantage?: 'adv' | 'dis'; crit?: boolean } = {}): { total: number; detail: string; faces: number[] } {
   const rng = opts.rng ?? Math.random;
   const terms = parseDice(expr);
   if (opts.advantage) {
@@ -32,14 +33,16 @@ export function rollDice(expr: string, opts: { rng?: () => number; advantage?: '
     if (i >= 0) terms[i] = { count: 2, sides: 20, sign: terms[i].sign, keep: { highest: opts.advantage === 'adv', n: 1 } };
   }
   let total = 0;
+  const faces: number[] = [];
   const detail = terms.map((t, i) => {
     const lead = i === 0 ? (t.sign < 0 ? '-' : '') : t.sign < 0 ? ' - ' : ' + ';
     if ('const' in t) { total += t.sign * t.const; return lead + t.const; }
     const count = opts.crit ? t.count * 2 : t.count; // ponytail: crit doubles only the count; a keep term (never a crit in 5e) keeps its n
     const rolls = Array.from({ length: count }, () => 1 + Math.floor(rng() * t.sides));
+    faces.push(...rolls);
     const kept = t.keep ? [...rolls].sort((a, b) => (t.keep!.highest ? b - a : a - b)).slice(0, t.keep.n) : rolls;
     total += t.sign * kept.reduce((a, b) => a + b, 0);
     return `${lead}${count}d${t.sides}${t.keep ? (t.keep.highest ? 'kh' : 'kl') + t.keep.n : ''} (${rolls.join(', ')})`;
   }).join('');
-  return { total, detail };
+  return { total, detail, faces };
 }
