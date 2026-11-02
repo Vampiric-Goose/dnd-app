@@ -3,7 +3,8 @@ import { addCombatants, monsterCombatant, pcCombatant } from '../combat/combat.t
 import { fightScene, prepareStart, remove, updateCombat } from '../combat/store.ts';
 import { db } from '../db.ts';
 import type { CampaignSettings, Character, Combat, Combatant, MonsterDef, Scene, Sheet, Size } from '../types.ts';
-import { addTokens, patchToken, removeTokens, tokensFromCombat, type NewToken } from './scene.ts';
+import { addTokens, freeSpot, patchToken, removeTokens, tokensFromCombat, type NewToken } from './scene.ts';
+import { summonCombatants } from '../combat/summons.ts';
 
 /** db.scenes.update on the fresh record (a player's move made since the page read it survives), stamping updatedAt. */
 export const editScene = (id: string, fn: (s: Scene) => Scene): Promise<Scene | undefined> =>
@@ -124,6 +125,41 @@ export async function dropTokens(cid: string, sceneId: string, ids: string[]): P
   await editScene(sceneId, (x) => removeTokens(x, ids));
   const combat = await db.combat.get(cid);
   for (const id of fighters) if (combat?.combatants.some((x) => x.id === id)) await remove(cid, id);
+}
+
+/** The tokens of fighters that just left (summons whose spell ended), on every scene. */
+export async function dropFighterTokens(cid: string, ids: string[]): Promise<void> {
+  const gone = new Set(ids);
+  for (const s of await db.scenes.list(cid)) {
+    const out = s.tokens.filter((t) => t.combatantId && gone.has(t.combatantId)).map((t) => t.id);
+    if (out.length) await editScene(s.id, (x) => removeTokens(x, out));
+  }
+}
+
+/**
+ * A summon cast: its creatures (scaled stat blocks, kept as the campaign's own monsters so the turn panel shows their attacks) join the
+ * fight marked with the casting, and get tokens beside the caster on the fight's scene. Returns the new combatants.
+ */
+export async function summon(cid: string, casterId: string, list: MonsterDef[], o: { spell: string; cast?: number; share: boolean; hpMode: 'average' | 'roll'; rng?: () => number }): Promise<Combatant[]> {
+  for (const m of list) if (!(await db.monsters.get(m.id))) await db.monsters.put({ ...m, campaignId: cid, updatedAt: Date.now() });
+  let added: Combatant[] = [];
+  await updateCombat(cid, (c) => {
+    const caster = c.combatants.find((x) => x.id === casterId);
+    if (!caster) return c;
+    const next = addCombatants(c, summonCombatants(caster, list, { ...o, rng: o.rng ?? Math.random }));
+    added = next.combatants.filter((x) => !c.combatants.some((y) => y.id === x.id));
+    return next;
+  });
+  const target = await fightScene(cid), k = await db.combat.get(cid), caster = k?.combatants.find((x) => x.id === casterId);
+  if (!target || !caster || !added.length) return added;
+  await editScene(target.id, (s) => {
+    const at = s.tokens.find((t) => (caster.characterId ? t.characterId === caster.characterId : t.combatantId === caster.id)) ?? { x: s.width / 2, y: s.height / 2 };
+    return added.reduce((x, z, i) => {
+      const m = list[Math.min(i, list.length - 1)], size = m.size[0] ?? 'M', p = freeSpot(x, { x: at.x, y: at.y }, size);
+      return addTokens(x, [{ name: z.name, size, combatantId: z.id, monsterId: m.id, ...(z.hp !== undefined && { hp: z.hp, maxHp: z.maxHp }), ...(p && { x: p.x, y: p.y }) }]);
+    }, s);
+  });
+  return added;
 }
 
 /** A combatant removed mid-fight leaves the map too (the HP write-back first keeps its other tokens' HP, final M2); a failed write-back still removes it. */

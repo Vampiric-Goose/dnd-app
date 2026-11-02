@@ -146,6 +146,8 @@ export interface Combatant {
   rider?: { spell: string; dice: string; type: string; once?: true; target?: string; /** spell attacks too (Hex) */ anyAttack?: true }; legendary?: { max: number; used: number }; reactionUsed?: boolean; notes?: string;
   economy?: { used: number; extra: number; bonus: boolean; attacks: number; light?: boolean; surged?: boolean; haste?: boolean; object?: boolean; readied?: boolean; bonusSpell?: boolean; leveledSpell?: boolean; dodging?: boolean }; // this turn (dodging: took the Dodge action; it lasts until this resets at its next turn): Actions used, extra Actions, Bonus action, attacks in the Attack action, attacked with a light melee weapon (two-weapon fighting), Action Surge used, one extra Action is Haste's, the free object interaction used, an action readied, a bonus-action spell cast, a spell other than an action cantrip cast (absent: fresh)
   hasted?: { by: string; round: number; ended?: true };
+  /** summoned by `by`'s casting of `spell` (`cast`: its concentration count, when it needs concentration); it leaves with it (summons.ts) */
+  summon?: { by: string; spell: string; cast?: number };
   spellsUsed?: Record<string, number>; // a monster's spell slots ('slot:3') and per-day spells ('day:<spell id>') used this fight // the Hasted condition: the caster's combatant id and the round cast; ended: the caster cast another concentration spell
 }
 /** The live fight of a campaign. `combatants` is the order; round 0 = setup; `turn` = the current combatant's id. */

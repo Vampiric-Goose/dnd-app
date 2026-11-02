@@ -12,6 +12,7 @@ import { uid } from '../uid.ts';
 import { addMonsters, concentrationDc, turnIds, encounterPicks, initOk, monsterHp, newCombat, next, patchCombatant, removeStep, rollInit, setInit, start, type Expired, type HpOp, type Step } from './combat.ts';
 import { restoreCombat, restoreScene, snapshotFight } from './encounters.ts';
 import { BLOCKING } from './economy.ts';
+import { endedSummons } from './summons.ts';
 
 // One operation at a time (per tab): two quick hits each read the character after the other's write, so both land.
 let queue: Promise<unknown> = Promise.resolve();
@@ -23,12 +24,15 @@ function serial<T>(fn: () => Promise<T>): Promise<T> {
 
 /** Every combat write. A concentration spell that ends with it takes its conditions along (a PC's off its character, after the write). */
 const update = async (cid: string, fn: (c: Combat) => Combat): Promise<Combat> => {
-  let drop: { id: string; condition: string }[] = [];
+  let drop: { id: string; condition: string }[] = [], gone: string[] = [];
   const out = (await db.combat.update(cid, (c) => {
     const r = endedSpells(c, { ...fn(c ?? newCombat(cid)), updatedAt: Date.now() });
     drop = r.drop;
-    return r.combat;
+    const s = endedSummons(r.combat); // summons leave with their casting, or at 0 HP
+    gone = s.gone;
+    return s.combat;
   }))!;
+  if (gone.length) await (await import('../map/store.ts')).dropFighterTokens(cid, gone); // one roster: their tokens go too
   for (const x of out.combatants) {
     const gone = drop.filter((d) => d.id === x.id).map((d) => d.condition);
     if (gone.length && x.kind === 'pc' && x.characterId) await editCharacter(x.characterId, (c) => (c.state.conditions.some((n) => gone.includes(n)) ? { ...c, state: { ...c.state, conditions: c.state.conditions.filter((n) => !gone.includes(n)) } } : c));

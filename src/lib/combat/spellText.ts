@@ -1,5 +1,6 @@
 // Pure (no Svelte/Vite/DOM): what a spell does, read from its wording (2014 rules, SRD 5.1 "Spellcasting"), and a monster's
 // Spellcasting trait. Anything the wording doesn't say plainly is left out; the spell's text stays one tap away in the panel.
+import { summonOptions } from './summons.ts';
 import { richToPlain } from '../content/richtext.ts';
 import { spellLine } from '../monsters/library.ts';
 import type { Ability, RichText, SpellDef, SpellMech, Trait } from '../types.ts';
@@ -38,6 +39,8 @@ export interface SpellRead {
   heal?: { dice: string; mod: boolean };
   /** Temporary hit points it gives (False Life), `perSlot` more for each slot level above the spell's. */
   temp?: { dice: string; perSlot?: number };
+  /** What it summons: a named stat block (a TCE spirit) or options by count and challenge rating (Conjure Animals), see summons.ts. */
+  summon?: ReturnType<typeof summonOptions>;
   /** How many creatures a helpful spell takes ("up to three creatures"), one more per slot level above `above`. */
   targets?: { count: number; above?: number };
   /** Dice added for every `step` slot levels above `above` (to the healing, else the first damage). */
@@ -200,6 +203,8 @@ export function readSpell(s: Pick<SpellDef, 'text' | 'level' | 'range'> & { name
     out.manual = 'Extra damage on weapon hits isn’t automated: apply it by hand.';
   else if (hurts && !(out.damage.length && (out.attack || out.save || out.auto))) out.manual = 'Its damage isn’t automated: apply it by hand.';
   else if (out.conditions?.length && !out.save) out.manual = 'Its effect isn’t automated: apply it by hand.';
+  const called = summonOptions(s.text);
+  if (called) out.summon = called;
   const rule = s.name ? SPELL_RULES[s.name.toLowerCase()] : undefined;
   return rule ? { ...out, ...rule } : out;
 }
