@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { aimPlan, workOut, type WorkIn } from '../../src/lib/combat/aiming.ts';
+import { aimPlan, pickableAt, workOut, type WorkIn } from '../../src/lib/combat/aiming.ts';
 import { targetOf } from '../../src/lib/combat/resolve.ts';
 import type { TurnAction } from '../../src/lib/combat/turnActions.ts';
 import { DEFAULT_GRID } from '../../src/lib/map/scene.ts';
@@ -26,6 +26,27 @@ describe('aimPlan', () => {
     expect(aimPlan(spell({ area: { shape: 'sphere', feet: 20, self: false } }, { feet: 90 }))!.area).toEqual({ shape: 'sphere', feet: 20, on: 'point', range: 90 });
     expect(aimPlan(spell({ save: 'Dex', area: { shape: 'cone', feet: 15, self: true } }, 'self' as never))!.area).toEqual({ shape: 'cone', feet: 15, on: 'self' });
     expect(aimPlan(spell({}))).toBeUndefined();
+  });
+});
+
+describe('reach and range by the book', () => {
+  const g = { ...DEFAULT_GRID };
+  const sword: TurnAction = { id: 'a', name: 'Longsword', cost: 'action', group: 'attack', attack: { entryId: 'e', name: 'Longsword', toHit: 5, damage: '1d8+3', damageType: 'slashing', properties: [] } };
+  const bow: TurnAction = { id: 'b', name: 'Longbow', cost: 'action', group: 'attack', attack: { entryId: 'b', name: 'Longbow', toHit: 5, damage: '1d8+3', damageType: 'piercing', properties: ['heavy'], ranged: true, range: [150, 600] } };
+  test('reach counts from the nearest square a big creature fills: a Huge one beside you is 5 ft away', () => {
+    expect(pickableAt(aimPlan(sword)!, g, '5-5-5', { ...cell(0), size: 'M' }, false, { ...cell(2), size: 'H' })).toEqual({ ok: true });
+    expect(pickableAt(aimPlan(sword)!, g, '5-5-5', { ...cell(0), size: 'M' }, false, { x: 35 + 70 * 1.5, y: 35 + 35, size: 'L' })).toEqual({ ok: true });
+  });
+  test('Sharpshooter: no disadvantage at long range; Crossbow Expert: none with a hostile within 5 ft', () => {
+    const far = { ...cell(40), size: 'M' as const }, me = { ...cell(0), size: 'M' as const };
+    expect(pickableAt(aimPlan(bow)!, g, '5-5-5', me, false, far)).toEqual({ ok: true, disadvantage: 'long range' });
+    expect(pickableAt(aimPlan(bow, { features: ['Sharpshooter'] })!, g, '5-5-5', me, false, far)).toEqual({ ok: true });
+    expect(pickableAt(aimPlan(bow, { features: ['Crossbow Expert'] })!, g, '5-5-5', me, true, { ...cell(4), size: 'M' })).toEqual({ ok: true });
+  });
+  test('an area that hurts only those who enter it or start a turn in it (Moonbeam): placed and listed, nothing rolled now', () => {
+    const p = aimPlan(spell({ save: 'Con', damage: [{ dice: '2d10', type: 'radiant' }], area: { shape: 'cylinder', feet: 5, self: false }, lingering: true }, { feet: 120 }))!;
+    expect(p.area).toMatchObject({ shape: 'cylinder', on: 'point' });
+    expect([p.dice, p.read?.save, p.attack]).toEqual([[], undefined, false]);
   });
 });
 

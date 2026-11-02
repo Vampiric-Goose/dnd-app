@@ -58,7 +58,8 @@ export interface TrackerRow { id: string; name: string; characterId?: string; in
 export interface TurnEcon { used: number; extra: number; bonus: boolean; attacks: number; light?: boolean; surged?: boolean; haste?: boolean; hasted?: boolean; object?: boolean; readied?: boolean; bonusSpell?: boolean; leveledSpell?: boolean; reaction: boolean; perAction: number; /** concentrating */ conc: boolean }
 export interface TrackerView { round: number; current?: string; rows: TrackerRow[]; /** the DM asked for initiative (setup only) */ ask?: true;
   /** Targeting: the viewer's own characters' pending area saves (a pop-up each). */ saves?: SavePrompt[] }
-export interface SavePrompt { resolution: string; characterId: string; ability: Ability; dc: number; spell: string }
+/** No DC: only the caster learns it; the DM's device works the save out. */
+export interface SavePrompt { resolution: string; characterId: string; ability: Ability; spell: string }
 
 /**
  * The tracker as players see it, an allowlist (spec 3.6): no hidden combatants, no monsters during setup (round 0), and of everything
@@ -108,7 +109,7 @@ export function trackerForPlayers(c: Combat | undefined, characters: Character[]
   // Targeting: a pending area save reaches only the player who owns that character.
   const saves = viewer === undefined ? [] : (c.resolutions ?? []).flatMap((r) => r.outcomes.flatMap((o): SavePrompt[] => {
     const ch = o.pending ? byId.get(c.combatants.find((x) => x.id === o.id)?.characterId ?? '') : undefined;
-    return ch && ch.ownerId === viewer ? [{ resolution: r.id, characterId: ch.id, ability: r.ability ?? 'dex', dc: r.dc ?? 0, spell: r.action }] : [];
+    return ch && ch.ownerId === viewer ? [{ resolution: r.id, characterId: ch.id, ability: r.ability ?? 'dex', spell: r.action }] : [];
   }));
   return { round, ...(current !== undefined && { current }), rows, ...(c.round === 0 && c.askInit && { ask: true as const }), ...(saves.length && { saves }) };
 }

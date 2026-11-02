@@ -74,6 +74,12 @@ export function cellDistance(g: Grid, a: Cell, b: Cell, diagonal: '5-5-5' | '5-1
 }
 
 export const feetBetween = (g: Grid, a: Pt, b: Pt, diagonal: '5-5-5' | '5-10-5'): number => cellDistance(g, cellAt(g, a), cellAt(g, b), diagonal) * g.feet;
+/** Between two creatures (PHB reach and range): from the nearest square one fills to the nearest the other fills. */
+export function tokenFeet(g: Grid, a: Pt & { size: Size }, b: Pt & { size: Size }, diagonal: '5-5-5' | '5-10-5'): number {
+  let best = Infinity;
+  for (const x of footprint(g, a)) for (const y of footprint(g, b)) best = Math.min(best, cellDistance(g, x, y, diagonal));
+  return best * g.feet;
+}
 
 /** Square: odd or fractional cell counts (T, S, M, H) snap to a cell centre, even ones (L, G) to the nearest vertex. Hex: always a centre. */
 export function snap(g: Grid, p: Pt, size: Size): Pt {

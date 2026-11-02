@@ -15,7 +15,7 @@ import { featureList } from '../character/play.ts';
 import { computeSheet } from '../rules/sheet.ts';
 import { moveTokens } from '../map/scene.ts';
 import { ActionBoard, actionProblem, actionsForPlayers, expiry, type ActionRequest, type DeclaredAction, type PlayerAction } from '../map/actions.ts';
-import type { Campaign, CampaignSettings, CampaignSync, Character, Combat, MonsterDef, Pack, PackMeta, Resolution, Scene } from '../types.ts';
+import type { Campaign, CampaignSettings, CampaignSync, Character, Combat, Combatant, MonsterDef, Pack, PackMeta, Resolution, Scene } from '../types.ts';
 import { newJoinCode, nextPlayerId, sha256Text } from './code.ts';
 import { hlcNow, hlcReceive, MAX_AHEAD } from './hlc.ts';
 import type { Link } from './link.ts';
@@ -394,11 +394,13 @@ export class Host {
     const x = combatantForToken(k, { characterId: ch.id });
     if (!x) return 'not on the map';
     const chars = await this.#deps.loadCharacters();
+    const onMap = new Set(sceneForPlayers(s, chars, k, camp.settings)?.tokens.map((t) => t.id)); // no hidden or fogged token
+    const seen = (z: Combatant) => s.tokens.some((t) => onMap.has(t.id) && combatantForToken(k, t)?.id === z.id);
     return workOut({
       a, level, features: features.map((f) => f.name), actor: x, combat: k, scene: s, diagonal: camp.settings.diagonal, aim,
       findTarget: (id) => { // a visible token's id (the player's map) or a tracker row's; players pick visible creatures only
-        const t = s.tokens.find((x) => x.id === id && !x.hidden), z = t ? combatantForToken(k, t) : k.combatants.find((y) => y.id === id || this.#aliases.get(y.id) === id);
-        return z && !z.hidden ? z : undefined;
+        const t = s.tokens.find((x) => x.id === id), z = t ? combatantForToken(k, t) : k.combatants.find((y) => y.id === id || this.#aliases.get(y.id) === id);
+        return z && !z.hidden && seen(z) ? z : undefined;
       },
       info: async (z): Promise<TargetInfo> => {
         const pc = z.characterId ? chars.find((c) => c.id === z.characterId) : undefined;
@@ -406,7 +408,7 @@ export class Host {
       },
       nameOf: (z) => (z.characterId ? chars.find((c) => c.id === z.characterId)?.name : undefined) ?? z.name,
       conditionsOf: (z) => (z.characterId ? chars.find((c) => c.id === z.characterId)?.state.conditions : undefined) ?? z.conditions ?? [],
-      magical: ch.inventory.find((e) => e.id === a.attack?.entryId)?.item.magic ?? false,
+      seen, magical: ch.inventory.find((e) => e.id === a.attack?.entryId)?.item.magic ?? false,
       id: uid(), now: this.#deps.now?.() ?? Date.now(), rng: Math.random,
     });
   }

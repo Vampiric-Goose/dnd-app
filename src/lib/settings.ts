@@ -16,4 +16,5 @@ export const DEFAULT_SETTINGS: CampaignSettings = {
   monsterHp: 'average',
   initiativeModules: { hp: true, conditions: true, deathSaves: true, concentration: false, legendary: false, lair: false, reactions: false },
   showMonsterHealth: true,
+  targeting: true,
 };

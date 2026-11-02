@@ -124,16 +124,16 @@ async function hpOf(cid: string, id: string): Promise<{ hp: number; temp: number
   const x = (await db.combat.get(cid))?.combatants.find((y) => y.id === id);
   if (x?.kind !== 'pc') return { hp: x?.hp ?? 0, temp: x?.tempHp ?? 0 };
   const s = (await db.characters.get(x.characterId ?? ''))?.state;
-  return { hp: s?.hp ?? 0, temp: s?.tempHp ?? 0, ...(s && { dying: { deathSaves: s.deathSaves, ...(s.stable !== undefined && { stable: s.stable }), ...(s.dead !== undefined && { dead: s.dead }) } }) };
+  return { hp: s?.hp ?? 0, temp: s?.tempHp ?? 0, ...(s && { dying: { deathSaves: s.deathSaves, stable: !!s.stable, dead: !!s.dead } }) };
 }
 
 /** One outcome's damage through changeHp (temp HP, dying, concentration), and what it took off. */
 async function hurtOne(cid: string, id: string, damage: number, crit: boolean, settings: CampaignSettings): Promise<Applied> {
   const before = await hpOf(cid, id);
-  await changeHp(cid, id, { damage, ...(crit && { crit }) }, settings);
+  const { concentrationDc } = await changeHp(cid, id, { damage, ...(crit && { crit }) }, settings);
   const after = await hpOf(cid, id);
   const dying = before.dying && JSON.stringify(before.dying) !== JSON.stringify(after.dying) ? before.dying : undefined;
-  return { id, hp: before.hp - after.hp, temp: before.temp - after.temp, ...(dying && { dying }) };
+  return { id, hp: before.hp - after.hp, temp: before.temp - after.temp, ...(dying && { dying }), ...(concentrationDc && { conc: concentrationDc }) };
 }
 
 /** Targeting: a use worked out by resolve.ts. Its damage goes on (not a PC's pending save), and it joins the last 20 results. */

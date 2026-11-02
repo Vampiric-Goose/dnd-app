@@ -134,8 +134,8 @@ export function cleanTracker(v: unknown): TrackerView | undefined {
   })).slice(0, MAX_ROWS);
   const current = rows.some((r) => r.id === v.current) ? v.current as string : undefined;
   const saves = Array.isArray(v.saves) ? v.saves.slice(0, 20).flatMap((x): SavePrompt[] =>
-    isRec(x) && s(x.resolution, 100) && s(x.characterId, 100) && typeof x.ability === 'string' && ABILITY.includes(x.ability) && fin(x.dc) && s(x.spell, 200)
-      ? [{ resolution: x.resolution, characterId: x.characterId, ability: x.ability as SavePrompt['ability'], dc: x.dc as number, spell: x.spell }] : []) : [];
+    isRec(x) && s(x.resolution, 100) && s(x.characterId, 100) && typeof x.ability === 'string' && ABILITY.includes(x.ability) && s(x.spell, 200)
+      ? [{ resolution: x.resolution, characterId: x.characterId, ability: x.ability as SavePrompt['ability'], spell: x.spell }] : []) : [];
   return { round: v.round as number, ...(current !== undefined && { current }), rows, ...(v.ask === true && v.round === 0 && { ask: true as const }), ...(saves.length && { saves }) };
 }
 const ABILITY = ['str', 'dex', 'con', 'int', 'wis', 'cha'];

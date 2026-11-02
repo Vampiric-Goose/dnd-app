@@ -28,6 +28,10 @@ describe('reading a spell for targeting', () => {
     expect(r.area).toMatchObject({ shape: 'sphere', feet: 20 });
     expect(r.damage).toEqual([]);
   });
+  test('Moonbeam hurts on entering or starting a turn there, not when cast', () => {
+    expect(readSpell(spell('Moonbeam')).lingering).toBe(true);
+    expect(readSpell(spell('Fireball')).lingering).toBeUndefined();
+  });
   test('ranges: self, touch, miles', () => {
     expect(readSpell(spell('Burning Hands')).range).toBe('self');
     expect(readSpell(spell('Cure Wounds')).range).toBe('touch');

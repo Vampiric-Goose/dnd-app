@@ -2,9 +2,9 @@
 // player's use). aimPlan says what an action needs (reach, a line, an area, its dice); workOut checks an aim against the shown scene and
 // works it out with resolve.ts. The target must be in reach or range (PHB range, close-combat disadvantage), the dice must fit, and an
 // area catches every token in it, hidden ones too; the acting player hears only hit or miss, a spell's DC and the visible names caught.
-import { feetBetween, type Pt } from '../map/grid.ts';
+import { feetBetween, tokenFeet, type Pt } from '../map/grid.ts';
 import { tokensInTemplate, type Shape } from '../map/templates.ts';
-import type { Ability, Combat, Combatant, Grid, Resolution, Scene } from '../types.ts';
+import type { Ability, Combat, Combatant, Grid, Resolution, Scene, Size } from '../types.ts';
 import { combatantForToken } from './movement.ts';
 import { checkFaces, keptD20, resolveAttack, resolveSpell, type TargetInfo } from './resolve.ts';
 import { diceAt, type SpellRead } from './spellText.ts';
@@ -20,16 +20,20 @@ export interface Aimed { resolution: Omit<Resolution, 'applied'>; outcome: UseOu
 
 export interface AimArea { shape: Shape; feet: number; width?: number; on: 'creature' | 'point' | 'self'; range?: number }
 /** `attack`: it rolls a d20 against AC. `dice`: its damage, in roll order (`on`: the part of a spell that deals it). */
-export interface AimPlan { reach: Reach; line: boolean; attack: boolean; toHit?: number; area?: AimArea; dice: { expr: string; type: string; on?: 'hit' | 'save' }[]; read?: SpellRead }
+/** `ignore`: disadvantages a feat removes (Sharpshooter: long range; Crossbow Expert: a hostile within 5 ft). */
+export interface AimPlan { reach: Reach; line: boolean; attack: boolean; toHit?: number; area?: AimArea; dice: { expr: string; type: string; on?: 'hit' | 'save' }[]; read?: SpellRead;
+  ignore?: { long?: true; close?: true } }
 
 /** What an action needs to be aimed, or undefined when it can't be (no reach, or a spell with no attack, save or area). */
-export function aimPlan(a: TurnAction, o: { level?: number; toggles?: Toggle[] } = {}): AimPlan | undefined {
+export function aimPlan(a: TurnAction, o: { level?: number; toggles?: Toggle[]; features?: string[] } = {}): AimPlan | undefined {
   const reach = reachOf(a);
   if (!reach) return undefined;
+  const has = (f: string) => !!o.features?.includes(f);
   if (a.attack) {
-    const w = a.attack, t = o.toggles ?? [];
+    const w = a.attack, t = o.toggles ?? [], ranged = !!w.ranged || !!w.range;
+    const ignore = { ...(w.ranged && has('Sharpshooter') && { long: true as const }), ...(ranged && has('Crossbow Expert') && { close: true as const }) };
     return { reach, line: !!w.ranged, attack: true, toHit: w.toHit + t.reduce((n, x) => n + x.toHit, 0),
-      dice: [{ expr: w.damage, type: w.damageType }, ...t.map((x) => ({ expr: String(x.damage), type: w.damageType }))] };
+      dice: [{ expr: w.damage, type: w.damageType }, ...t.map((x) => ({ expr: String(x.damage), type: w.damageType }))], ...(Object.keys(ignore).length && { ignore }) };
   }
   const ma = a.group === 'monster' ? monsterAttack(a) : undefined;
   if (ma) return { reach, line: ma.ranged, attack: true, toHit: ma.toHit, dice: ma.dmg };
@@ -40,14 +44,17 @@ export function aimPlan(a: TurnAction, o: { level?: number; toggles?: Toggle[] }
   const area: AimArea | undefined = read.burst ? { shape: 'sphere', feet: read.burst, on: 'creature' }
     : read.area ? { shape: read.area.shape, feet: read.area.feet, ...(read.area.width && { width: read.area.width }), on: read.area.self ? 'self' : 'point',
       ...(reach !== 'self' && reach.spell !== undefined && { range: reach.spell }) } : undefined;
-  return { reach, line: read.attack === 'ranged', attack: !!read.attack, ...(a.cast!.attack !== undefined && { toHit: a.cast!.attack }), ...(area && { area }), dice, read };
+  if (read.lingering) return { reach, line: false, attack: false, ...(area && { area }), dice: [], read: { ...read, attack: undefined, save: undefined, damage: [] } }; // placed and listed only
+  const ignore = read.attack === 'ranged' && has('Crossbow Expert') ? { close: true as const } : undefined;
+  return { reach, line: read.attack === 'ranged', attack: !!read.attack, ...(a.cast!.attack !== undefined && { toHit: a.cast!.attack }), ...(area && { area }), dice, read, ...(ignore && { ignore }) };
 }
 
 /** Whether a creature at `t` can be picked from `me`, and with what disadvantage. A melee weapon past its reach is thrown (ranged). */
-export function pickableAt(plan: AimPlan, g: Grid, diagonal: '5-5-5' | '5-10-5', me: Pt, foeWithin5: boolean, t: Pt): Pickable {
-  const feet = feetBetween(g, me, t, diagonal);
+export function pickableAt(plan: AimPlan, g: Grid, diagonal: '5-5-5' | '5-10-5', me: Pt & { size: Size }, foeWithin5: boolean, t: Pt & { size: Size }): Pickable {
+  const feet = tokenFeet(g, me, t, diagonal);
   const thrown = plan.reach !== 'self' && plan.reach.melee !== undefined && plan.reach.normal !== undefined && feet > plan.reach.melee;
-  return canTarget(plan.reach, feet, foeWithin5, plan.line || thrown);
+  const p = canTarget(plan.reach, feet, foeWithin5 && !plan.ignore?.close, plan.line || thrown);
+  return p.ok && p.disadvantage === 'long range' && plan.ignore?.long ? { ok: true } : p;
 }
 
 const OUT = /incapacitated|paralyzed|petrified|stunned|unconscious/i;
@@ -55,7 +62,7 @@ const OUT = /incapacitated|paralyzed|petrified|stunned|unconscious/i;
 export function foeWithin5(k: Combat, s: Scene, actor: Combatant, diagonal: '5-5-5' | '5-10-5', conditionsOf: (z: Combatant) => readonly string[] = (z) => z.conditions ?? []): boolean {
   const tokenOf = (id: string) => s.tokens.find((t) => combatantForToken(k, t)?.id === id), me = tokenOf(actor.id);
   return !!me && k.combatants.some((z) => z.id !== actor.id && !z.hidden && (actor.kind === 'pc' ? z.kind === 'monster' : z.kind === 'pc')
-    && !conditionsOf(z).some((c) => OUT.test(c)) && (() => { const t = tokenOf(z.id); return !!t && feetBetween(s.grid, me, t, diagonal) <= 5; })());
+    && !conditionsOf(z).some((c) => OUT.test(c)) && (() => { const t = tokenOf(z.id); return !!t && tokenFeet(s.grid, me, t, diagonal) <= 5; })());
 }
 
 export interface WorkIn {
@@ -65,6 +72,8 @@ export interface WorkIn {
   info: (z: Combatant) => TargetInfo | Promise<TargetInfo>;
   nameOf: (z: Combatant) => string;
   conditionsOf?: (z: Combatant) => readonly string[];
+  /** Whether the roller sees it (a player: its token is on their map, not hidden or fogged); unseen ones are caught but never named. */
+  seen?: (z: Combatant) => boolean;
   /** A weapon attack's weapon is magical (it beats "nonmagical" resistance). */
   magical: boolean; id: string; now: number; rng: () => number;
 }
@@ -72,7 +81,7 @@ export interface WorkIn {
 /** An aim checked on the scene and worked out, or why not. */
 export async function workOut(i: WorkIn): Promise<Aimed | string> {
   const { a, aim, combat: k, scene: s, actor } = i;
-  const plan = aimPlan(a, { level: i.level, toggles: attackToggles(a, i.features).filter((t) => aim.toggles.includes(t.id)) });
+  const plan = aimPlan(a, { level: i.level, features: i.features, toggles: attackToggles(a, i.features).filter((t) => aim.toggles.includes(t.id)) });
   if (!plan) return 'that cannot be aimed';
   const tokenOf = (id: string) => s.tokens.find((t) => combatantForToken(k, t)?.id === id);
   const me = tokenOf(actor.id);
@@ -107,6 +116,6 @@ export async function workOut(i: WorkIn): Promise<Aimed | string> {
   return {
     resolution: { ...base, outcomes, ...(area && { caught: caught.map((z) => z.id) }), ...(read.save && { dc: a.cast!.dc, ability: read.save.toLowerCase() as Ability, onSave: read.onSave }) },
     outcome: { action: a.name, ...(hit !== undefined && { hit }), ...(read.save && a.cast!.dc !== undefined && { dc: a.cast!.dc }),
-      ...(area && { caught: caught.filter((z) => !z.hidden).map(i.nameOf) }) },
+      ...(area && { caught: caught.filter((z) => !z.hidden && (i.seen?.(z) ?? true)).map(i.nameOf) }) },
   };
 }

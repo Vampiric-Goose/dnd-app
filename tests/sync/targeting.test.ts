@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { DEFAULT_GRID } from '../../src/lib/map/scene.ts';
 import { DEFAULT_SETTINGS } from '../../src/lib/settings.ts';
-import { cleanOutcome, cleanTracker } from '../../src/lib/sync/guest.ts';
+import { cleanOutcome, cleanSettings, cleanTracker } from '../../src/lib/sync/guest.ts';
 import { Host } from '../../src/lib/sync/host.ts';
 import { parseGuestMessage } from '../../src/lib/sync/protocol.ts';
 import type { TrackerView } from '../../src/lib/sync/project.ts';
@@ -106,6 +106,31 @@ describe('targeting over sync', () => {
     expect(refusals(a)).toEqual(['pick a target']);
   });
 
+  test('the DM turning Targeting off reaches players (their panel goes back to roll buttons)', () => {
+    expect(cleanSettings({ ...settings(), targeting: false })?.targeting).toBe(false);
+  });
+
+  test('Review Focus 2: the same use sent twice (a resend after a reconnect) lands once', async () => {
+    const { d, host, a } = await joined();
+    a.deliver(strike('t-g1', [17], [[]]));
+    a.deliver(strike('t-g1', [17], [[]]));
+    await settle(host);
+    expect(hp(d, 'g1')).toBe(3);
+    expect(refusals(a)).toEqual(['no Action left']);
+    expect(d.combat!.resolutions).toHaveLength(1);
+  });
+
+  test('a creature whose token is hidden (or fogged) is no target and is never named in a catch', async () => {
+    const { d, host, b } = await joined({ combat: fight({ turn: 'pc:mira', combatants: [...fight().combatants, cb({ id: 'l1', kind: 'monster', name: 'Lurker', init: 9, ac: 12, hp: 9, maxHp: 9 })] }) });
+    d.scene = { ...d.scene!, tokens: [...d.scene!.tokens, { id: 't-l1', name: 'Lurker', ...cell(6, 1), size: 'M', color: '#000000', combatantId: 'l1', hidden: true }] };
+    b.deliver({ t: 'use', characterId: 'mira', action: 'spell:spell:shard@FIX', slot: 1, aim: { target: 't-l1', rolled: { d20: [15], dmg: [[6], [3, 4]] }, toggles: [] } });
+    b.deliver({ t: 'use', characterId: 'mira', action: 'spell:spell:shard@FIX', slot: 1, aim: { target: 't-g2', rolled: { d20: [15], dmg: [[6], [3, 4]] }, toggles: [] } });
+    await settle(host);
+    expect(refusals(b)).toEqual(['pick a target']);
+    expect(d.combat!.resolutions![0].caught).toContain('l1'); // caught all the same
+    expect(outcomes(b)).toEqual([expect.objectContaining({ caught: ['Goblin 2'] })]); // not the Lurker the player's map doesn't show
+  });
+
   test('a miss: no damage, no damage in the outcome', async () => {
     const { d, host, a } = await joined();
     a.deliver(strike(aliasOf(a, 'Goblin 1'), [2], [[]]));
@@ -140,7 +165,8 @@ describe('targeting over sync', () => {
     expect(o.caught!.sort()).toEqual(['Goblin 2', 'Thorin']);
     for (const r of [a, b]) expect(JSON.stringify(r.got)).not.toMatch(/x1|Assassin/);
     const prompt = (a.got as { t: string; tracker?: TrackerView }[]).filter((m) => m.t === 'tracker').at(-1)!.tracker!.saves;
-    expect(prompt).toEqual([expect.objectContaining({ characterId: 'thorin', ability: 'dex', dc: 13, spell: 'Shard' })]);
+    expect(prompt).toEqual([expect.objectContaining({ characterId: 'thorin', ability: 'dex', spell: 'Shard' })]);
+    expect(prompt![0]).not.toHaveProperty('dc'); // only the caster learns the DC
     const other = (b.got as { t: string; tracker?: TrackerView }[]).filter((m) => m.t === 'tracker').at(-1)!.tracker!.saves;
     expect(other).toBeUndefined();
   });
@@ -169,6 +195,6 @@ describe('targeting over sync', () => {
     expect(cleanOutcome({ t: 'outcome', action: 'Shard', hit: true, dc: 13, caught: ['Goblin 2'] })).toEqual({ action: 'Shard', hit: true, dc: 13, caught: ['Goblin 2'] });
     expect(cleanOutcome({ t: 'outcome', action: 5 })).toBeUndefined();
     const t = cleanTracker({ round: 1, rows: [], saves: [{ resolution: 'r1', characterId: 'thorin', ability: 'dex', dc: 13, spell: 'Shard' }, { resolution: 3 }] });
-    expect(t?.saves).toEqual([{ resolution: 'r1', characterId: 'thorin', ability: 'dex', dc: 13, spell: 'Shard' }]);
+    expect(t?.saves).toEqual([{ resolution: 'r1', characterId: 'thorin', ability: 'dex', spell: 'Shard' }]);
   });
 });

@@ -65,6 +65,21 @@ test('a PC\'s pending save: its roll settles it against the DC, half on a succes
   expect((await db.characters.get('p'))!.state.hp).toBe(20);
 });
 
+test('Undo of a killing blow brings the PC back (dead cleared)', async () => {
+  await db.characters.put({ ...pc(), state: { ...pc().state, hp: 5 } });
+  await applyResolution('c1', res('r1', [{ id: 'pc:p', hit: true, damage: 40 }]), settings); // 35 past 0 >= max 30: dead
+  expect((await db.characters.get('p'))!.state.dead).toBe(true);
+  await undoResolution('c1', 'r1', settings);
+  const s = (await db.characters.get('p'))!.state;
+  expect([s.hp, !!s.dead]).toEqual([5, false]);
+});
+
+test('a hit on a concentrating creature that stays up keeps its concentration save DC for the DM', async () => {
+  await updateCombat('c1', (c) => ({ ...c, combatants: c.combatants.map((x) => (x.id === 'g1' ? { ...x, concentrating: true } : x)) }));
+  await applyResolution('c1', res('r1', [{ id: 'g1', hit: true, damage: 2 }]), settings);
+  expect((await db.combat.get('c1'))!.resolutions![0].applied[0]).toMatchObject({ id: 'g1', conc: 10 });
+});
+
 test('what a target brings: a monster\'s AC, saves (printed, else its ability modifier) and defenses; a PC\'s from its sheet', () => {
   const m = targetOf(g('g1'), { monster: goblin });
   expect(m).toMatchObject({ id: 'g1', ac: 15, pc: false, save: { dex: 2, str: -1 } });

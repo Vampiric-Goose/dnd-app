@@ -41,7 +41,7 @@
   <ul class="plain">
     {#each saves as s (s.resolution + s.characterId)}
       <li>
-        <span><strong>{charOf(s)?.name ?? 'Your character'}</strong>: {ABILITY_NAMES[s.ability]} save, DC <span class="num">{s.dc}</span> ({s.spell})</span>
+        <span><strong>{charOf(s)?.name ?? 'Your character'}</strong>: {ABILITY_NAMES[s.ability]} save against {s.spell}</span>
         {#if sent[s.resolution + s.characterId] !== undefined}
           <span class="num">{sent[s.resolution + s.characterId]}</span><span class="muted">sent</span>
         {:else}

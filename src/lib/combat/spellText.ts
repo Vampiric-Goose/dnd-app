@@ -21,6 +21,8 @@ export interface SpellRead {
   /** "each creature within N feet of it": a burst of N feet around the target. */
   burst?: number;
   range?: { feet: number } | 'self' | 'touch';
+  /** It hurts a creature that enters the area or starts its turn there (Moonbeam), not when cast. */
+  lingering?: true;
   heal?: { dice: string; mod: boolean };
   /** Dice added for every `step` slot levels above `above` (to the healing, else the first damage). */
   perSlot?: { dice: string; above: number; step: number };
@@ -55,6 +57,7 @@ export function readSpell(s: Pick<SpellDef, 'text' | 'level' | 'range'> & { high
   const r = s.range.trim(), feet = /(\d+)\s*(?:feet|foot)/i.exec(r), miles = /(\d+)\s*miles?/i.exec(r);
   const range = /^self/i.test(r) ? 'self' as const : /^touch/i.test(r) ? 'touch' as const : feet ? { feet: +feet[1] } : miles ? { feet: +miles[1] * 5280 } : undefined;
   if (range) out.range = range;
+  if (/starts its turn there|enters the (?:spell's )?area|starts its turn (?:with)?in/i.test(t)) out.lingering = true;
   const heal = /regains? (?:a number of )?hit points equal to (\d+d\d+)( \+ your spellcasting ability modifier)?/i.exec(t);
   if (heal) out.heal = { dice: heal[1], mod: !!heal[2] };
   const up = /increases by (\d+d\d+) for (each|every two) (?:slot )?levels? (?:above|of higher spell slot) (?:the )?(\d)/i.exec(h);

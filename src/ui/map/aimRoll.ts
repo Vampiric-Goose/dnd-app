@@ -2,6 +2,7 @@
 // the result says it hit (a save's damage, which lands hit or miss, can be shown at once).
 import type { AimPlan } from '../../lib/combat/aiming.ts';
 import { finalMode, type Disadvantage } from '../../lib/combat/targeting.ts';
+import { rollDice } from '../../lib/dice.ts';
 import { natD20, publish, roll, rollMode, type RollEntry } from '../../lib/rolls.svelte.ts';
 import { signed } from '../creator/labels.ts';
 
@@ -20,7 +21,8 @@ export function rollAim(name: string, plan: AimPlan, forced?: Disadvantage): Aim
   const dmg = plan.dice.map((d) => ({ d, r: roll(`${name}: ${d.type} damage`, d.expr, { crit: crit && d.on !== 'save', hold: true }) }));
   rollMode.value = 'normal';
   return {
-    rolled: { ...(d20 && { d20: d20.faces }), ...(pick && { mode: pick }), dmg: dmg.map(({ r }) => r.faces) },
+    // two d20s always (the second unshown when none was asked for): the DM's device may see a disadvantage this one can't (fog)
+    rolled: { ...(d20 && { d20: d20.faces.length > 1 ? d20.faces : [...d20.faces, ...rollDice('1d20').faces] }), ...(pick && { mode: pick }), dmg: dmg.map(({ r }) => r.faces) },
     held: dmg.map(({ d, r }) => ({ entry: r, part: d.on === 'save' || (plan.read && !plan.read.attack) ? 'save' : 'hit' })),
   };
 }

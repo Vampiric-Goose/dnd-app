@@ -539,6 +539,7 @@
                       {#each r.outcomes as o, i (i)}
                         <li>{nameOfCombatant(o.id)}: {describe(o)}{#if o.pending} <button type="button" disabled={busy} onclick={() => rollFor(r.id, o.id)}>Roll for them</button>{/if}</li>
                       {/each}
+                      {#each r.applied.filter((x) => x.conc) as x (x.id)}<li><strong>{nameOfCombatant(x.id)}</strong>: Con save DC {x.conc} to keep concentrating</li>{/each}
                     </ul>
                   </li>
                 {/each}

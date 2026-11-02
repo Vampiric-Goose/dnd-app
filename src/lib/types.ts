@@ -158,7 +158,8 @@ export interface Outcome {
   pending?: true; owed?: { amount: number; type: string }[];
 }
 /** What a result took off a combatant (HP and temp HP), and a PC's dying state before it, so Undo puts back exactly that. */
-export interface Applied { id: string; hp: number; temp: number; dying?: { deathSaves: { success: number; fail: number }; stable?: boolean; dead?: boolean } }
+export interface Applied { id: string; hp: number; temp: number; dying?: { deathSaves: { success: number; fail: number }; stable: boolean; dead: boolean };
+  /** the Con save DC to keep concentrating (the hit left it standing) */ conc?: number }
 export interface Resolution { id: string; actor: string /* combatant */; action: string /* its name */; dc?: number; ability?: Ability; onSave?: 'half' | 'none';
   outcomes: Outcome[]; applied: Applied[]; at: number; /** an area's catch (combatant ids), for the DM's list */ caught?: string[] }
 /** Map ↔ combat: where the token stood when its turn's movement began (set by its first move) and Dashes taken this turn. */
