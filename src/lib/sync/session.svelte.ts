@@ -181,9 +181,9 @@ function hostDeps(r: Run, cid: string): HostDeps {
     updateCombat: (fn) => db.combat.update(cid, (c) => c && fn(c)).then((c) => (changed(r), c)), // the DM's tracker re-reads (session.rev)
     endTurn: (id) => import('../combat/store.ts').then((m) => m.turn(cid, 'next', id)).then(() => changed(r)),
     editCharacter: (id, fn) => import('../combat/store.ts').then((m) => m.editCharacter(id, fn)).then((ok) => (changed(r), ok)),
-    resolve: async (res) => {
+    resolve: async (res, before) => {
       const [m, camp] = await Promise.all([import('../combat/store.ts'), db.campaigns.get(cid)]);
-      if (camp) await m.applyResolution(cid, res, camp.settings);
+      if (camp) await m.applyResolution(cid, res, camp.settings, before);
       changed(r);
     },
     settleSave: async (rid, target, d20) => {

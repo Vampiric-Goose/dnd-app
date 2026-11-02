@@ -9,13 +9,13 @@ import { toBase64 } from '../base64.ts';
 import { budgetApplies, combatantForToken, recordMove } from '../combat/movement.ts';
 import { applyUse, attacksPerAction, characterEffect, editsCharacter, payment, pcActions, problemOf, spendOn, type TurnAction } from '../combat/turnActions.ts';
 import { targetOf, type TargetInfo } from '../combat/resolve.ts';
-import { workOut, type Aim, type Aimed } from '../combat/aiming.ts';
+import { snapOf, touched, workOut, type Aim, type Aimed } from '../combat/aiming.ts';
 import { targetingOn } from '../combat/targeting.ts';
 import { featureList } from '../character/play.ts';
 import { computeSheet } from '../rules/sheet.ts';
 import { moveTokens } from '../map/scene.ts';
 import { ActionBoard, actionProblem, actionsForPlayers, expiry, type ActionRequest, type DeclaredAction, type PlayerAction } from '../map/actions.ts';
-import type { Campaign, CampaignSettings, CampaignSync, Character, Combat, Combatant, MonsterDef, Pack, PackMeta, Resolution, Scene } from '../types.ts';
+import type { Campaign, CampaignSettings, CampaignSync, Character, Combat, Combatant, MonsterDef, Pack, PackMeta, Resolution, Scene, Snap } from '../types.ts';
 import { newJoinCode, nextPlayerId, sha256Text } from './code.ts';
 import { hlcNow, hlcReceive, MAX_AHEAD } from './hlc.ts';
 import type { Link } from './link.ts';
@@ -57,7 +57,7 @@ export interface HostDeps {
   /** Turn panel: the DM's own edit of a character (a player's slot or resource spent by a use), stamped and synced like any DM edit. */
   editCharacter?(id: string, fn: (c: Character) => Character): Promise<unknown>;
   /** Targeting: a worked-out use applied on this device (store applyResolution: damage through changeHp, kept for the DM's Undo). */
-  resolve?(r: Omit<Resolution, 'applied'>): Promise<void>;
+  resolve?(r: Omit<Resolution, 'applied'>, before?: Snap): Promise<void>;
   /** Targeting: a player's own save roll for its PC's pending area save (store settleSave). */
   settleSave?(rid: string, target: string, d20: number): Promise<void>;
   /** Targeting: a monster's stat block (its saves and defenses). */
@@ -363,6 +363,8 @@ export class Host {
     }
     const edits = editsCharacter(a, level);
     if (edits && !this.#deps.editCharacter) return refuse('this device cannot spend it');
+    const k0 = aimed && await this.#deps.loadCombat?.(); // before paying: Undo gives the pip and slot back too
+    const before = aimed && k0 ? snapOf(k0, await this.#deps.loadCharacters(), touched(aimed.resolution)) : undefined;
     const per = attacksPerAction(features);
     let why: string | undefined = 'not in the fight';
     await this.#deps.updateCombat((k) => {
@@ -378,7 +380,7 @@ export class Host {
       return refuse('the character could not be updated, so nothing was paid');
     }
     if (aimed) {
-      await this.#deps.resolve!(aimed.resolution);
+      await this.#deps.resolve!(aimed.resolution, before);
       this.#send(c, { t: 'outcome', ...aimed.outcome });
     }
   }

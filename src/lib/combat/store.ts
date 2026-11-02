@@ -3,8 +3,10 @@
 import { applyDamage, applyHealing, rollDeathSave } from '../character/rest.ts';
 import { db, DeletedError } from '../db.ts';
 import { computeSheet } from '../rules/sheet.ts';
-import type { Applied, CampaignSettings, Character, Combat, Combatant, Duration, Encounter, MonsterDef, Outcome, Resolution, Scene } from '../types.ts';
+import type { Applied, CampaignSettings, Character, Combat, Combatant, Duration, Encounter, MonsterDef, Outcome, Resolution, Scene, Snap } from '../types.ts';
 import { settle } from './resolve.ts';
+import { snapOf, touched } from './aiming.ts';
+import { canon } from '../sync/merge.ts';
 import { uid } from '../uid.ts';
 import { addMonsters, concentrationDc, encounterPicks, initOk, monsterHp, newCombat, next, patchCombatant, removeStep, rollInit, setInit, start, type Expired, type HpOp, type Step } from './combat.ts';
 import { restoreCombat, restoreScene, snapshotFight } from './encounters.ts';
@@ -136,11 +138,41 @@ async function hurtOne(cid: string, id: string, damage: number, crit: boolean, s
   return { id, hp: before.hp - after.hp, temp: before.temp - after.temp, ...(dying && { dying }), ...(concentrationDc && { conc: concentrationDc }) };
 }
 
-/** Targeting: a use worked out by resolve.ts. Its damage goes on (not a PC's pending save), and it joins the last 20 results. */
-export async function applyResolution(cid: string, r: Omit<Resolution, 'applied'>, settings: CampaignSettings): Promise<Combat> {
+/** The touched creatures as stored now (see snapOf). */
+async function snapNow(cid: string, ids: string[]): Promise<Snap> {
+  const k = await db.combat.get(cid);
+  if (!k) return { combatants: {}, states: {} };
+  const chars = (await Promise.all(k.combatants.filter((x) => ids.includes(x.id) && x.characterId).map((x) => db.characters.get(x.characterId!)))).filter((c): c is Character => !!c);
+  return snapOf(k, chars, ids);
+}
+
+/**
+ * Targeting: a use worked out by resolve.ts. Its damage goes on (not a PC's pending save), and it joins the last 20 results with what it
+ * touched before (`before`: taken before it was paid for; else now) and after, for Undo.
+ */
+export async function applyResolution(cid: string, r: Omit<Resolution, 'applied'>, settings: CampaignSettings, before?: Snap): Promise<Combat> {
+  const ids = touched(r), was = before ?? await snapNow(cid, ids);
   const applied: Applied[] = [];
   for (const o of r.outcomes) if (o.damage > 0 && !o.pending) applied.push(await hurtOne(cid, o.id, o.damage, o.nat === 20 && o.part !== 'save', settings));
-  return serial(() => update(cid, (c) => ({ ...c, resolutions: [...(c.resolutions ?? []), { ...r, applied }].slice(-20) })));
+  const after = await snapNow(cid, ids);
+  return serial(() => update(cid, (c) => ({ ...c, resolutions: [...(c.resolutions ?? []), { ...r, applied, undo: { before: was, after } }].slice(-20) })));
+}
+
+type Rec = Record<string, unknown>;
+/**
+ * Undo's three-way restore of one record: a field still as the result left it goes back to how it was before; a field changed since by
+ * something else stays, except HP and temp HP, which get back what the result took (capped at `max`).
+ */
+function restore<T extends object>(cur: T, before: T, after: T, max: number): T {
+  const c = cur as unknown as Rec, out: Rec = { ...c }, b = before as unknown as Rec, a = after as unknown as Rec;
+  for (const k of new Set([...Object.keys(b), ...Object.keys(a)])) {
+    if (canon(c[k]) === canon(a[k])) { if (b[k] === undefined) delete out[k]; else out[k] = b[k]; }
+    else if ((k === 'hp' || k === 'tempHp') && typeof c[k] === 'number' && typeof a[k] === 'number' && typeof b[k] === 'number') {
+      out[k] = Math.max(0, (c[k] as number) + (b[k] as number) - (a[k] as number));
+      if (k === 'hp') out[k] = Math.min(max, out[k] as number);
+    }
+  }
+  return out as T;
 }
 
 /** Undo: puts back exactly what the result took (capped at max HP), a PC's dying state too, and drops the result. */
@@ -148,7 +180,16 @@ export const undoResolution = (cid: string, rid: string, settings: CampaignSetti
   const had = await db.combat.get(cid);
   const r = had?.resolutions?.find((x) => x.id === rid);
   if (!had || !r) throw new Error('That result is no longer there.');
-  for (const a of r.applied) {
+  if (r.undo) { // the whole state it changed: pips, slots, resources, HP, dying, concentration
+    const { before, after } = r.undo;
+    for (const [chId, b] of Object.entries(before.states)) {
+      if (after.states[chId]) await editCharacter(chId, (c) => ({ ...c, state: restore(c.state, b, after.states[chId], computeSheet(c, { settings, viewer: 'dm' }).maxHp) }));
+    }
+    return update(cid, (c) => ({ ...c,
+      combatants: c.combatants.map((x) => (before.combatants[x.id] && after.combatants[x.id] ? restore(x, before.combatants[x.id], after.combatants[x.id], x.maxHp ?? Infinity) : x)),
+      resolutions: (c.resolutions ?? []).filter((x) => x.id !== rid) }));
+  }
+  for (const a of r.applied) { // a result stored before Undo kept states: its HP only
     const x = had.combatants.find((y) => y.id === a.id);
     if (x?.kind === 'pc' && x.characterId) {
       await editCharacter(x.characterId, (c) => ({ ...c, state: { ...c.state, ...a.dying,
@@ -179,7 +220,9 @@ export async function settleSave(cid: string, rid: string, target: string, d20: 
   if (!owed) return undefined; // already settled
   const damage = (await db.combat.get(cid))?.resolutions?.find((y) => y.id === rid)?.outcomes.find((o) => o.id === target && o.part === 'save')?.damage ?? 0;
   const applied = damage > 0 ? await hurtOne(cid, target, damage, false, settings) : undefined;
-  return serial(() => update(cid, (c) => ({ ...c, resolutions: (c.resolutions ?? []).map((y) => (y.id === rid && applied ? { ...y, applied: [...y.applied, applied] } : y)) })));
+  const now = await snapNow(cid, [target]); // Undo's "after" follows the save's damage
+  return serial(() => update(cid, (c) => ({ ...c, resolutions: (c.resolutions ?? []).map((y) => (y.id !== rid ? y : { ...y, ...(applied && { applied: [...y.applied, applied] }),
+    ...(y.undo && { undo: { before: y.undo.before, after: { combatants: { ...y.undo.after.combatants, ...now.combatants }, states: { ...y.undo.after.states, ...now.states } } } }) })) })));
 }
 
 /** Final M4: ends the fight (deletes the record) in the queue, so an operation sent just before it cannot write a fresh combat after. */

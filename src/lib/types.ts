@@ -161,7 +161,9 @@ export interface Outcome {
 export interface Applied { id: string; hp: number; temp: number; dying?: { deathSaves: { success: number; fail: number }; stable: boolean; dead: boolean };
   /** the Con save DC to keep concentrating (the hit left it standing) */ conc?: number }
 export interface Resolution { id: string; actor: string /* combatant */; action: string /* its name */; dc?: number; ability?: Ability; onSave?: 'half' | 'none';
-  outcomes: Outcome[]; applied: Applied[]; at: number; /** an area's catch (combatant ids), for the DM's list */ caught?: string[] }
+  outcomes: Outcome[]; applied: Applied[]; at: number; /** an area's catch (combatant ids), for the DM's list */ caught?: string[];
+  /** Undo: the creatures it touched (combatants, and PCs' character state) before it was paid for, and after it landed. */ undo?: { before: Snap; after: Snap } }
+export interface Snap { combatants: Record<string, Combatant>; states: Record<string, Character['state']> }
 /** Map ↔ combat: where the token stood when its turn's movement began (set by its first move) and Dashes taken this turn. */
 export interface Movement { from?: { x: number; y: number }; dashes: number; /** speed multiplier this turn: 2 Hasted, 0 after Haste ends */ mult?: number;
   /** stood up from prone this turn: half the speed spent */ stood?: true }

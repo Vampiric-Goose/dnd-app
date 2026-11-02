@@ -95,6 +95,7 @@ describe('targeting over sync', () => {
     expect(outcomes(a)).toEqual([{ t: 'outcome', action: 'Unarmed Strike', hit: true }]);
     expect(JSON.stringify(a.got)).not.toMatch(/"ac"/);
     expect(d.combat!.resolutions).toHaveLength(1);
+    expect(d.combat!.resolutions![0].undo?.before.combatants['pc:thorin'].economy?.used ?? 0).toBe(0); // taken before paying: Undo gives the Action back
   });
 
   test('a player map names its target by token id; a hidden token is no target', async () => {

@@ -13,7 +13,7 @@
   import { currentRun, patchCombatant } from '../../lib/combat/combat.ts';
   import { budgetApplies, budgetFeet, combatantForToken, effectiveSpeed, originOf, recordMove } from '../../lib/combat/movement.ts';
   import { applyResolution, editCharacter, settleSave, turn, undoResolution, updateCombat } from '../../lib/combat/store.ts';
-  import { aimPlan, foeWithin5, pickableAt, workOut, type AimPlan } from '../../lib/combat/aiming.ts';
+  import { aimPlan, foeWithin5, pickableAt, snapOf, touched, workOut, type AimPlan } from '../../lib/combat/aiming.ts';
   import { targetOf } from '../../lib/combat/resolve.ts';
   import { targetingOn, type Pickable, type Toggle } from '../../lib/combat/targeting.ts';
   import { roll } from '../../lib/rolls.svelte.ts';
@@ -392,9 +392,10 @@
       },
       nameOf: (z) => nameOfCombatant(z.id), magical: !!ch?.inventory.find((e) => e.id === m.a.attack?.entryId)?.item.magic, id: uid(), now: Date.now(), rng: Math.random });
     if (typeof res === 'string') throw new Error(`Not done: ${res}.`);
+    const before = snapOf(k, chars, touched(res.resolution)); // before paying: Undo gives the pip and slot back too
     await pay(m.v, m.a, m.slot);
     reveal(r.held, res.outcome.hit);
-    await applyResolution(cid, res.resolution, settings);
+    await applyResolution(cid, res.resolution, settings, before);
     await reload();
   });
   const undo = (rid: string) => run(async () => { await undoResolution(cid, rid, settings); await reload(); });

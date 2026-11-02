@@ -4,7 +4,7 @@
 // area catches every token in it, hidden ones too; the acting player hears only hit or miss, a spell's DC and the visible names caught.
 import { feetBetween, tokenFeet, type Pt } from '../map/grid.ts';
 import { tokensInTemplate, type Shape } from '../map/templates.ts';
-import type { Ability, Combat, Combatant, Grid, Resolution, Scene, Size } from '../types.ts';
+import type { Ability, Character, Combat, Combatant, Grid, Resolution, Scene, Size, Snap } from '../types.ts';
 import { combatantForToken } from './movement.ts';
 import { checkFaces, keptD20, resolveAttack, resolveSpell, type TargetInfo } from './resolve.ts';
 import { diceAt, type SpellRead } from './spellText.ts';
@@ -23,6 +23,21 @@ export interface AimArea { shape: Shape; feet: number; width?: number; on: 'crea
 /** `ignore`: disadvantages a feat removes (Sharpshooter: long range; Crossbow Expert: a hostile within 5 ft). */
 export interface AimPlan { reach: Reach; line: boolean; attack: boolean; toHit?: number; area?: AimArea; dice: { expr: string; type: string; on?: 'hit' | 'save' }[]; read?: SpellRead;
   ignore?: { long?: true; close?: true } }
+
+/** The creatures a result touches: its actor (who paid), everyone it rolled for, and everyone its area caught. */
+export const touched = (r: Pick<Resolution, 'actor' | 'outcomes' | 'caught'>): string[] => [...new Set([r.actor, ...r.outcomes.map((o) => o.id), ...(r.caught ?? [])])];
+
+/** Those combatants as they are, and their characters' state (a PC's HP, slots and resources live there): what Undo restores. */
+export function snapOf(k: Combat, chars: Character[], ids: string[]): Snap {
+  const combatants: Snap['combatants'] = {}, states: Snap['states'] = {};
+  for (const x of k.combatants) {
+    if (!ids.includes(x.id)) continue;
+    combatants[x.id] = structuredClone(x);
+    const ch = x.characterId ? chars.find((c) => c.id === x.characterId) : undefined;
+    if (ch) states[ch.id] = structuredClone(ch.state);
+  }
+  return { combatants, states };
+}
 
 /** What an action needs to be aimed, or undefined when it can't be (no reach, or a spell with no attack, save or area). */
 export function aimPlan(a: TurnAction, o: { level?: number; toggles?: Toggle[]; features?: string[] } = {}): AimPlan | undefined {

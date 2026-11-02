@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import { beforeEach, expect, test } from 'vitest';
 import { addCombatants, monsterCombatant } from '../../src/lib/combat/combat.ts';
 import { targetOf } from '../../src/lib/combat/resolve.ts';
+import { snapOf } from '../../src/lib/combat/aiming.ts';
 import { applyResolution, settleSave, undoResolution, updateCombat } from '../../src/lib/combat/store.ts';
 import { db, resetDb } from '../../src/lib/db.ts';
 import { computeSheet } from '../../src/lib/rules/sheet.ts';
@@ -78,6 +79,28 @@ test('a hit on a concentrating creature that stays up keeps its concentration sa
   await updateCombat('c1', (c) => ({ ...c, combatants: c.combatants.map((x) => (x.id === 'g1' ? { ...x, concentrating: true } : x)) }));
   await applyResolution('c1', res('r1', [{ id: 'g1', hit: true, damage: 2 }]), settings);
   expect((await db.combat.get('c1'))!.resolutions![0].applied[0]).toMatchObject({ id: 'g1', conc: 10 });
+});
+
+test('Undo puts back the whole state: the pip and slot spent, HP exactly (even above max), lost concentration', async () => {
+  await db.characters.put({ ...pc(), state: { ...pc().state, hp: 35, slotsUsed: [0] } }); // above max 30 (a DM's edit)
+  await updateCombat('c1', (c) => ({ ...c, combatants: c.combatants.map((x) => (x.id === 'g1' ? { ...x, concentrating: true } : x)) }));
+  const k = (await db.combat.get('c1'))!, before = snapOf(k, [(await db.characters.get('p'))!], ['pc:p', 'g1']);
+  // paying: the PC's Action and a 1st-level slot
+  await updateCombat('c1', (c) => ({ ...c, combatants: c.combatants.map((x) => (x.id === 'pc:p' ? { ...x, economy: { used: 1, extra: 0, bonus: false, attacks: 0 } } : x)) }));
+  await db.characters.put({ ...(await db.characters.get('p'))!, state: { ...(await db.characters.get('p'))!.state, slotsUsed: [1] } });
+  await applyResolution('c1', res('r1', [{ id: 'g1', hit: true, damage: 9 }, { id: 'pc:p', part: 'save', damage: 6 }]), settings, before);
+  await undoResolution('c1', 'r1', settings);
+  const c = (await db.combat.get('c1'))!, ch = (await db.characters.get('p'))!;
+  expect(c.combatants.find((x) => x.id === 'pc:p')!.economy).toBeUndefined();
+  expect(c.combatants.find((x) => x.id === 'g1')).toMatchObject({ hp: 7, concentrating: true });
+  expect([ch.state.hp, ch.state.slotsUsed]).toEqual([35, [0]]);
+});
+
+test('Undo leaves what changed since by other hands, giving back only its own HP', async () => {
+  await applyResolution('c1', res('r1', [{ id: 'g1', hit: true, damage: 3 }]), settings);
+  await updateCombat('c1', (c) => ({ ...c, combatants: c.combatants.map((x) => (x.id === 'g1' ? { ...x, hp: 2, conditions: ['prone'] } : x)) })); // the DM's edits
+  await undoResolution('c1', 'r1', settings);
+  expect((await db.combat.get('c1'))!.combatants.find((x) => x.id === 'g1')).toMatchObject({ hp: 5, conditions: ['prone'] });
 });
 
 test('what a target brings: a monster\'s AC, saves (printed, else its ability modifier) and defenses; a PC\'s from its sheet', () => {
