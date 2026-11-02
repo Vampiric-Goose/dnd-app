@@ -35,10 +35,8 @@ export type GuestMsg =
   | { t: 'drag'; sceneId: string; tokenId: string; x: number; y: number /* live drag preview of the player's own token (never stored) */ }
   | { t: 'dragEnd'; sceneId: string; tokenId: string /* that drag ended */ };
 
-/** Targeting: what a use aims at (a creature's row id, or a map point for an area) and the player's own raw dice (resolve.ts Rolled). */
-export interface Aim { target?: string; point?: { x: number; y: number }; rolled: { d20?: number[]; mode?: 'adv' | 'dis'; dmg: number[][] }; toggles: ('gwm' | 'ss')[] }
-/** Targeting, to the acting player only: hit or miss, a spell's save DC, the names of the visible creatures its area caught. */
-export interface UseOutcome { action: string; hit?: boolean; dc?: number; caught?: string[] }
+import type { Aim, UseOutcome } from '../combat/aiming.ts';
+export type { Aim, UseOutcome };
 export interface PackOffer { id: string; hash: string; size: number }
 /** A live drag preview: the token at `at`, or (no `at`) the drag ended. Never stored. */
 export interface Preview { tokenId: string; at?: { x: number; y: number } }
