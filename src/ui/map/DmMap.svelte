@@ -322,11 +322,11 @@
     const ch = x.characterId ? chars.find((c) => c.id === x.characterId) : undefined, sheet = ch && sheets.get(ch.id);
     if (ch && sheet) {
       const features = featureList(ch, settings);
-      return { x, ch, sheet, name: ch.name, hp: ch.state.hp, maxHp: sheet.maxHp, tempHp: ch.state.tempHp, conditions: ch.state.conditions,
+      return { x, ch, sheet, name: ch.name, ac: sheet.ac, hp: ch.state.hp, maxHp: sheet.maxHp, tempHp: ch.state.tempHp, conditions: ch.state.conditions,
         actions: pcActions(ch, sheet, features), perAction: attacksPerAction(features), slots: slotsLeft(sheet, ch) };
     }
     const m = x.monsterId ? monsterById.get(x.monsterId) : undefined;
-    return { x, name: x.name, hp: x.hp, maxHp: x.maxHp, tempHp: x.tempHp, conditions: x.conditions ?? [], actions: m ? monsterActions(m, { spell: (n) => spellByName.get(n), used: x.spellsUsed }) : [], perAction: 1 };
+    return { x, name: x.name, ac: x.ac ?? m?.ac[0]?.value, hp: x.hp, maxHp: x.maxHp, tempHp: x.tempHp, conditions: x.conditions ?? [], actions: m ? monsterActions(m, { spell: (n) => spellByName.get(n), used: x.spellsUsed }) : [], perAction: 1 };
   });
   /** The DM's use: pips and what it pays, no turn checks (the panel greys out what the rules don't allow). */
   const useAction = (a: TurnAction, slot?: number, target?: string) => run(async () => {
@@ -448,7 +448,7 @@
       {#snippet panel(id)}
         {#if id === 'turn' && view && combat}
           <TurnPanel dm name={view.name} order={combat.combatants} self={view.x.id} current={combat.turn} round={combat.round}
-            hp={view.hp} maxHp={view.maxHp} tempHp={view.tempHp} tone={view.ch ? 'accent' : 'danger'} conditions={[...view.conditions, ...(view.x.hasted && !view.x.hasted.ended ? ['Hasted'] : [])]}
+            ac={view.ac} hp={view.hp} maxHp={view.maxHp} tempHp={view.tempHp} tone={view.ch ? 'accent' : 'danger'} conditions={[...view.conditions, ...(view.x.hasted && !view.x.hasted.ended ? ['Hasted'] : [])]}
             x={view.x} perAction={view.perAction} onTurn={turnIds.has(view.x.id)} actions={view.actions} slots={view.slots}
             concentrating={!!view.x.concentrating} {busy} canEnd={!busy} endLabel="Next turn ▶" onuse={(a, slot, target) => void useAction(a, slot, target)} onend={nextTurn} {onpip}
             onstrip={(id) => (viewId = id)} ontemplate={placeTemplate}>

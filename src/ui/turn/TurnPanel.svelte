@@ -17,13 +17,13 @@
 
   type Pip = 'action' | 'bonus' | 'reaction';
   let {
-    name, order, self, current, round, hp, maxHp, tempHp = 0, tone = 'accent', conditions, moveLeft, x, perAction = 1, onTurn, actions,
+    name, order, self, current, round, ac, hp, maxHp, tempHp = 0, tone = 'accent', conditions, moveLeft, x, perAction = 1, onTurn, actions,
     slots = [], concentrating = false, dm = false, busy = false, canEnd, endLabel = 'End turn', onuse, onend, onpip, onstrip, ontemplate, top,
   }: {
     name: string;
     /** The turn order as the viewer sees it; `self` is the creature shown, `current` the one acting. */
     order: { id: string; name: string; init?: number }[]; self: string; current?: string; round: number;
-    hp?: number; maxHp?: number; tempHp?: number; tone?: 'accent' | 'danger';
+    ac?: number; hp?: number; maxHp?: number; tempHp?: number; tone?: 'accent' | 'danger';
     conditions: string[]; moveLeft?: number;
     /** Its pips (economy, reactionUsed) and legendary uses. */
     x: Combatant; perAction?: number; onTurn: boolean; actions: TurnAction[];
@@ -132,7 +132,7 @@
   <h2 class="name">{name}</h2>
   {#if hp !== undefined && maxHp}
     <div class="hp">
-      <span><span class="num">{hp}</span>/<span class="num">{maxHp}</span> HP{#if tempHp}<span class="muted"> +<span class="num">{tempHp}</span> temp</span>{/if}</span>
+      <span>{#if ac !== undefined}<strong class="ac">AC <span class="num">{ac}</span></strong>{/if}<span class="num">{hp}</span>/<span class="num">{maxHp}</span> HP{#if tempHp}<span class="muted"> +<span class="num">{tempHp}</span> temp</span>{/if}</span>
       <Bar value={hp} max={maxHp} temp={tempHp} {tone} label="{name} hit points" />
     </div>
   {/if}
@@ -460,6 +460,10 @@
   .head button {
     min-width: 44px;
     min-height: 44px;
+  }
+
+  .ac {
+    margin-right: 0.75rem;
   }
 
   .actions h3 {
