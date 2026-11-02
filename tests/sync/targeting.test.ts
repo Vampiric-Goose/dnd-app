@@ -129,10 +129,25 @@ describe('targeting over sync', () => {
     leap('t-g2');
     await settle(host);
     expect(refusals(b)).toEqual(['pick another creature', 'no leap']);
-    expect(hp(d, 'g2')).toBe(0); // 1 + 2 + 4
+    expect(d.combat!.resolutions!.at(-1)!.outcomes[0].choose?.map((o) => o.type)).toEqual(['acid', 'cold']); // d8s 1 and 2: the player picks
     expect(d.combat!.resolutions!.find((r) => r.id === 'r1')!.leapt).toBe(true);
     expect(d.combat!.resolutions!.at(-1)).toMatchObject({ action: 'Chaos Bolt', chain: ['g1', 'g2'] });
     expect(d.combat!.combatants.find((x) => x.id === 'pc:mira')!.economy?.used ?? 0).toBe(0);
+  });
+
+  test('Chaos Bolt\'s d8 pick: the pop-up\'s options reach only the caster\'s player, never their damage; the pick reaches the DM\'s device', async () => {
+    const waiting: Combat['resolutions'] = [{ id: 'r1', actor: 'pc:mira', action: 'Chaos Bolt', applied: [], at: 0,
+      outcomes: [{ id: 'g1', part: 'hit', hit: true, damage: 0, choose: [{ face: 3, type: 'fire', damage: 4 }, { face: 2, type: 'cold', damage: 9 }] }] }];
+    const { d, host, a, b } = await joined({ combat: fight({ turn: 'pc:mira', resolutions: waiting }) });
+    const last = (r: { got: unknown[] }) => (r.got as { t: string; tracker?: TrackerView }[]).filter((m) => m.t === 'tracker').at(-1)!.tracker!;
+    expect(last(b).picks).toEqual([{ resolution: 'r1', characterId: 'mira', spell: 'Chaos Bolt', options: [{ face: 3, type: 'fire' }, { face: 2, type: 'cold' }] }]);
+    expect(last(a).picks).toBeUndefined();
+    expect(cleanTracker(last(b))?.picks).toEqual(last(b).picks);
+    b.deliver({ t: 'pick', characterId: 'mira', resolution: 'r1', type: 'psychic' });
+    b.deliver({ t: 'pick', characterId: 'mira', resolution: 'r1', type: 'cold' });
+    await settle(host);
+    expect(d.picked).toEqual([{ rid: 'r1', target: 'g1', type: 'cold' }]);
+    expect(parseGuestMessage({ t: 'pick', characterId: 'mira', resolution: 'r1', type: 'x'.repeat(30) })).toMatchObject({ error: 'bad pick' });
   });
 
   test('a player map names its target by token id; a hidden token is no target', async () => {

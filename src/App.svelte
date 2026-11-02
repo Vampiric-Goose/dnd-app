@@ -171,6 +171,9 @@
 {#if app.campaign?.sync?.role === 'player' && session.tracker?.saves?.length}
   {#await import('./ui/initiative/SavePrompt.svelte') then { default: SavePrompt }}<SavePrompt campaign={app.campaign} />{/await}
 {/if}
+{#if app.campaign?.sync?.role === 'player' && session.tracker?.picks?.length}
+  {#await import('./ui/initiative/PickPrompt.svelte') then { default: PickPrompt }}<PickPrompt />{/await}
+{/if}
 
 <style>
   /*

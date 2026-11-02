@@ -130,6 +130,13 @@ describe('workOut on the DM\'s map', () => {
     const r = await workOut({ ...base(moon, { dmg: [] }), aim: { point: cell(0), rolled: { dmg: [] }, toggles: [] } });
     expect(r).toMatchObject({ resolution: { outcomes: [], linger: { dice: [{ expr: '2d10', type: 'radiant' }], read: { save: 'Con' }, dc: 13 } } });
   });
+  test('Chaos Bolt cast by a PC: the hit waits for its player to pick a d8; each pick\'s damage is worked out now (resistance and all)', async () => {
+    const bolt = spell({ attack: 'ranged', leap: 30, damage: [{ dice: '2d8+1d6', type: '' }], typeFromDie: { sides: 8, types: ['acid', 'cold', 'fire', 'force', 'lightning', 'poison', 'psychic', 'thunder'] } });
+    const rolled = { d20: [18, 18], dmg: [[3, 2, 4]] }; // d8s 3 (fire) and 2 (cold)
+    const r = await workOut({ ...base(bolt, rolled), actor: k.combatants[1], aim: { target: 'g', rolled, toggles: [] },
+      info: (z: Combatant) => ({ ...targetOf(z, {}), ac: 14, defenses: { resist: ['fire'], immune: [], vulnerable: [] } }) });
+    expect(r).toMatchObject({ resolution: { outcomes: [{ id: 'g', hit: true, damage: 0, choose: [{ face: 3, type: 'fire', damage: 4 }, { face: 2, type: 'cold', damage: 9 }] }] } });
+  });
   test('a slowing ray: a hit leaves a condition named after the spell with its speed cut, for one round; a miss leaves nothing', async () => {
     const frost = { ...spell({ attack: 'ranged', slow: { feet: 10 }, damage: [{ dice: '1d8', type: 'cold' }] }), name: 'Ray of Frost' };
     expect(await workOut(base(frost, { d20: [18, 18], dmg: [[4]] }))).toMatchObject({ resolution: { rounds: 1, outcomes: [{ id: 'pc:thorin', hit: true, inflict: ['Ray of Frost (speed −10 ft)'] }] } });

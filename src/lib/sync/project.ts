@@ -57,9 +57,12 @@ export interface TrackerRow { id: string; name: string; characterId?: string; in
 /** Turn panel: Actions used and extra, the Bonus action, attacks in the Attack action, the Reaction, attacks one Attack action allows. */
 export interface TurnEcon { /** extra damage on its weapon hits (no mark: players learn no ids) */ rider?: { dice: string; type: string; anyAttack?: true }; used: number; extra: number; bonus: boolean; attacks: number; light?: boolean; surged?: boolean; haste?: boolean; hasted?: boolean; object?: boolean; readied?: boolean; bonusSpell?: boolean; leveledSpell?: boolean; reaction: boolean; perAction: number; /** concentrating */ conc: boolean }
 export interface TrackerView { round: number; current?: string; rows: TrackerRow[]; /** the DM asked for initiative (setup only) */ ask?: true;
-  /** Targeting: the viewer's own characters' pending area saves (a pop-up each). */ saves?: SavePrompt[] }
+  /** Targeting: the viewer's own characters' pending area saves (a pop-up each). */ saves?: SavePrompt[];
+  /** Targeting: the viewer's own characters' hits waiting for a die pick (Chaos Bolt). */ picks?: PickPrompt[] }
 /** No DC: only the caster learns it; the DM's device works the save out. */
 export interface SavePrompt { resolution: string; characterId: string; ability: Ability; spell: string }
+/** A hit waiting for its caster's player to pick the die that sets its type (Chaos Bolt): the faces and their types, never the damage. */
+export interface PickPrompt { resolution: string; characterId: string; spell: string; options: { face: number; type: string }[]; leap?: true }
 
 /**
  * The tracker as players see it, an allowlist (spec 3.6): no hidden combatants, no monsters during setup (round 0), and of everything
@@ -111,7 +114,12 @@ export function trackerForPlayers(c: Combat | undefined, characters: Character[]
     const ch = o.pending ? byId.get(c.combatants.find((x) => x.id === o.id)?.characterId ?? '') : undefined;
     return ch && ch.ownerId === viewer ? [{ resolution: r.id, characterId: ch.id, ability: r.ability ?? 'dex', spell: r.action }] : [];
   }));
-  return { round, ...(current !== undefined && { current }), rows, ...(c.round === 0 && c.askInit && { ask: true as const }), ...(saves.length && { saves }) };
+  const picks = viewer === undefined ? [] : (c.resolutions ?? []).flatMap((r) => {
+    const ch = byId.get(c.combatants.find((x) => x.id === r.actor)?.characterId ?? '');
+    return ch && ch.ownerId === viewer ? r.outcomes.flatMap((o): PickPrompt[] => (o.choose ? [{ resolution: r.id, characterId: ch.id, spell: r.action,
+      options: o.choose.map(({ face, type }) => ({ face, type })), ...(o.leap && { leap: true as const }) }] : [])) : [];
+  });
+  return { round, ...(current !== undefined && { current }), rows, ...(c.round === 0 && c.askInit && { ask: true as const }), ...(saves.length && { saves }), ...(picks.length && { picks }) };
 }
 
 /** Stage 5's movement gate: the characterId whose turn it is, if any. */

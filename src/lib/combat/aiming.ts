@@ -239,7 +239,7 @@ export async function workOut(i: WorkIn): Promise<Aimed | string> {
     .map((id) => combatantForToken(k, s.tokens.find((t) => t.id === id)!)).filter((z): z is Combatant => !!z && !(area?.on === 'self' && z.id === actor.id)) : [];
   const bad = checkFaces(plan.dice.map((d) => ({ expr: d.expr, crit: crit && d.on !== 'save' })), rolled);
   if (bad) return bad;
-  const outcomes = resolveSpell(read, plan.dice, a.cast!.dc, plan.toHit, target && await i.info(target), await Promise.all(caught.map(i.info)), rolled, i.rng, autoCrit);
+  const outcomes = resolveSpell(read, plan.dice, a.cast!.dc, plan.toHit, target && await i.info(target), await Promise.all(caught.map(i.info)), rolled, i.rng, autoCrit, actor.kind === 'pc');
   const hit = outcomes.find((o) => o.part === 'hit')?.hit;
   // a lasting spell's effect also leaves a condition named after the spell (the user's standard: Hold Monster, Hex, Haste)
   const lasts = !!(a.spell?.concentration || read.rounds);

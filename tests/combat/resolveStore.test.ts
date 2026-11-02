@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { addCombatants, monsterCombatant } from '../../src/lib/combat/combat.ts';
 import { targetOf } from '../../src/lib/combat/resolve.ts';
 import { snapOf } from '../../src/lib/combat/aiming.ts';
-import { applyResolution, changeHp, settleSave, turn, undoResolution, updateCombat } from '../../src/lib/combat/store.ts';
+import { applyResolution, changeHp, settlePick, settleSave, turn, undoResolution, updateCombat } from '../../src/lib/combat/store.ts';
 import { db, resetDb } from '../../src/lib/db.ts';
 import { computeSheet } from '../../src/lib/rules/sheet.ts';
 import type { Character, Combatant, MonsterDef, Pack, Resolution } from '../../src/lib/types.ts';
@@ -225,4 +225,17 @@ test('a slowing hit leaves its speed cut until the start of the caster\'s next t
   const g1 = (await db.combat.get('c1'))!.combatants.find((x) => x.id === 'g1')!;
   expect(g1.conditions).toEqual(['Ray of Frost (speed −10 ft)']);
   expect(g1.durations).toEqual({ 'Ray of Frost (speed −10 ft)': { rounds: 1, at: 'start', of: 'g2' } });
+});
+
+test('a player\'s Chaos Bolt pick: that option\'s damage lands, the wait ends; a type not offered does nothing; Undo gives the HP back', async () => {
+  await applyResolution('c1', res('r1', [{ id: 'g1', part: 'hit', hit: true, damage: 0, choose: [{ face: 3, type: 'fire', damage: 4, note: 'fire (d8 3)' }, { face: 2, type: 'cold', damage: 6, note: 'cold (d8 2), vulnerable to cold' }] }],
+    { action: 'Chaos Bolt' }), settings);
+  await settlePick('c1', 'r1', 'g1', 'psychic', settings);
+  expect(await hp('g1')).toBe(7);
+  await settlePick('c1', 'r1', 'g1', 'cold', settings);
+  expect(await hp('g1')).toBe(1);
+  expect((await db.combat.get('c1'))!.resolutions![0].outcomes[0]).toMatchObject({ damage: 6, note: 'cold (d8 2), vulnerable to cold' });
+  expect((await db.combat.get('c1'))!.resolutions![0].outcomes[0].choose).toBeUndefined();
+  await undoResolution('c1', 'r1', settings);
+  expect(await hp('g1')).toBe(7);
 });

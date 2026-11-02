@@ -60,6 +60,8 @@ export interface HostDeps {
   resolve?(r: Omit<Resolution, 'applied'>, before?: Snap): Promise<void>;
   /** Targeting: a player's own save roll for its PC's pending area save (store settleSave). */
   settleSave?(rid: string, target: string, d20: number): Promise<void>;
+  /** Targeting: a player's pick of the die that sets its hit's type (store settlePick). */
+  settlePick?(rid: string, target: string, type: string): Promise<void>;
   /** Targeting: a monster's stat block (its saves and defenses). */
   loadMonster?(id: string): Promise<MonsterDef | undefined>;
   /** Stage 5: the campaign's shown scene (db.scenes.shown). Without it no scene is sent. */
@@ -299,6 +301,7 @@ export class Host {
       case 'use': return this.#use(c, c.playerId, msg);
       case 'save': return this.#save(c, c.playerId, msg);
       case 'leap': return this.#leap(c, c.playerId, msg);
+      case 'pick': return this.#pick(c, c.playerId, msg);
       case 'endTurn': return this.#endTurn(c, c.playerId, msg.characterId);
       case 'action': return this.#action(c, c.playerId, msg.action);
       case 'clearAction': return this.#actionsChanged(this.#board.clear(c.playerId));
@@ -441,6 +444,17 @@ export class Host {
   }
 
   /** Targeting: a player's own save roll for their character's pending area save (else a violation); a settled one is ignored. */
+  /** Targeting: the player picks the die that sets its own hit's type (Chaos Bolt); only the caster's player, only a type offered. */
+  async #pick(c: Conn, pid: string, m: Extract<GuestMsg, { t: 'pick' }>): Promise<void> {
+    const camp = await this.#deps.loadCampaign();
+    const ch = await this.#deps.loadCharacter(m.characterId);
+    if (!camp || !ch || ch.ownerId !== pid || ch.campaignId !== camp.id) return this.#violation(c, 'not their character');
+    const k = await this.#deps.loadCombat?.(), x = k && combatantForToken(k, { characterId: ch.id });
+    const r = x && k.resolutions?.find((y) => y.id === m.resolution && y.actor === x.id);
+    const o = r?.outcomes.find((y) => y.choose?.some((z) => z.type === m.type));
+    if (r && o) await this.#deps.settlePick?.(r.id, o.id, m.type);
+  }
+
   async #save(c: Conn, pid: string, m: Extract<GuestMsg, { t: 'save' }>): Promise<void> {
     const camp = await this.#deps.loadCampaign();
     const ch = await this.#deps.loadCharacter(m.characterId);

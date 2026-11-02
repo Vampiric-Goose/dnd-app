@@ -28,6 +28,7 @@ export class Device {
   rolls: { e: RollEntry; from?: string }[] = [];
   errors: unknown[] = [];
   settled: { rid: string; target: string; d20: number }[] = [];
+  picked: { rid: string; target: string; type: string }[] = [];
   wall: () => number;
   constructor(wall: () => number = Date.now) { this.wall = wall; }
 
@@ -104,6 +105,7 @@ export class Device {
         this.combat = { ...this.combat, resolutions: [...(this.combat.resolutions ?? []), { ...r, applied: [], ...(before && { undo: { before, after: before } }) }] };
       },
       settleSave: async (rid, target, d20) => { this.settled.push({ rid, target, d20 }); },
+      settlePick: async (rid, target, type) => { this.picked.push({ rid, target, type }); },
       ...(this.map && {
         loadScene: async () => (this.scene?.shown ? clone(this.scene) : undefined),
         updateScene: async (id: string, fn: (s: Scene) => Scene) => {

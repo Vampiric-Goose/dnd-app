@@ -12,7 +12,7 @@
   import { addTokensToCombat, editScene, startFight, tokenForCharacter, tokenForMonster } from '../../lib/map/store.ts';
   import { currentRun, patchCombatant } from '../../lib/combat/combat.ts';
   import { budgetApplies, budgetFeet, combatantForToken, effectiveSpeed, originOf, recordMove } from '../../lib/combat/movement.ts';
-  import { applyResolution, editCharacter, settleSave, turn, undoResolution, updateCombat } from '../../lib/combat/store.ts';
+  import { applyResolution, editCharacter, settlePick, settleSave, turn, undoResolution, updateCombat } from '../../lib/combat/store.ts';
   import { aimPlan, areasOn, foeWithin5, judge, snapOf, startsIn, touched, workOut, type AimPlan } from '../../lib/combat/aiming.ts';
   import { resolveSpell, targetOf } from '../../lib/combat/resolve.ts';
   import { targetingOn, type Pickable, type Toggle } from '../../lib/combat/targeting.ts';
@@ -445,9 +445,10 @@
     await settleSave(cid, rid, target, d.faces[0], settings);
     await reload();
   });
+  const pickFor = (rid: string, target: string, type: string) => run(async () => { await settlePick(cid, rid, target, type, settings); await reload(); });
   const describe = (o: Outcome) => [
     o.part !== 'save' && o.roll !== undefined ? `${o.hit ? 'hit' : 'miss'} (${o.roll}${o.nat ? `, natural ${o.nat}` : ''} vs AC ${o.ac ?? '?'}${o.edge ? `; ${o.edge}` : ''})` : '',
-    o.save ? `${o.save.ok ? 'saved' : 'failed'} (${o.save.total})` : o.pending ? 'waiting for their save' : '',
+    o.save ? `${o.save.ok ? 'saved' : 'failed'} (${o.save.total})` : o.pending ? 'waiting for their save' : o.choose ? 'waiting for their d8 pick' : '',
     o.damage ? `${o.damage} damage` : '', o.note ?? '',
   ].filter(Boolean).join(', ');
   const onpip = (pip: 'action' | 'bonus' | 'reaction', used: boolean) => run(async () => {
@@ -583,7 +584,8 @@
                     {#if r.caught?.length}<p class="muted small">In the area: {r.caught.map(nameOfCombatant).join(', ')}</p>{/if}
                     <ul class="plain small">
                       {#each r.outcomes as o, i (i)}
-                        <li>{nameOfCombatant(o.id)}: {describe(o)}{#if o.inflict?.length}; {o.inflict.join(', ').toLowerCase()}{/if}{#if o.pending} <button type="button" disabled={busy} onclick={() => rollFor(r.id, o.id)}>Roll for them</button>{/if}</li>
+                        <li>{nameOfCombatant(o.id)}: {describe(o)}{#if o.inflict?.length}; {o.inflict.join(', ').toLowerCase()}{/if}{#if o.pending} <button type="button" disabled={busy} onclick={() => rollFor(r.id, o.id)}>Roll for them</button>{/if}
+                          {#each o.choose ?? [] as c (c.face)} <button type="button" disabled={busy} onclick={() => pickFor(r.id, o.id, c.type)}>{c.type} ({c.damage})</button>{/each}</li>
                       {/each}
                       {#each r.applied.filter((x) => x.conc) as x (x.id)}<li><strong>{nameOfCombatant(x.id)}</strong>: Con save DC {x.conc} to keep concentrating</li>{/each}
                     </ul>

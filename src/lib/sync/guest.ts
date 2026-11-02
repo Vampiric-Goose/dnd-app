@@ -13,7 +13,7 @@ import { newCampaignSync, sha256Bytes, sha256Text } from './code.ts';
 import { MAX_AHEAD } from './hlc.ts';
 import type { Link } from './link.ts';
 import { canon, latestClock, mergeCharacter, type Synced } from './merge.ts';
-import type { CampaignForPlayers, HealthStatus, RosterEntry, SavePrompt, TrackerRow, TrackerView } from './project.ts';
+import type { CampaignForPlayers, HealthStatus, PickPrompt, RosterEntry, SavePrompt, TrackerRow, TrackerView } from './project.ts';
 import { BLOB_CHUNK, cleanRoll, HLC, IMAGE_TYPES, INIT_MAX, INIT_MIN, MAX_BLOB, MAX_MESSAGE, MAX_PACK, PLAYER_ID, size, type Aim, type GuestMsg, type PackOffer, type Preview, type UseOutcome } from './protocol.ts';
 import { cleanScene, sceneBlobs, type PlayerScene } from './scene.ts';
 
@@ -139,7 +139,12 @@ export function cleanTracker(v: unknown): TrackerView | undefined {
   const saves = Array.isArray(v.saves) ? v.saves.slice(0, 20).flatMap((x): SavePrompt[] =>
     isRec(x) && s(x.resolution, 100) && s(x.characterId, 100) && typeof x.ability === 'string' && ABILITY.includes(x.ability) && s(x.spell, 200)
       ? [{ resolution: x.resolution, characterId: x.characterId, ability: x.ability as SavePrompt['ability'], spell: x.spell }] : []) : [];
-  return { round: v.round as number, ...(current !== undefined && { current }), rows, ...(v.ask === true && v.round === 0 && { ask: true as const }), ...(saves.length && { saves }) };
+  const picks = Array.isArray(v.picks) ? v.picks.slice(0, 20).flatMap((x): PickPrompt[] => {
+    const options = isRec(x) && Array.isArray(x.options) ? x.options.slice(0, 2).flatMap((o) => (isRec(o) && fin(o.face) && s(o.type, 20) ? [{ face: o.face as number, type: o.type }] : [])) : [];
+    return isRec(x) && s(x.resolution, 100) && s(x.characterId, 100) && s(x.spell, 200) && options.length
+      ? [{ resolution: x.resolution, characterId: x.characterId, spell: x.spell, options, ...(x.leap === true && { leap: true as const }) }] : [];
+  }) : [];
+  return { round: v.round as number, ...(current !== undefined && { current }), rows, ...(v.ask === true && v.round === 0 && { ask: true as const }), ...(saves.length && { saves }), ...(picks.length && { picks }) };
 }
 const ABILITY = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
 
@@ -245,6 +250,8 @@ export class Guest {
   }
   /** Targeting: the player's own save roll for their character's pending area save. */
   sendSave(resolution: string, characterId: string, d20: number): void { this.#own(characterId, () => this.#send({ t: 'save', resolution, characterId, d20 })); }
+  /** Targeting: the die picked for a hit waiting on it (Chaos Bolt), by the type it gives. */
+  sendPick(resolution: string, characterId: string, type: string): void { this.#own(characterId, () => this.#send({ t: 'pick', resolution, characterId, type })); }
   /** Targeting: a leaping spell's next target (Chaos Bolt), for the result the DM's device names in the outcome. */
   sendLeap(resolution: string, characterId: string, aim: Aim): void { this.#own(characterId, () => this.#send({ t: 'leap', resolution, characterId, aim })); }
   sendEndTurn(characterId: string): void { this.#own(characterId, () => this.#send({ t: 'endTurn', characterId })); }

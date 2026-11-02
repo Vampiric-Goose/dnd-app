@@ -191,6 +191,11 @@ function hostDeps(r: Run, cid: string): HostDeps {
       if (camp) await m.settleSave(cid, rid, target, d20, camp.settings);
       changed(r);
     },
+    settlePick: async (rid, target, type) => {
+      const [m, camp] = await Promise.all([import('../combat/store.ts'), db.campaigns.get(cid)]);
+      if (camp) await m.settlePick(cid, rid, target, type, camp.settings);
+      changed(r);
+    },
     loadMonster: async (id) => ((await db.monsters.get(id)) as MonsterDef | undefined) ?? ((await getIndex(cid)).resolve(id) as MonsterDef | undefined),
     loadScene: () => db.scenes.shown(cid),
     updateScene: (id, fn) => db.scenes.update(id, fn, { network: true }).then((s) => (changed(r), s)),
@@ -420,6 +425,9 @@ export function sendDrag(sceneId: string, tokenId: string, at?: Pt): void {
 /** Turn panel: the player's own character uses an action, or ends its turn (the guest checks owner and online; the DM checks the rest). */
 export function sendUse(characterId: string, action: string, slot?: number, target?: string, aim?: Aim): void {
   run?.guest?.sendUse(characterId, action, slot, target, aim);
+}
+export function sendPick(resolution: string, characterId: string, type: string): void {
+  run?.guest?.sendPick(resolution, characterId, type);
 }
 export function sendLeap(resolution: string, characterId: string, aim: Aim): void {
   run?.guest?.sendLeap(resolution, characterId, aim);

@@ -97,7 +97,7 @@ const ABILITY: Record<string, Ability> = { Str: 'str', Dex: 'dex', Con: 'con', I
  * is rolled once: a failure takes it all, a success half (rounded down) or none, each after its own defenses. Spell damage is magical.
  */
 export function resolveSpell(read: SpellRead, dice: { expr: string; type: string; on?: 'hit' | 'save'; vs?: string }[], dc: number | undefined, toHit: number | undefined,
-  target: TargetInfo | undefined, caught: TargetInfo[], r: Rolled, rng: () => number, autoCrit = false): Outcome[] {
+  target: TargetInfo | undefined, caught: TargetInfo[], r: Rolled, rng: () => number, autoCrit = false, ask = false): Outcome[] {
   const out: Outcome[] = [];
   const idx = dice.map((d, i) => ({ ...d, faces: r.dmg[i] ?? [] }));
   const hitDice = read.attack ? idx.filter((d) => d.on !== 'save') : [], saveDice = read.attack ? idx.filter((d) => d.on === 'save') : idx;
@@ -106,7 +106,13 @@ export function resolveSpell(read: SpellRead, dice: { expr: string; type: string
     const live = hitDice.filter((d) => !d.vs || d.vs === target.id); // a marked rider (Hex) hurts only its mark
     const h = a.hit ? hurt(target, live, live.map((d) => d.faces), a.nat === 20 || autoCrit, true, read.typeFromDie) : { damage: 0 };
     const { matched, ...dealt } = h as ReturnType<typeof hurt>;
-    out.push({ id: target.id, part: 'hit', ...a, ac: target.ac, ...dealt, ...(matched && read.leap && { leap: true as const }) }); // matching dice: it leaps (Chaos Bolt)
+    const pick = read.typeFromDie, open = live.find((d) => !d.type), crit = a.nat === 20 || autoCrit;
+    // `ask` (a PC casts it): its player picks the die; each pick's damage is worked out here, where the defenses are known
+    const choose = a.hit && ask && pick && open ? [...new Set(firstTwo(open.expr, open.faces, pick.sides, crit))].map((face) => {
+      const type = pick.types[face - 1] ?? '', c = hurt(target, live.map((d) => (d.type ? d : { ...d, type })), live.map((d) => d.faces), crit, true);
+      return { face, type, damage: c.damage, note: [`${type} (d${pick.sides} ${face})`, ...(c.note ? [c.note] : [])].join(', ') };
+    }) : undefined;
+    out.push({ id: target.id, part: 'hit', ...a, ac: target.ac, ...(choose ? { damage: 0, choose } : dealt), ...(matched && read.leap && { leap: true as const }) }); // matching dice: it leaps (Chaos Bolt)
   }
   // ponytail: darts that always hit all go to the one target; split them between several when someone needs it
   if ((read.auto || (read.lingering && !read.save)) && target) out.push({ id: target.id, part: 'hit', hit: true, ...hurt(target, idx, idx.map((d) => d.faces), false, true, read.typeFromDie) });

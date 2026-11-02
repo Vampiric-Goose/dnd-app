@@ -164,6 +164,8 @@ export interface Outcome {
   pending?: true; owed?: { amount: number; type: string }[];
   /** conditions a failed save left (`inflicts`: what a PC's pending save would leave on a failure; `ends`: what a repeat save ends on a success) */ inflict?: string[]; inflicts?: string[]; ends?: string[];
   /** its dice matched: the spell may leap to another creature (Chaos Bolt) */ leap?: true;
+  /** a hit waiting for its caster's player to pick the die that sets the type (Chaos Bolt): each pick's damage, worked out already */
+  choose?: { face: number; type: string; damage: number; note?: string }[];
 }
 /** What a result took off a combatant (HP and temp HP), and a PC's dying state before it, so Undo puts back exactly that. */
 export interface Applied { id: string; hp: number; temp: number; dying?: { deathSaves: { success: number; fail: number }; stable: boolean; dead: boolean };

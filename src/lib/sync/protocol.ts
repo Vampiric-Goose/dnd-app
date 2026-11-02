@@ -29,6 +29,7 @@ export type GuestMsg =
   | { t: 'blobWant'; hashes: string[] /* stage 5: images of the current scene it lacks */ }
   | { t: 'use'; characterId: string; action: string; slot?: number; target?: string /* turn panel: the player's own character does something (a TurnAction id) */; aim?: Aim }
   | { t: 'save'; resolution: string; characterId: string; d20: number /* targeting: the player's own save roll for a pending area save */ }
+  | { t: 'pick'; characterId: string; resolution: string; type: string /* targeting: the die picked for a hit waiting on it (Chaos Bolt), by its type */ }
   | { t: 'leap'; characterId: string; resolution: string; aim: Aim /* targeting: a leaping spell's next target (Chaos Bolt), from that result's creature */ }
   | { t: 'endTurn'; characterId: string /* the player's own character ends its turn */ }
   | { t: 'action'; action: ActionRequest /* declared action: the player's arrow (replaces their last) */ }
@@ -144,6 +145,10 @@ export function parseGuestMessage(raw: unknown): GuestMsg | { error: string } {
       return str(characterId, 100) && str(action, 200) && (slot === undefined || (Number.isInteger(slot) && (slot as number) >= 1 && (slot as number) <= 9))
         && (target === undefined || str(target, 100)) && aim !== null
         ? { t: 'use', characterId, action, ...(slot !== undefined && { slot: slot as number }), ...(target !== undefined && { target: target as string }), ...(aim && { aim }) } : { error: 'bad use' };
+    }
+    case 'pick': {
+      const { resolution, characterId, type } = raw;
+      return str(resolution, 100) && str(characterId, 100) && str(type, 20) ? { t: 'pick', resolution, characterId, type } : { error: 'bad pick' };
     }
     case 'leap': {
       const { resolution, characterId } = raw, aim = cleanAim(raw.aim);

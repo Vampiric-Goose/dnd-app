@@ -265,6 +265,25 @@ export const undoResolution = (cid: string, rid: string, settings: CampaignSetti
 });
 
 /** A PC's own save roll (`d20`) for a pending outcome: against the DC with its sheet's bonus, half or none on a success. Settles once. */
+/** A player's pick of the die that sets a hit's damage type (Chaos Bolt): that pick's damage lands, and Undo's "after" follows it. */
+export async function settlePick(cid: string, rid: string, target: string, type: string, settings: CampaignSettings): Promise<Combat | undefined> {
+  const o = (await db.combat.get(cid))?.resolutions?.find((y) => y.id === rid)?.outcomes.find((x) => x.id === target && x.choose);
+  const c = o?.choose?.find((x) => x.type === type);
+  if (!o || !c) return undefined;
+  let took = false;
+  await serial(() => update(cid, (k) => ({ ...k, resolutions: (k.resolutions ?? []).map((y) => (y.id !== rid ? y : { ...y, outcomes: y.outcomes.map((x) => {
+    if (x.id !== target || !x.choose) return x;
+    took = true;
+    const { choose: _c, ...rest } = x;
+    return { ...rest, damage: c.damage, ...(c.note && { note: c.note }) };
+  }) })) })));
+  if (!took) return undefined; // already picked
+  const applied = c.damage > 0 ? await hurtOne(cid, target, c.damage, o.nat === 20, settings) : undefined;
+  const now = await snapNow(cid, [target]);
+  return serial(() => update(cid, (k) => ({ ...k, resolutions: (k.resolutions ?? []).map((y) => (y.id !== rid ? y : { ...y, ...(applied && { applied: [...y.applied, applied] }),
+    ...(y.undo && { undo: { before: y.undo.before, after: { combatants: { ...y.undo.after.combatants, ...now.combatants }, states: { ...y.undo.after.states, ...now.states } } } }) })) })));
+}
+
 export async function settleSave(cid: string, rid: string, target: string, d20: number, settings: CampaignSettings): Promise<Combat | undefined> {
   const k = await db.combat.get(cid);
   const r = k?.resolutions?.find((x) => x.id === rid), x = k?.combatants.find((y) => y.id === target);
