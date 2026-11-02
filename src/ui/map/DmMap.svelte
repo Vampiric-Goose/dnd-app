@@ -7,9 +7,9 @@
   import { resizeImage } from '../../lib/images.ts';
   import { encodeFog, newFog, paintFog, type FogEdit } from '../../lib/map/fog.ts';
   import { snap, type Pt } from '../../lib/map/grid.ts';
-  import { addTokens, liveHp, MAX_SIDE, MAX_TOKENS, moveTokens, newScene, patchToken, regrid, removeTokens, tokenColor, type NewToken } from '../../lib/map/scene.ts';
+  import { addTokens, liveHp, MAX_SIDE, MAX_TOKENS, moveTokens, newScene, patchToken, regrid, tokenColor, type NewToken } from '../../lib/map/scene.ts';
   import { arrowsOn } from '../../lib/map/actions.ts';
-  import { addTokensToCombat, editScene, startFight, tokenForCharacter, tokenForMonster } from '../../lib/map/store.ts';
+  import { addTokensToCombat, dropTokens, editScene, joinFight, placeUnplaced, startFight, tokenForCharacter, tokenForMonster } from '../../lib/map/store.ts';
   import { currentRun, patchCombatant } from '../../lib/combat/combat.ts';
   import { budgetApplies, budgetFeet, combatantForToken, effectiveSpeed, originOf, recordMove } from '../../lib/combat/movement.ts';
   import { applyResolution, editCharacter, settlePick, settleSave, turn, undoResolution, updateCombat } from '../../lib/combat/store.ts';
@@ -182,10 +182,30 @@
   const monsterById = $derived(new Map(pool.map((m) => [m.id, m])));
   const charSize = (c: Character): Size => ((c.embedded[c.build.raceId] ?? index?.get(c.build.raceId)) as RaceDef | undefined)?.size ?? 'M';
 
-  const add = (list: NewToken[]) => {
-    if (scene && scene.tokens.length + list.length > MAX_TOKENS) notice = `A scene holds at most ${MAX_TOKENS} tokens; only the first ones fit.`;
-    return edit((s) => addTokens(s, list));
-  };
+  /** What fighters made from tokens need (addTokensToCombat). */
+  const fightOpts = () => ({ chars, sheetOf: (c: Character) => sheets.get(c.id) ?? computeSheet(c, { settings, viewer: 'dm' }), lookup: (id: string) => monsterById.get(id), settings });
+  /** New tokens; during a fight they join it too (one roster). */
+  const add = (list: NewToken[]) => run(async () => {
+    if (!scene) return;
+    if (scene.tokens.length + list.length > MAX_TOKENS) notice = `A scene holds at most ${MAX_TOKENS} tokens; only the first ones fit.`;
+    const had = new Set(scene.tokens.map((t) => t.id)), s = await editScene(scene.id, (x) => addTokens(x, list));
+    const ids = (s?.tokens ?? []).filter((t) => !had.has(t.id)).map((t) => t.id);
+    const { missing } = ids.length ? await joinFight(cid, scene.id, ids, fightOpts()) : { missing: [] };
+    await reload();
+    if (missing.length) toast(`Not in this campaign any more, so left out: ${missing.join(', ')}.`, true);
+  });
+  // One roster: fighters with no token anywhere (added on the Combat page before there was a scene, or an older fight) are placed on
+  // the fight's scene. Tried once per set of them, so a full scene isn't retried on every reload.
+  let placing = '';
+  $effect(() => {
+    const k = combat, ss = scenes;
+    if (!k || !ss.length) return;
+    const linked = new Set(ss.flatMap((s) => s.tokens.map((t) => t.combatantId))), onMap = new Set(ss.flatMap((s) => s.tokens.map((t) => t.characterId)));
+    const key = k.combatants.filter((x) => (x.kind === 'monster' && !linked.has(x.id)) || (x.kind === 'pc' && !onMap.has(x.characterId))).map((x) => x.id).join(',');
+    if (!key || key === placing) return;
+    placing = key;
+    void untrack(() => run(async () => { await placeUnplaced(cid, (id) => monsterById.get(id)); await reload(); }));
+  });
 
   // Characters already on this scene are not offered again (one token per character).
   const onScene = $derived(new Set(scene?.tokens.flatMap((t) => (t.characterId ? [t.characterId] : [])) ?? []));
@@ -219,9 +239,7 @@
   };
   const addToCombat = () => run(async () => {
     if (!scene) return;
-    const { missing } = await addTokensToCombat(cid, scene.id, selected, {
-      chars, sheetOf: (c) => sheets.get(c.id) ?? computeSheet(c, { settings, viewer: 'dm' }), lookup: (id) => monsterById.get(id), settings,
-    });
+    const { missing } = await addTokensToCombat(cid, scene.id, selected, fightOpts());
     await reload();
     if (missing.length) toast(`Not in this campaign any more, so left out: ${missing.join(', ')}.`, true);
     else toast('Added to combat.');
@@ -231,7 +249,8 @@
     if (!t) return s;
     return patchToken(s, id, p.size ? { ...p, ...snap(s.grid, t, p.size) } : p); // a new size re-snaps (Large sits on a vertex)
   });
-  const removeIds = (ids: string[]) => { const gone = new Set(ids); selected = selected.filter((x) => !gone.has(x)); void edit((s) => removeTokens(s, ids)); };
+  /** Tokens off the map, and the fighters they stand for out of the fight (one roster). */
+  const removeIds = (ids: string[]) => { const gone = new Set(ids); selected = selected.filter((x) => !gone.has(x)); void run(async () => { if (scene) await dropTokens(cid, scene.id, ids); await reload(); }); };
   const portrait = (id: string, file: File) => run(async () => {
     const hash = await db.blobs.put(await resizeImage(file, 256));
     if (scene) await editScene(scene.id, (s) => patchToken(s, id, { portrait: hash }));
@@ -309,9 +328,7 @@
   /** One step: show the scene, everyone on it joins, monsters and the DM's characters roll; round 1 once the players have rolled. */
   const beginFight = () => run(async () => {
     if (!scene) return;
-    const r = await startFight(cid, scene.id, {
-      chars, sheetOf: (c) => sheets.get(c.id) ?? computeSheet(c, { settings, viewer: 'dm' }), lookup: (id) => monsterById.get(id), settings,
-    });
+    const r = await startFight(cid, scene.id, fightOpts());
     await reload();
     if (r.missing.length) toast(`Not in this campaign any more, so left out: ${r.missing.join(', ')}.`, true);
     toast(r.waiting.length ? `Waiting for initiative from ${r.waiting.join(', ')}.` : 'Round 1.');
@@ -361,7 +378,10 @@
   let aiming: { a: TurnAction; slot?: number; toggles: Toggle[]; dtype?: string; plan: AimPlan; v: NonNullable<typeof view>; picks?: Pick[]; leap?: { rid: string; from: string; exclude: string[] } } | undefined = $state.raw();
   const onaim = (a: TurnAction, slot: number | undefined, toggles: Toggle[], dtype?: string) => {
     const plan = aimPlan(a, { level: slot, toggles, dtype, rider: view?.x.rider });
-    if (plan && view) { aiming = { a, slot, toggles, dtype, plan, v: view }; sheet = false; selected = []; }
+    if (!plan || !view) return;
+    const k = combat, here = k && scene?.tokens.some((t) => combatantForToken(k, t)?.id === view!.x.id);
+    if (!here) { error = `${view.name} has no token on this scene: put it on the map to aim.`; return; } // never a silent no-op
+    aiming = { a, slot, toggles, dtype, plan, v: view }; sheet = false; selected = [];
   };
   const conditionsOf = (z: Combatant) => (z.characterId ? chars.find((c) => c.id === z.characterId)?.state.conditions : undefined) ?? z.conditions ?? [];
   const nameOfCombatant = (id: string) => { const z = combat?.combatants.find((y) => y.id === id); return (z?.characterId ? chars.find((c) => c.id === z.characterId)?.name : undefined) ?? z?.name ?? '?'; };

@@ -3,7 +3,7 @@ import { addCombatants, monsterCombatant, pcCombatant } from '../combat/combat.t
 import { fightScene, prepareStart, remove, updateCombat } from '../combat/store.ts';
 import { db } from '../db.ts';
 import type { CampaignSettings, Character, Combat, Combatant, MonsterDef, Scene, Sheet, Size } from '../types.ts';
-import { addTokens, patchToken, tokensFromCombat, type NewToken } from './scene.ts';
+import { addTokens, patchToken, removeTokens, tokensFromCombat, type NewToken } from './scene.ts';
 
 /** db.scenes.update on the fresh record (a player's move made since the page read it survives), stamping updatedAt. */
 export const editScene = (id: string, fn: (s: Scene) => Scene): Promise<Scene | undefined> =>
@@ -100,10 +100,41 @@ export async function placeCombatants(cid: string, added: Combatant[], lookup: (
   return placed < wanted ? { placed, why: 'full' } : { placed };
 }
 
-/** Final M2: a combatant removed mid-fight first leaves its HP on its linked tokens (the link drops once it is gone); a failed write-back still removes it. */
+// One roster (the user's ruling, 11-02): the fight and the map hold the same creatures. Added on either side, a creature is on both;
+// removed from either, it leaves both.
+
+/** Every fighter no token on any scene links to (a character: none on the fight's scene) gets one there (placeCombatants). */
+export async function placeUnplaced(cid: string, lookup: (id: string) => MonsterDef | undefined): ReturnType<typeof placeCombatants> {
+  const combat = await db.combat.get(cid);
+  if (!combat) return { placed: 0 };
+  const linked = new Set((await db.scenes.list(cid)).flatMap((s) => s.tokens.map((t) => t.combatantId)));
+  const out = combat.combatants.filter((x) => !linked.has(x.id));
+  return out.length ? placeCombatants(cid, out, lookup) : { placed: 0 };
+}
+
+/** Tokens put on the map join the fight when there is one (addTokensToCombat); with none they stay map-only. */
+export async function joinFight(cid: string, sceneId: string, ids: string[], o: Parameters<typeof addTokensToCombat>[3]): Promise<{ missing: string[] }> {
+  return (await db.combat.get(cid)) ? addTokensToCombat(cid, sceneId, ids, o) : { missing: [] };
+}
+
+/** Tokens taken off the map, and the fighters they link to out of the fight. */
+export async function dropTokens(cid: string, sceneId: string, ids: string[]): Promise<void> {
+  const gone = new Set(ids), s = await db.scenes.get(sceneId);
+  const fighters = (s?.tokens ?? []).flatMap((t) => (gone.has(t.id) && t.combatantId ? [t.combatantId] : []));
+  await editScene(sceneId, (x) => removeTokens(x, ids));
+  const combat = await db.combat.get(cid);
+  for (const id of fighters) if (combat?.combatants.some((x) => x.id === id)) await remove(cid, id);
+}
+
+/** A combatant removed mid-fight leaves the map too (the HP write-back first keeps its other tokens' HP, final M2); a failed write-back still removes it. */
 export async function removeCombatant(cid: string, combatantId: string): ReturnType<typeof remove> {
   try { await endCombatWriteBack(cid); } catch (e) { console.warn(e); }
-  return remove(cid, combatantId);
+  const out = await remove(cid, combatantId);
+  for (const s of await db.scenes.list(cid)) {
+    const ids = s.tokens.filter((t) => t.combatantId === combatantId).map((t) => t.id);
+    if (ids.length) await editScene(s.id, (x) => removeTokens(x, ids));
+  }
+  return out;
 }
 
 /** Before a fight ends: every scene of the campaign takes the fight's HP onto its linked tokens. */

@@ -87,6 +87,12 @@
 
   const run = async (op: () => Promise<unknown>) => { await act(op); await reload(); };
   const edit = (fn: (c: Combat) => Combat) => run(() => updateCombat(cid, fn));
+  /** One roster: who joins the fight also gets a token on its scene (none yet: the map places them once one is made). */
+  const join = (fn: (c: Combat) => Combat) => run(async () => {
+    await updateCombat(cid, fn);
+    const p = await (await import('../../lib/map/store.ts')).placeUnplaced(cid, (id) => monById.get(id));
+    if (p.why === 'full') toast(`The scene is full (200 tokens): ${p.placed ? `only ${p.placed} placed` : 'no tokens placed'}.`, true);
+  });
   const pcs = (cs: Character[]) => cs.map((c) => pcCombatant(c, computeSheet(c, { settings, viewer: 'dm' })));
 
   // Toggles save one after another, each from the stored campaign, so quick toggles never overwrite each other.
@@ -147,7 +153,7 @@
   const setPrompt = (id: string, p: Prompt) => { prompts[id] = p; };
 
   const addItems = $derived<MenuItem[]>([
-    { label: 'Add party', disabled: !outside.length || full, onselect: () => void edit((c) => addCombatants(c, pcs(outside))) },
+    { label: 'Add party', disabled: !outside.length || full, onselect: () => void join((c) => addCombatants(c, pcs(outside))) },
     ...(mods.lair && !list.some((x) => x.kind === 'lair')
       ? [{ label: 'Add lair actions', disabled: full, onselect: () => void edit((c) => addCombatants(c, [lairCombatant()])) }]
       : []),
@@ -199,8 +205,8 @@
                   {#each outside as c (c.id)}<option value={c.id}>{c.name || 'Unnamed'}</option>{/each}
                 </select>
               </label>
-              <button type="button" disabled={!pickChar || full} onclick={() => { const c = charById.get(pickChar); pickChar = ''; if (c) void edit((x) => addCombatants(x, pcs([c]))); }}>Add character</button>
-              <MonsterSearch {pool} label="Add monster" onadd={(m, count) => edit((c) => addMonsters(c, [{ monster: m, count }], settings.monsterHp))} />
+              <button type="button" disabled={!pickChar || full} onclick={() => { const c = charById.get(pickChar); pickChar = ''; if (c) void join((x) => addCombatants(x, pcs([c]))); }}>Add character</button>
+              <MonsterSearch {pool} label="Add monster" onadd={(m, count) => join((c) => addMonsters(c, [{ monster: m, count }], settings.monsterHp))} />
             </div>
           {/snippet}
         </Menu>

@@ -114,7 +114,9 @@
   let leapOffer: { rid: string; a: TurnAction; slot?: number; c: Character; plan: AimPlan; from: string; exclude: string[] } | undefined = $state.raw();
   const onaim = (a: TurnAction, slot: number | undefined, toggles: Toggle[], dtype?: string) => {
     const plan = aimPlan(a, { level: slot, toggles, dtype, rider: turn?.econ.rider });
-    if (plan && turn && joined) { aiming = { a, slot, toggles, dtype, plan, c: turn.c }; selected = []; }
+    if (!plan || !turn || !joined) return;
+    if (!view?.tokens.some((t) => t.characterId === turn.c.id)) { error = `${turn.c.name} isn't on the map: ask your DM to place your token.`; return; } // never a silent no-op
+    aiming = { a, slot, toggles, dtype, plan, c: turn.c }; selected = [];
   };
   const OUT = /incapacitated|paralyzed|petrified|stunned|unconscious/i;
   const aim = $derived.by(() => {

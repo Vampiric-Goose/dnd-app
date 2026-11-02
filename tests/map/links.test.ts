@@ -5,7 +5,7 @@ import { monsterCombatant, newCombat } from '../../src/lib/combat/combat.ts';
 import { db, resetDb } from '../../src/lib/db.ts';
 import { footprint } from '../../src/lib/map/grid.ts';
 import { addTokens, newScene, tokensFromCombat } from '../../src/lib/map/scene.ts';
-import { addTokensToCombat, combatantsFromTokens, endCombatWriteBack, placeCombatants, removeCombatant } from '../../src/lib/map/store.ts';
+import { addTokensToCombat, combatantsFromTokens, dropTokens, endCombatWriteBack, joinFight, placeCombatants, placeUnplaced, removeCombatant } from '../../src/lib/map/store.ts';
 import type { MonsterDef, Pack, Scene, Sheet } from '../../src/lib/types.ts';
 import { camp, char } from '../fixtures/records.ts';
 
@@ -109,6 +109,42 @@ describe('with the database', () => {
     await db.combat.update('c1', (c) => ({ ...c!, combatants: c!.combatants.map((x) => (x.id === g1.id ? { ...x, hp: 1 } : x)) }));
     await removeCombatant('c1', g1.id);
     expect((await db.combat.get('c1'))!.combatants.some((x) => x.id === g1.id)).toBe(false);
-    expect((await db.scenes.get(s.id))!.tokens.find((t) => t.name === 'Goblin 1')!.hp).toBe(1);
+    expect((await db.scenes.get(s.id))!.tokens.some((t) => t.name === 'Goblin 1')).toBe(false); // one roster: its token goes with it
+  });
+
+  // One roster (the user's ruling, 11-02): the fight and the map hold the same creatures.
+  test('fighters with no token anywhere are placed on the fight\'s scene; linked ones are not placed again', async () => {
+    const [g1, g2] = [1, 2].map((n) => monsterCombatant(goblin, `Goblin ${n}`, 'average', half));
+    await db.combat.update('c1', () => ({ ...newCombat('c1'), combatants: [g1, g2] }));
+    expect(await placeUnplaced('c1', lookup)).toEqual({ placed: 0, why: 'no scene' });
+    const a = addTokens(newScene('c1', 'A'), [{ name: 'Goblin 1', size: 'S', monsterId: goblin.id, combatantId: g1.id }]), b = newScene('c1', 'B');
+    await db.scenes.put(a);
+    await db.scenes.put(b);
+    await db.scenes.show('c1', b.id);
+    expect(await placeUnplaced('c1', lookup)).toEqual({ placed: 1 });
+    expect((await db.scenes.get(b.id))!.tokens.map((t) => t.combatantId)).toEqual([g2.id]);
+    expect(await placeUnplaced('c1', lookup)).toEqual({ placed: 0 });
+  });
+
+  test('tokens put on the map join a running fight, and only then', async () => {
+    const s = prepared(), o = { chars: [thorin], sheetOf, lookup, settings: camp('c1').settings };
+    await db.scenes.put(s);
+    await joinFight('c1', s.id, [s.tokens[1].id], o);
+    expect(await db.combat.get('c1')).toBeUndefined();
+    await db.combat.update('c1', () => newCombat('c1'));
+    await joinFight('c1', s.id, [s.tokens[1].id], o);
+    const k = (await db.combat.get('c1'))!;
+    expect(k.combatants.map((x) => x.name)).toEqual(['Goblin 1']);
+    expect((await db.scenes.get(s.id))!.tokens[1].combatantId).toBe(k.combatants[0].id);
+  });
+
+  test('tokens removed from the map leave the fight', async () => {
+    const s = prepared();
+    await db.scenes.put(s);
+    await addTokensToCombat('c1', s.id, s.tokens.map((t) => t.id), { chars: [thorin], sheetOf, lookup, settings: camp('c1').settings });
+    const linked = (await db.scenes.get(s.id))!.tokens.find((t) => t.name === 'Goblin 1')!;
+    await dropTokens('c1', s.id, [linked.id]);
+    expect((await db.scenes.get(s.id))!.tokens.some((t) => t.id === linked.id)).toBe(false);
+    expect((await db.combat.get('c1'))!.combatants.map((x) => x.name).sort()).toEqual(['Goblin 2', 'Thorin']);
   });
 });
