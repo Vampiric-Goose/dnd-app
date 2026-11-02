@@ -1,6 +1,7 @@
 import { enumerateChoices, getKind, raceParts, walkLevels } from '../character/choices.ts';
 import type { LevelStep, Lookup, PendingChoice } from '../character/choices.ts';
 import { playerItem } from '../items/playerView.ts';
+import { SPELL_EFFECTS } from './constants.ts';
 import type { CampaignSettings, Character, Effect, InventoryEntry, ItemDef } from '../types.ts';
 
 // Pure (no Svelte/Vite/DOM): shared with Node scripts.
@@ -26,6 +27,7 @@ export function gather(c: Character, opts: SheetOpts, lookup: Lookup = id => c.e
   const add = (source: string, list: Effect[] | undefined, classId?: string) =>
     list?.forEach(effect => effects.push({ effect, source, ...(classId && { classId }) }));
 
+  for (const n of c.state.conditions) add(n, SPELL_EFFECTS[n]); // Mage Armor
   const { race, sub } = raceParts(c, lookup);
   for (const r of [race, sub]) {
     if (!r) continue;

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { applyDamage, applyHealing, rollDeathSave } from '../../lib/character/rest.ts';
   import { deathState } from '../../lib/character/play.ts';
-  import { CONDITIONS } from '../../lib/rules/constants.ts';
+  import { CONDITIONS, SPELL_EFFECTS } from '../../lib/rules/constants.ts';
   import type { Character, OverrideKey, Recharge, Sheet } from '../../lib/types.ts';
   import HpControls from '../HpControls.svelte';
   import Bar from '../kit/Bar.svelte';
@@ -92,7 +92,7 @@
   </p>
   <Drawer title="Set conditions">
     <div class="chips" role="group" aria-label="Conditions">
-      {#each CONDITIONS as name (name)}
+      {#each [...CONDITIONS, ...Object.keys(SPELL_EFFECTS)] as name (name)}
         <button type="button" class="chip" aria-pressed={c.state.conditions.includes(name)} onclick={() => toggleCondition(name)}>{name}</button>
       {/each}
     </div>

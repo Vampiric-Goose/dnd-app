@@ -4,7 +4,7 @@ import { spellList } from '../character/play.ts';
 import { getKind } from '../character/choices.ts';
 import { richToPlain } from '../content/richtext.ts';
 import type { Attack, Character, Combat, Combatant, MonsterDef, RichText, Sheet, SpellDef } from '../types.ts';
-import { abilityMod } from '../rules/constants.ts';
+import { abilityMod, SPELL_EFFECTS } from '../rules/constants.ts';
 import { actionsLeft, BLOCKING, grantAction, spend, useProblem, type Cost } from './economy.ts';
 import { addDash, standUp } from './movement.ts';
 import { readSpell, readSpellcasting, type SpellRead } from './spellText.ts';
@@ -192,6 +192,7 @@ export function characterEffect(c: Character, a: TurnAction, pick?: string): Cha
   const prone = (on: boolean) => ({ ...c, state: { ...c.state, conditions: [...c.state.conditions.filter((n) => n.toLowerCase() !== 'prone'), ...(on ? ['Prone'] : [])] } });
   if (a.id === 'free:prone') return prone(true);
   if (a.id === 'free:stand') return prone(false);
+  if (a.spell && SPELL_EFFECTS[a.name]) return c.state.conditions.includes(a.name) ? c : { ...c, state: { ...c.state, conditions: [...c.state.conditions, a.name] } }; // Mage Armor
   const e = c.inventory.find((x) => x.id === pick && x.item.weapon);
   if (!e) return c;
   // one from a stack is drawn into its own row; a stowed one goes back on its stack (hands.ts)

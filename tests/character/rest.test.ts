@@ -56,3 +56,9 @@ test('rest recharge rolls rechargeAmount with the given rng (fix round 1)', () =
   c.inventory = [useCharge(makeEntry({ kind: 'item', id: 'item:rod@t', name: 'Rod', source: 't', text: [], type: 'rod', magic: true, charges: { max: 6, recharge: 'long', rechargeAmount: '1d6+1' } }), 6)];
   expect(longRest(c, computeSheet(c, dm), () => 0.4).inventory[0].chargesUsed).toBe(2); // d6=3, +1: 4 of 6 restored
 });
+
+test('a long rest ends Mage Armor (8 hours); real conditions stay', () => {
+  const w = mkChar({ race: 'human', base: {}, levels: ['fighter'] });
+  w.state = { ...w.state, conditions: ['Mage Armor', 'Poisoned'] };
+  expect(longRest(w, computeSheet(w, dm)).state.conditions).toEqual(['Poisoned']);
+});

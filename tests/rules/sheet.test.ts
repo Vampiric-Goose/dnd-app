@@ -35,6 +35,12 @@ test('AC variants', () => {
   expect(ac({ race: 'human', base: { dex: 13, con: 15 }, levels: ['barbarian'], inventory: [['shield', true]] })).toBe(17);
   expect(ac({ race: 'human', base: { dex: 17 }, levels: ['fighter'], inventory: [['half-plate', true]] })).toBe(17);
 });
+test('Mage Armor on a character: base AC 13 + Dex with no armor (a shield still adds); worn armor wins', () => {
+  const ac = (o: Parameters<typeof mkChar>[0]) => { const c = mkChar(o); return computeSheet({ ...c, state: { ...c.state, conditions: ['Mage Armor'] } }, dm).ac; };
+  expect(ac({ race: 'human', base: { dex: 15 }, levels: ['fighter'] })).toBe(16); // human +1: dex16 → 13+3
+  expect(ac({ race: 'human', base: { dex: 15 }, levels: ['fighter'], inventory: [['shield', true]] })).toBe(18);
+  expect(ac({ race: 'human', base: { dex: 17 }, levels: ['fighter'], inventory: [['half-plate', true]] })).toBe(17);
+});
 test('proficiency variants', () => {
   const bard = computeSheet(mkChar({ race: 'human', base: { dex: 13, int: 9 }, levels: ['bard', 'bard'] }), dm);
   expect([bard.initiative, bard.skills.arcana.bonus]).toEqual([3, 1]);

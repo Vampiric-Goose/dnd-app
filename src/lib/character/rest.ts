@@ -1,4 +1,5 @@
 import { rechargeEntry } from '../items/inventory.ts';
+import { SPELL_EFFECTS } from '../rules/constants.ts';
 import type { Character, Sheet } from '../types.ts';
 
 // Pure (no Svelte/Vite/DOM): shared with Node scripts. Every function returns a new Character.
@@ -46,7 +47,7 @@ export function longRest(c: Character, sheet: Sheet, rng?: () => number): Charac
   return {
     ...withState(c, {
       hp: sheet.maxHp, tempHp: 0, hitDiceUsed: used, slotsUsed: [], pactSlotsUsed: 0, resourcesUsed,
-      exhaustion: Math.max(0, c.state.exhaustion - 1), deathSaves: NO_SAVES, stable: false,
+      exhaustion: Math.max(0, c.state.exhaustion - 1), deathSaves: NO_SAVES, stable: false, conditions: c.state.conditions.filter((n) => !SPELL_EFFECTS[n]),
     }),
     inventory,
   };

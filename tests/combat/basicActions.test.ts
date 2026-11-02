@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import { describe, expect, test } from 'vitest';
 import { budgetFeet } from '../../src/lib/combat/movement.ts';
 import { applyUse, characterEffect, monsterActions, pcActions, problemOf, visible, type TurnAction } from '../../src/lib/combat/turnActions.ts';
+import { mkChar } from '../fixtures/content.ts';
 import type { Character, Combat, Combatant, MonsterDef, Pack, Sheet } from '../../src/lib/types.ts';
 
 // The 2014 basic rules (SRD 5.1, Combat): Grapple and Shove replace an attack of the Attack action; escaping a grapple is an action; one
@@ -78,4 +79,12 @@ describe('the basic rules a character always has', () => {
     const prone = applyUse(fight(cb({ kind: 'monster' })), cb({ kind: 'monster' }), by('free:prone', m));
     expect(prone.combatants[0].conditions).toEqual(['Prone']);
   });
+});
+
+test('casting Mage Armor puts it on the caster', () => {
+  const c = mkChar({ race: 'human', base: {}, levels: ['fighter'] });
+  const a: TurnAction = { id: 'spell:mage-armor@SRD', name: 'Mage Armor', cost: 'action', group: 'spell', spell: { id: 'spell:mage-armor@SRD', level: 1, concentration: false } };
+  const on = characterEffect(c, a);
+  expect(on.state.conditions).toEqual(['Mage Armor']);
+  expect(characterEffect(on, a).state.conditions).toEqual(['Mage Armor']); // cast again: still once
 });
