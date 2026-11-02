@@ -186,3 +186,18 @@ test('R55: a subrace is required only when one from the race\'s own source point
   expect(race(mkChar({ race: 'human', base: {}, levels: ['fighter'] }))).toEqual([]);
   expect(race(mkChar({ race: 'dwarf', base: {}, levels: ['fighter'] }))).toEqual(['Choose a Dwarf subrace']); // Hill Dwarf shares the race's source
 });
+
+test('a race feat (Variant Human), picked from Choices to make: the feat is on the sheet, its ability bonus counts', async () => {
+  const { featureList } = await import('../../src/lib/character/play.ts');
+  const tough = { kind: 'feat', id: 'feat:sturdy@FIX', name: 'Sturdy', source: 'FIX', text: [{ p: 'Fixture feat.' }], abilityBonus: { con: 1 } } as Entity;
+  const variant = { ...hillDwarf, id: 'subrace:variant-human@FIX', name: 'Variant Human', raceId: 'race:human@FIX', abilityBonuses: {}, traits: [{ name: 'Feat', text: [] }], choices: [{ type: 'feat' as const }] };
+  const ix = new ContentIndex([{ id: 'p', name: 'p', source: 'FIX', importedAt: 0, hash: '', patches: [], entities: [...fixtureEntities, variant, tough] }]);
+  let c = mkChar({ race: 'human', base: { con: 14 }, levels: ['fighter'] });
+  c = embedContent({ ...c, build: { ...c.build, subraceId: variant.id } }, ix); // built before the feat existed: nothing picked
+  const before = computeSheet(c, { settings: S, viewer: 'dm' }).scores.con;
+  const p = listChoices(c, ix, S).find((x) => x.choice.type === 'feat')!;
+  expect(p.answer).toBeUndefined();
+  c = embedContent(answerChoice(c, p.key, { type: 'ids', ids: [tough.id] }), ix); // what Save on the Choices page does
+  expect(featureList(c, S).map((f) => f.name)).toContain('Sturdy');
+  expect(computeSheet(c, { settings: S, viewer: 'dm' }).scores.con).toBe(before + 1);
+});

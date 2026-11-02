@@ -6,9 +6,10 @@
 
   // Every pending choice, grouped by level. listChoices re-runs after each answer, so whatever an answer
   // picks (a subclass, an option, a feat...) shows its own choices underneath, however deep they nest.
-  // `fromLevel` (level-up) hides answered choices below that level.
-  let { c = $bindable(), index, settings, sheet, problems, fromLevel = 0 }: {
-    c: Character; index: ContentIndex; settings: CampaignSettings; sheet: Sheet; problems: Problem[]; fromLevel?: number;
+  // `fromLevel` (level-up) hides answered choices below that level; `hidden` (Choices to make) hides the ones answered before the page
+  // opened, so a choice stays in view while it is being answered.
+  let { c = $bindable(), index, settings, sheet, problems, fromLevel = 0, hidden }: {
+    c: Character; index: ContentIndex; settings: CampaignSettings; sheet: Sheet; problems: Problem[]; fromLevel?: number; hidden?: Set<string>;
   } = $props();
 
   const racial = (sourceId: string) => [c.build.raceId, c.build.subraceId].includes(sourceId.split('/')[0]);
@@ -19,6 +20,7 @@
     for (const p of all) {
       if (c.build.customOrigin && p.choice.type === 'ability' && racial(p.sourceId)) continue; // R24: the custom origin replaces these
       if (p.level < fromLevel && p.answer) continue;
+      if (hidden?.has(p.key)) continue;
       out.set(p.level, [...(out.get(p.level) ?? []), p]);
     }
     return [...out].sort((a, b) => a[0] - b[0]);
