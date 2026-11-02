@@ -1,6 +1,6 @@
 import { slug } from '../../content/ids.ts';
 import { renderTags } from '../../content/richtext.ts';
-import type { SpellDef } from '../../types.ts';
+import type { Ability, SpellDef, SpellMech } from '../../types.ts';
 import { arr, base, rich, table, type ClassRef, type Ctx, type Raw } from './common.ts';
 
 const SCHOOL = table<string>({ A: 'abjuration', C: 'conjuration', D: 'divination', E: 'enchantment', V: 'evocation', I: 'illusion', N: 'necromancy', T: 'transmutation' });
@@ -52,6 +52,24 @@ function classesOf(refs: ClassRef[], spellSource: string, listed: Ctx['listed'])
   return [...new Set(ok.map(c => slug(c.name)))];
 }
 
+const ABILITY: Record<string, Ability> = { strength: 'str', dexterity: 'dex', constitution: 'con', intelligence: 'int', wisdom: 'wis', charisma: 'cha' };
+const AREA: Record<string, NonNullable<SpellMech['area']>['shape']> = { radius: 'sphere', sphere: 'sphere', hemisphere: 'sphere', cone: 'cone', line: 'line', cube: 'cube' };
+const strs = (v: unknown): string[] => arr(v).filter((x): x is string => typeof x === 'string');
+
+/** The record's mechanics tags (savingThrow, spellAttack, damageInflict, conditionInflict, scalingLevelDice, an area range), or undefined. */
+function mechOf(r: Raw): SpellMech | undefined {
+  const save = strs(r.savingThrow).map((s) => ABILITY[s.toLowerCase()]).filter(Boolean);
+  const atk = strs(r.spellAttack)[0]?.toUpperCase();
+  const types = strs(r.damageInflict).map((s) => s.toLowerCase()), conditions = strs(r.conditionInflict).map(cap);
+  const sc = arr(r.scalingLevelDice)[0]?.scaling;
+  const scaling = sc && typeof sc === 'object' ? Object.fromEntries(Object.entries(sc).filter(([k, v]) => /^\d+$/.test(k) && typeof v === 'string').map(([k, v]) => [+k, v as string])) : {};
+  const shape = AREA[r.range?.type], feet = r.range?.distance?.type === 'feet' ? r.range.distance.amount : undefined;
+  const m: SpellMech = { ...(save.length && { save }), ...((atk === 'R' || atk === 'M') && { attack: atk === 'R' ? 'ranged' as const : 'melee' as const }),
+    ...(types.length && { types }), ...(conditions.length && { conditions }), ...(Object.keys(scaling).length && { scaling }),
+    ...(shape && typeof feet === 'number' && { area: { shape, feet } }) };
+  return Object.keys(m).length ? m : undefined;
+}
+
 export const spell = (r: Raw, ctx: Ctx, id: string, name: string): SpellDef => {
   const c = r.components ?? {}, m = typeof c.m === 'string' ? c.m : typeof c.m?.text === 'string' ? c.m.text : undefined;
   const higher = arr(r.entriesHigherLevel).flatMap(e => (e?.entries ? arr(e.entries) : [e]));
@@ -60,7 +78,7 @@ export const spell = (r: Raw, ctx: Ctx, id: string, name: string): SpellDef => {
     ...arr(r.classes?.fromClassListVariant).map(x => ({ name: x?.name, source: x?.source, variantOf: [x?.definedInSource] })),
     ...ctx.spellClasses(r.name, r.source),
   ];
-  const durations = arr(r.duration);
+  const durations = arr(r.duration), mech = mechOf(r);
   return {
     ...base('spell', id, name, r),
     level: r.level ?? 0, school: SCHOOL[r.school] ?? String(r.school ?? '').toLowerCase(),
@@ -69,6 +87,7 @@ export const spell = (r: Raw, ctx: Ctx, id: string, name: string): SpellDef => {
     duration: duration(durations), concentration: durations.some(d => d.concentration === true), ritual: r.meta?.ritual === true,
     ...(higher.length && { higherLevels: rich(higher) }),
     classes: classesOf(refs, r.source, ctx.listed),
+    ...(mech && { mech }),
   };
 };
 

@@ -58,7 +58,10 @@ export interface FeatureDef extends Base { kind: 'feature'; level: number; class
 export interface OptionalFeatureDef extends Base { kind: 'optionalFeature'; featureTypes: string[]; prerequisite?: string }
 export interface BackgroundDef extends Base { kind: 'background'; proficiencies: Proficiencies; equipment: StartingEquipment; feature: Trait }
 export interface FeatDef extends Base { kind: 'feat'; prerequisite?: { abilities?: Partial<Scores>[]; spellcasting?: boolean; races?: string[]; text?: string }; abilityBonus?: Partial<Scores> }
-export interface SpellDef extends Base { kind: 'spell'; level: number; school: string; castingTime: string; range: string; components: { v?: boolean; s?: boolean; m?: string }; duration: string; concentration: boolean; ritual: boolean; higherLevels?: RichText; classes: string[] /* class slugs, e.g. 'wizard' */ }
+/** A spell's mechanics as its book tags them (5etools import): saves, attack, damage types, conditions, cantrip dice by level, an area around the caster. */
+export interface SpellMech { save?: Ability[]; attack?: 'melee' | 'ranged'; types?: string[]; conditions?: string[]; scaling?: Record<number, string>;
+  area?: { shape: 'cone' | 'sphere' | 'cube' | 'line' | 'cylinder'; feet: number } }
+export interface SpellDef extends Base { kind: 'spell'; level: number; school: string; castingTime: string; range: string; components: { v?: boolean; s?: boolean; m?: string }; duration: string; concentration: boolean; ritual: boolean; higherLevels?: RichText; classes: string[] /* class slugs, e.g. 'wizard' */; mech?: SpellMech }
 export type ItemType = 'weapon' | 'armor' | 'shield' | 'ammunition' | 'gear' | 'pack' | 'tool' | 'wondrous' | 'potion' | 'ring' | 'rod' | 'scroll' | 'staff' | 'wand' | 'other';
 export type Rarity = 'common' | 'uncommon' | 'rare' | 'very rare' | 'legendary' | 'artifact' | 'varies';
 export interface ItemDef extends Base { kind: 'item'; type: ItemType; magic: boolean; weight?: number; costCp?: number; rarity?: Rarity; attunement?: boolean | string; baseItemId?: string; consumable?: boolean; category?: string /* gear/tool category, e.g. 'holy-symbols'; weapons and armor use weapon/armor.category */; curse?: RichText;
@@ -91,7 +94,7 @@ export interface MonsterDef extends Base {
 export type Entity = RaceDef | SubraceDef | ClassDef | SubclassDef | FeatureDef | OptionalFeatureDef | BackgroundDef | FeatDef | SpellDef | ItemDef | ConditionDef | MonsterDef;
 export type EntityKind = Entity['kind'];
 export type EntityOfKind<K extends EntityKind> = Extract<Entity, { kind: K }>;
-export interface EntityPatch { targetId: string; alias: string; text?: RichText; addFeatures?: FeatureRef[]; /** monsters: the book's lair actions and regional effects */ lair?: RichText; regional?: RichText }
+export interface EntityPatch { targetId: string; alias: string; text?: RichText; /** a spell's book mechanics */ mech?: SpellMech; addFeatures?: FeatureRef[]; /** monsters: the book's lair actions and regional effects */ lair?: RichText; regional?: RichText }
 export interface Pack { id: string; name: string; source: string; homebrew?: boolean; importedAt: number; hash: string; entities: Entity[]; patches: EntityPatch[]; sharedBy?: string /* stage 3: received from this campaign's DM */ }
 export interface PackMeta { id: string; name: string; source: string; homebrew?: boolean; importedAt: number; hash: string; counts: Partial<Record<EntityKind, number>>; sharedBy?: string }
 export type HideableField = 'rarity' | 'attunement' | 'bonuses' | 'effects' | 'charges' | 'curse';

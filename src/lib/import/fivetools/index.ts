@@ -292,7 +292,8 @@ export async function import5etools(
     // An empty text (mundane gear often has none) would blank the SRD's own description.
     // The SRD has no lair actions or regional effects; a book monster brings its own (from its legendary group).
     const lair = def.kind === 'monster' ? { ...(def.lair && { lair: def.lair }), ...(def.regional && { regional: def.regional }) } : {};
-    if (twin) p.patches.set(twin.id, { targetId: twin.id, alias: def.source, ...(def.text.length && { text: def.text }), ...lair });
+    if (twin) p.patches.set(twin.id, { targetId: twin.id, alias: def.source, ...(def.text.length && { text: def.text }), ...lair,
+      ...(def.kind === 'spell' && def.mech && { mech: def.mech }) });
     else p.entities.set(def.id, def);
   };
   // 5etools keeps some races' defaults on a nameless subrace (PHB Human's +1s): they become the race's own, so no unnamed subrace is offered

@@ -26,6 +26,7 @@ export class ContentIndex {
       if (!aliases.some(a => up(a) === up(patch.alias))) aliases.push(patch.alias);
       copy.aliases = aliases;
       if (patch.text) copy.text = patch.text;
+      if (patch.mech && copy.kind === 'spell') copy.mech = patch.mech;
       if (copy.kind === 'monster') { if (patch.lair) copy.lair = patch.lair; if (patch.regional) copy.regional = patch.regional; }
       if (patch.addFeatures && 'features' in copy) {
         const features = [...copy.features];

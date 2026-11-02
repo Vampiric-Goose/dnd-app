@@ -89,6 +89,27 @@ test('schema drift: piped codes, both spell-class styles', async () => {
   expect(r.errors).toEqual([]);
 });
 
+test('spells keep their book mechanics', async () => {
+  const r = await run({ 'spells.json': { spell: [
+    { name: 'Testgrip', source: 'TST', level: 2, school: 'E', range: { type: 'radius', distance: { type: 'feet', amount: 10 } }, entries: ['Grip.'],
+      savingThrow: ['wisdom'], spellAttack: ['R'], damageInflict: ['fire', 'cold'], conditionInflict: ['paralyzed'],
+      scalingLevelDice: { label: 'x', scaling: { 1: '1d6', 5: '2d6' } } },
+    { name: 'Testplain', source: 'TST', level: 1, school: 'A', range: { type: 'point', distance: { type: 'feet', amount: 30 } }, entries: ['Plain.'] },
+  ] } });
+  const of = (n: string) => r.packs.flatMap(p => p.entities).find(e => e.name === n) as SpellDef;
+  expect(of('Testgrip').mech).toEqual({ save: ['wis'], attack: 'ranged', types: ['fire', 'cold'], conditions: ['Paralyzed'], scaling: { 1: '1d6', 5: '2d6' }, area: { shape: 'sphere', feet: 10 } });
+  expect('mech' in of('Testplain')).toBe(false);
+});
+
+test('an SRD-overlap patch carries the mechanics onto the SRD spell', async () => {
+  const srd: Pack = JSON.parse((await import('node:fs')).readFileSync('src/data/srd.json', 'utf8'));
+  const r = await import5etools([{ name: 'spells.json', json: { spell: [{ name: 'Fireball', source: 'PHB', srd: true, level: 3, school: 'V', entries: ['Boom.'], savingThrow: ['dexterity'] }] } }],
+    { index: new ContentIndex([srd]), rawLookup: async () => undefined });
+  const phb = r.packs.find(p => p.source === 'PHB')!;
+  expect(phb.patches[0]).toMatchObject({ targetId: 'spell:fireball@SRD', mech: { save: ['dex'] } });
+  expect((new ContentIndex([srd, phb]).get('spell:fireball@SRD') as SpellDef).mech).toEqual({ save: ['dex'] });
+});
+
 test('spells: generated spell-source lookup shape, reaction, area range, ritual, higher levels', async () => {
   const r = await run({
     'spells.json': { spell: [{ name: 'Testward', source: 'TST', level: 1, school: 'A', time: [{ number: 1, unit: 'reaction', condition: 'which you take when you are hit' }],
