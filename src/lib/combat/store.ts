@@ -170,6 +170,7 @@ export async function applyResolution(cid: string, r: Omit<Resolution, 'applied'
   const applied: Applied[] = [];
   for (const o of r.outcomes) if (o.damage > 0 && !o.pending) applied.push(await hurtOne(cid, o.id, o.damage, o.nat === 20 && o.part !== 'save', settings));
   const inflicted = await inflict(cid, r, r.outcomes.flatMap((o) => (o.inflict ?? []).map((condition) => ({ id: o.id, condition, ...(o.save && { bonus: o.save.total - o.save.roll }) }))));
+  if (r.rider || r.spent) await update(cid, (c) => ({ ...c, combatants: c.combatants.map((x) => (x.id !== r.actor ? x : r.rider ? { ...x, rider: r.rider } : (({ rider: _r, ...rest }) => rest)(x))) }));
   const after = await snapNow(cid, ids);
   return serial(() => update(cid, (c) => ({ ...c, resolutions: [...(c.resolutions ?? []), { ...r, applied, ...(inflicted.length && { inflicted }), undo: { before: was, after } }].slice(-20) })));
 }

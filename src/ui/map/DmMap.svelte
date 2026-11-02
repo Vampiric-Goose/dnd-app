@@ -358,7 +358,7 @@
   // Targeting (the DM's setting): the action being aimed on the map, then rolled here and worked out by the same rules as a player's use.
   let aiming: { a: TurnAction; slot?: number; toggles: Toggle[]; dtype?: string; plan: AimPlan; v: NonNullable<typeof view> } | undefined = $state.raw();
   const onaim = (a: TurnAction, slot: number | undefined, toggles: Toggle[], dtype?: string) => {
-    const plan = aimPlan(a, { level: slot, toggles, dtype });
+    const plan = aimPlan(a, { level: slot, toggles, dtype, rider: view?.x.rider });
     if (plan && view) { aiming = { a, slot, toggles, dtype, plan, v: view }; sheet = false; selected = []; }
   };
   const conditionsOf = (z: Combatant) => (z.characterId ? chars.find((c) => c.id === z.characterId)?.state.conditions : undefined) ?? z.conditions ?? [];

@@ -137,7 +137,9 @@ export interface Combatant {
   hp?: number; maxHp?: number; tempHp?: number;  // monsters only (a PC's live on the character)
   conditions?: string[];                 // monsters only (a PC's are character.state.conditions)
   durations?: Record<string, Duration>;  // condition name → when it ends (PCs too)
-  concentrating?: boolean; /** the spell it concentrates on (its name) */ concentratingOn?: string; legendary?: { max: number; used: number }; reactionUsed?: boolean; notes?: string;
+  concentrating?: boolean; /** the spell it concentrates on (its name) */ concentratingOn?: string;
+  /** extra damage on its weapon hits from a spell it cast (`type` '' = the weapon's): the next hit only (`once`), or hits on `target` */
+  rider?: { spell: string; dice: string; type: string; once?: true; target?: string }; legendary?: { max: number; used: number }; reactionUsed?: boolean; notes?: string;
   economy?: { used: number; extra: number; bonus: boolean; attacks: number; light?: boolean; surged?: boolean; haste?: boolean; object?: boolean; readied?: boolean; bonusSpell?: boolean; leveledSpell?: boolean; dodging?: boolean }; // this turn (dodging: took the Dodge action; it lasts until this resets at its next turn): Actions used, extra Actions, Bonus action, attacks in the Attack action, attacked with a light melee weapon (two-weapon fighting), Action Surge used, one extra Action is Haste's, the free object interaction used, an action readied, a bonus-action spell cast, a spell other than an action cantrip cast (absent: fresh)
   hasted?: { by: string; round: number; ended?: true };
   spellsUsed?: Record<string, number>; // a monster's spell slots ('slot:3') and per-day spells ('day:<spell id>') used this fight // the Hasted condition: the caster's combatant id and the round cast; ended: the caster cast another concentration spell
@@ -170,7 +172,8 @@ export interface Resolution { id: string; actor: string /* combatant */; action:
   /** A spell's area as cast, on scene `sceneId` in `round`; `lasting`: a concentration spell's, shown while its caster concentrates. */
   area?: Area; sceneId?: string; round?: number; lasting?: true;
   /** the conditions it left, which end with the spell; `rounds`: a non-concentration spell's length */ inflicted?: { id: string; condition: string; /** a monster's save bonus, for its repeat saves */ bonus?: number }[]; rounds?: number;
-  /** its targets save again at the end of each of their turns */ repeat?: true }
+  /** its targets save again at the end of each of their turns */ repeat?: true;
+  /** a marked rider spell (Hex): the creature marked and the rider its caster now has; `spent`: a hit used a once-only rider */ mark?: string; rider?: Combatant['rider']; spent?: true }
 /** An area on the map (as a map template: a cone's or line's length, a sphere's or cylinder's radius, a cube's side, in ft). */
 export interface Area { shape: 'cone' | 'sphere' | 'cube' | 'line' | 'cylinder'; origin: { x: number; y: number }; aim: { x: number; y: number }; feet: number; width?: number }
 export interface Snap { combatants: Record<string, Combatant>; states: Record<string, Character['state']> }

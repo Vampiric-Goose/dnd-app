@@ -87,7 +87,7 @@
     if (!r?.econ || !c) return undefined;
     try {
       const sheet = computeSheet(c, { settings, viewer: 'player' });
-      const { reaction, perAction: _p, conc: _c, hasted: _h, ...economy } = r.econ;
+      const { reaction, perAction: _p, conc: _c, hasted: _h, rider: _r, ...economy } = r.econ;
       return { r, c, econ: r.econ, sheet, actions: pcActions(c, sheet, featureList(c, settings)), x: { economy, reactionUsed: reaction } as Combatant };
     } catch { return undefined; }
   });
@@ -109,7 +109,7 @@
   let aiming: { a: TurnAction; slot?: number; toggles: Toggle[]; dtype?: string; plan: AimPlan; c: Character } | undefined = $state.raw();
   let held: { action: string; roll: AimRoll } | undefined;
   const onaim = (a: TurnAction, slot: number | undefined, toggles: Toggle[], dtype?: string) => {
-    const plan = aimPlan(a, { level: slot, toggles, dtype });
+    const plan = aimPlan(a, { level: slot, toggles, dtype, rider: turn?.econ.rider });
     if (plan && turn && joined) { aiming = { a, slot, toggles, dtype, plan, c: turn.c }; selected = []; }
   };
   const OUT = /incapacitated|paralyzed|petrified|stunned|unconscious/i;

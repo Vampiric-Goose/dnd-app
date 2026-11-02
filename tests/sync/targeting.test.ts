@@ -101,6 +101,17 @@ describe('targeting over sync', () => {
     expect(d.combat!.resolutions![0].undo?.before.combatants['pc:thorin'].economy?.used ?? 0).toBe(0); // taken before paying: Undo gives the Action back
   });
 
+  test('Review Focus 5: a player whose device left out the rider\'s dice is refused; with them, the hit carries the extra damage', async () => {
+    const k = fight();
+    const { d, host, a } = await joined({ combat: { ...k, combatants: k.combatants.map((x) => (x.id === 'pc:thorin' ? { ...x, rider: { spell: 'Divine Favor', dice: '1d4', type: 'radiant' } } : x)) } });
+    a.deliver(strike('t-g1', [17], [[]]));
+    await settle(host);
+    expect(refusals(a)).toEqual(['bad damage dice']);
+    a.deliver(strike('t-g1', [17], [[], [2]]));
+    await settle(host);
+    expect(hp(d, 'g1')).toBe(1); // 4 + 2
+  });
+
   test('a player map names its target by token id; a hidden token is no target', async () => {
     const { d, host, a } = await joined();
     a.deliver(strike('t-g1', [17], [[]]));

@@ -103,7 +103,7 @@ test('how long a spell lasts, in rounds', () => {
 
 describe('never silently wrong', () => {
   test('what can’t be automated says so', () => {
-    expect(readSpell(fix('Self', 'The next time you hit a creature with a weapon attack, the attack deals an extra 2d6 radiant damage.')).manual)
+    expect(readSpell(fix('Touch', 'Until the spell ends, the weapon deals an extra 1d4 damage of the chosen type when it hits.')).manual)
       .toBe('Extra damage on weapon hits isn’t automated: apply it by hand.');
     expect(readSpell(fix('120 feet', 'A beam of light shines down. A creature that starts its turn there makes a Constitution saving throw or takes 2d10 radiant damage.')).manual)
       .toBe('Damage over time isn’t automated: apply it by hand.');
@@ -220,4 +220,14 @@ test('a light radius is not an area of effect (Light)', () => {
 test('a save repeated at the end of each turn', () => {
   expect(readSpell(fix('60 feet', 'The target makes a Wisdom saving throw or is paralyzed. At the end of each of its turns, the target can make another Wisdom saving throw.')).repeat).toBe(true);
   expect(readSpell(spell('Fireball')).repeat).toBeUndefined();
+});
+
+describe('extra damage on weapon hits', () => {
+  test('the next hit, every weapon hit, or hits on a marked target', () => {
+    const once = readSpell(fix('Self', 'The next time you hit a creature with a weapon attack, the attack deals an extra 2d6 radiant damage.'));
+    expect([once.rider, once.manual]).toEqual([{ dice: '2d6', type: 'radiant', once: true }, undefined]);
+    expect(readSpell(fix('Self', 'Your weapon attacks deal an extra 1d4 radiant damage on a hit.')).rider).toEqual({ dice: '1d4', type: 'radiant' });
+    expect(readSpell(fix('90 feet', 'You mark a creature. Until the spell ends, you deal an extra 1d6 damage to the target whenever you hit it with a weapon attack.')).rider)
+      .toEqual({ dice: '1d6', type: '', marked: true });
+  });
 });

@@ -172,3 +172,15 @@ describe('saving again at the end of each turn', () => {
     expect((await db.characters.get('p'))!.state.conditions).toEqual([]);
   });
 });
+
+test('a once-only rider (a smite) is spent by a hit, kept after a miss', async () => {
+  const smite = { spell: 'Searing Smite', dice: '1d6', type: 'fire', once: true as const };
+  await updateCombat('c1', (c) => ({ ...c, combatants: c.combatants.map((x) => (x.id === 'pc:p' ? { ...x, rider: smite } : x)) }));
+  const rider = async () => (await db.combat.get('c1'))!.combatants.find((x) => x.id === 'pc:p')!.rider;
+  await applyResolution('c1', res('r1', [{ id: 'g1', hit: false, damage: 0 }]), settings);
+  expect(await rider()).toEqual(smite);
+  await applyResolution('c1', res('r2', [{ id: 'g1', hit: true, damage: 5 }], { spent: true }), settings);
+  expect(await rider()).toBeUndefined();
+  await undoResolution('c1', 'r2', settings);
+  expect(await rider()).toEqual(smite);
+});

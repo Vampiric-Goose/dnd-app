@@ -101,6 +101,21 @@ describe('workOut on the DM\'s map', () => {
     expect(await at({ conditions: ['Paralyzed'], rounds: 10 })).toMatchObject({ resolution: { outcomes: [{ id: 'g', inflict: ['Paralyzed', 'Hold Monster'] }] } });
     expect(await at({ conditions: ['Prone'] })).toMatchObject({ resolution: { outcomes: [{ id: 'g', inflict: ['Prone'] }] } });
   });
+  test('extra damage on hits: one more expression of the rider\'s type (else the weapon\'s); only against a marked target; doubled on a crit', async () => {
+    const sword: TurnAction = { id: 'a', name: 'Longsword', cost: 'action', group: 'attack', attack: { entryId: 'e', name: 'Longsword', toHit: 5, damage: '1d8+3', damageType: 'slashing', properties: [] } };
+    expect(aimPlan(sword, { rider: { dice: '1d4', type: 'radiant' } })!.dice).toEqual([{ expr: '1d8+3', type: 'slashing' }, { expr: '1d4', type: 'radiant' }]);
+    expect(aimPlan(sword, { rider: { dice: '1d6', type: '' } })!.dice[1]).toEqual({ expr: '1d6', type: 'slashing' });
+    const hexed = (on: string, rolled: WorkIn['aim']['rolled']) => workOut({ ...base(bow, rolled), actor: { ...k.combatants[0], rider: { spell: 'Hex', dice: '1d6', type: 'necrotic', target: on } } });
+    expect(await hexed('pc:thorin', { d20: [18, 18], dmg: [[4], [3]] })).toMatchObject({ resolution: { outcomes: [{ id: 'pc:thorin', hit: true, damage: 9 }] } });
+    expect(await hexed('pc:mira', { d20: [18, 18], dmg: [[4], [3]] })).toMatchObject({ resolution: { outcomes: [{ id: 'pc:thorin', hit: true, damage: 6 }] } });
+    expect(await hexed('pc:thorin', { d20: [20, 20], dmg: [[4, 4], [3, 3]] })).toMatchObject({ resolution: { outcomes: [{ hit: true, damage: 16 }] } });
+  });
+  test('a marked rider spell (Hex) is aimed at its creature: no dice; the mark and a condition named after it', async () => {
+    const hex = { ...spell({ rider: { dice: '1d6', type: 'necrotic', marked: true }, damage: [{ dice: '1d6', type: 'necrotic' }] }), name: 'Hex' };
+    expect(aimPlan(hex)).toMatchObject({ attack: false, dice: [], mark: true });
+    expect(await workOut({ ...base(hex, { dmg: [] }), aim: { target: 'g', rolled: { dmg: [] }, toggles: [] } }))
+      .toMatchObject({ resolution: { mark: 'g', rider: { spell: 'Hex', dice: '1d6', type: 'necrotic', target: 'g' }, outcomes: [{ id: 'g', damage: 0, inflict: ['Hex'] }] } });
+  });
   test('Chaos Bolt: of the two d8s, the type that hurts more', async () => {
     const bolt = spell({ attack: 'ranged', damage: [{ dice: '2d8+1d6', type: '' }], choices: ['acid', 'cold', 'fire'],
       typeFromDie: { sides: 8, types: ['acid', 'cold', 'fire', 'force', 'lightning', 'poison', 'psychic', 'thunder'] } });

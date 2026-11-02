@@ -83,9 +83,10 @@ const attackRoll = (t: TargetInfo, toHit: number, r: Rolled): { hit: boolean; ro
 };
 
 /** A weapon attack (or a monster's): hit or miss against AC, and its damage on a hit. Extra damage (GWM's +10) is one more expression. */
-export function resolveAttack(t: TargetInfo, toHit: number, dmg: { expr: string; type: string }[], r: Rolled, magical: boolean, autoCrit = false): Outcome {
+export function resolveAttack(t: TargetInfo, toHit: number, dmg: { expr: string; type: string; vs?: string }[], r: Rolled, magical: boolean, autoCrit = false): Outcome {
   const a = attackRoll(t, toHit, r);
-  return { id: t.id, ...a, ac: t.ac, ...(a.hit ? hurt(t, dmg, r.dmg, a.nat === 20 || autoCrit, magical) : { damage: 0 }) };
+  const live = dmg.map((d, i) => ({ d, f: r.dmg[i] ?? [] })).filter((x) => !x.d.vs || x.d.vs === t.id); // a marked rider hurts only its mark
+  return { id: t.id, ...a, ac: t.ac, ...(a.hit ? hurt(t, live.map((x) => x.d), live.map((x) => x.f), a.nat === 20 || autoCrit, magical) : { damage: 0 }) };
 }
 
 const ABILITY: Record<string, Ability> = { Str: 'str', Dex: 'dex', Con: 'con', Int: 'int', Wis: 'wis', Cha: 'cha' };

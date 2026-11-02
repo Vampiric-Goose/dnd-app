@@ -274,6 +274,8 @@ export function applyUse(k: Combat, x: Combatant, a: TurnAction, perAction = 1, 
   }
   if (a.grants === 'action') { y = grantAction(y); y = { ...y, economy: { ...y.economy!, surged: true } }; }
   if (a.spell?.concentration) y = { ...y, concentrating: true, concentratingOn: a.name };
+  const rd = a.cast?.read.rider;
+  if (rd && !rd.marked) y = { ...y, rider: { spell: a.name, dice: rd.dice, type: rd.type, ...(rd.once && { once: true as const }) } }; // a marked one comes with its mark (aiming.ts)
   if (a.legendary && y.legendary) y = { ...y, legendary: { ...y.legendary, used: y.legendary.used + a.legendary } };
   let cs = k.combatants.map((z) => (z.id === x.id ? y : z));
   if (a.spell?.concentration) cs = cs.map((z) => (z.hasted?.by === x.id ? { ...z, hasted: { ...z.hasted, ended: true as const } } : z));

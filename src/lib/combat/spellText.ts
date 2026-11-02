@@ -48,6 +48,8 @@ export interface SpellRead {
   rounds?: number;
   /** The target saves again at the end of each of its turns, ending the conditions on a success. */
   repeat?: true;
+  /** Extra damage on the caster's weapon hits (`type` '' = the weapon's): the next hit only (`once`), or hits on a creature it marks. */
+  rider?: { dice: string; type: string; once?: true; marked?: true };
   area?: SpellArea;
 }
 
@@ -125,9 +127,17 @@ export function readSpell(s: Pick<SpellDef, 'text' | 'level' | 'range'> & { name
   else if (out.save && typeof range === 'object' && /each creature (?:within range|other than you in that area)/i.test(t)) out.area = { shape: 'sphere', feet: range.feet, self: true };
   // ponytail: a bare "N-foot radius" is often light or an aura (Light), not an area of effect: only an explicit sphere or cylinder counts
   if (out.save && mech?.area && !out.area && !out.burst) out.area = { shape: mech.area.shape, feet: mech.area.feet, self: true };
+  // extra damage on weapon hits: hits on a marked target (Hex), every weapon hit (Divine Favor), or the next hit only (a smite)
+  const ty = `(?:(${TYPES}) )?`, extra = new RegExp(`extra (\\d+d\\d+) ${ty}damage`, 'i');
+  const marked = new RegExp(`extra (\\d+d\\d+) ${ty}damage to the target whenever you hit it`, 'i').exec(t);
+  const every = new RegExp(`weapon attacks deal an extra (\\d+d\\d+) ${ty}damage`, 'i').exec(t);
+  const nextHit = /next time you hit/i.test(t) ? extra.exec(t) : null;
+  const rm = marked ?? every ?? nextHit;
+  if (rm) out.rider = { dice: rm[1], type: (rm[2] ?? '').toLowerCase(), ...(rm === nextHit && { once: true as const }), ...(rm === marked && { marked: true as const }) };
   // never silently wrong: what the targeting can't deliver says so
   const hurts = out.damage.length > 0 || !!mech?.types?.length;
-  if (out.lingering && hurts) out.manual = 'Damage over time isn’t automated: apply it by hand.';
+  if (out.rider) { /* delivered on the caster's weapon hits */ }
+  else if (out.lingering && hurts) out.manual = 'Damage over time isn’t automated: apply it by hand.';
   else if (!out.attack && !out.save && t.split(/(?<=\.)\s+/).some((x) => /\bextra \d+d\d+/i.test(x) && /\b(?:hits?|weapon)\b/i.test(x)))
     out.manual = 'Extra damage on weapon hits isn’t automated: apply it by hand.';
   else if (hurts && !(out.damage.length && (out.attack || out.save || out.auto))) out.manual = 'Its damage isn’t automated: apply it by hand.';

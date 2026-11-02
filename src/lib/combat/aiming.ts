@@ -23,8 +23,9 @@ export interface AimArea { shape: Shape; feet: number; width?: number; on: 'crea
 /** `attack`: it rolls a d20 against AC. `dice`: its damage, in roll order (`on`: the part of a spell that deals it). */
 /** `ignore`: disadvantages a feat removes (Sharpshooter: long range; Crossbow Expert: a hostile within 5 ft). */
 /** `choices`: the damage types to pick from for dice whose type is chosen (their `type` stays '' until one is picked). */
-export interface AimPlan { reach: Reach; line: boolean; attack: boolean; toHit?: number; area?: AimArea; dice: { expr: string; type: string; on?: 'hit' | 'save' }[]; read?: SpellRead;
-  ignore?: { long?: true; close?: true }; choices?: string[] }
+/** `mark`: a rider spell aimed at the creature it marks (no dice). A die's `vs`: it hurts only that creature (a marked rider). */
+export interface AimPlan { reach: Reach; line: boolean; attack: boolean; toHit?: number; area?: AimArea; dice: { expr: string; type: string; on?: 'hit' | 'save'; vs?: string }[]; read?: SpellRead;
+  ignore?: { long?: true; close?: true }; choices?: string[]; mark?: true }
 
 /**
  * The spell areas to draw on a scene, for everyone: an instant one until its caster's next turn, a concentration one while its caster
@@ -52,8 +53,10 @@ export function endedSpells(prev: Combat | undefined, next: Combat): { combat: C
     return !y?.concentrating || y.concentratingOn !== x.concentratingOn;
   });
   const drop = (next.resolutions ?? []).filter((r) => r.lasting && ended.some((x) => x.id === r.actor && x.concentratingOn === r.action)).flatMap((r) => r.inflicted ?? []);
-  if (!drop.length) return { combat: next, drop };
-  return { drop, combat: { ...next, combatants: next.combatants.map((y) => {
+  const unrid = new Set(ended.filter((x) => next.combatants.find((y) => y.id === x.id)?.rider?.spell === x.concentratingOn).map((x) => x.id)); // its rider ends too
+  if (!drop.length && !unrid.size) return { combat: next, drop };
+  return { drop, combat: { ...next, combatants: next.combatants.map((v) => {
+    const y = unrid.has(v.id) ? (({ rider: _r, ...rest }) => rest)(v) : v;
     const gone = drop.filter((d) => d.id === y.id).map((d) => d.condition);
     if (!gone.length || y.kind === 'pc') return y;
     return { ...y, conditions: (y.conditions ?? []).filter((n) => !gone.includes(n)), durations: Object.fromEntries(Object.entries(y.durations ?? {}).filter(([n]) => !gone.includes(n))) };
@@ -76,7 +79,8 @@ export function snapOf(k: Combat, chars: Character[], ids: string[]): Snap {
 }
 
 /** What an action needs to be aimed, or undefined when it can't be (no reach, or a spell with no attack, save or area). */
-export function aimPlan(a: TurnAction, o: { level?: number; toggles?: Toggle[]; features?: string[]; dtype?: string } = {}): AimPlan | undefined {
+export function aimPlan(a: TurnAction, o: { level?: number; toggles?: Toggle[]; features?: string[]; dtype?: string; rider?: Pick<NonNullable<Combatant['rider']>, 'dice' | 'type' | 'target'> } = {}): AimPlan | undefined {
+  const rider = (weapon: string | undefined) => (o.rider ? [{ expr: o.rider.dice, type: o.rider.type || weapon || '', ...(o.rider.target && { vs: o.rider.target }) }] : []);
   const reach = reachOf(a);
   if (!reach) return undefined;
   const has = (f: string) => !!o.features?.includes(f);
@@ -84,11 +88,12 @@ export function aimPlan(a: TurnAction, o: { level?: number; toggles?: Toggle[]; 
     const w = a.attack, t = o.toggles ?? [], ranged = !!w.ranged || !!w.range;
     const ignore = { ...(w.ranged && has('Sharpshooter') && { long: true as const }), ...(ranged && has('Crossbow Expert') && { close: true as const }) };
     return { reach, line: !!w.ranged, attack: true, toHit: w.toHit + t.reduce((n, x) => n + x.toHit, 0),
-      dice: [{ expr: w.damage, type: w.damageType }, ...t.map((x) => ({ expr: String(x.damage), type: w.damageType }))], ...(Object.keys(ignore).length && { ignore }) };
+      dice: [{ expr: w.damage, type: w.damageType }, ...t.map((x) => ({ expr: String(x.damage), type: w.damageType })), ...rider(w.damageType)], ...(Object.keys(ignore).length && { ignore }) };
   }
   const ma = a.group === 'monster' ? monsterAttack(a) : undefined;
-  if (ma) return { reach, line: ma.ranged, attack: true, toHit: ma.toHit, dice: ma.dmg };
+  if (ma) return { reach, line: ma.ranged, attack: true, toHit: ma.toHit, dice: [...ma.dmg, ...rider(ma.dmg[0]?.type)] };
   const read = a.cast?.read;
+  if (read?.rider && a.spell) return read.rider.marked ? { reach, line: false, attack: false, dice: [], read, mark: true } : undefined; // Hex marks a creature; the rest are cast
   if (!read || !a.spell || !(read.attack || read.save || read.area || read.burst || read.auto)) return undefined;
   if (!read.damage.length && !read.area && !read.burst && !read.conditions?.length) return undefined; // a save that does nothing here (Light)
   const picked = o.dtype && read.choices?.includes(o.dtype) ? o.dtype : '';
@@ -149,7 +154,7 @@ export interface WorkIn {
 /** An aim checked on the scene and worked out, or why not. */
 export async function workOut(i: WorkIn): Promise<Aimed | string> {
   const { a, aim, combat: k, scene: s, actor } = i;
-  const plan = aimPlan(a, { level: i.level, features: i.features, toggles: attackToggles(a, i.features).filter((t) => aim.toggles.includes(t.id)), dtype: aim.dtype });
+  const plan = aimPlan(a, { level: i.level, features: i.features, toggles: attackToggles(a, i.features).filter((t) => aim.toggles.includes(t.id)), dtype: aim.dtype, rider: actor.rider });
   if (!plan) return 'that cannot be aimed';
   if (plan.dice.some((d) => !d.type) && plan.choices && !plan.read?.typeFromDie) return 'pick a damage type';
   const tokenOf = (id: string) => s.tokens.find((t) => combatantForToken(k, t)?.id === id);
@@ -174,9 +179,14 @@ export async function workOut(i: WorkIn): Promise<Aimed | string> {
     const bad = checkFaces(plan.dice.map((d) => ({ expr: d.expr, crit })), rolled);
     if (bad) return bad;
     const o = resolveAttack(await i.info(target!), plan.toHit ?? 0, plan.dice, rolled, i.magical, autoCrit);
-    return { resolution: { ...base, outcomes: [withWhy(o)] }, outcome: { action: a.name, hit: !!o.hit } };
+    return { resolution: { ...base, outcomes: [withWhy(o)], ...(o.hit && actor.rider?.once && { spent: true as const }) }, outcome: { action: a.name, hit: !!o.hit } };
   }
   const read = plan.read, area = plan.area;
+  if (plan.mark && read.rider) { // Hex: the mark, and a condition named after the spell on it
+    if (!target) return 'pick a target';
+    const rider = { spell: a.name, dice: read.rider.dice, type: read.rider.type, target: target.id };
+    return { resolution: { ...base, outcomes: [{ id: target.id, damage: 0, inflict: [a.name] }], mark: target.id, rider, ...(a.spell?.concentration && { lasting: true as const }) }, outcome: { action: a.name } };
+  }
   const point = area?.on === 'creature' ? (tt && { x: tt.x, y: tt.y }) : aim.point ?? (tt && { x: tt.x, y: tt.y });
   if (area && area.on !== 'self' && (!point || (area.range !== undefined && feetBetween(s.grid, me, point, i.diagonal) > area.range))) return area.on === 'creature' ? 'pick a target' : 'out of range';
   if (!area && !target) return 'pick a target';
