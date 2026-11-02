@@ -97,3 +97,11 @@ describe('conditions on a failed save', () => {
     expect(one(goblin('p', { pc: true }), 2)).toMatchObject({ pending: true, inflicts: ['Paralyzed'] });
   });
 });
+
+test('damage over time with no save just lands; with a save, the usual save', () => {
+  const daggers: SpellRead = { damage: [{ dice: '4d4', type: 'slashing' }], lingering: true };
+  expect(resolveSpell(daggers, [{ expr: '4d4', type: 'slashing' }], undefined, undefined, goblin('g'), [], { dmg: [[1, 2, 3, 4]] }, always(10)))
+    .toEqual([expect.objectContaining({ id: 'g', hit: true, damage: 10 })]);
+  const moon: SpellRead = { damage: [{ dice: '2d10', type: 'radiant' }], lingering: true, save: 'Con', onSave: 'half' };
+  expect(resolveSpell(moon, [{ expr: '2d10', type: 'radiant' }], 13, undefined, goblin('g'), [], { dmg: [[5, 5]] }, always(2))[0]).toMatchObject({ save: { ok: false }, damage: 10 });
+});

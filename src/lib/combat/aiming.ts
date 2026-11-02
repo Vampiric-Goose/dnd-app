@@ -25,22 +25,33 @@ export interface AimArea { shape: Shape; feet: number; width?: number; on: 'crea
 /** `choices`: the damage types to pick from for dice whose type is chosen (their `type` stays '' until one is picked). */
 /** `mark`: a rider spell aimed at the creature it marks (no dice). A die's `vs`: it hurts only that creature (a marked rider). */
 export interface AimPlan { reach: Reach; line: boolean; attack: boolean; toHit?: number; area?: AimArea; dice: { expr: string; type: string; on?: 'hit' | 'save'; vs?: string }[]; read?: SpellRead;
-  ignore?: { long?: true; close?: true }; choices?: string[]; mark?: true }
+  ignore?: { long?: true; close?: true }; choices?: string[]; mark?: true; /** damage over time, kept for the turns to come */ linger?: { dice: { expr: string; type: string }[]; read: SpellRead } }
 
 /**
  * The spell areas to draw on a scene, for everyone: an instant one until its caster's next turn, a concentration one while its caster
  * keeps concentrating. Undo drops the result, and its area with it.
  */
 export function areasOn(k: Combat | undefined, sceneId: string): Area[] {
+  return liveAreas(k, sceneId).map((r) => r.area!);
+}
+
+/** The results whose area is still up on that scene (areasOn). */
+function liveAreas(k: Combat | undefined, sceneId: string): Resolution[] {
   if (!k) return [];
   const order = k.combatants.map((x) => x.id), now = order.indexOf(k.turn ?? '');
-  return (k.resolutions ?? []).flatMap((r) => {
-    if (!r.area || r.sceneId !== sceneId) return [];
+  return (k.resolutions ?? []).filter((r) => {
+    if (!r.area || r.sceneId !== sceneId) return false;
     const caster = k.combatants.find((x) => x.id === r.actor);
-    const on = r.lasting ? !!caster?.concentrating && (caster.concentratingOn === undefined || caster.concentratingOn === r.action)
+    return r.lasting ? !!caster?.concentrating && (caster.concentratingOn === undefined || caster.concentratingOn === r.action)
       : r.round === k.round || (r.round === k.round - 1 && now < order.indexOf(r.actor));
-    return on ? [r.area] : [];
   });
+}
+
+/** The damage-over-time areas (Moonbeam, Cloudkill) that creature `id`'s token stands in: what hurts it as its turn starts. */
+export function startsIn(k: Combat, s: Scene, id: string): Resolution[] {
+  const t = s.tokens.find((x) => combatantForToken(k, x)?.id === id);
+  if (!t) return [];
+  return liveAreas(k, s.id).filter((r) => r.linger && tokensInTemplate(r.area!, s.grid, s.tokens).includes(t.id));
 }
 
 /**
@@ -102,7 +113,8 @@ export function aimPlan(a: TurnAction, o: { level?: number; toggles?: Toggle[]; 
   const area: AimArea | undefined = read.burst ? { shape: 'sphere', feet: read.burst, on: 'creature' }
     : read.area ? { shape: read.area.shape, feet: read.area.feet, ...(read.area.width && { width: read.area.width }), on: read.area.self ? 'self' : 'point',
       ...(reach !== 'self' && reach.spell !== undefined && { range: reach.spell }) } : undefined;
-  if (read.lingering) return { reach, line: false, attack: false, ...(area && { area }), dice: [], read: { ...read, attack: undefined, save: undefined, damage: [] } }; // placed and listed only
+  if (read.lingering) return { reach, line: false, attack: false, ...(area && { area }), dice: [], read: { ...read, attack: undefined, save: undefined, damage: [] }, // placed and listed now
+    ...(dice.length && { linger: { dice: dice.map(({ expr, type }) => ({ expr, type })), read } }) }; // rolled as a creature starts its turn there
   const ignore = read.attack === 'ranged' && has('Crossbow Expert') ? { close: true as const } : undefined;
   return { reach, line: read.attack === 'ranged', attack: !!read.attack, ...(a.cast!.attack !== undefined && { toHit: a.cast!.attack }), ...(area && { area }), dice, read, ...(ignore && { ignore }),
     ...(read.choices && { choices: read.choices }) };
@@ -203,6 +215,7 @@ export async function workOut(i: WorkIn): Promise<Aimed | string> {
   const named = (o: Outcome): Outcome => (!lasts ? o : o.inflict ? { ...o, inflict: [...o.inflict, a.name] } : o.inflicts ? { ...o, inflicts: [...o.inflicts, a.name] } : o);
   return {
     resolution: { ...base, outcomes: outcomes.map(withWhy).map(named), ...(placed && { caught: caught.map((z) => z.id), area: placed, sceneId: s.id, round: k.round }),
+      ...(plan.linger && { linger: { ...plan.linger, ...(plan.linger.read.save && a.cast!.dc !== undefined && { dc: a.cast!.dc }) } }),
       ...(a.spell?.concentration ? { lasting: true as const } : read.rounds && { rounds: read.rounds }), ...(read.repeat && { repeat: true as const }), ...(read.save && { dc: a.cast!.dc, ability: read.save.toLowerCase() as Ability, onSave: read.onSave }) },
     outcome: { action: a.name, ...(hit !== undefined && { hit }), ...(read.save && a.cast!.dc !== undefined && { dc: a.cast!.dc }),
       ...(area && { caught: caught.filter((z) => !z.hidden && (i.seen?.(z) ?? true)).map(i.nameOf) }) },

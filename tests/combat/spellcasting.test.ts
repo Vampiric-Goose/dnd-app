@@ -105,7 +105,7 @@ describe('never silently wrong', () => {
   test('what can’t be automated says so', () => {
     expect(readSpell(fix('Touch', 'Until the spell ends, the weapon deals an extra 1d4 damage of the chosen type when it hits.')).manual)
       .toBe('Extra damage on weapon hits isn’t automated: apply it by hand.');
-    expect(readSpell(fix('120 feet', 'A beam of light shines down. A creature that starts its turn there makes a Constitution saving throw or takes 2d10 radiant damage.')).manual)
+    expect(readSpell(fix('120 feet', 'A ring of light rises. A creature that enters the area for the first time on a turn makes a Constitution saving throw or takes 2d10 radiant damage.')).manual)
       .toBe('Damage over time isn’t automated: apply it by hand.');
     expect(readSpell({ ...fix('Touch', 'The target is wreathed in energy for the duration.'), mech: { types: ['fire'] } }).manual)
       .toBe('Its damage isn’t automated: apply it by hand.');
@@ -230,4 +230,10 @@ describe('extra damage on weapon hits', () => {
     expect(readSpell(fix('90 feet', 'You mark a creature. Until the spell ends, you deal an extra 1d6 damage to the target whenever you hit it with a weapon attack.')).rider)
       .toEqual({ dice: '1d6', type: '', marked: true });
   });
+});
+
+test('damage over time: only entering the area stays by hand', () => {
+  expect(readSpell(fix('120 feet', 'A beam shines in a 5-foot-radius, 40-foot-high cylinder. A creature that enters the area for the first time on a turn or starts its turn there makes a Constitution saving throw, taking 2d10 radiant damage on a failed save.')).manual)
+    .toBe('Entering the area isn’t automated, only starting a turn in it.');
+  expect(readSpell(fix('120 feet', 'A cloud fills a 20-foot-radius sphere. A creature that starts its turn there makes a Constitution saving throw or takes 5d8 poison damage.')).manual).toBeUndefined();
 });

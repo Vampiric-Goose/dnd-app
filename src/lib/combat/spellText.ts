@@ -137,7 +137,10 @@ export function readSpell(s: Pick<SpellDef, 'text' | 'level' | 'range'> & { name
   // never silently wrong: what the targeting can't deliver says so
   const hurts = out.damage.length > 0 || !!mech?.types?.length;
   if (out.rider) { /* delivered on the caster's weapon hits */ }
-  else if (out.lingering && hurts) out.manual = 'Damage over time isn’t automated: apply it by hand.';
+  else if (out.lingering && hurts) { // the start of a turn there is automated (aiming.ts startsIn); entering it isn't
+    if (!/starts its turn/i.test(t)) out.manual = 'Damage over time isn’t automated: apply it by hand.';
+    else if (/\benters?\b/i.test(t)) out.manual = 'Entering the area isn’t automated, only starting a turn in it.';
+  }
   else if (!out.attack && !out.save && t.split(/(?<=\.)\s+/).some((x) => /\bextra \d+d\d+/i.test(x) && /\b(?:hits?|weapon)\b/i.test(x)))
     out.manual = 'Extra damage on weapon hits isn’t automated: apply it by hand.';
   else if (hurts && !(out.damage.length && (out.attack || out.save || out.auto))) out.manual = 'Its damage isn’t automated: apply it by hand.';

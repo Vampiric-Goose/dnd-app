@@ -105,7 +105,7 @@ export function resolveSpell(read: SpellRead, dice: { expr: string; type: string
     out.push({ id: target.id, part: 'hit', ...a, ac: target.ac, ...(a.hit ? hurt(target, hitDice, hitDice.map((d) => d.faces), a.nat === 20 || autoCrit, true, read.typeFromDie) : { damage: 0 }) });
   }
   // ponytail: darts that always hit all go to the one target; split them between several when someone needs it
-  if (read.auto && target) out.push({ id: target.id, part: 'hit', hit: true, ...hurt(target, idx, idx.map((d) => d.faces), false, true, read.typeFromDie) });
+  if ((read.auto || (read.lingering && !read.save)) && target) out.push({ id: target.id, part: 'hit', hit: true, ...hurt(target, idx, idx.map((d) => d.faces), false, true, read.typeFromDie) });
   if (!read.save || dc === undefined) return out;
   const ability = ABILITY[read.save] ?? 'dex';
   const owed = saveDice.map((d) => ({ amount: totalOf(d.expr, d.faces, false) ?? 0, type: d.type }));

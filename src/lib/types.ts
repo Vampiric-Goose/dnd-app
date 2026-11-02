@@ -1,3 +1,4 @@
+import type { SpellRead } from './combat/spellText.ts';
 import type { Hlc } from './sync/hlc.ts';
 import type { SyncMeta } from './sync/merge.ts';
 
@@ -173,7 +174,8 @@ export interface Resolution { id: string; actor: string /* combatant */; action:
   area?: Area; sceneId?: string; round?: number; lasting?: true;
   /** the conditions it left, which end with the spell; `rounds`: a non-concentration spell's length */ inflicted?: { id: string; condition: string; /** a monster's save bonus, for its repeat saves */ bonus?: number }[]; rounds?: number;
   /** its targets save again at the end of each of their turns */ repeat?: true;
-  /** a marked rider spell (Hex): the creature marked and the rider its caster now has; `spent`: a hit used a once-only rider */ mark?: string; rider?: Combatant['rider']; spent?: true }
+  /** a marked rider spell (Hex): the creature marked and the rider its caster now has; `spent`: a hit used a once-only rider */ mark?: string; rider?: Combatant['rider']; spent?: true;
+  /** damage over time (Moonbeam): its dice, reading and DC, rolled when a creature starts its turn in the area */ linger?: { dice: { expr: string; type: string }[]; read: SpellRead; dc?: number } }
 /** An area on the map (as a map template: a cone's or line's length, a sphere's or cylinder's radius, a cube's side, in ft). */
 export interface Area { shape: 'cone' | 'sphere' | 'cube' | 'line' | 'cylinder'; origin: { x: number; y: number }; aim: { x: number; y: number }; feet: number; width?: number }
 export interface Snap { combatants: Record<string, Combatant>; states: Record<string, Character['state']> }

@@ -13,8 +13,8 @@
   import { currentRun, patchCombatant } from '../../lib/combat/combat.ts';
   import { budgetApplies, budgetFeet, combatantForToken, effectiveSpeed, originOf, recordMove } from '../../lib/combat/movement.ts';
   import { applyResolution, editCharacter, settleSave, turn, undoResolution, updateCombat } from '../../lib/combat/store.ts';
-  import { aimPlan, areasOn, foeWithin5, judge, snapOf, touched, workOut, type AimPlan } from '../../lib/combat/aiming.ts';
-  import { targetOf } from '../../lib/combat/resolve.ts';
+  import { aimPlan, areasOn, foeWithin5, judge, snapOf, startsIn, touched, workOut, type AimPlan } from '../../lib/combat/aiming.ts';
+  import { resolveSpell, targetOf } from '../../lib/combat/resolve.ts';
   import { targetingOn, type Pickable, type Toggle } from '../../lib/combat/targeting.ts';
   import { roll } from '../../lib/rolls.svelte.ts';
   import { uid } from '../../lib/uid.ts';
@@ -31,7 +31,7 @@
   import { getIndex, saveCampaign } from '../../lib/store.svelte.ts';
   import { MAX_BLOB } from '../../lib/sync/protocol.ts';
   import { clearDeclared, declareAction, sendDrag, session } from '../../lib/sync/session.svelte.ts';
-  import type { Campaign, Character, Combat, Combatant, MonsterDef, Outcome, RaceDef, Scene, Sheet, Size, Token } from '../../lib/types.ts';
+  import type { Ability, Campaign, Character, Combat, Combatant, MonsterDef, Outcome, RaceDef, Resolution, Scene, Sheet, Size, Token } from '../../lib/types.ts';
   import GridForm from './GridForm.svelte';
   import { detectSquareGrid } from '../../lib/map/detectGrid.ts';
   import MapCanvas from './MapCanvas.svelte';
@@ -388,16 +388,33 @@
       diagonal: settings.diagonal, aim: { ...(target ? { target: target.id } : { point: p.point }), rolled: r.rolled, toggles: m.toggles.map((x) => x.id), ...(m.dtype && { dtype: m.dtype }) },
       findTarget: (id) => k.combatants.find((z) => z.id === id), conditionsOf,
       exhaustionOf: (z) => (z.characterId ? chars.find((c) => c.id === z.characterId)?.state.exhaustion : undefined) ?? 0,
-      info: (z) => {
-        const c = z.characterId ? chars.find((y) => y.id === z.characterId) : undefined;
-        return c ? targetOf(z, { sheet: sheets.get(c.id) ?? computeSheet(c, { settings, viewer: 'dm' }) }) : targetOf(z, { monster: z.monsterId ? monsterById.get(z.monsterId) : undefined });
-      },
+      info: infoOf,
       nameOf: (z) => nameOfCombatant(z.id), magical: !!ch?.inventory.find((e) => e.id === m.a.attack?.entryId)?.item.magic, id: uid(), now: Date.now(), rng: Math.random });
     if (typeof res === 'string') throw new Error(`Not done: ${res}.`);
     const before = snapOf(k, chars, touched(res.resolution)); // before paying: Undo gives the pip and slot back too
     await pay(m.v, m.a, m.slot);
     reveal(r.held, res.outcome.hit);
     await applyResolution(cid, res.resolution, settings, before);
+    await reload();
+  });
+  const infoOf = (z: Combatant) => {
+    const c = z.characterId ? chars.find((y) => y.id === z.characterId) : undefined;
+    return c ? targetOf(z, { sheet: sheets.get(c.id) ?? computeSheet(c, { settings, viewer: 'dm' }) }) : targetOf(z, { monster: z.monsterId ? monsterById.get(z.monsterId) : undefined });
+  };
+  // Damage over time: the areas the creature whose turn it is starts in (Moonbeam), each until it is rolled for this round
+  const startOf = (r: Resolution) => `${r.action} (start of turn)`;
+  const hurtsNow = $derived.by(() => {
+    const k = combat, s = scene, id = k?.turn;
+    if (!k || !s || !id) return [];
+    return startsIn(k, s, id).filter((r) => !(k.resolutions ?? []).some((y) => y.action === startOf(r) && y.round === k.round && y.outcomes[0]?.id === id));
+  });
+  const lingerRoll = (r: Resolution) => run(async () => {
+    const k = combat, z = k?.combatants.find((x) => x.id === k.turn), l = r.linger;
+    if (!k || !z || !l) return;
+    const rolled = { dmg: l.dice.map((d) => roll(`${r.action}: ${d.type} damage`, d.expr).faces) };
+    const outcomes = resolveSpell(l.read, l.dice, l.dc, undefined, infoOf(z), [], rolled, Math.random);
+    await applyResolution(cid, { id: uid(), actor: r.actor, action: startOf(r), outcomes, at: Date.now(), round: k.round,
+      ...(l.dc !== undefined && l.read.save && { dc: l.dc, ability: l.read.save.toLowerCase() as Ability, onSave: l.read.onSave }) }, settings);
     await reload();
   });
   const undo = (rid: string) => run(async () => { await undoResolution(cid, rid, settings); await reload(); });
@@ -533,6 +550,8 @@
           {#if combat?.resolutions?.length}
             <section class="results" aria-labelledby="res-h">
               <h3 id="res-h">Results</h3>
+              {#each hurtsNow as r (r.id)}<p class="row small"><span><strong>{nameOfCombatant(combat.turn ?? '')}</strong> starts its turn in {r.action}</span>
+                <button type="button" disabled={busy} onclick={() => lingerRoll(r)}>Roll</button></p>{/each}
               <ol class="plain">
                 {#each [...combat.resolutions].reverse().slice(0, 6) as r (r.id)}
                   <li>

@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'vitest';
-import { aimPlan, pickableAt, workOut, type WorkIn } from '../../src/lib/combat/aiming.ts';
+import { aimPlan, pickableAt, startsIn, workOut, type WorkIn } from '../../src/lib/combat/aiming.ts';
 import { targetOf } from '../../src/lib/combat/resolve.ts';
 import type { TurnAction } from '../../src/lib/combat/turnActions.ts';
 import { DEFAULT_GRID } from '../../src/lib/map/scene.ts';
-import type { Combat, Combatant, Scene } from '../../src/lib/types.ts';
+import type { Combat, Combatant, Resolution, Scene } from '../../src/lib/types.ts';
 
 // What an action needs to be aimed, and the DM's own monster attack worked out on the scene (the host's player path is in sync tests).
 const cell = (q: number, r = 0) => ({ x: 35 + 70 * q, y: 35 + 70 * r });
@@ -115,6 +115,20 @@ describe('workOut on the DM\'s map', () => {
     expect(aimPlan(hex)).toMatchObject({ attack: false, dice: [], mark: true });
     expect(await workOut({ ...base(hex, { dmg: [] }), aim: { target: 'g', rolled: { dmg: [] }, toggles: [] } }))
       .toMatchObject({ resolution: { mark: 'g', rider: { spell: 'Hex', dice: '1d6', type: 'necrotic', target: 'g' }, outcomes: [{ id: 'g', damage: 0, inflict: ['Hex'] }] } });
+  });
+  test('a lasting area that deals damage over time: who starts a turn in it', () => {
+    const beam: Resolution = { id: 'r', actor: 'pc:mira', action: 'Moonbeam', outcomes: [], applied: [], at: 0, sceneId: 's1', round: 1, lasting: true,
+      area: { shape: 'cylinder', origin: cell(0), aim: cell(0), feet: 5 }, linger: { dice: [{ expr: '2d10', type: 'radiant' }], read: { damage: [], save: 'Con', onSave: 'half' }, dc: 13 } };
+    const at = (concentrating: boolean) => ({ ...k, resolutions: [beam], combatants: k.combatants.map((x) => (x.id === 'pc:mira' ? { ...x, concentrating, concentratingOn: 'Moonbeam' } : x)) });
+    expect(startsIn(at(true), scene, 'g')).toEqual([beam]);
+    expect(startsIn(at(true), scene, 'pc:thorin')).toEqual([]);
+    expect(startsIn(at(false), scene, 'g')).toEqual([]);
+  });
+  test('casting a damage-over-time spell keeps its dice and DC for the turns to come; nothing is rolled now', async () => {
+    const moon = { ...spell({ save: 'Con', onSave: 'half', lingering: true, damage: [{ dice: '2d10', type: 'radiant' }], area: { shape: 'cylinder', feet: 5, self: false } }), name: 'Moonbeam' };
+    expect(aimPlan(moon)).toMatchObject({ dice: [], linger: { dice: [{ expr: '2d10', type: 'radiant' }] } });
+    const r = await workOut({ ...base(moon, { dmg: [] }), aim: { point: cell(0), rolled: { dmg: [] }, toggles: [] } });
+    expect(r).toMatchObject({ resolution: { outcomes: [], linger: { dice: [{ expr: '2d10', type: 'radiant' }], read: { save: 'Con' }, dc: 13 } } });
   });
   test('Chaos Bolt: of the two d8s, the type that hurts more', async () => {
     const bolt = spell({ attack: 'ranged', damage: [{ dice: '2d8+1d6', type: '' }], choices: ['acid', 'cold', 'fire'],
