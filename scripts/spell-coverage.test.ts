@@ -12,7 +12,7 @@ const FILES = ['spells-phb.json', 'spells-xge.json', 'spells-tce.json'];
 
 /** It can be worked out here: damage it can deliver, or conditions behind a save. */
 export const resolves = (x: SpellRead & Record<string, unknown>): boolean =>
-  !x.manual && ((x.damage.length > 0 && !!(x.attack || x.save || x.auto || x.linger || x.rider || x.rays)) || (!!x.conditions?.length && !!x.save));
+  !x.manual && ((x.damage.length > 0 && !!(x.attack || x.save || x.auto || (x.lingering && x.area) || x.rider || x.rays)) || (!!x.conditions?.length && !!x.save));
 
 test.skipIf(!dir)('spell coverage over the local books', () => {
   const ctx = { spellClasses: () => [], listed: () => true } as never;

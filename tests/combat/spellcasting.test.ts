@@ -237,3 +237,7 @@ test('damage over time: only entering the area stays by hand', () => {
     .toBe('Entering the area isn’t automated, only starting a turn in it.');
   expect(readSpell(fix('120 feet', 'A cloud fills a 20-foot-radius sphere. A creature that starts its turn there makes a Constitution saving throw or takes 5d8 poison damage.')).manual).toBeUndefined();
 });
+
+test('damage over time with no area to place stays by hand', () => {
+  expect(readSpell(fix('Self', 'Spirits surround you. A creature that starts its turn near you takes 1d8 cold damage.')).manual).toBe('Damage over time isn’t automated: apply it by hand.');
+});
