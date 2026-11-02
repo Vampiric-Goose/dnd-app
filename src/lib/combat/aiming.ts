@@ -58,7 +58,20 @@ function liveAreas(k: Combat | undefined, sceneId: string): Resolution[] {
 export function startsIn(k: Combat, s: Scene, id: string): Resolution[] {
   const t = s.tokens.find((x) => combatantForToken(k, x)?.id === id);
   if (!t) return [];
-  return liveAreas(k, s.id).filter((r) => r.linger && tokensInTemplate(r.area!, s.grid, s.tokens).includes(t.id));
+  const from = k.movement?.[id]?.from, at = from ? { ...t, x: from.x, y: from.y } : t; // where its turn began, once it has moved
+  return liveAreas(k, s.id).filter((r) => r.linger && !r.linger.read.noStart && tokensInTemplate(r.area!, s.grid, [at]).length > 0);
+}
+
+/**
+ * The damage-over-time areas that also hurt a creature entering them (Cloudkill) which creature `id`'s token now stands in but its turn
+ * began outside of: it walked in this turn. ponytail: the turn's origin and where it stands, so a path through and out isn't caught, nor a
+ * creature pushed in on another's turn (by hand).
+ */
+export function entersIn(k: Combat, s: Scene, id: string): Resolution[] {
+  const t = s.tokens.find((x) => combatantForToken(k, x)?.id === id), from = k.movement?.[id]?.from;
+  if (!t || !from) return [];
+  return liveAreas(k, s.id).filter((r) => r.linger?.read.enters && tokensInTemplate(r.area!, s.grid, [t]).length
+    && !tokensInTemplate(r.area!, s.grid, [{ ...t, x: from.x, y: from.y }]).length);
 }
 
 /**

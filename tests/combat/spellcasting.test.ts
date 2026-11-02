@@ -240,9 +240,9 @@ describe('extra damage on weapon hits', () => {
   });
 });
 
-test('damage over time: only entering the area stays by hand', () => {
-  expect(readSpell(fix('120 feet', 'A beam shines in a 5-foot-radius, 40-foot-high cylinder. A creature that enters the area for the first time on a turn or starts its turn there makes a Constitution saving throw, taking 2d10 radiant damage on a failed save.')).manual)
-    .toBe('Entering the area isn’t automated, only starting a turn in it.');
+test('damage over time: entering the area and starting a turn there are both automated', () => {
+  const beam = readSpell(fix('120 feet', 'A beam shines in a 5-foot-radius, 40-foot-high cylinder. A creature that enters the area for the first time on a turn or starts its turn there makes a Constitution saving throw, taking 2d10 radiant damage on a failed save.'));
+  expect([beam.manual, beam.enters]).toEqual([undefined, true]);
   expect(readSpell(fix('120 feet', 'A cloud fills a 20-foot-radius sphere. A creature that starts its turn there makes a Constitution saving throw or takes 5d8 poison damage.')).manual).toBeUndefined();
 });
 
@@ -371,4 +371,12 @@ test('upcast target counts and a flat healing upcast', () => {
   expect(sp('Choose any number of creatures within range.').targets?.count).toBeGreaterThan(10);
   const heal = readSpell({ level: 6, range: '60 feet', text: [{ p: 'A creature you choose within range regains 70 hit points.' }], higherLevels: [{ p: 'The amount of healing increases by 10 for each slot level above 6th.' }] } as unknown as SpellDef);
   expect(diceAt(heal, { slot: 8, level: 6 }).heal).toBe('90');
+});
+test('an area that hurts a creature entering it is marked so, and says nothing is by hand', () => {
+  const r = readSpell({ level: 5, range: '120 feet', duration: 'Concentration, up to 10 minutes', text: [{ p: 'You create a 20-foot-radius sphere of fog centered on a point within range. When a creature enters the spell\'s area for the first time on a turn or starts its turn there, that creature must make a Constitution saving throw. The creature takes 5d8 poison damage on a failed save, or half as much damage on a successful one.' }] } as unknown as SpellDef);
+  expect([r.lingering, r.enters, r.manual]).toEqual([true, true, undefined]);
+});
+test('an area that hurts on entering and at the end of a turn (Incendiary Cloud): entering automated, never the start of a turn', () => {
+  const r = readSpell({ level: 8, range: '150 feet', duration: 'Concentration, up to 1 minute', text: [{ p: 'A cloud fills a 20-foot-radius sphere centered on a point within range. When the cloud appears, each creature in it must make a Dexterity saving throw, taking 10d8 fire damage on a failed save, or half as much on a successful one. A creature must also make this saving throw when it enters the spell\'s area for the first time on a turn or ends its turn there.' }] } as unknown as SpellDef);
+  expect([r.lingering, r.enters, r.noStart, r.manual]).toEqual([true, true, true, expect.stringMatching(/appears and at the end of a turn/)]);
 });

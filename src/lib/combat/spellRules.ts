@@ -15,7 +15,7 @@ export const SPELL_RULES: Record<string, Partial<SpellRead>> = {
   'find greater steed': { summon: { forms: ['Griffon', 'Pegasus', 'Peryton', 'Dire Wolf', 'Rhinoceros', 'Saber-Toothed Tiger'] } },
   'chaos bolt': { typeFromDie: { sides: 8, types: ['acid', 'cold', 'fire', 'force', 'lightning', 'poison', 'psychic', 'thunder'] }, leap: 30 },
   // the SRD words its aura "to a distance of 15 feet"; the SRD's upcast die is misprinted "1dl0"
-  'spirit guardians': { area: { shape: 'sphere', feet: 15, self: true }, manual: 'Entering the area isn’t automated, only starting a turn in it.' },
+  'spirit guardians': { area: { shape: 'sphere', feet: 15, self: true }, enters: true, manual: undefined },
   moonbeam: { perSlot: { dice: '1d10', above: 2, step: 1 } },
   // the save rolls; what a failure does is the caster's pick, by option or by the target's hit points
   command: { conditions: undefined, manual: 'On a failed save, carry out the command by hand.' },

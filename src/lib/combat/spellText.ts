@@ -36,6 +36,10 @@ export interface SpellRead {
   reach?: number;
   /** It hurts a creature that enters the area or starts its turn there (Moonbeam), not when cast. */
   lingering?: true;
+  /** it also hurts a creature entering it (Cloudkill, Moonbeam): aiming.ts entersIn */
+  enters?: true;
+  /** it never hurts as a turn starts there (Incendiary Cloud: the end of one) */
+  noStart?: true;
   heal?: { dice: string; mod: boolean };
   /** Temporary hit points it gives (False Life), `perSlot` more for each slot level above the spell's. */
   temp?: { dice: string; perSlot?: number };
@@ -202,9 +206,16 @@ export function readSpell(s: Pick<SpellDef, 'text' | 'level' | 'range'> & { name
   // never silently wrong: what the targeting can't deliver says so
   const hurts = out.damage.length > 0 || !!mech?.types?.length;
   if (out.rider) { /* delivered on the caster's weapon hits */ }
-  else if (out.lingering && hurts) { // the start of a turn there is automated (aiming.ts startsIn); entering it isn't
-    if (!/starts its turn/i.test(t) || (!out.area && !out.burst)) out.manual = 'Damage over time isn’t automated: apply it by hand.';
-    else if (/\benters?\b/i.test(t)) out.manual = 'Entering the area isn’t automated, only starting a turn in it.';
+  else if (out.lingering && hurts) { // the start of a turn there (aiming.ts startsIn) and entering it on a turn (entersIn) are automated
+    if (!out.area && !out.burst) out.manual = 'Damage over time isn’t automated: apply it by hand.';
+    else {
+      if (/\benters?\b/i.test(t)) out.enters = true;
+      // Incendiary Cloud: entering it, as it appears and at the end of a turn there; only entering is automated
+      if (!/starts its turn/i.test(t)) {
+        out.noStart = true;
+        out.manual = /ends its turn/i.test(t) ? 'Its damage as it appears and at the end of a turn there is by hand.' : 'Damage over time isn’t automated: apply it by hand.';
+      }
+    }
   }
   else if (!out.attack && !out.save && t.split(/(?<=\.)\s+/).some((x) => /\bextra \d+d\d+/i.test(x) && /\b(?:hits?|weapon)\b/i.test(x)))
     out.manual = 'Extra damage on weapon hits isn’t automated: apply it by hand.';

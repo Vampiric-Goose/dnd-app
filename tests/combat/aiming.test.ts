@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { aimPlan, pickableAt, startsIn, workOut, type WorkIn } from '../../src/lib/combat/aiming.ts';
+import { aimPlan, entersIn, pickableAt, startsIn, workOut, type WorkIn } from '../../src/lib/combat/aiming.ts';
 import { targetOf } from '../../src/lib/combat/resolve.ts';
 import { readSpell } from '../../src/lib/combat/spellText.ts';
 import type { TurnAction } from '../../src/lib/combat/turnActions.ts';
@@ -283,4 +283,23 @@ test('Toll the Dead deals its d12 only to a target missing hit points', async ()
     return r.resolution.outcomes[0].damage;
   };
   expect([await dealt(10), await dealt(6)]).toEqual([5, 11]);
+});
+
+// Entering a damage-over-time area (Cloudkill, Moonbeam): a creature whose token now stands in it but whose turn began outside it.
+test('who has entered a lasting area this turn', () => {
+  const k0: Combat = { campaignId: 'c1', round: 2, turn: 'g', groupMonsters: false, updatedAt: 0,
+    combatants: [cb({ id: 'pc:mira', kind: 'pc', name: 'Mira', concentrating: true, concentratingOn: 'Cloudkill' }), cb({ id: 'g', kind: 'monster', name: 'Goblin' })] };
+  const sc: Scene = { id: 's1', campaignId: 'c1', name: 'F', width: 1400, height: 700, grid: { ...DEFAULT_GRID }, shown: true, updatedAt: 0,
+    tokens: [{ id: 't-g', name: 'G', ...cell(3), size: 'M', color: '#000000', combatantId: 'g' }, { id: 't-m', name: 'M', ...cell(9), size: 'M', color: '#000000', characterId: 'mira' }] };
+  const fog = (enters: boolean): Resolution => ({ id: 'r', actor: 'pc:mira', action: 'Cloudkill', outcomes: [], applied: [], at: 0, sceneId: 's1', round: 1, lasting: true,
+    area: { shape: 'cylinder', origin: cell(3), aim: cell(3), feet: 5 }, linger: { dice: [{ expr: '5d8', type: 'poison' }], read: { damage: [], save: 'Con', onSave: 'half', ...(enters && { enters: true }) }, dc: 13 } });
+  const from = (q: number, enters = true) => ({ ...k0, resolutions: [fog(enters)], movement: { g: { from: cell(q), dashes: 0 } } });
+  expect(entersIn(from(0), sc, 'g').map((r) => r.id)).toEqual(['r']); // walked in
+  expect(entersIn(from(3), sc, 'g')).toEqual([]); // began its turn there: the start of its turn already counted
+  expect(entersIn(from(0, false), sc, 'g')).toEqual([]); // a spell that hurts only at the start of a turn
+  // where its turn began decides the start of its turn: walked in, it didn't start there; walked out, it did
+  expect(startsIn(from(0), sc, 'g')).toEqual([]);
+  const cloud = { ...from(3), resolutions: [{ ...fog(true), linger: { ...fog(true).linger!, read: { ...fog(true).linger!.read, noStart: true as const } } }] };
+  expect(startsIn(cloud, sc, 'g')).toEqual([]); // Incendiary Cloud: the end of a turn, not its start
+  expect(startsIn({ ...from(3), movement: { g: { from: cell(3), dashes: 0 } } }, { ...sc, tokens: sc.tokens.map((t) => (t.id === 't-g' ? { ...t, ...cell(6) } : t)) }, 'g').map((r) => r.id)).toEqual(['r']);
 });

@@ -14,7 +14,7 @@
   import { currentRun, patchCombatant } from '../../lib/combat/combat.ts';
   import { budgetApplies, budgetFeet, combatantForToken, effectiveSpeed, originOf, recordMove } from '../../lib/combat/movement.ts';
   import { applyResolution, editCharacter, settlePick, settleSave, turn, undoResolution, updateCombat } from '../../lib/combat/store.ts';
-  import { aimPlan, areasOn, foeWithin5, judge, snapOf, startsIn, touched, workOut, type AimPlan } from '../../lib/combat/aiming.ts';
+  import { aimPlan, areasOn, entersIn, foeWithin5, judge, snapOf, startsIn, touched, workOut, type AimPlan } from '../../lib/combat/aiming.ts';
   import { monsterAc, resolveSpell, targetOf } from '../../lib/combat/resolve.ts';
   import { targetingOn, type Pickable, type Toggle } from '../../lib/combat/targeting.ts';
   import { roll } from '../../lib/rolls.svelte.ts';
@@ -456,19 +456,21 @@
     const c = z.characterId ? chars.find((y) => y.id === z.characterId) : undefined;
     return c ? targetOf(z, { sheet: sheets.get(c.id) ?? computeSheet(c, { settings, viewer: 'dm' }), hp: c.state.hp, conditions: c.state.conditions }) : targetOf(z, { monster: z.monsterId ? monsterById.get(z.monsterId) : undefined });
   };
-  // Damage over time: the areas the creature whose turn it is starts in (Moonbeam), each until it is rolled for this round
-  const startOf = (r: Resolution) => `${r.action} (start of turn)`;
-  const hurtsNow = $derived.by(() => {
+  // Damage over time: the areas the creature whose turn it is starts in (Moonbeam), or walked into (Cloudkill), each once a turn: a start of
+  // turn there or entering it, not both
+  const startOf = (r: Resolution) => `${r.action} (start of turn)`, enterOf = (r: Resolution) => `${r.action} (entering)`;
+  const hurtsNow = $derived.by((): { r: Resolution; enters: boolean }[] => {
     const k = combat, s = scene, id = k?.turn;
     if (!k || !s || !id) return [];
-    return startsIn(k, s, id).filter((r) => !(k.resolutions ?? []).some((y) => y.action === startOf(r) && y.round === k.round && y.outcomes[0]?.id === id));
+    const done = (r: Resolution) => (k.resolutions ?? []).some((y) => (y.action === startOf(r) || y.action === enterOf(r)) && y.round === k.round && y.outcomes[0]?.id === id);
+    return [...startsIn(k, s, id).map((r) => ({ r, enters: false })), ...entersIn(k, s, id).map((r) => ({ r, enters: true }))].filter((x) => !done(x.r));
   });
-  const lingerRoll = (r: Resolution) => run(async () => {
+  const lingerRoll = (r: Resolution, enters = false) => run(async () => {
     const k = combat, z = k?.combatants.find((x) => x.id === k.turn), l = r.linger;
     if (!k || !z || !l) return;
     const rolled = { dmg: l.dice.map((d) => roll(`${r.action}: ${d.type} damage`, d.expr).faces) };
     const outcomes = resolveSpell(l.read, l.dice, l.dc, undefined, infoOf(z), [], rolled, Math.random);
-    await applyResolution(cid, { id: uid(), actor: r.actor, action: startOf(r), outcomes, at: Date.now(), round: k.round,
+    await applyResolution(cid, { id: uid(), actor: r.actor, action: enters ? enterOf(r) : startOf(r), outcomes, at: Date.now(), round: k.round,
       ...(l.dc !== undefined && l.read.save && { dc: l.dc, ability: l.read.save.toLowerCase() as Ability, onSave: l.read.onSave }) }, settings);
     await reload();
   });
@@ -615,8 +617,8 @@
           {#if combat?.resolutions?.length}
             <section class="results" aria-labelledby="res-h">
               <h3 id="res-h">Results</h3>
-              {#each hurtsNow as r (r.id)}<p class="row small"><span><strong>{nameOfCombatant(combat.turn ?? '')}</strong> starts its turn in {r.action}</span>
-                <button type="button" disabled={busy} onclick={() => lingerRoll(r)}>Roll</button></p>{/each}
+              {#each hurtsNow as h (h.r.id + h.enters)}<p class="row small"><span><strong>{nameOfCombatant(combat.turn ?? '')}</strong> {h.enters ? 'entered' : 'starts its turn in'} {h.r.action}</span>
+                <button type="button" disabled={busy} onclick={() => lingerRoll(h.r, h.enters)}>Roll</button></p>{/each}
               <ol class="plain">
                 {#each [...combat.resolutions].reverse().slice(0, 6) as r (r.id)}
                   <li>

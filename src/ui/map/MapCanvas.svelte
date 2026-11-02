@@ -99,6 +99,13 @@
   const aimFocus = $derived(aimPick ?? (aimAt ? aimFor(aimAt) : undefined));
   const aimTpl = $derived(aimTemplate(aimFocus));
   const aimCaught = $derived(aimTpl ? tokensInTemplate(aimTpl, grid, tokens) : []);
+  /** A placed area's center past its range: how far, said in the strip (a tap there never fails silently). */
+  const aimOut = $derived.by(() => {
+    const a = aim, ar = a?.area;
+    if (!a || ar?.on !== 'point' || ar.range === undefined || !aimAt) return '';
+    const d = feetBetween(grid, a.from, snap(grid, aimAt, 'M'), diagonal);
+    return d > ar.range ? `Out of range: ${d} ft away (range ${ar.range} ft)` : '';
+  });
   /** Why the creature under the pointer would be rolled against with advantage or disadvantage. */
   const aimWhy = $derived.by(() => {
     const k = aimFocus?.tokenId !== undefined ? aim?.pickable(aimFocus.tokenId) : undefined;
@@ -321,12 +328,12 @@
     // the squares the selected (or dragged) token can still reach this turn, tinted under the tokens (as chess.com shows legal moves)
     const moverId = drag?.id ?? (selected.length === 1 ? selected[0] : undefined), mover = moverId !== undefined ? tokens.find((t) => t.id === moverId) : undefined;
     const lim = mover && canDrag(mover.id) ? limitOf?.(mover.id) : undefined;
-    if (mover && lim) {
+    const tint = (cells: Cell[], alpha: number) => {
       ctx.save();
-      ctx.globalAlpha = 0.16;
+      ctx.globalAlpha = alpha;
       ctx.fillStyle = accent;
       ctx.beginPath();
-      for (const c of reachableCells(grid, lim.from ?? mover, lim.budget, diagonal, width, height)) {
+      for (const c of cells) {
         if (grid.type === 'square') { const p = cellCenter(grid, c); ctx.rect(p.x - grid.size / 2 + px, p.y - grid.size / 2 + px, grid.size - 2 * px, grid.size - 2 * px); continue; }
         const [first, ...rest] = hexCorners(grid, c);
         ctx.moveTo(first.x, first.y);
@@ -335,7 +342,10 @@
       }
       ctx.fill();
       ctx.restore();
-    }
+    };
+    if (mover && lim) tint(reachableCells(grid, lim.from ?? mover, lim.budget, diagonal, width, height), 0.16);
+    // a placed area's range from its caster (Fireball's 150 ft), by the grid's distance rule: where its center may go
+    if (aim?.area?.on === 'point' && aim.area.range !== undefined) tint(reachableCells(grid, aim.from, aim.area.range, diagonal, width, height), 0.12);
     if (castCells.length) { // spell areas as cast, under the tokens
       ctx.save();
       ctx.globalAlpha = 0.28;
@@ -656,6 +666,7 @@
         schedule();
         return;
       }
+      if (aim.area?.on === 'point') { aimAt = w; schedule(); } // a tap past its range: the strip says why (aimOut)
     }
     if (ruler) { ruler = undefined; schedule(); } // the next tap clears the ruler
     if (tool === 'ruler') { ruler = { a: w, b: w }; mode = { k: 'ruler' }; return; }
@@ -852,8 +863,9 @@
       <div class="strip" role="group" aria-label="Aiming">
         {#if aim.status}<span class="inside" role="status">{aim.status}</span>{/if}
         {#if aimWhy}<span class="inside" role="status">{aimWhy}</span>{/if}
+        {#if aimOut}<span class="inside out" role="status">{aimOut}</span>{/if}
         {#if aim.area}<span class="inside" role="status">In the area: {aimCaught.length ? tokens.filter((t) => aimCaught.includes(t.id)).map((t) => t.name).join(', ') : 'none'}</span>{/if}
-        <span class="hint">{aim.area?.on === 'point' ? 'Tap where it lands' : aim.area?.on === 'self' ? 'Tap the direction' : 'Tap a ringed creature'}{aimPick ? ' — tap again to confirm' : ''}.</span>
+        <span class="hint">{aim.area?.on === 'point' ? `Tap where it lands${aim.area.range !== undefined ? ` (within ${aim.area.range} ft, shaded)` : ''}` : aim.area?.on === 'self' ? 'Tap the direction' : 'Tap a ringed creature'}{aimPick ? ' — tap again to confirm' : ''}.</span>
         {#if aim.onundo}<button type="button" onclick={() => aim?.onundo?.()}>Undo pick</button>{/if}
         {#if aim.ondone}<button type="button" onclick={() => aim?.ondone?.()}>Done</button>{/if}
         <button type="button" onclick={() => aim?.oncancel()}>Cancel</button>
@@ -1002,6 +1014,10 @@
 
   .inside {
     color: var(--text-strong);
+  }
+
+  .inside.out {
+    color: var(--danger);
   }
 
   .zoom {
