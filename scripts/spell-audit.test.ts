@@ -20,9 +20,26 @@ const cell = (q: number) => ({ x: 35 + 70 * q, y: 35 });
 const cb = (o: Partial<Combatant> & Pick<Combatant, 'id' | 'kind' | 'name'>): Combatant => ({ initMod: 0, dex: 10, tie: 0.5, conSave: 0, ...o });
 const maxFaces = (expr: string) => parseDice(expr).flatMap((t) => ('const' in t ? [] : Array(t.count).fill(t.sides)));
 
+const SHORT: Record<string, string> = { strength: 'Str', dexterity: 'Dex', constitution: 'Con', intelligence: 'Int', wisdom: 'Wis', charisma: 'Cha' };
+/** Where the read and the book's own tags disagree: damage types, save, attack kind, area shape and size. */
+export function disagree(s: SpellDef): string[] {
+  const m = s.mech, r = readSpell(s), out: string[] = [];
+  if (!m) return out;
+  const types = new Set([...r.damage.map((d) => d.type).filter(Boolean), ...(r.choices ?? [])]), want = new Set(m.types ?? []);
+  const missing = [...want].filter((x) => !types.has(x)), extra = [...types].filter((x) => want.size && !want.has(x));
+  if ((missing.length && !r.manual) || extra.length) out.push(`types ${[...types].join('/') || '-'} vs book ${[...want].join('/')}`);
+  if (m.save?.length && r.save && !m.save.map((x) => SHORT[x] ?? x.charAt(0).toUpperCase() + x.slice(1)).includes(r.save)) out.push(`save ${r.save} vs book ${m.save.join('/')}`);
+  if (m.save?.length && !r.save && !r.manual && !r.rider) out.push(`no save vs book ${m.save.join('/')}`);
+  if (m.attack && r.attack !== m.attack && !r.manual) out.push(`attack ${r.attack ?? '-'} vs book ${m.attack}`);
+  if (m.area && r.area && (r.area.shape !== m.area.shape || r.area.feet !== m.area.feet)) out.push(`area ${r.area.shape} ${r.area.feet} vs book ${m.area.shape} ${m.area.feet}`);
+  if (m.area && !r.area && !r.burst && !r.manual && (r.save || r.damage.length)) out.push(`no area vs book ${m.area.shape} ${m.area.feet}`);
+  return out;
+}
+
 export async function audit(s: SpellDef): Promise<string> {
   const read = readSpell(s);
-  if (SPELL_EFFECTS[s.name]) return 'ok: sheet effect';
+  if (SPELL_EFFECTS[s.name]) return 'ok: effect';
+  if (read.rider) return `ok: rider, ${read.rider.dice} ${read.rider.type || 'weapon'}${read.rider.once ? ' on the next hit' : ''}`;
   const a: TurnAction = { id: 's', name: s.name, cost: 'action', group: 'spell', spell: { id: s.id, level: s.level, concentration: s.concentration }, cast: { read, attack: 5, dc: 13, charLevel: 5, mod: 3 } };
   const plan = aimPlan(a);
   const hurts = read.damage.length > 0, conds = !!read.conditions?.length;
@@ -49,8 +66,22 @@ test.skipIf(!dir)('spell audit', async () => {
   const ctx = { spellClasses: () => [], listed: () => true } as never, out: string[] = [];
   const books: [string, SpellDef[]][] = [['SRD', (srd as { entities: SpellDef[] }).entities.filter((e) => e.kind === 'spell')]];
   for (const f of ['phb', 'xge', 'tce']) books.push([f.toUpperCase(), JSON.parse(readFileSync(join(dir!, `spells-${f}.json`), 'utf8')).spell.map((r: { name: string }) => spell(r as never, ctx, r.name, r.name))]);
-  for (const [book, list] of books) for (const s of list) out.push(`${book}\tL${s.level}\t${s.name}\t${await audit(s)}`);
-  writeFileSync(process.env.AUDIT_OUT ?? 'spell-audit.tsv', out.join('\n'));
+  const dis: string[] = [];
+  // the SRD has no book tags: its read is held to its PHB twin's, field by field (the same spell, other wording)
+  const phb = new Map(books[1][1].map((s) => [s.name.toLowerCase(), readSpell(s)]));
+  const key = (r: ReturnType<typeof readSpell>) => ({ attack: r.attack, save: r.save, onSave: r.onSave, dice: r.damage.map((d) => d.dice).join('+'),
+    area: r.area && `${r.area.shape} ${r.area.feet}`, burst: r.burst, conditions: r.conditions?.join('/'), heal: r.heal?.dice, perSlot: r.perSlot?.dice, lingering: r.lingering, rounds: r.rounds });
+  for (const s of books[0][1]) {
+    const twin = phb.get(s.name.toLowerCase());
+    if (!twin) continue;
+    const a = key(readSpell(s)), b = key(twin);
+    for (const f of Object.keys(a) as (keyof typeof a)[]) if (String(a[f]) !== String(b[f])) dis.push(`DISAGREE\tSRD\t${s.name}\t${f} ${a[f] ?? '-'} vs PHB ${b[f] ?? '-'}`);
+  }
+  for (const [book, list] of books) for (const s of list) {
+    out.push(`${book}\tL${s.level}\t${s.name}\t${await audit(s)}`);
+    for (const d of disagree(s)) dis.push(`DISAGREE\t${book}\t${s.name}\t${d}`);
+  }
+  writeFileSync(process.env.AUDIT_OUT ?? 'spell-audit.tsv', [...out, ...dis].join('\n'));
   const count = (p: string) => out.filter((l) => l.split('\t')[3].startsWith(p)).length;
-  console.log(`spells ${out.length} · ok ${count('ok')} · heal ${count('heal')} · manual ${count('manual')} · none ${count('none')} · BROKEN ${count('BROKEN')}`);
+  console.log(`spells ${out.length} · disagree ${dis.length} · ok ${count('ok')} · heal ${count('heal')} · manual ${count('manual')} · none ${count('none')} · BROKEN ${count('BROKEN')}`);
 });
