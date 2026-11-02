@@ -50,6 +50,10 @@ export interface SpellRead {
   drift?: { feet: number };
   /** its caster can move it this far, for that cost (Moonbeam: 60 ft, an action) */
   move?: { feet: number; cost: 'action' | 'bonus' };
+  /** its caster regains half the necrotic damage it deals (Vampiric Touch) */
+  drain?: true;
+  /** while its caster concentrates on it, used again at this cost with no new slot (turnActions.ts againOf), as `read` says if that differs */
+  again?: { cost: 'action' | 'bonus'; read?: Partial<SpellRead> };
   heal?: { dice: string; mod: boolean };
   /** Temporary hit points it gives (False Life), `perSlot` more for each slot level above the spell's. */
   temp?: { dice: string; perSlot?: number };
@@ -180,6 +184,7 @@ export function readSpell(s: Pick<SpellDef, 'text' | 'level' | 'range'> & { name
   }
   const heal = /regains? (?:a number of )?hit points equal to (\d+d\d+)( \+ your spellcasting ability modifier)?/i.exec(t);
   const flatHeal = /\bregains? (\d+(?:d\d+)?(?:\s*\+\s*\d+)?) hit points\b/i.exec(t); // Heal's 70, Regenerate's 4d8 + 15
+  if (/\byou regain hit points equal to half the amount of necrotic damage\b/i.test(t)) out.drain = true; // Vampiric Touch, Enervation
   if (heal) out.heal = { dice: heal[1], mod: !!heal[2] };
   else if (flatHeal) out.heal = { dice: flatHeal[1].replace(/\s+/g, ''), mod: false };
   const temp = /\bgains? (\d+d\d+(?:\s*\+\s*\d+)?) temporary hit points\b/i.exec(t), tempUp = /\b(\d+) additional temporary hit points for each slot level above\b/i.exec(h);

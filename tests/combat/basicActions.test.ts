@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { describe, expect, test } from 'vitest';
 import { budgetFeet } from '../../src/lib/combat/movement.ts';
-import { applyUse, characterEffect, monsterActions, pcActions, problemOf, visible, type TurnAction } from '../../src/lib/combat/turnActions.ts';
+import { againOf, applyUse, characterEffect, monsterActions, payment, pcActions, problemOf, visible, type TurnAction } from '../../src/lib/combat/turnActions.ts';
 import { mkChar } from '../fixtures/content.ts';
 import type { Character, Combat, Combatant, MonsterDef, Pack, Sheet } from '../../src/lib/types.ts';
 
@@ -98,4 +98,20 @@ test('casting a buff or debuff changes the caster only when it is a buff cast un
   expect(characterEffect(c, sp('Faerie Fire', { save: 'Dex' })).state.conditions).toEqual([]);
   expect(characterEffect(c, sp('Haste', {})).state.conditions).toEqual([]);
   expect(characterEffect(c, sp('Bless', {})).state.conditions).toEqual(['Bless']); // targeting off: the caster, the DM moves it
+});
+
+// A held concentration spell used again (Vampiric Touch's touch, Aura of Vitality's heal): its own cost, no slot, no new casting.
+test('using a held spell again costs its action or bonus action, no slot, and doesn\'t restart concentration', () => {
+  const touch: TurnAction = { id: 'spell:vt', name: 'Vampiric Touch', cost: 'action', group: 'spell', spell: { id: 'vt', level: 3, concentration: true },
+    cast: { read: { damage: [{ dice: '3d6', type: 'necrotic' }], attack: 'melee', perSlot: { dice: '1d6', above: 3, step: 1 }, again: { cost: 'action' } }, attack: 5, dc: 13, charLevel: 5, mod: 3 } as never };
+  const again = againOf(touch, 5)!;
+  expect([again.id, again.cost, again.spell?.concentration, again.at]).toEqual(['again:spell:vt', 'action', false, 5]);
+  expect(payment(again, { slots: [0, 0, 0] } as never, { state: { slotsUsed: [] } } as never)).toEqual({});
+  const x = { id: 'pc:m', kind: 'pc', name: 'M', initMod: 0, dex: 10, tie: 0.5, conSave: 0, concentrating: true, concentratingOn: 'Vampiric Touch', concentrationCount: 2 } as Combatant;
+  const k = { campaignId: 'c', round: 1, turn: 'pc:m', groupMonsters: false, updatedAt: 0, combatants: [x] } as Combat;
+  const y = applyUse(k, x, again).combatants[0];
+  expect([y.concentrationCount, y.economy?.used, y.economy?.leveledSpell]).toEqual([2, 1, undefined]);
+  expect(againOf({ ...touch, cast: { ...touch.cast!, read: { ...touch.cast!.read, again: undefined } } })).toBeUndefined();
+  // casting a concentration spell remembers its slot, for its repeats' dice
+  expect(applyUse({ ...k, combatants: [{ ...x, concentrating: false }] }, { ...x, concentrating: false }, touch, 1, undefined, 5).combatants[0].concentrationSlot).toBe(5);
 });

@@ -142,6 +142,7 @@ export interface Combatant {
   conditions?: string[];                 // monsters only (a PC's are character.state.conditions)
   durations?: Record<string, Duration>;  // condition name → when it ends (PCs too)
   concentrating?: boolean; /** the spell it concentrates on (its name), and how many concentration spells it has cast (which casting it is) */ concentratingOn?: string; concentrationCount?: number;
+  /** the slot its concentration spell was cast with (its repeats' dice: turnActions.ts againOf) */ concentrationSlot?: number;
   /** extra damage on its weapon hits from a spell it cast (`type` '' = the weapon's): the next hit only (`once`), or hits on `target` */
   rider?: { spell: string; dice: string; type: string; once?: true; target?: string; /** spell attacks too (Hex) */ anyAttack?: true }; legendary?: { max: number; used: number }; reactionUsed?: boolean; notes?: string;
   economy?: { used: number; extra: number; bonus: boolean; attacks: number; light?: boolean; surged?: boolean; haste?: boolean; object?: boolean; readied?: boolean; bonusSpell?: boolean; leveledSpell?: boolean; dodging?: boolean }; // this turn (dodging: took the Dodge action; it lasts until this resets at its next turn): Actions used, extra Actions, Bonus action, attacks in the Attack action, attacked with a light melee weapon (two-weapon fighting), Action Surge used, one extra Action is Haste's, the free object interaction used, an action readied, a bonus-action spell cast, a spell other than an action cantrip cast (absent: fresh)

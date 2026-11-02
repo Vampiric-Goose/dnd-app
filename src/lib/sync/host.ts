@@ -344,7 +344,8 @@ export class Host {
     const refuse = (reason: string) => this.#send(c, { t: 'useRefused', reason });
     if (!this.#deps.updateCombat) return refuse('no fight');
     const sheet = computeSheet(ch, { settings: camp.settings, viewer: 'player' }), features = featureList(ch, camp.settings);
-    const a = pcActions(ch, sheet, features).find((x) => x.id === m.action);
+    const fight = await this.#deps.loadCombat?.(), fx = fight && combatantForToken(fight, { characterId: ch.id }); // the spell it holds, to use again
+    const a = pcActions(ch, sheet, features, fx?.concentrating ? { spell: fx.concentratingOn, slot: fx.concentrationSlot } : undefined).find((x) => x.id === m.action);
     if (!a) return refuse('that action is not available');
     const { level, pact, problem } = payment(a, sheet, ch, m.slot);
     if (problem) return refuse(problem);
@@ -381,7 +382,7 @@ export class Host {
       if (!x || why) { why ??= 'not in the fight'; return k; }
       const t = a.target && m.target !== undefined ? k.combatants.find((z) => !z.hidden && (z.id === m.target || this.#aliases.get(z.id) === m.target)) : undefined;
       if (a.target && !t) { why = 'pick a target'; return k; }
-      return applyUse(k, x, a, per, t?.id);
+      return applyUse(k, x, a, per, t?.id, level);
     });
     if (why) return refuse(why);
     if (edits && !(await this.#deps.editCharacter!(ch.id, (x) => characterEffect(spendOn(x, level, a.resource, pact), a, m.target, !!aimed)).catch(() => false))) {

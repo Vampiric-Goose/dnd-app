@@ -14,7 +14,7 @@
   import { currentRun, patchCombatant } from '../../lib/combat/combat.ts';
   import { budgetApplies, budgetFeet, combatantForToken, effectiveSpeed, originOf, recordMove } from '../../lib/combat/movement.ts';
   import { applyResolution, editCharacter, settlePick, settleSave, turn, undoResolution, updateCombat } from '../../lib/combat/store.ts';
-  import { aimPlan, areaRollName, areaRolls, areasOn, foeWithin5, judge, moveArea, movableAreas, noteEntries, snapOf, touched, workOut, type AimPlan, type AreaKind } from '../../lib/combat/aiming.ts';
+  import { aimPlan, ALL_HP, areaRollName, areaRolls, areasOn, foeWithin5, judge, moveArea, movableAreas, noteEntries, snapOf, touched, workOut, type AimPlan, type AreaKind } from '../../lib/combat/aiming.ts';
   import { monsterAc, resolveSpell, targetOf } from '../../lib/combat/resolve.ts';
   import { targetingOn, type Pickable, type Toggle } from '../../lib/combat/targeting.ts';
   import { roll } from '../../lib/rolls.svelte.ts';
@@ -355,7 +355,7 @@
     if (ch && sheet) {
       const features = featureList(ch, settings);
       return { x, ch, sheet, name: ch.name, ac: sheet.ac, hp: ch.state.hp, maxHp: sheet.maxHp, tempHp: ch.state.tempHp, conditions: ch.state.conditions,
-        actions: pcActions(ch, sheet, features), perAction: attacksPerAction(features), slots: slotsLeft(sheet, ch) };
+        actions: pcActions(ch, sheet, features, x.concentrating ? { spell: x.concentratingOn, slot: x.concentrationSlot } : undefined), perAction: attacksPerAction(features), slots: slotsLeft(sheet, ch) };
     }
     const m = x.monsterId ? monsterById.get(x.monsterId) : undefined;
     return { x, name: x.name, ac: monsterAc(x, m, x.conditions ?? []), hp: x.hp, maxHp: x.maxHp, tempHp: x.tempHp, conditions: x.conditions ?? [], actions: m ? monsterActions(m, { spell: (n) => spellByName.get(n), used: x.spellsUsed }) : [], perAction: 1 };
@@ -385,7 +385,7 @@
     await updateCombat(cid, (k) => { // checked again on the fresh fight: a quick second tap spends nothing
       const y = k.combatants.find((z) => z.id === v.x.id);
       why = y ? problemOf(y, a, v.ch ? v.conditions : y.conditions ?? [], currentRun(k).has(y.id), v.perAction) : 'not in the fight';
-      return y && !why ? applyUse(k, y, a, v.perAction, target) : k;
+      return y && !why ? applyUse(k, y, a, v.perAction, target, pay.level) : k;
     });
     if (why) throw new Error(`Not done: ${why}.`);
     if (v.ch && editsCharacter(a, pay.level)) await editCharacter(v.ch.id, (c) => characterEffect(spendOn(c, pay.level, a.resource, pay.pact), a, target, aimed));
@@ -501,7 +501,7 @@
   const describe = (o: Outcome) => [
     o.part !== 'save' && o.roll !== undefined ? `${o.hit ? 'hit' : 'miss'} (${o.roll}${o.nat ? `, natural ${o.nat}` : ''} vs AC ${o.ac ?? '?'}${o.edge ? `; ${o.edge}` : ''})` : '',
     o.save ? `${o.save.ok ? 'saved' : 'failed'} (${o.save.total})` : o.pending ? 'waiting for their save' : o.choose ? 'waiting for their d8 pick' : '',
-    o.damage ? `${o.damage} damage` : '', o.heal ? `regains ${o.heal} HP` : '', o.temp ? `${o.temp} temporary HP` : '', o.note ?? '',
+    o.damage ? `${o.damage} damage` : '', o.heal ? (o.heal >= ALL_HP ? 'regains all its hit points' : `regains ${o.heal} HP`) : '', o.temp ? `${o.temp} temporary HP` : '', o.note ?? '',
     o.inflict?.length ? o.inflict.join(', ').toLowerCase() : '',
   ].filter(Boolean).join(', ');
   const onpip = (pip: 'action' | 'bonus' | 'reaction', used: boolean) => run(async () => {

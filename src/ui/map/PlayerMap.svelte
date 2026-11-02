@@ -92,7 +92,7 @@
     try {
       const sheet = computeSheet(c, { settings, viewer: 'player' });
       const { reaction, perAction: _p, conc: _c, hasted: _h, rider: _r, ...economy } = r.econ;
-      return { r, c, econ: r.econ, sheet, actions: pcActions(c, sheet, featureList(c, settings)), x: { economy, reactionUsed: reaction } as Combatant };
+      return { r, c, econ: r.econ, sheet, actions: pcActions(c, sheet, featureList(c, settings), r.econ.conc ? { spell: r.econ.concOn, slot: r.econ.concSlot } : undefined), x: { economy, reactionUsed: reaction } as Combatant };
     } catch { return undefined; }
   });
   /** The tracker a use was sent under: its buttons stay off until the next tracker arrives or 3 s pass (a double tap sends one use). */

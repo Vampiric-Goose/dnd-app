@@ -84,6 +84,17 @@ export const SPELL_RULES: Record<string, Partial<SpellRead>> = {
   'investiture of flame': { damage: [], save: undefined, area: undefined, manual: 'Its 1d10 fire aura and fire line (an action) are by hand.' },
   'investiture of ice': { damage: [], save: undefined, area: undefined, manual: 'Its freezing cone (an action) is by hand.' },
   'investiture of wind': { damage: [], save: undefined, area: undefined, manual: 'Its wind cube (an action), and ranged attacks against you with disadvantage, are by hand.' },
+  // healing: what the wording sets apart from its first cast
+  'vampiric touch': { again: { cost: 'action' } }, // the touch again each turn, as an action, while it lasts
+  // a failed save: 4d8 (and 4d8 each turn after, an action, no save); a success: 2d8 and the spell ends, here half of the 4d8
+  enervation: { damage: [{ dice: '4d8', type: 'necrotic' }], onSave: 'half', again: { cost: 'action', read: { save: undefined, auto: { count: 1 } } },
+    manual: 'A successful save ends the spell: end concentration by hand.' },
+  // the cast makes the aura; its bonus action heals one creature in it (the caster too), on any of the caster's turns
+  'aura of vitality': { heal: undefined, again: { cost: 'bonus', read: { heal: { dice: '2d6', mod: false }, range: { feet: 30 } } } },
+  'power word heal': { heal: { dice: 'all', mod: false }, conditions: undefined, manual: 'It also ends charmed, frightened, paralyzed and stunned, and a prone target can stand as a reaction: by hand.' },
+  regenerate: { manual: 'The 1 hit point it restores at the start of each of the target’s turns, and regrowing limbs, are by hand.' },
+  goodberry: { manual: 'Each berry eaten restores 1 hit point: by hand.' },
+  'soul cage': { heal: undefined, manual: 'Steal Life (a bonus action: you regain 2d8) and its other uses, six in all, are by hand.' },
   'wrath of nature': { manual: 'Only the trees’ slashing is automated: the roots, vines and hurled rocks are by hand.' },
   // fight-changing, but nothing a roll or a number here can carry: the cast says so
   ...Object.fromEntries(Object.entries({
@@ -107,7 +118,6 @@ export const SPELL_RULES: Record<string, Partial<SpellRead>> = {
     'circle of power': 'Advantage on saves against spells, and no damage on a success, by hand.',
     'aura of purity': 'Its resistance to poison and advantage on saves are by hand.',
     'aura of life': 'Its resistance to necrotic damage and regaining 1 hit point are by hand.',
-    'aura of vitality': 'Roll its bonus-action healing by hand.',
     'antimagic field': 'Spells and magic in the sphere are suppressed: by hand.',
     maze: 'Banish the target to the maze by hand.',
     'giant insect': 'Use the giant insect’s stat block for the creature it grows, by hand.',

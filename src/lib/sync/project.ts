@@ -57,7 +57,7 @@ export interface TrackerRow { id: string; name: string; characterId?: string; in
   moved?: Movement /* a player character's turn origin and Dashes, while a budget applies */;
   econ?: TurnEcon /* the viewer's own character's pips this turn, in a running fight */ }
 /** Turn panel: Actions used and extra, the Bonus action, attacks in the Attack action, the Reaction, attacks one Attack action allows. */
-export interface TurnEcon { /** extra damage on its weapon hits (no mark: players learn no ids) */ rider?: { dice: string; type: string; anyAttack?: true }; used: number; extra: number; bonus: boolean; attacks: number; light?: boolean; surged?: boolean; haste?: boolean; hasted?: boolean; object?: boolean; readied?: boolean; bonusSpell?: boolean; leveledSpell?: boolean; reaction: boolean; perAction: number; /** concentrating */ conc: boolean }
+export interface TurnEcon { /** extra damage on its weapon hits (no mark: players learn no ids) */ rider?: { dice: string; type: string; anyAttack?: true }; used: number; extra: number; bonus: boolean; attacks: number; light?: boolean; surged?: boolean; haste?: boolean; hasted?: boolean; object?: boolean; readied?: boolean; bonusSpell?: boolean; leveledSpell?: boolean; reaction: boolean; perAction: number; /** concentrating */ conc: boolean; /** its own spell held and the slot it was cast with, to use again */ concOn?: string; concSlot?: number }
 export interface TrackerView { round: number; current?: string; rows: TrackerRow[]; /** the DM asked for initiative (setup only) */ ask?: true;
   /** Targeting: the viewer's own characters' pending area saves (a pop-up each). */ saves?: SavePrompt[];
   /** Targeting: the viewer's own characters' hits waiting for a die pick (Chaos Bolt). */ picks?: PickPrompt[] }
@@ -92,7 +92,7 @@ export function trackerForPlayers(c: Combat | undefined, characters: Character[]
       const e = c.round >= 1 && ch.ownerId === viewer ? { used: 0, extra: 0, bonus: false, attacks: 0, ...x.economy } : undefined;
       rows.push({ id: x.id, name: ch.name, characterId: ch.id, ...(x.init !== undefined && { init: x.init }), hp: ch.state.hp, maxHp: maxHp(ch),
         ...(m && { moved: { ...(from && { from }), dashes: m.dashes, ...(m.mult !== undefined && { mult: m.mult }), ...(m.stood && { stood: true as const }) } }),
-        ...(e && { econ: { ...e, reaction: !!x.reactionUsed, conc: !!x.concentrating, hasted: !!x.hasted && !x.hasted.ended, perAction: attacksPerAction(featureList(ch, settings)), ...(x.rider && { rider: { dice: x.rider.dice, type: x.rider.type, ...(x.rider.anyAttack && { anyAttack: true as const }) } }) } }) });
+        ...(e && { econ: { ...e, reaction: !!x.reactionUsed, conc: !!x.concentrating, ...(x.concentrating && x.concentratingOn && { concOn: x.concentratingOn }), ...(x.concentrating && x.concentrationSlot !== undefined && { concSlot: x.concentrationSlot }), hasted: !!x.hasted && !x.hasted.ended, perAction: attacksPerAction(featureList(ch, settings)), ...(x.rider && { rider: { dice: x.rider.dice, type: x.rider.type, ...(x.rider.anyAttack && { anyAttack: true as const }) } }) } }) });
       sent.set(x.id, x.id);
       continue;
     }

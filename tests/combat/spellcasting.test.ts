@@ -411,3 +411,7 @@ describe('when a lasting area acts', () => {
     expect(sp('Water swirls in a 30-foot radius centered on a point within range. Any creature that starts its turn there must succeed on a Strength saving throw or take 6d6 bludgeoning damage.').area).toEqual({ shape: 'cylinder', feet: 30, self: false });
   });
 });
+test('a spell that heals its caster from the necrotic damage it deals is read as draining', () => {
+  expect(readSpell({ level: 3, range: 'Self', text: [{ p: 'Make a melee spell attack. On a hit, the target takes 3d6 necrotic damage, and you regain hit points equal to half the amount of necrotic damage dealt.' }] } as unknown as SpellDef).drain).toBe(true);
+  expect(readSpell({ level: 5, range: '60 feet', text: [{ p: 'The target takes 4d8 necrotic damage. Whenever the spell deals damage to a target, you regain hit points equal to half the amount of necrotic damage the target takes.' }] } as unknown as SpellDef).drain).toBe(true);
+});

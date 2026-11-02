@@ -94,7 +94,7 @@
   /** Targeting: the damage type picked per spell whose type is chosen (default: the first it names). */
   let typeFor: Record<string, string> = $state({});
   /** A character's levelled spell uses a slot it picks; a monster's spends its own slots or per-day uses (a.spend). */
-  const slotted = (a: TurnAction) => !!a.spell && a.spell.level > 0 && !a.spend;
+  const slotted = (a: TurnAction) => !!a.spell && a.spell.level > 0 && !a.spend && !a.again; // a held spell used again takes no slot
   const problem = (a: TurnAction) => problemOf(x, a, conditions, onTurn, perAction) ?? (slotted(a) && !freeSlots(a).length ? 'no slot left' : undefined);
   /** The spell's dice at the slot picked (a monster's: its own level). */
   const spellDice = (a: TurnAction) => diceAt(a.cast!.read, { slot: slotted(a) ? slotOf(a) : a.spell!.level, level: a.spell!.level, charLevel: a.cast!.charLevel, mod: a.cast!.mod });

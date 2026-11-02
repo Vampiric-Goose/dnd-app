@@ -22,6 +22,8 @@ export interface TurnAction {
   legendary?: number;
   /** Casting it needs a target, which gets this condition (Haste: its text grants "an additional action on each of its turns"). */
   target?: 'haste';
+  /** A held concentration spell used again (againOf): no slot, no new casting; `at`: the slot it was cast with, for its dice. */
+  again?: true; at?: number;
   /** Ability checks it rolls instead of an attack (Grapple, Shove, escaping a grapple). */
   check?: { label: string; bonus: number }[];
   /** Only offered while it applies: grappled, prone, or standing. */
@@ -100,7 +102,9 @@ const id = (name: string) => name.toLowerCase().replace(/\s+/g, '-');
 const lightMelee = (a: Attack) => a.properties.includes('light') && !a.properties.includes('ammunition');
 
 /** A character's actions: attacks (the first is the primary card), off-hand, standard actions, Cunning Action, castable spells, resources. */
-export function pcActions(c: Character, sheet: Sheet, features: { name: string; text: RichText }[]): TurnAction[] {
+/** The spell its caster concentrates on (`spell`, its name) and the slot it was cast with: what pcActions offers to use again. */
+export type Held = { spell?: string; slot?: number };
+export function pcActions(c: Character, sheet: Sheet, features: { name: string; text: RichText }[], holding?: Held): TurnAction[] {
   // identical weapons held (two handaxes) are listed once; two light ones still allow the off-hand attack
   const once = (l: Attack[]) => l.filter((a, i) => l.findIndex((b) => b.name === a.name && b.toHit === a.toHit && b.damage === a.damage) === i);
   const out: TurnAction[] = once(sheet.attacks).map((a) => ({ id: `attack:${a.entryId}`, name: a.name, cost: 'action', group: 'attack', attack: a }));
@@ -131,6 +135,8 @@ export function pcActions(c: Character, sheet: Sheet, features: { name: string; 
       out.push({ id: `spell:${spell.id}`, name: spell.name, cost, group: 'spell', text: spell.text, spell: { id: spell.id, level: spell.level, concentration: spell.concentration },
         cast: { ...cast, read: readSpell(spell) }, ...(blocked && { blocked }),
         ...(/\badditional action on each of its turns\b/i.test(richToPlain(spell.text)) && { target: 'haste' as const }) });
+      const again = holding?.spell === spell.name ? againOf(out[out.length - 1], holding.slot) : undefined;
+      if (again) out.push(again);
     }
   }
   for (const r of sheet.resources) {
@@ -220,8 +226,8 @@ export function problemOf(x: Combatant, a: TurnAction, conditions: readonly stri
   if (!visible(a, conditions)) return 'not now';
   if (a.blocked) return a.blocked;
   // SRD 5.1: after a bonus-action spell, no other spell that turn but a cantrip with a casting time of 1 action
-  if (a.spell && onTurn && x.economy?.bonusSpell && !(a.cost === 'action' && a.spell.level === 0)) return 'after a bonus-action spell, only a cantrip that takes an action';
-  if (a.spell && onTurn && a.cost === 'bonus' && x.economy?.leveledSpell) return 'a spell other than an action cantrip was already cast this turn';
+  if (a.spell && !a.again && onTurn && x.economy?.bonusSpell && !(a.cost === 'action' && a.spell.level === 0)) return 'after a bonus-action spell, only a cantrip that takes an action';
+  if (a.spell && !a.again && onTurn && a.cost === 'bonus' && x.economy?.leveledSpell) return 'a spell other than an action cantrip was already cast this turn';
   if (a.id === 'react:readied' && !x.economy?.readied) return 'nothing readied';
   if (a.grants === 'action' && !onTurn) return 'not your turn';
   if (a.grants === 'action' && x.economy?.surged) return 'once a turn';
@@ -249,8 +255,16 @@ export function slotsLeft(sheet: Sheet, c: Character): number[] {
  * A levelled spell's slot level (the chosen one, else the lowest free one at or above its own) and why it can't be paid, if so; `pact`
  * when a Pact Magic slot pays (a regular slot of that level goes first). Cantrips and the rest: no level.
  */
+/** A held concentration spell used again on a later turn (Vampiric Touch's touch, Aura of Vitality's heal), when its rules say it can. */
+export function againOf(a: TurnAction, slot?: number): TurnAction | undefined {
+  const g = a.cast?.read.again;
+  if (!g || !a.spell) return undefined;
+  return { ...a, id: `again:${a.id}`, name: `${a.name} (again)`, cost: g.cost, again: true, ...(slot !== undefined && { at: slot }), spell: { ...a.spell, concentration: false },
+    cast: { ...a.cast!, read: { ...a.cast!.read, ...g.read, again: undefined } } };
+}
+
 export function payment(a: TurnAction, sheet: Sheet, c: Character, slot?: number): { level?: number; pact?: true; problem?: string } {
-  if (!a.spell || a.spell.level < 1) return {};
+  if (!a.spell || a.spell.level < 1 || a.again) return {}; // a held spell used again takes no slot
   const left = slotsLeft(sheet, c), min = a.spell.level;
   const level = slot ?? (left.findIndex((n, i) => n > 0 && i + 1 >= min) + 1 || min);
   if (level < min || (left[level - 1] ?? 0) < 1) return { level, problem: `no level ${level} slot left` };
@@ -261,7 +275,7 @@ export function payment(a: TurnAction, sheet: Sheet, c: Character, slot?: number
  * The fight after the use (check problemOf first): its pip, an extra Action, concentration, a Dash's movement, legendary uses; a new
  * concentration spell ends the caster's Haste; Haste makes `target` (a combatant id) Hasted.
  */
-export function applyUse(k: Combat, x: Combatant, a: TurnAction, perAction = 1, target?: string): Combat {
+export function applyUse(k: Combat, x: Combatant, a: TurnAction, perAction = 1, target?: string, slot?: number): Combat {
   const haste = onHasteAction(x, a, perAction);
   let y = spend(x, costOf(x, a), attackOf(a, haste ? 1 : perAction));
   const mark = (e: Partial<NonNullable<Combatant['economy']>>) => ({ ...y, economy: { used: 0, extra: 0, bonus: false, attacks: 0, ...y.economy, ...e } });
@@ -270,14 +284,14 @@ export function applyUse(k: Combat, x: Combatant, a: TurnAction, perAction = 1, 
   if (OBJECT.includes(a.id)) y = mark({ object: true });
   if (a.id === 'std:ready') y = mark({ readied: true });
   if (a.id === 'std:dodge') y = mark({ dodging: true }); // attacks against it have disadvantage until its next turn
-  if (a.spell && a.cost === 'bonus') y = mark({ bonusSpell: true });
-  if (a.spell && !(a.cost === 'action' && a.spell.level === 0)) y = mark({ leveledSpell: true });
+  if (a.spell && !a.again && a.cost === 'bonus') y = mark({ bonusSpell: true }); // using a held spell again isn't casting one
+  if (a.spell && !a.again && !(a.cost === 'action' && a.spell.level === 0)) y = mark({ leveledSpell: true });
   if (a.spend) y = { ...y, spellsUsed: { ...y.spellsUsed, [a.spend]: (y.spellsUsed?.[a.spend] ?? 0) + 1 } };
   if (x.kind !== 'pc' && (a.id === 'free:prone' || a.id === 'free:stand')) { // a PC's conditions live on the character (characterEffect)
     y = { ...y, conditions: [...(y.conditions ?? []).filter((n) => n.toLowerCase() !== 'prone'), ...(a.id === 'free:prone' ? ['Prone'] : [])] };
   }
   if (a.grants === 'action') { y = grantAction(y); y = { ...y, economy: { ...y.economy!, surged: true } }; }
-  if (a.spell?.concentration) y = { ...y, concentrating: true, concentratingOn: a.name, concentrationCount: (y.concentrationCount ?? 0) + 1 };
+  if (a.spell?.concentration) y = { ...y, concentrating: true, concentratingOn: a.name, concentrationCount: (y.concentrationCount ?? 0) + 1, concentrationSlot: slot };
   const rd = a.cast?.read.rider;
   if (rd && !rd.marked) y = { ...y, rider: { spell: a.name, dice: rd.dice, type: rd.type, ...(rd.once && { once: true as const }) } }; // a marked one comes with its mark (aiming.ts)
   if (a.legendary && y.legendary) y = { ...y, legendary: { ...y.legendary, used: y.legendary.used + a.legendary } };

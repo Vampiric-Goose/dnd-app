@@ -63,10 +63,11 @@ export async function audit(s: SpellDef): Promise<string> {
     info: (z) => ({ ...targetOf(z, {}), ac: 10 }), nameOf: (z) => z.name, magical: false, id: 'r', now: 0, rng: () => 0.01 });
   if (typeof r === 'string') return read.manual ? `manual: ${read.manual}` : `BROKEN: ${r}`;
   const o = r.resolution.outcomes, dealt = o.reduce((t, x) => t + (x.damage ?? 0), 0), inflicted = o.some((x) => x.inflict?.length);
+  const healed = o.reduce((t, x) => t + (x.heal ?? 0) + (x.temp ?? 0), 0);
   if (r.resolution.linger) return `ok: placed, ${r.resolution.linger.dice.map((d) => d.expr + ' ' + d.type).join(' + ')} as a turn starts there${read.manual ? ` (${read.manual})` : ''}`;
-  const bits = [`${plan.dice.map((d) => `${d.expr} ${d.type}`).join(' + ') || 'no dice'}`, `dealt ${dealt}`, ...(inflicted ? [`inflicts ${[...new Set(o.flatMap((x) => x.inflict ?? []))].join(', ')}`] : []),
+  const bits = [`${plan.dice.map((d) => `${d.expr} ${d.type}`).join(' + ') || 'no dice'}`, `dealt ${dealt}`, ...(healed ? [`healed ${healed >= 1e6 ? 'all' : healed}`] : []), ...(inflicted ? [`inflicts ${[...new Set(o.flatMap((x) => x.inflict ?? []))].join(', ')}`] : []),
     ...(read.save ? [`${read.save} save, ${read.onSave} on success`] : []), ...(read.manual ? [`note: ${read.manual}`] : [])];
-  if (read.manual && !dealt && !inflicted) return `manual: ${read.manual}`;
+  if (read.manual && !dealt && !inflicted && !healed) return `manual: ${read.manual}`;
   if (hurts && !dealt) return `BROKEN: no damage dealt (${bits.join('; ')})`;
   if (conds && !inflicted) return `BROKEN: conditions not inflicted (${bits.join('; ')})`;
   return `ok: ${bits.join('; ')}`;

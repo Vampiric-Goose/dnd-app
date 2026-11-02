@@ -36,14 +36,18 @@ const spiritM = { kind: 'monster', id: 'monster:test-spirit@FIX', name: 'Test Sp
   scores: { str: 18, dex: 11, con: 16, int: 4, wis: 14, cha: 5 }, saves: {}, skills: {}, vulnerable: [], resist: [], immune: [], conditionImmune: [], senses: [], passive: 12, languages: [],
   traits: [], actions: [], bonusActions: [], reactions: [], legendary: [] } as unknown as MonsterDef;
 
+// Paraphrased: an aura whose bonus action heals (Aura of Vitality's rule applies by name: the cast heals nothing, its repeat 2d6).
+const aura: SpellDef = { ...shard, id: 'spell:aura-of-vitality@FIX', name: 'Aura of Vitality', range: 'Self', concentration: true, duration: 'Concentration, up to 1 minute',
+  text: [{ p: 'Healing energy radiates from you in an aura. Until the spell ends, you can use a bonus action to cause one creature in the aura (including you) to regain 2d6 hit points.' }] };
+
 function thorin(): Character {
   const c = mkChar({ race: 'human', base: { str: 16 }, levels: ['fighter'] });
   return { ...c, id: 'thorin', name: 'Thorin', campaignId: CID, ownerId: 'A1' };
 }
 function mira(): Character {
   const c = mkChar({ race: 'human', base: { int: 16 }, levels: ['wizard'] });
-  return { ...c, id: 'mira', name: 'Mira', campaignId: CID, ownerId: 'A2', embedded: { ...c.embedded, [shard.id]: shard, [bolt.id]: bolt, [ward.id]: ward, [call.id]: call },
-    build: { ...c.build, spells: { 'class:wizard@FIX': { known: [shard.id, bolt.id, ward.id, call.id], prepared: [shard.id, bolt.id, ward.id, call.id] } } } };
+  return { ...c, id: 'mira', name: 'Mira', campaignId: CID, ownerId: 'A2', embedded: { ...c.embedded, [shard.id]: shard, [bolt.id]: bolt, [ward.id]: ward, [call.id]: call, [aura.id]: aura },
+    build: { ...c.build, spells: { 'class:wizard@FIX': { known: [shard.id, bolt.id, ward.id, call.id, aura.id], prepared: [shard.id, bolt.id, ward.id, call.id, aura.id] } } } };
 }
 const scene = (): Scene => ({
   id: 's1', campaignId: CID, name: 'Field', width: 1400, height: 1400, grid: { ...DEFAULT_GRID }, shown: true, updatedAt: 0,
@@ -126,6 +130,21 @@ describe('targeting over sync', () => {
     await settle(host);
     expect(refusals(b)).toEqual([]);
     expect(d.combat!.resolutions!.at(-1)).toMatchObject({ action: 'Shield of Faith', lasting: true, outcomes: [{ id: 'pc:thorin', inflict: ['Shield of Faith'] }] });
+  });
+
+  test('a player uses a held spell again (Aura of Vitality’s heal): its bonus action, no slot; not while not holding it', async () => {
+    const holding = fight({ turn: 'pc:mira', combatants: fight().combatants.map((x) => (x.id === 'pc:mira' ? { ...x, concentrating: true, concentratingOn: 'Aura of Vitality', concentrationSlot: 1 } : x)) });
+    const { d, host, b } = await joined({ combat: holding });
+    const slots = JSON.stringify(d.char('mira')!.state.slotsUsed);
+    b.deliver({ t: 'use', characterId: 'mira', action: `again:spell:${aura.id}`, aim: { targets: [aliasOf(b, 'Mira')], rolled: { dmg: [[3, 4]] }, toggles: [] } });
+    await settle(host);
+    expect(refusals(b)).toEqual([]);
+    expect(d.combat!.resolutions!.at(-1)).toMatchObject({ outcomes: [{ id: 'pc:mira', heal: 7 }] });
+    expect([JSON.stringify(d.char('mira')!.state.slotsUsed), d.combat!.combatants.find((x) => x.id === 'pc:mira')!.economy?.bonus]).toEqual([slots, true]);
+    const free = await joined({ combat: fight({ turn: 'pc:mira' }) });
+    free.b.deliver({ t: 'use', characterId: 'mira', action: `again:spell:${aura.id}`, aim: { targets: [aliasOf(free.b, 'Mira')], rolled: { dmg: [[3, 4]] }, toggles: [] } });
+    await settle(free.host);
+    expect(refusals(free.b)).toEqual(['that action is not available']);
   });
 
   test('Every Spell, Task 8: a player\'s summon pick is checked on the DM\'s device, scaled, and summoned beside its caster', async () => {

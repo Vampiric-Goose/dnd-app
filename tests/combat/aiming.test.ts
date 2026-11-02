@@ -367,3 +367,28 @@ describe('lasting areas over time', () => {
     expect(aimPlan({ ...spell({ save: 'Con', onSave: 'none', lingering: true, area: { shape: 'sphere', feet: 20, self: false } }), name: 'Stinking Cloud' })!.linger).toBeTruthy();
   });
 });
+
+// Healing gaps: a draining spell heals its caster half the necrotic damage it deals; Power Word Heal heals all; a repeat uses the cast's slot.
+describe('healing', () => {
+  const k: Combat = { campaignId: 'c1', round: 1, turn: 'a', groupMonsters: false, updatedAt: 0, combatants: [cb({ id: 'a', kind: 'monster', name: 'A' }), cb({ id: 'b', kind: 'monster', name: 'B' })] };
+  const sc: Scene = { id: 's1', campaignId: 'c1', name: 'F', width: 1400, height: 700, grid: { ...DEFAULT_GRID }, shown: true, updatedAt: 0,
+    tokens: ['a', 'b'].map((id, q) => ({ id: `t-${id}`, name: id, ...cell(q), size: 'M' as const, color: '#000000', combatantId: id })) };
+  const run = (a: TurnAction, aim: Partial<WorkIn['aim']>) => workOut({ a, features: [], actor: k.combatants[0], combat: k, scene: sc, diagonal: '5-5-5',
+    aim: { rolled: { dmg: [] }, toggles: [], ...aim }, findTarget: (id) => k.combatants.find((z) => z.id === id), info: (z) => targetOf(z, {}), nameOf: (z) => z.name, magical: false, id: 'r', now: 0, rng: () => 0.5 });
+  test('Vampiric Touch heals its caster half the damage it deals', async () => {
+    const r = await run({ ...spell({ attack: 'melee', reach: 5, drain: true, damage: [{ dice: '3d6', type: 'necrotic' }] }, 'self' as never), name: 'Vampiric Touch' }, { target: 'b', rolled: { d20: [15, 15], dmg: [[4, 4, 3]] } });
+    if (typeof r === 'string') throw new Error(r);
+    expect(r.resolution.outcomes.map((o) => [o.id, o.damage, o.heal])).toEqual([['b', 11, undefined], ['a', 0, 5]]);
+  });
+  test('Power Word Heal heals all its target\'s hit points', async () => {
+    const pwh = { ...spell({ heal: { dice: 'all', mod: false } }, 'touch' as never), name: 'Power Word Heal' };
+    expect(aimPlan(pwh)!.dice).toEqual([]);
+    const r = await run(pwh, { target: 'b' });
+    if (typeof r === 'string') throw new Error(r);
+    expect(r.resolution.outcomes[0].heal).toBeGreaterThan(100000);
+  });
+  test('a repeat rolls the dice of the slot it was cast with', () => {
+    const vt: TurnAction = { ...spell({ attack: 'melee', reach: 5, damage: [{ dice: '3d6', type: 'necrotic' }], perSlot: { dice: '1d6', above: 3, step: 1 } }, 'self' as never), spell: { id: 's', level: 3, concentration: false }, again: true, at: 5 };
+    expect(aimPlan(vt)!.dice[0].expr).toBe('5d6');
+  });
+});

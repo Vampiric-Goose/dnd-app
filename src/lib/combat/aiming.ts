@@ -125,6 +125,9 @@ export function driftAreas(k: Combat, s: Scene): Combat {
   return moved ? { ...k, resolutions: rs } : k;
 }
 
+/** A heal of all its target's hit points (Power Word Heal): applying it stops at the target's maximum. */
+export const ALL_HP = 1_000_000;
+
 export type AreaKind = 'start' | 'enter' | 'end';
 /** The result name of an area's roll: as a turn starts there, on entering it, as a turn ends there. */
 export const areaRollName = (r: Pick<Resolution, 'action'>, kind: AreaKind): string => `${r.action} (${kind === 'enter' ? 'entering' : kind === 'end' ? 'end of turn' : 'start of turn'})`;
@@ -197,16 +200,17 @@ export function aimPlan(a: TurnAction, o: { level?: number; toggles?: Toggle[]; 
   // a helpful spell (a buff in SPELL_EFFECTS, healing, temp HP): on up to `max` creatures in reach, the caster too; range Self is the caster.
   // Haste keeps its own target (turnActions.ts `target`).
   if (read && a.spell && !a.target && !read.attack && !read.save && (SPELL_EFFECTS[a.name] || read.heal || read.temp)) {
-    const slot = o.level ?? a.spell.level, up = Math.max(0, slot - a.spell.level);
+    const slot = o.level ?? a.at ?? a.spell.level, up = Math.max(0, slot - a.spell.level);
     const heal = diceAt(read, { slot, level: a.spell.level, charLevel: a.cast!.charLevel, mod: a.cast!.mod }).heal;
     const temp = read.temp && (read.temp.perSlot && up ? `${read.temp.dice}+${read.temp.perSlot * up}` : read.temp.dice);
     const max = reach === 'self' ? 1 : read.targets ? read.targets.count + (read.targets.above !== undefined ? Math.max(0, slot - read.targets.above) : 0) : 1;
-    return { reach, line: false, attack: false, read, helps: { max }, dice: heal ? [{ expr: heal, type: 'healing' }] : temp ? [{ expr: temp, type: 'temp' }] : [] };
+    const all = read.heal?.dice === 'all'; // Power Word Heal: nothing to roll
+    return { reach, line: false, attack: false, read, helps: { max }, dice: heal && !all ? [{ expr: heal, type: 'healing' }] : temp ? [{ expr: temp, type: 'temp' }] : [] };
   }
   if (!read || !a.spell || !(read.attack || read.save || read.area || read.burst || read.auto)) return undefined;
   if (!read.save && !read.damage.length && !read.area && !read.burst && !read.conditions?.length) return undefined; // a save-only spell (Suggestion) still rolls the monster's save
   const picked = o.dtype && read.choices?.includes(o.dtype) ? o.dtype : '';
-  const dice = diceAt(read, { slot: o.level ?? a.spell.level, level: a.spell.level, charLevel: a.cast!.charLevel, mod: a.cast!.mod }).damage
+  const dice = diceAt(read, { slot: o.level ?? a.at ?? a.spell.level, level: a.spell.level, charLevel: a.cast!.charLevel, mod: a.cast!.mod }).damage
     .map((d, i) => { const [expr, ...type] = d.split(' '); return { expr, type: type.join(' ') || picked, ...(read.damage[i]?.on && { on: read.damage[i].on }), ...(read.damage[i]?.part && { part: read.damage[i].part }) }; });
   const area: AimArea | undefined = read.burst ? { shape: 'sphere', feet: read.burst, on: 'creature' }
     : read.area ? { shape: read.area.shape, feet: read.area.feet, ...(read.area.width && { width: read.area.width }), on: read.area.self ? 'self' : 'point',
@@ -219,7 +223,7 @@ export function aimPlan(a: TurnAction, o: { level?: number; toggles?: Toggle[]; 
     ...((dice.length || read.save || read.conditions?.length) && { linger: { dice: dice.map(({ expr, type }) => ({ expr, type })), read } }) };
   if (read.attack && o.rider?.anyAttack) dice.push({ expr: o.rider.dice, type: o.rider.type || dice[0]?.type || '', on: 'hit', ...(o.rider.target && { vs: o.rider.target }) }); // Hex on a spell attack
   const ignore = read.attack === 'ranged' && has('Crossbow Expert') ? { close: true as const } : undefined;
-  const slot = o.level ?? a.spell.level, lvl = a.cast!.charLevel ?? 1, up = (above?: number) => (above !== undefined && slot > above ? slot - above : 0);
+  const slot = o.level ?? a.at ?? a.spell.level, lvl = a.cast!.charLevel ?? 1, up = (above?: number) => (above !== undefined && slot > above ? slot - above : 0);
   const count = read.rays ? (read.rays.byLevel ? (lvl >= 17 ? 4 : lvl >= 11 ? 3 : lvl >= 5 ? 2 : 1) : read.rays.count + up(read.rays.above)) : read.auto ? read.auto.count + up(read.auto.above)
     : read.targets && read.save && !area ? read.targets.count + up(read.targets.above) : 1; // Bane, Hold Person: up to that many, each once
   return { reach, line: read.attack === 'ranged', attack: !!read.attack, ...(a.cast!.attack !== undefined && { toHit: a.cast!.attack }), ...(area && { area }), dice, read, ...(ignore && { ignore }),
@@ -313,7 +317,8 @@ export async function workOut(i: WorkIn): Promise<Aimed | string> {
     const n = plan.dice.length;
     if (aim.rolled.dmg.length !== n * ids.length || plan.dice.some((d, j) => ids.some((_, r) => totalOf(d.expr, aim.rolled.dmg[r * n + j], false) === undefined))) return 'bad damage dice';
     const amount = (r: number) => (n ? totalOf(plan.dice[0].expr, aim.rolled.dmg[r * n], false)! : 0), kind = plan.dice[0]?.type;
-    const outcomes: Outcome[] = ids.map((id, r) => ({ id, damage: 0, ...(SPELL_EFFECTS[a.name] && { inflict: [a.name] }), ...(kind === 'healing' && { heal: amount(r) }), ...(kind === 'temp' && { temp: amount(r) }) }));
+    const outcomes: Outcome[] = ids.map((id, r) => ({ id, damage: 0, ...(SPELL_EFFECTS[a.name] && { inflict: [a.name] }), ...(kind === 'healing' && { heal: amount(r) }), ...(kind === 'temp' && { temp: amount(r) }),
+      ...(plan.read?.heal?.dice === 'all' && { heal: ALL_HP }) }));
     return { resolution: { id: i.id, actor: actor.id, action: a.name, at: i.now, round: k.round, outcomes, ...(a.spell?.concentration ? { cast: (actor.concentrationCount ?? 0) + 1, lasting: true as const } : plan.read?.rounds && { rounds: plan.read.rounds }) },
       outcome: { action: a.name } };
   }
@@ -362,6 +367,9 @@ export async function workOut(i: WorkIn): Promise<Aimed | string> {
   const bad = checkFaces(plan.dice.map((d) => ({ expr: d.expr, crit: crit && d.on !== 'save' })), rolled);
   if (bad) return bad;
   const outcomes = resolveSpell(read, plan.dice, a.cast!.dc, toHit, target && await i.info(target), await Promise.all(caught.map(i.info)), rolled, i.rng, autoCrit, actor.kind === 'pc');
+  // a draining spell (Vampiric Touch) heals its caster half the necrotic damage it deals. ponytail: a save its target rolls later (a PC's) drains nothing
+  const drained = read.drain ? Math.floor(outcomes.reduce((t, o) => t + (o.damage ?? 0), 0) / 2) : 0;
+  if (drained > 0) outcomes.push({ id: actor.id, damage: 0, heal: drained });
   const hit = outcomes.find((o) => o.part === 'hit')?.hit;
   // a lasting spell's effect also leaves a condition named after the spell (the user's standard: Hold Monster, Hex, Haste)
   const lasts = !!(a.spell?.concentration || read.rounds);
