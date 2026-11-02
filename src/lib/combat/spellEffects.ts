@@ -6,7 +6,7 @@ import type { Effect } from '../types.ts';
 
 type Edge = Extract<Effect, { type: 'edge' }>;
 type Dice = Extract<Effect, { type: 'rollDice' }>;
-export interface SpellMods { ac: number; acMin?: number; resist: string[]; immune: string[]; speed: number;
+export interface SpellMods { ac: number; acMin?: number; /** Mage Armor: base AC plus these abilities' modifiers, unarmored */ acBase?: { base: number; abilities: string[] }; resist: string[]; immune: string[]; speed: number;
   edges: (Omit<Edge, 'type'> & { from: string })[]; dice: (Omit<Dice, 'type'> & { from: string })[] }
 
 export function spellMods(conditions: readonly string[]): SpellMods {
@@ -14,6 +14,7 @@ export function spellMods(conditions: readonly string[]): SpellMods {
   for (const from of conditions) for (const e of SPELL_EFFECTS[from] ?? []) {
     if (e.type === 'bonus' && e.target === 'ac' && typeof e.value === 'number') out.ac += e.value;
     else if (e.type === 'acMin') out.acMin = Math.max(out.acMin ?? 0, e.value);
+    else if (e.type === 'acBase') out.acBase = { base: e.base, abilities: e.abilities };
     else if (e.type === 'damage') (e.kind === 'immunity' ? out.immune : out.resist).push(e.damageType);
     else if (e.type === 'speed' && e.mode === 'walk' && typeof e.value === 'number') out.speed += e.value;
     else if (e.type === 'edge') out.edges.push({ on: e.on, mode: e.mode, from });

@@ -15,7 +15,7 @@
   import { budgetApplies, budgetFeet, combatantForToken, effectiveSpeed, originOf, recordMove } from '../../lib/combat/movement.ts';
   import { applyResolution, editCharacter, settlePick, settleSave, turn, undoResolution, updateCombat } from '../../lib/combat/store.ts';
   import { aimPlan, areasOn, foeWithin5, judge, snapOf, startsIn, touched, workOut, type AimPlan } from '../../lib/combat/aiming.ts';
-  import { resolveSpell, targetOf } from '../../lib/combat/resolve.ts';
+  import { monsterAc, resolveSpell, targetOf } from '../../lib/combat/resolve.ts';
   import { targetingOn, type Pickable, type Toggle } from '../../lib/combat/targeting.ts';
   import { roll } from '../../lib/rolls.svelte.ts';
   import { uid } from '../../lib/uid.ts';
@@ -350,7 +350,7 @@
         actions: pcActions(ch, sheet, features), perAction: attacksPerAction(features), slots: slotsLeft(sheet, ch) };
     }
     const m = x.monsterId ? monsterById.get(x.monsterId) : undefined;
-    return { x, name: x.name, ac: x.ac ?? m?.ac[0]?.value, hp: x.hp, maxHp: x.maxHp, tempHp: x.tempHp, conditions: x.conditions ?? [], actions: m ? monsterActions(m, { spell: (n) => spellByName.get(n), used: x.spellsUsed }) : [], perAction: 1 };
+    return { x, name: x.name, ac: monsterAc(x, m, x.conditions ?? []), hp: x.hp, maxHp: x.maxHp, tempHp: x.tempHp, conditions: x.conditions ?? [], actions: m ? monsterActions(m, { spell: (n) => spellByName.get(n), used: x.spellsUsed }) : [], perAction: 1 };
   });
   /** The DM's use: pips and what it pays, no turn checks (the panel greys out what the rules don't allow). */
   const useAction = (a: TurnAction, slot?: number, target?: string) => run(async () => {

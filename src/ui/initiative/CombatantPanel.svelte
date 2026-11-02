@@ -13,6 +13,7 @@
   import Bar from '../kit/Bar.svelte';
   import Drawer from '../kit/Drawer.svelte';
   import StatBlock from '../monsters/StatBlock.svelte';
+  import { monsterAc } from '../../lib/combat/resolve.ts';
   import { rollTo } from '../sheet/roll.ts';
   import { reorder } from './order.ts';
 
@@ -109,7 +110,7 @@
     {:else}
       <span><span class="caption">Init</span> <span class="num">{x.init}</span></span>
     {/if}
-    {#if x.ac !== undefined}<span><span class="caption">AC</span> <span class="num strong">{x.ac}</span></span>{/if}
+    {#if x.ac !== undefined}<span><span class="caption">AC</span> <span class="num strong">{x.kind === 'monster' ? monsterAc(x, monster, x.conditions ?? []) : x.ac}</span></span>{/if}
   </div>
   <label class="check"><input type="checkbox" checked={!!x.hidden} onchange={(e) => patch({ hidden: e.currentTarget.checked })} /> Hidden from players</label>
   <div class="row move">

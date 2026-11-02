@@ -266,3 +266,21 @@ test('True Strike goes on the caster; Aid heals 5 with its condition', () => {
   expect([ts.reach, ts.helps]).toEqual(['self', { max: 1 }]);
   expect(aimPlan(sp('Aid', 'Choose up to three creatures within range. Each target\'s hit point maximum and current hit points increase by 5 for the duration.', 2))!.dice).toEqual([{ expr: '5', type: 'healing' }]);
 });
+
+// Toll the Dead end to end (paraphrased wording): the d8 against an unhurt target, the d12 instead against a hurt one, from one roll of both.
+test('Toll the Dead deals its d12 only to a target missing hit points', async () => {
+  const read = readSpell({ name: 'Toll the Dead', level: 0, range: '60 feet', text: [{ p: 'The target must succeed on a Wisdom saving throw or take 1d8 necrotic damage. If the target is missing any of its hit points, it instead takes 1d12 necrotic damage.' }] } as unknown as SpellDef);
+  const a: TurnAction = { id: 's', name: 'Toll the Dead', cost: 'action', group: 'spell', spell: { id: 's', level: 0, concentration: false }, cast: { read, attack: 5, dc: 13, charLevel: 1, mod: 3 } };
+  const plan = aimPlan(a)!;
+  expect(plan.dice.map((d) => [d.expr, d.part])).toEqual([['1d8', undefined], ['1d12', 'alt']]);
+  const k = (hp: number): Combat => ({ campaignId: 'c1', round: 1, turn: 'a', groupMonsters: false, updatedAt: 0, combatants: [cb({ id: 'a', kind: 'monster', name: 'A' }), cb({ id: 'b', kind: 'monster', name: 'B', hp, maxHp: 10 })] });
+  const sc: Scene = { id: 's1', campaignId: 'c1', name: 'F', width: 1400, height: 700, grid: { ...DEFAULT_GRID }, shown: true, updatedAt: 0,
+    tokens: ['a', 'b'].map((id, q) => ({ id: `t-${id}`, name: id, ...cell(q), size: 'M' as const, color: '#000000', combatantId: id })) };
+  const dealt = async (hp: number) => {
+    const f = k(hp), r = await workOut({ a, features: [], actor: f.combatants[0], combat: f, scene: sc, diagonal: '5-5-5', aim: { target: 'b', rolled: { dmg: [[5], [11]] }, toggles: [] },
+      findTarget: (id) => f.combatants.find((z) => z.id === id), info: (z) => targetOf(z, {}), nameOf: (z) => z.name, magical: false, id: 'r', now: 0, rng: () => 0.01 });
+    if (typeof r === 'string') throw new Error(r);
+    return r.resolution.outcomes[0].damage;
+  };
+  expect([await dealt(10), await dealt(6)]).toEqual([5, 11]);
+});

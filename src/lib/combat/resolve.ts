@@ -157,6 +157,21 @@ export function settle(t: Pick<TargetInfo, 'defenses'> & { pc?: boolean }, owed:
 }
 
 const mod = (score: number) => Math.floor((score - 10) / 2);
+/**
+ * A monster's AC with the spells it holds: Mage Armor gives its printed "with mage armor" AC, else its base plus Dex when it wears no armor
+ * (natural armor doesn't stack: the higher stays; a shield still counts); then Shield-like bonuses, then Barkskin's floor.
+ */
+export function monsterAc(x: Combatant, m: MonsterDef | undefined, held: readonly string[]): number {
+  const sp = spellMods(held), worn = x.ac ?? m?.ac[0]?.value ?? 10, from = (m?.ac[0]?.from ?? '').toLowerCase();
+  let ac = worn;
+  if (sp.acBase) {
+    const printed = m?.ac.find((a) => /mage armor/i.test(a.from ?? ''))?.value;
+    const armored = /armor/.test(from.replace(/natural armor/g, ''));
+    const own = sp.acBase.base + sp.acBase.abilities.reduce((t, a) => t + mod(m?.scores[a as Ability] ?? x.dex), 0) + (/shield/.test(from) ? 2 : 0);
+    if (printed !== undefined) ac = Math.max(worn, printed); else if (!armored) ac = Math.max(worn, own);
+  }
+  return Math.max(sp.acMin ?? 0, ac + sp.ac);
+}
 /** A combatant as a target: a monster's AC, saves (printed, else its ability modifier) and defenses; a PC's from its sheet. */
 export function targetOf(x: Combatant, o: { monster?: MonsterDef; sheet?: Sheet; /** a PC's current HP and conditions (its character's) */ hp?: number; conditions?: string[] }): TargetInfo {
   const keys: Ability[] = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
@@ -167,7 +182,7 @@ export function targetOf(x: Combatant, o: { monster?: MonsterDef; sheet?: Sheet;
       defenses: { resist: s.resistances, immune: s.immunities, vulnerable: s.vulnerabilities }, ...(conditions.length && { conditions }) };
   }
   const held = [...(x.conditions ?? []), ...(hasted ? ['Haste'] : [])], m = o.monster, sp = spellMods(held); // a monster's spells (Shield, Stoneskin) on top of its stat block
-  return { id: x.id, ac: Math.max(sp.acMin ?? 0, (x.ac ?? m?.ac[0]?.value ?? 10) + sp.ac), pc: false, hidden: !!x.hidden, ...(x.hp !== undefined && x.maxHp !== undefined && x.hp < x.maxHp && { hurt: true }),
+  return { id: x.id, ac: monsterAc(x, m, held), pc: false, hidden: !!x.hidden, ...(x.hp !== undefined && x.maxHp !== undefined && x.hp < x.maxHp && { hurt: true }),
     save: Object.fromEntries(keys.map((k) => [k, m?.saves[k] ?? (m ? mod(m.scores[k]) : 0)])) as Record<Ability, number>,
     defenses: { resist: [...(m?.resist ?? []), ...sp.resist], immune: [...(m?.immune ?? []), ...sp.immune], vulnerable: m?.vulnerable ?? [] }, conditionImmune: m?.conditionImmune ?? [],
     ...(held.length && { conditions: held }) };

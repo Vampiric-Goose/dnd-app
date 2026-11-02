@@ -10,7 +10,7 @@ import { db, resetDb } from '../../src/lib/db.ts';
 import { DEFAULT_GRID } from '../../src/lib/map/scene.ts';
 import { computeSheet } from '../../src/lib/rules/sheet.ts';
 import { DEFAULT_SETTINGS } from '../../src/lib/settings.ts';
-import type { Combat, Combatant, Scene } from '../../src/lib/types.ts';
+import type { Combat, Combatant, MonsterDef, Scene } from '../../src/lib/types.ts';
 import { mkChar } from '../fixtures/content.ts';
 import { camp, char } from '../fixtures/records.ts';
 
@@ -101,4 +101,14 @@ test('Warding Bond, Greater Invisibility and Investiture of Stone change the num
   expect([ward.ac, ward.resist.includes('fire'), ward.resist.includes('psychic')]).toEqual([1, true, true]);
   expect(inv.edges.map((e) => `${e.on} ${e.mode}`)).toEqual(['attacksBy adv', 'attacksAgainst dis']);
   expect(stone.resist).toEqual(['bludgeoning, piercing, and slashing from nonmagical attacks']);
+});
+
+// Mage Armor on a monster: its printed "with mage armor" AC, else 13 + Dex when it wears no armor; worn armor wins; Shield on top.
+test('Mage Armor sets a monster\'s AC', () => {
+  const mon = (ac: { value: number; from?: string }[], dex: number) => ({ id: 'm', name: 'M', ac, scores: { str: 10, dex, con: 10, int: 10, wis: 10, cha: 10 }, saves: {}, resist: [], immune: [], vulnerable: [], conditionImmune: [] }) as unknown as MonsterDef;
+  const at = (m: MonsterDef, conditions: string[]) => targetOf({ id: 'x', kind: 'monster', name: 'M', initMod: 0, dex: m.scores.dex, tie: 0.5, conSave: 0, ac: m.ac[0].value, conditions }, { monster: m }).ac;
+  const mage = mon([{ value: 12 }, { value: 15, from: 'with mage armor' }], 14);
+  expect([at(mage, []), at(mage, ['Mage Armor']), at(mage, ['Mage Armor', 'Shield'])]).toEqual([12, 15, 20]);
+  expect(at(mon([{ value: 11, from: 'natural armor' }], 16), ['Mage Armor'])).toBe(16);
+  expect(at(mon([{ value: 15, from: 'leather armor, shield' }], 14), ['Mage Armor'])).toBe(15);
 });
