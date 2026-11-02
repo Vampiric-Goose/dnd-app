@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { addLevel, answerChoice, embedContent, listChoices, newCharacter, skillOptions, spellLimits, takenElsewhere, validateCharacter } from '../../src/lib/character/build.ts';
+import { addLevel, answerChoice, embedContent, embedStale, listChoices, newCharacter, skillOptions, spellLimits, takenElsewhere, validateCharacter } from '../../src/lib/character/build.ts';
 import { computeSheet } from '../../src/lib/rules/sheet.ts';
 import { DEFAULT_SETTINGS } from '../../src/lib/settings.ts';
 import { enumerateChoices } from '../../src/lib/character/choices.ts';
@@ -200,4 +200,10 @@ test('a race feat (Variant Human), picked from Choices to make: the feat is on t
   c = embedContent(answerChoice(c, p.key, { type: 'ids', ids: [tough.id] }), ix); // what Save on the Choices page does
   expect(featureList(c, S).map((f) => f.name)).toContain('Sturdy');
   expect(computeSheet(c, { settings: S, viewer: 'dm' }).scores.con).toBe(before + 1);
+  // a sync kept the older Variant Human (no feat choice): the answer is there, the sheet can't see it, so the snapshot is stale
+  expect(embedStale(c, ix, S)).toBe(false);
+  const reverted = { ...c, embedded: { ...c.embedded, [variant.id]: { ...variant, choices: [] } } };
+  expect(featureList(reverted, S).map((f) => f.name)).not.toContain('Sturdy');
+  expect(embedStale(reverted, ix, S)).toBe(true);
+  expect(featureList(embedContent(reverted, ix), S).map((f) => f.name)).toContain('Sturdy');
 });

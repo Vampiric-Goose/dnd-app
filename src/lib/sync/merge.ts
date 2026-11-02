@@ -33,9 +33,11 @@ const LIST = 'state.slotsUsed';
  * - `inventory/<entryId>`: the whole entry. A removal is a tombstone in `gone`; it wins over any change with an earlier clock.
  * - `order/<entryId>`: not a value but the entry's list position, set when the entry first appears (its add clock plus index); a merge
  *   keeps the earliest. Inventory order is position order: the app only appends, so this is insertion order on every device.
- * Untracked: `id`; `updatedAt` (the merge time); `embedded` (a content cache: the union of both copies, per id the larger value).
+ * - `embedded/<id>`: one content snapshot. `embedded` is the union of both copies, per id the later snapshot (a re-embed after a book
+ *   upgrade beats the older copy); two unstamped copies fall back to the larger value. A snapshot is never removed.
+ * Untracked: `id`; `updatedAt` (the merge time).
  */
-export const SYNC_PATHS: readonly string[] = [...TOP, ...SPLIT.map((k) => `${k}.*`), ...[...DEEP].map((k) => `${k}.*`), 'inventory/*', 'order/*'];
+export const SYNC_PATHS: readonly string[] = [...TOP, ...SPLIT.map((k) => `${k}.*`), ...[...DEEP].map((k) => `${k}.*`), 'inventory/*', 'order/*', 'embedded/*'];
 
 /** JSON with object keys sorted, so equal values compare equal whatever order their keys were written in. */
 export const canon = (v: unknown): string => JSON.stringify(v, (_, x) =>
@@ -125,6 +127,7 @@ export function latestClock(c: Synced<Character>): Hlc {
 export function stamp(prev: Synced<Character> | undefined, next: Character, at: Hlc): Synced<Character> {
   const clock = new Map(Object.entries(prev?.sync?.clock ?? {})), gone = new Map(Object.entries(prev?.sync?.gone ?? {}));
   for (const p of valuePaths(prev, next)) if (canon(valueAt(prev, p)) !== canon(valueAt(next, p))) clock.set(keyOf(p), at);
+  for (const k of keysOf(next.embedded)) if (canon(own(prev?.embedded, k)) !== canon(own(next.embedded, k))) clock.set(`embedded/${k}`, at);
   const before = new Map((prev?.inventory ?? []).map((e) => [e.id, e]));
   next.inventory.forEach((e, i) => {
     const had = before.get(e.id);
@@ -161,7 +164,8 @@ export function rebase(stored: Synced<Character> | undefined, edited: Synced<Cha
   const pos = (e: InventoryEntry) => clockAt(sc, `order/${e.id}`);
   inventory.sort((p, q) => (!pos(p) === !pos(q) ? (pos(p) < pos(q) ? -1 : pos(p) > pos(q) ? 1 : 0) : pos(p) ? -1 : 1));
   // a build value taken from the store may need content the stale copy's snapshot lacks
-  const embedded = fromStore.some((k) => k.startsWith('build.')) ? { ...stored.embedded, ...edited.embedded } : edited.embedded;
+  const embedded: Rec = { ...(fromStore.some((k) => k.startsWith('build.')) && stored.embedded), ...edited.embedded };
+  for (const k of keysOf(stored.embedded)) if (newer(`embedded/${k}`)) define(embedded, k, own(stored.embedded, k)); // re-embedded since
   const rest: Rec = { ...edited };
   for (const k of TOP) delete rest[k];
   return { ...rest, ...vals, embedded, inventory } as unknown as Character;
@@ -182,8 +186,8 @@ export function mergeCharacter(a: Synced<Character>, b: Synced<Character>): Sync
 
   const embedded: Rec = {};
   for (const k of union(a.embedded, b.embedded)) {
-    const x = own(a.embedded, k), y = own(b.embedded, k);
-    define(embedded, k, x === undefined ? y : y === undefined || !beats('', y, '', x) ? x : y);
+    const x = own(a.embedded, k), y = own(b.embedded, k), ek = `embedded/${k}`;
+    define(embedded, k, x === undefined ? y : y === undefined || !beats(clockAt(cb, ek), y, clockAt(ca, ek), x) ? x : y);
   }
   out.embedded = embedded;
 

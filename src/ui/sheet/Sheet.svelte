@@ -12,7 +12,7 @@
   import { replay } from '../../lib/sync/merge.ts';
   import { session } from '../../lib/sync/session.svelte.ts';
   import { app, getFullIndex, getIndex, refreshCampaigns } from '../../lib/store.svelte.ts';
-  import { listChoices } from '../../lib/character/build.ts';
+  import { embedContent, embedStale, listChoices } from '../../lib/character/build.ts';
   import type { ContentIndex } from '../../lib/content/index.ts';
   import { toast } from '../../lib/toast.svelte.ts';
   import type { Campaign, CampaignSettings, Character, OverrideKey } from '../../lib/types.ts';
@@ -128,6 +128,10 @@
     if (!c || !index) return 0;
     const ch = c, racial = (id: string) => [ch.build.raceId, ch.build.subraceId].includes(id.split('/')[0]);
     try { return listChoices(ch, index, settings).filter((p) => !p.answer && !(ch.build.customOrigin && p.choice.type === 'ability' && racial(p.sourceId))).length; } catch { return 0; }
+  });
+  // An answered choice the saved content no longer offers (an older copy came back through sync): re-embed once, and autosave keeps it.
+  $effect(() => {
+    if (c && index && c === saved && untrack(() => { try { return embedStale(c!, index!, settings); } catch { return false; } })) update((x) => embedContent(x, index!));
   });
   const sheet = $derived(c ? computeSheet(c, { settings, viewer: app.viewer }) : undefined);
 

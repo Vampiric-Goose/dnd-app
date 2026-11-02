@@ -201,6 +201,22 @@ describe('the spec guarantees (3.6)', () => {
     expect(m.build.levels).toEqual([{ classId: 'class:fighter@PHB' }]);
   });
 
+  test('a re-embedded snapshot (a book upgrade added a choice) beats the older copy, whichever sorts larger, both ways', () => {
+    const sub = 'subrace:variant@PHB';
+    const old = { kind: 'subrace', id: sub, name: 'Variant Human', choices: [{ type: 'skill' }] };
+    const fresh = { ...old, choices: [{ type: 'skill' }, { type: 'feat' }] };
+    expect(canon(old) > canon(fresh)).toBe(true); // the old copy is the canon-larger one
+    const [a, b] = pair();
+    a.edit((c) => { c.embedded = { [sub]: old as never }; }, T);
+    b.receive(a);
+    b.edit((c) => { c.embedded = { [sub]: fresh as never }; }, T + 5);
+    for (const m of [mergeCharacter(a.rec, b.rec), mergeCharacter(b.rec, a.rec)]) expect(m.embedded[sub]).toEqual(fresh);
+    // an edit on the stale device keeps the newer snapshot it has not loaded yet
+    const stale = clone(a.rec);
+    a.receive(b);
+    expect(rebase(a.rec, stale).embedded[sub]).toEqual(fresh);
+  });
+
   test('R7: different keys of one map survive; a deleted key sticks against an older value', () => {
     const [a, b] = pair();
     a.edit((c) => { c.build.choices.feat4 = { type: 'ids', ids: ['feat:alert@PHB'] }; c.state.resourcesUsed.Rage = 1; c.overrides.ac = 18; c.state.slotsUsed = [1]; }, T);
