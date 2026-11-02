@@ -255,3 +255,14 @@ test('damage held for later (Acid Arrow) lands once, at the end of the target\'s
   await turn('c1', 'next'); // and only once
   expect(await hp('g1')).toBe(3);
 });
+
+test('a helpful spell heals and gives temp HP (the higher stays); Undo takes them back', async () => {
+  await updateCombat('c1', (c) => ({ ...c, combatants: c.combatants.map((x) => (x.id === 'g1' ? { ...x, hp: 2 } : x)) }));
+  await applyResolution('c1', res('h1', [{ id: 'g1', damage: 0, heal: 3 }, { id: 'pc:p', damage: 0, temp: 6 }], { action: 'Cure Wounds' }), settings);
+  expect(await hp('g1')).toBe(5);
+  expect((await db.characters.get('p'))!.state.tempHp).toBe(6);
+  await applyResolution('c1', res('h2', [{ id: 'pc:p', damage: 0, temp: 4 }], { action: 'False Life' }), settings);
+  expect((await db.characters.get('p'))!.state.tempHp).toBe(6);
+  await undoResolution('c1', 'h1', settings);
+  expect(await hp('g1')).toBe(2);
+});

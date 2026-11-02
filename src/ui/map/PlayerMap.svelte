@@ -117,6 +117,7 @@
     if (!plan || !turn || !joined) return;
     if (!view?.tokens.some((t) => t.characterId === turn.c.id)) { error = `${turn.c.name} isn't on the map: ask your DM to place your token.`; return; } // never a silent no-op
     aiming = { a, slot, toggles, dtype, plan, c: turn.c }; selected = [];
+    if (plan.helps && plan.reach === 'self') fire([], () => ({ ok: true })); // a buff on the caster (Shield): nothing to pick
   };
   const OUT = /incapacitated|paralyzed|petrified|stunned|unconscious/i;
   const aim = $derived.by(() => {
@@ -129,9 +130,9 @@
     const pickable = (id: string): Pickable => {
       const t = v.tokens.find((x) => x.id === id);
       // its conditions as the player's map shows them; a monster's Dodge only the DM's device knows (two d20s are sent either way)
-      return t && t.id !== me.id && t.characterId !== m.c.id && !m.leap?.exclude.includes(t.id) ? judge(m.plan, v.grid, settings.diagonal, me, foe, t, { attacker: m.c.state.conditions, target: t.conditions, exhaustion: m.c.state.exhaustion }) : { ok: false };
+      return t && (m.plan.helps || (t.id !== me.id && t.characterId !== m.c.id)) && !m.leap?.exclude.includes(t.id) ? judge(m.plan, v.grid, settings.diagonal, me, foe, t, { attacker: m.c.state.conditions, target: t.conditions, exhaustion: m.c.state.exhaustion }) : { ok: false };
     };
-    const picks = m.picks ?? [], count = m.plan.count, nameAt = (p: Pick) => v.tokens.find((t) => t.id === p.tokenId)?.name ?? '?';
+    const picks = m.picks ?? [], count = m.plan.count ?? m.plan.helps?.max, nameAt = (p: Pick) => v.tokens.find((t) => t.id === p.tokenId)?.name ?? '?';
     return { from: { x: me.x, y: me.y }, line: m.plan.line, ...(m.plan.area && { area: m.plan.area }), pickable,
       onpick: (p: Pick) => {
         if (count && picks.length + 1 < count) { aiming = { ...m, picks: [...picks, p] }; return; }
@@ -139,6 +140,7 @@
       },
       ...(count ? { status: `Target ${picks.length + 1} of ${count}${picks.length ? `: ${picks.map(nameAt).join(', ')}` : ''}` } : m.leap ? { status: 'Leap: a creature within 30 ft of the last one' } : {}),
       ...(picks.length && { onundo: () => (aiming = { ...m, picks: picks.slice(0, -1) }) }),
+      ...(m.plan.helps && picks.length && { ondone: () => fire(picks, pickable) }), // a helpful spell may take fewer than it could
       oncancel: () => (aiming = undefined) };
   });
   function fire(ps: Pick[], pickable: (id: string) => Pickable) {
@@ -146,11 +148,12 @@
     aiming = undefined;
     if (!m || offline()) return;
     const judged = (p: Pick) => (p.tokenId ? pickable(p.tokenId) : undefined);
-    const r = m.plan.count ? rollAim(m.a.name, m.plan, ps.map(judged)) : rollAim(m.a.name, m.plan, judged(ps[0]));
+    const many = m.plan.count || m.plan.helps; // one roll per creature (a helpful spell on the caster alone: one)
+    const r = many ? rollAim(m.a.name, m.plan, ps.length ? ps.map(judged) : [undefined]) : rollAim(m.a.name, m.plan, judged(ps[0]));
     const targets = ps.flatMap((p) => (p.tokenId ? [p.tokenId] : []));
     held = { action: m.a.name, roll: r, a: m.a, slot: m.slot, c: m.c, plan: m.plan, targets: [...(m.leap?.exclude ?? []), ...targets] };
     sentUnder = session.tracker;
-    const where = m.plan.count ? { targets } : ps[0].tokenId ? { target: ps[0].tokenId } : { point: ps[0].point };
+    const where = many ? { targets } : ps[0].tokenId ? { target: ps[0].tokenId } : { point: ps[0].point };
     const aimed = { ...where, rolled: r.rolled, toggles: m.toggles.map((t) => t.id), ...(m.dtype && { dtype: m.dtype }) };
     if (m.leap) sendLeap(m.leap.rid, m.c.id, aimed);
     else sendUse(m.c.id, m.a.id, m.slot, undefined, aimed);

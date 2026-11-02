@@ -189,6 +189,10 @@ export async function applyResolution(cid: string, r: Omit<Resolution, 'applied'
   const was: Snap = { combatants: { ...extra.combatants, ...was0.combatants }, states: { ...extra.states, ...was0.states } };
   const applied: Applied[] = [];
   for (const o of r.outcomes) if (o.damage > 0 && !o.pending) applied.push(await hurtOne(cid, o.id, o.damage, o.nat === 20 && o.part !== 'save', settings));
+  for (const o of r.outcomes) { // a helpful spell: healing, and temporary hit points (they don't stack: the higher stays)
+    if (o.heal) await changeHp(cid, o.id, { heal: o.heal }, settings);
+    if (o.temp && o.temp > (await hpOf(cid, o.id)).temp) await changeHp(cid, o.id, { temp: o.temp }, settings);
+  }
   const inflicted = await inflict(cid, r, r.outcomes.flatMap((o) => (o.inflict ?? []).map((condition) => ({ id: o.id, condition, ...(o.save && { bonus: o.save.total - o.save.roll }) }))));
   if (r.rider || r.spent) await update(cid, (c) => ({ ...c, combatants: c.combatants.map((x) => (x.id !== r.actor ? x : r.rider ? { ...x, rider: r.rider } : (({ rider: _r, ...rest }) => rest)(x))) }));
   const after = await snapNow(cid, ids);

@@ -332,3 +332,10 @@ test('a cantrip\'s alternative die scales with it (Toll the Dead at 5th level)',
   const r = { damage: [{ dice: '1d8', type: 'necrotic' }, { dice: '1d12', type: 'necrotic', part: 'alt' }], scaling: { 1: '1d8', 5: '2d8' } } as never;
   expect(diceAt(r, { level: 0, charLevel: 5 }).damage).toEqual(['2d8 necrotic', '2d12 necrotic']);
 });
+
+// Every Spell, Task 6 (paraphrased wording): how many creatures a helpful spell takes, and temporary hit points.
+test('a helpful spell\'s target count, its upcast, and temp HP', () => {
+  const sp = (p: string, higher?: string) => readSpell({ level: 1, range: '30 feet', text: [{ p }], ...(higher && { higherLevels: [{ p: higher }] }) } as unknown as SpellDef);
+  expect(sp('You bless up to three creatures of your choice within range.', 'You can target one additional creature for each slot level above 1st.').targets).toEqual({ count: 3, above: 1 });
+  expect(sp('You gain 1d4 + 4 temporary hit points for the duration.', 'You gain 5 additional temporary hit points for each slot level above 1st.').temp).toEqual({ dice: '1d4+4', perSlot: 5 });
+});

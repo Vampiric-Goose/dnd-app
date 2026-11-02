@@ -7,7 +7,7 @@ import { SPELL_RULES } from './spellRules.ts';
 import type { Shape } from '../map/templates.ts';
 
 const TYPES = 'acid|bludgeoning|cold|fire|force|lightning|necrotic|piercing|poison|psychic|radiant|slashing|thunder';
-const WORDS: Record<string, number> = { two: 2, three: 3, four: 4, five: 5 };
+const WORDS: Record<string, number> = { two: 2, three: 3, four: 4, five: 5, six: 6 };
 const ABILITY_OF: Record<string, Ability> = { strength: 'str', dexterity: 'dex', constitution: 'con', intelligence: 'int', wisdom: 'wis', charisma: 'cha' };
 const SHORT: Record<Ability, string> = { str: 'Str', dex: 'Dex', con: 'Con', int: 'Int', wis: 'Wis', cha: 'Cha' };
 const SAVES: Record<string, string> = { strength: 'Str', dexterity: 'Dex', constitution: 'Con', intelligence: 'Int', wisdom: 'Wis', charisma: 'Cha' };
@@ -36,6 +36,10 @@ export interface SpellRead {
   /** It hurts a creature that enters the area or starts its turn there (Moonbeam), not when cast. */
   lingering?: true;
   heal?: { dice: string; mod: boolean };
+  /** Temporary hit points it gives (False Life), `perSlot` more for each slot level above the spell's. */
+  temp?: { dice: string; perSlot?: number };
+  /** How many creatures a helpful spell takes ("up to three creatures"), one more per slot level above `above`. */
+  targets?: { count: number; above?: number };
   /** Dice added for every `step` slot levels above `above` (to the healing, else the first damage). */
   perSlot?: { dice: string; above: number; step: number };
   /** A cantrip whose damage grows at 5th, 11th and 17th level. */
@@ -144,6 +148,10 @@ export function readSpell(s: Pick<SpellDef, 'text' | 'level' | 'range'> & { name
   if (/starts its turn there|enters the (?:spell's )?area|starts its turn (?:with)?in/i.test(t)) out.lingering = true;
   const heal = /regains? (?:a number of )?hit points equal to (\d+d\d+)( \+ your spellcasting ability modifier)?/i.exec(t);
   if (heal) out.heal = { dice: heal[1], mod: !!heal[2] };
+  const temp = /\bgains? (\d+d\d+(?:\s*\+\s*\d+)?) temporary hit points\b/i.exec(t), tempUp = /\b(\d+) additional temporary hit points for each slot level above\b/i.exec(h);
+  if (temp) out.temp = { dice: temp[1].replace(/\s+/g, ''), ...(tempUp && { perSlot: +tempUp[1] }) };
+  const many = /\bup to (two|three|four|five|six|\d+) (?:willing )?creatures\b/i.exec(t), more = /\bone additional creature for each slot level above (\d)/i.exec(h);
+  if (many) out.targets = { count: WORDS[many[1].toLowerCase()] ?? +many[1], ...(more && { above: +more[1] }) };
   // "increases by 1d8 for each slot level above 1st" (a comma allowed), or "takes 1d6 extra damage … for each slot level above 1st"
   const up = /increases by (\d+d\d+),? for (each|every two) (?:slot )?levels? (?:above|of higher spell slot) (?:the )?(\d)/i.exec(h)
     ?? /\b(\d+d\d+) extra damage\b[^.]*?\bfor (each|every two) slot levels? above (\d)/i.exec(h);

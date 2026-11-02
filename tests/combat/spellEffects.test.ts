@@ -88,3 +88,9 @@ describe('a PC\'s save', () => {
     expect(k!.resolutions![0].outcomes[0].save).toMatchObject({ roll: 12, total: 12 + computeSheet((await db.characters.get('p'))!, dm).saves.wis.bonus + 4 });
   });
 });
+
+test('a Hasted creature (kept on the combatant) has +2 AC and saves on Dex with advantage', () => {
+  const t = targetOf(cb({ id: 'm', kind: 'monster', name: 'M', ac: 12, hasted: { by: 'c', round: 1 } }), {});
+  expect([t.ac, t.conditions]).toEqual([14, ['Haste']]);
+  expect(targetOf(cb({ id: 'm', kind: 'monster', name: 'M', ac: 12, hasted: { by: 'c', round: 1, ended: true } }), {}).ac).toBe(12);
+});

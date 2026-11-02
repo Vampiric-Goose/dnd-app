@@ -25,14 +25,17 @@ const shard: SpellDef = { kind: 'spell', id: 'spell:shard@FIX', name: 'Shard', s
 // Paraphrased: a bolt whose d8s pick its type and leap on a match (Chaos Bolt's rule applies by name).
 const bolt: SpellDef = { ...shard, id: 'spell:chaos-bolt@FIX', name: 'Chaos Bolt', range: '120 feet', text: [{ p: 'Make a ranged spell attack against the target. On a hit, the target takes 2d8 + 1d6 damage.' }] };
 
+// Paraphrased: a ward on one creature within range (Shield of Faith's numbers apply by name, SPELL_EFFECTS).
+const ward: SpellDef = { ...shard, id: 'spell:shield-of-faith@FIX', name: 'Shield of Faith', concentration: true, duration: 'Concentration, up to 10 minutes', text: [{ p: 'A shimmering field surrounds a creature of your choice within range.' }] };
+
 function thorin(): Character {
   const c = mkChar({ race: 'human', base: { str: 16 }, levels: ['fighter'] });
   return { ...c, id: 'thorin', name: 'Thorin', campaignId: CID, ownerId: 'A1' };
 }
 function mira(): Character {
   const c = mkChar({ race: 'human', base: { int: 16 }, levels: ['wizard'] });
-  return { ...c, id: 'mira', name: 'Mira', campaignId: CID, ownerId: 'A2', embedded: { ...c.embedded, [shard.id]: shard, [bolt.id]: bolt },
-    build: { ...c.build, spells: { 'class:wizard@FIX': { known: [shard.id, bolt.id], prepared: [shard.id, bolt.id] } } } };
+  return { ...c, id: 'mira', name: 'Mira', campaignId: CID, ownerId: 'A2', embedded: { ...c.embedded, [shard.id]: shard, [bolt.id]: bolt, [ward.id]: ward },
+    build: { ...c.build, spells: { 'class:wizard@FIX': { known: [shard.id, bolt.id, ward.id], prepared: [shard.id, bolt.id, ward.id] } } } };
 }
 const scene = (): Scene => ({
   id: 's1', campaignId: CID, name: 'Field', width: 1400, height: 1400, grid: { ...DEFAULT_GRID }, shown: true, updatedAt: 0,
@@ -107,6 +110,14 @@ describe('targeting over sync', () => {
     expect(JSON.stringify(a.got)).not.toMatch(/"ac"/);
     expect(d.combat!.resolutions).toHaveLength(1);
     expect(d.combat!.resolutions![0].undo?.before.combatants['pc:thorin'].economy?.used ?? 0).toBe(0); // taken before paying: Undo gives the Action back
+  });
+
+  test('Every Spell, Task 6: a player casts a ward on an ally from their own device; the ally\'s character holds it', async () => {
+    const { d, host, b } = await joined({ combat: fight({ turn: 'pc:mira' }) });
+    b.deliver({ t: 'use', characterId: 'mira', action: `spell:${ward.id}`, slot: 1, aim: { targets: [aliasOf(b, 'Thorin')], rolled: { dmg: [] }, toggles: [] } });
+    await settle(host);
+    expect(refusals(b)).toEqual([]);
+    expect(d.combat!.resolutions!.at(-1)).toMatchObject({ action: 'Shield of Faith', lasting: true, outcomes: [{ id: 'pc:thorin', inflict: ['Shield of Faith'] }] });
   });
 
   test('Every Spell, Review Focus 1: Bless on a player\'s character adds its d4 to the attack the player sends', async () => {

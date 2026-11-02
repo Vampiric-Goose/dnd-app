@@ -6,7 +6,8 @@ import { feetBetween, tokenFeet, type Pt } from '../map/grid.ts';
 import { tokensInTemplate, type Shape } from '../map/templates.ts';
 import type { Ability, Area, Character, Combat, Combatant, Grid, Resolution, Scene, Size, Snap } from '../types.ts';
 import { combatantForToken } from './movement.ts';
-import { checkFaces, keptD20, resolveAttack, resolveSpell, type Outcome, type TargetInfo } from './resolve.ts';
+import { checkFaces, keptD20, resolveAttack, resolveSpell, totalOf, type Outcome, type TargetInfo } from './resolve.ts';
+import { SPELL_EFFECTS } from '../rules/constants.ts';
 import { diceAt, type SpellRead } from './spellText.ts';
 import { rollSpellDice, spellMods } from './spellEffects.ts';
 import { attackEdge, attackToggles, canTarget, combineMode, monsterAttack, reachOf, type Pickable, type Reach, type Sides, type Toggle } from './targeting.ts';
@@ -26,7 +27,7 @@ export interface AimArea { shape: Shape; feet: number; width?: number; on: 'crea
 /** `choices`: the damage types to pick from for dice whose type is chosen (their `type` stays '' until one is picked). */
 /** `mark`: a rider spell aimed at the creature it marks (no dice). A die's `vs`: it hurts only that creature (a marked rider). */
 export interface AimPlan { reach: Reach; line: boolean; attack: boolean; toHit?: number; area?: AimArea; dice: { expr: string; type: string; on?: 'hit' | 'save'; vs?: string; part?: 'alt' | 'later' }[]; read?: SpellRead;
-  ignore?: { long?: true; close?: true }; choices?: string[]; mark?: true; /** rays, beams or darts: a target each */ count?: number; /** damage over time, kept for the turns to come */ linger?: { dice: { expr: string; type: string }[]; read: SpellRead } }
+  ignore?: { long?: true; close?: true }; choices?: string[]; mark?: true; /** rays, beams or darts: a target each */ count?: number; /** a helpful spell: up to `max` creatures, the caster included */ helps?: { max: number }; /** damage over time, kept for the turns to come */ linger?: { dice: { expr: string; type: string }[]; read: SpellRead } }
 
 /**
  * The spell areas to draw on a scene, for everyone: an instant one until its caster's next turn, a concentration one while its caster
@@ -112,6 +113,15 @@ export function aimPlan(a: TurnAction, o: { level?: number; toggles?: Toggle[]; 
   if (ma) return { reach, line: ma.ranged, attack: true, toHit: ma.toHit, dice: [...ma.dmg, ...rider(ma.dmg[0]?.type)] };
   const read = a.cast?.read;
   if (read?.rider && a.spell) return read.rider.marked ? { reach, line: false, attack: false, dice: [], read, mark: true } : undefined; // Hex marks a creature; the rest are cast
+  // a helpful spell (a buff in SPELL_EFFECTS, healing, temp HP): on up to `max` creatures in reach, the caster too; range Self is the caster.
+  // Haste keeps its own target (turnActions.ts `target`).
+  if (read && a.spell && !a.target && !read.attack && !read.save && (SPELL_EFFECTS[a.name] || read.heal || read.temp)) {
+    const slot = o.level ?? a.spell.level, up = Math.max(0, slot - a.spell.level);
+    const heal = diceAt(read, { slot, level: a.spell.level, charLevel: a.cast!.charLevel, mod: a.cast!.mod }).heal;
+    const temp = read.temp && (read.temp.perSlot && up ? `${read.temp.dice}+${read.temp.perSlot * up}` : read.temp.dice);
+    const max = reach === 'self' ? 1 : read.targets ? read.targets.count + (read.targets.above !== undefined ? Math.max(0, slot - read.targets.above) : 0) : 1;
+    return { reach, line: false, attack: false, read, helps: { max }, dice: heal ? [{ expr: heal, type: 'healing' }] : temp ? [{ expr: temp, type: 'temp' }] : [] };
+  }
   if (!read || !a.spell || !(read.attack || read.save || read.area || read.burst || read.auto)) return undefined;
   if (!read.save && !read.damage.length && !read.area && !read.burst && !read.conditions?.length) return undefined; // a save-only spell (Suggestion) still rolls the monster's save
   const picked = o.dtype && read.choices?.includes(o.dtype) ? o.dtype : '';
@@ -203,6 +213,23 @@ export async function workOut(i: WorkIn): Promise<Aimed | string> {
   const tokenOf = (id: string) => s.tokens.find((t) => combatantForToken(k, t)?.id === id);
   const me = tokenOf(i.leapFrom?.from ?? actor.id);
   if (!me) return 'not on the map';
+  if (plan.helps) { // each creature picked once, in reach (the caster included); its dice once per creature
+    const ids = aim.targets?.length ? aim.targets : aim.target !== undefined ? [aim.target] : plan.reach === 'self' ? [actor.id] : [];
+    if (!ids.length) return 'pick a target';
+    if (ids.length > plan.helps.max) return 'too many targets';
+    if (new Set(ids).size !== ids.length) return 'pick each creature once';
+    for (const id of ids) {
+      const z = i.findTarget(id), t = z && tokenOf(z.id);
+      if (!z || !t) return 'pick a target';
+      if (plan.reach === 'self' ? z.id !== actor.id : !canTarget(plan.reach, tokenFeet(s.grid, me, t, i.diagonal), false, false).ok) return 'out of range';
+    }
+    const n = plan.dice.length;
+    if (aim.rolled.dmg.length !== n * ids.length || plan.dice.some((d, j) => ids.some((_, r) => totalOf(d.expr, aim.rolled.dmg[r * n + j], false) === undefined))) return 'bad damage dice';
+    const amount = (r: number) => (n ? totalOf(plan.dice[0].expr, aim.rolled.dmg[r * n], false)! : 0), kind = plan.dice[0]?.type;
+    const outcomes: Outcome[] = ids.map((id, r) => ({ id, damage: 0, ...(SPELL_EFFECTS[a.name] && { inflict: [a.name] }), ...(kind === 'healing' && { heal: amount(r) }), ...(kind === 'temp' && { temp: amount(r) }) }));
+    return { resolution: { id: i.id, actor: actor.id, action: a.name, at: i.now, round: k.round, outcomes, ...(a.spell?.concentration ? { cast: (actor.concentrationCount ?? 0) + 1, lasting: true as const } : plan.read?.rounds && { rounds: plan.read.rounds }) },
+      outcome: { action: a.name } };
+  }
   const target = aim.target === undefined ? undefined : i.findTarget(aim.target), tt = target && tokenOf(target.id);
   if (aim.target !== undefined && !tt) return 'pick a target';
   if (i.leapFrom && target && i.leapFrom.exclude.includes(target.id)) return 'pick another creature';

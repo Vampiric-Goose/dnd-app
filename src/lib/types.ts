@@ -170,6 +170,7 @@ export interface Outcome {
   /** a hit waiting for its caster's player to pick the die that sets the type (Chaos Bolt): each pick's damage, worked out already */
   choose?: { face: number; type: string; damage: number; note?: string }[];
   /** damage still to come at the end of the target's next turn (Acid Arrow), applied then by turn() */ later?: number;
+  /** a helpful spell's healing and temporary hit points */ heal?: number; temp?: number;
 }
 /** What a result took off a combatant (HP and temp HP), and a PC's dying state before it, so Undo puts back exactly that. */
 export interface Applied { id: string; hp: number; temp: number; dying?: { deathSaves: { success: number; fail: number }; stable: boolean; dead: boolean };

@@ -198,3 +198,39 @@ test('a lasting area of a chosen type asks for it and keeps it for the turns to 
   expect(aimPlan(a)!.choices).toEqual(['radiant', 'necrotic']);
   expect(aimPlan(a, { dtype: 'necrotic' })!.linger!.dice[0].type).toBe('necrotic');
 });
+
+// Every Spell, Task 6: helpful spells (buffs, healing, temp HP) land on allies, the caster included.
+describe('helpful spells', () => {
+  const k: Combat = { campaignId: 'c1', round: 1, turn: 'a', groupMonsters: false, updatedAt: 0, combatants: [cb({ id: 'a', kind: 'monster', name: 'A' }), ...['b', 'c', 'd', 'e', 'f'].map((id) => cb({ id, kind: 'monster', name: id.toUpperCase() }))] };
+  const sc: Scene = { id: 's1', campaignId: 'c1', name: 'F', width: 1400, height: 700, grid: { ...DEFAULT_GRID }, shown: true, updatedAt: 0,
+    tokens: ['a', 'b', 'c', 'd', 'e', 'f'].map((id, q) => ({ id: `t-${id}`, name: id, ...cell(q), size: 'M' as const, color: '#000000', combatantId: id })) };
+  const cast = (name: string, read: object, level = 1, concentration = false): TurnAction => ({ id: 's', name, cost: 'action', group: 'spell', spell: { id: 's', level, concentration },
+    cast: { read: { damage: [], range: { feet: 30 }, ...read } as never, attack: 5, dc: 13, charLevel: 3, mod: 3 } });
+  const run = (a: TurnAction, aim: Partial<WorkIn['aim']>, level?: number) => workOut({ a, ...(level && { level }), features: [], actor: k.combatants[0], combat: k, scene: sc, diagonal: '5-5-5',
+    aim: { rolled: { dmg: [] }, toggles: [], ...aim }, findTarget: (id) => k.combatants.find((z) => z.id === id), info: (z) => targetOf(z, {}), nameOf: (z) => z.name, magical: false, id: 'r', now: 0, rng: () => 0.5 });
+  const bless = cast('Bless', { targets: { count: 3, above: 1 }, rounds: 10 }, 1, true);
+  test('Bless takes three at 1st level, four at 2nd, never five; each gets the condition, kept while concentrating', async () => {
+    expect(aimPlan(bless)!.helps).toEqual({ max: 3 });
+    expect(aimPlan(bless, { level: 2 })!.helps).toEqual({ max: 4 });
+    const r = await run(bless, { targets: ['a', 'b', 'c', 'd'] }, 2);
+    if (typeof r === 'string') throw new Error(r);
+    expect(r.resolution.outcomes.map((o) => [o.id, o.inflict])).toEqual([['a', ['Bless']], ['b', ['Bless']], ['c', ['Bless']], ['d', ['Bless']]]);
+    expect(r.resolution.lasting).toBe(true);
+    expect(await run(bless, { targets: ['a', 'b', 'c', 'd', 'e'] }, 2)).toBe('too many targets');
+  });
+  test('Shield (range Self) lands on the caster with no pick, until the start of its next turn', async () => {
+    const r = await run(cast('Shield', { range: 'self', rounds: 1 }), {});
+    if (typeof r === 'string') throw new Error(r);
+    expect([r.resolution.outcomes[0].id, r.resolution.outcomes[0].inflict, r.resolution.rounds]).toEqual(['a', ['Shield'], 1]);
+  });
+  test('healing heals its target its dice plus the modifier; temp HP the same', async () => {
+    const cure = cast('Cure Wounds', { range: 'touch', heal: { dice: '1d8', mod: true }, perSlot: { dice: '1d8', above: 1, step: 1 } });
+    expect(aimPlan(cure)!.dice).toEqual([{ expr: '1d8+3', type: 'healing' }]);
+    const r = await run(cure, { target: 'b', rolled: { dmg: [[6]] } });
+    if (typeof r === 'string') throw new Error(r);
+    expect(r.resolution.outcomes).toEqual([{ id: 'b', damage: 0, heal: 9 }]);
+    const life = await run(cast('False Life', { range: 'self', temp: { dice: '1d4+4', perSlot: 5 } }), { rolled: { dmg: [[3]] } }, 2);
+    if (typeof life === 'string') throw new Error(life);
+    expect(life.resolution.outcomes).toEqual([{ id: 'a', damage: 0, temp: 12 }]); // 3 + 4, +5 at 2nd level
+  });
+});

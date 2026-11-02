@@ -160,14 +160,15 @@ const mod = (score: number) => Math.floor((score - 10) / 2);
 /** A combatant as a target: a monster's AC, saves (printed, else its ability modifier) and defenses; a PC's from its sheet. */
 export function targetOf(x: Combatant, o: { monster?: MonsterDef; sheet?: Sheet; /** a PC's current HP and conditions (its character's) */ hp?: number; conditions?: string[] }): TargetInfo {
   const keys: Ability[] = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
+  const hasted = !!x.hasted && !x.hasted.ended; // Haste is kept on the combatant (combat.ts), not as a condition: +2 AC, Dex saves with advantage
   if (o.sheet) { // the sheet already holds what its spells do to AC and defenses (rules/effects.ts)
-    const s = o.sheet;
-    return { id: x.id, ac: s.ac, pc: true, hidden: !!x.hidden, ...(o.hp !== undefined && o.hp < s.maxHp && { hurt: true }), save: Object.fromEntries(keys.map((k) => [k, s.saves[k].bonus])) as Record<Ability, number>,
-      defenses: { resist: s.resistances, immune: s.immunities, vulnerable: s.vulnerabilities }, ...(o.conditions?.length && { conditions: o.conditions }) };
+    const s = o.sheet, conditions = [...(o.conditions ?? []), ...(hasted ? ['Haste'] : [])];
+    return { id: x.id, ac: s.ac + (hasted ? 2 : 0), pc: true, hidden: !!x.hidden, ...(o.hp !== undefined && o.hp < s.maxHp && { hurt: true }), save: Object.fromEntries(keys.map((k) => [k, s.saves[k].bonus])) as Record<Ability, number>,
+      defenses: { resist: s.resistances, immune: s.immunities, vulnerable: s.vulnerabilities }, ...(conditions.length && { conditions }) };
   }
-  const m = o.monster, sp = spellMods(x.conditions ?? []); // a monster's spells (Shield, Stoneskin) on top of its stat block
+  const held = [...(x.conditions ?? []), ...(hasted ? ['Haste'] : [])], m = o.monster, sp = spellMods(held); // a monster's spells (Shield, Stoneskin) on top of its stat block
   return { id: x.id, ac: Math.max(sp.acMin ?? 0, (x.ac ?? m?.ac[0]?.value ?? 10) + sp.ac), pc: false, hidden: !!x.hidden, ...(x.hp !== undefined && x.maxHp !== undefined && x.hp < x.maxHp && { hurt: true }),
     save: Object.fromEntries(keys.map((k) => [k, m?.saves[k] ?? (m ? mod(m.scores[k]) : 0)])) as Record<Ability, number>,
     defenses: { resist: [...(m?.resist ?? []), ...sp.resist], immune: [...(m?.immune ?? []), ...sp.immune], vulnerable: m?.vulnerable ?? [] }, conditionImmune: m?.conditionImmune ?? [],
-    ...(x.conditions?.length && { conditions: x.conditions }) };
+    ...(held.length && { conditions: held }) };
 }
