@@ -1,0 +1,116 @@
+// Pure (no Svelte/Vite/DOM): one targeted use worked out on the DM's device (PHB 2014 p.194-196, p.205). An attack: the kept d20 plus
+// the bonus against AC, a natural 20 always hits with its damage dice twice, a natural 1 always misses. A save: d20 plus the target's
+// bonus against the DC, the area's damage rolled once for everyone. Dice come as raw faces (a player's own roll, checked here);
+// monsters' saves roll on this device. A PC's save waits for its player (`pending`, with what it owes).
+import { parseDice } from '../dice.ts';
+import type { Ability, Combatant, MonsterDef, Outcome, Sheet } from '../types.ts';
+export type { Outcome };
+import type { SpellRead } from './spellText.ts';
+import { afterDefenses, type Defenses } from './targeting.ts';
+
+export interface TargetInfo { id: string; ac: number; save: Record<Ability, number>; defenses: Defenses; pc: boolean; hidden: boolean }
+/** Raw faces: `d20` one die, or two with advantage or disadvantage; `dmg[i]` the faces of damage expression i (twice the dice on a crit). */
+export interface Rolled { d20?: number[]; mode?: 'adv' | 'dis'; dmg: number[][] }
+
+/** The total of `expr` from these faces, or undefined when they don't fit it (die count, doubled on a crit; a face outside its die). */
+export function totalOf(expr: string, faces: number[], crit: boolean): number | undefined {
+  let i = 0, total = 0;
+  for (const t of parseDice(expr)) {
+    if ('const' in t) { total += t.sign * t.const; continue; }
+    const n = crit ? t.count * 2 : t.count;
+    const mine = faces.slice(i, i + n);
+    if (mine.length < n || mine.some((f) => !Number.isInteger(f) || f < 1 || f > t.sides)) return undefined;
+    total += t.sign * mine.reduce((a, b) => a + b, 0);
+    i += n;
+  }
+  return i === faces.length ? total : undefined;
+}
+
+/** What is wrong with dice another device sent, or undefined. */
+export function checkFaces(dice: { expr: string; crit?: boolean }[], r: Rolled): string | undefined {
+  if (r.d20 && (r.d20.length < 1 || r.d20.length > 2 || r.d20.some((f) => !Number.isInteger(f) || f < 1 || f > 20))) return 'bad d20';
+  if (r.dmg.length !== dice.length || dice.some((d, i) => totalOf(d.expr, r.dmg[i], !!d.crit) === undefined)) return 'bad damage dice';
+  return undefined;
+}
+
+/** The d20 that counts: the higher with advantage, the lower with disadvantage, else the first. */
+export const keptD20 = (r: Rolled): number => {
+  const d = r.d20 ?? [];
+  return r.mode === 'adv' ? Math.max(...d) : r.mode === 'dis' ? Math.min(...d) : d[0];
+};
+
+/** Damage of these expressions (faces already checked) after the target's defenses, with the notes why it changed. */
+function hurt(t: TargetInfo, dice: { expr: string; type: string }[], faces: number[][], crit: boolean, magical: boolean): { damage: number; note?: string } {
+  let damage = 0;
+  const notes: string[] = [];
+  dice.forEach((d, i) => {
+    const r = afterDefenses(totalOf(d.expr, faces[i] ?? [], crit) ?? 0, d.type, t.defenses, magical);
+    damage += r.amount;
+    if (r.note && !notes.includes(r.note)) notes.push(r.note);
+  });
+  return { damage, ...(notes.length && { note: notes.join(', ') }) };
+}
+
+const attackRoll = (t: TargetInfo, toHit: number, r: Rolled): { hit: boolean; roll: number; nat?: 20 | 1 } => {
+  const d = keptD20(r), roll = d + toHit;
+  return { hit: d === 20 || (d !== 1 && roll >= t.ac), roll, ...(d === 20 ? { nat: 20 as const } : d === 1 ? { nat: 1 as const } : {}) };
+};
+
+/** A weapon attack (or a monster's): hit or miss against AC, and its damage on a hit. Extra damage (GWM's +10) is one more expression. */
+export function resolveAttack(t: TargetInfo, toHit: number, dmg: { expr: string; type: string }[], r: Rolled, magical: boolean): Outcome {
+  const a = attackRoll(t, toHit, r);
+  return { id: t.id, ...a, ...(a.hit ? hurt(t, dmg, r.dmg, a.nat === 20, magical) : { damage: 0 }) };
+}
+
+const ABILITY: Record<string, Ability> = { Str: 'str', Dex: 'dex', Con: 'con', Int: 'int', Wis: 'wis', Cha: 'cha' };
+
+/**
+ * A spell: its attack on `target` (hit damage), then its save for everyone `caught` (the target alone when there's no area). Save damage
+ * is rolled once: a failure takes it all, a success half (rounded down) or none, each after its own defenses. Spell damage is magical.
+ */
+export function resolveSpell(read: SpellRead, dice: { expr: string; type: string; on?: 'hit' | 'save' }[], dc: number | undefined, toHit: number | undefined,
+  target: TargetInfo | undefined, caught: TargetInfo[], r: Rolled, rng: () => number): Outcome[] {
+  const out: Outcome[] = [];
+  const idx = dice.map((d, i) => ({ ...d, faces: r.dmg[i] ?? [] }));
+  const hitDice = read.attack ? idx.filter((d) => d.on !== 'save') : [], saveDice = read.attack ? idx.filter((d) => d.on === 'save') : idx;
+  if (read.attack && target && toHit !== undefined) {
+    const a = attackRoll(target, toHit, r);
+    out.push({ id: target.id, part: 'hit', ...a, ...(a.hit ? hurt(target, hitDice, hitDice.map((d) => d.faces), a.nat === 20, true) : { damage: 0 }) });
+  }
+  if (!read.save || dc === undefined) return out;
+  const ability = ABILITY[read.save] ?? 'dex';
+  const owed = saveDice.map((d) => ({ amount: totalOf(d.expr, d.faces, false) ?? 0, type: d.type }));
+  for (const t of caught.length ? caught : target ? [target] : []) {
+    if (t.pc) { out.push({ id: t.id, part: 'save', pending: true, damage: 0, owed }); continue; }
+    const roll = 1 + Math.floor(rng() * 20), total = roll + t.save[ability];
+    out.push({ id: t.id, part: 'save', save: { roll, total, ok: total >= dc }, ...settle(t, owed, total >= dc, read.onSave) });
+  }
+  return out;
+}
+
+/** What a save leaves of the owed damage: all on a failure, half or none on a success, each type after the target's defenses. */
+export function settle(t: Pick<TargetInfo, 'defenses'>, owed: { amount: number; type: string }[], ok: boolean, onSave: SpellRead['onSave']): { damage: number; note?: string } {
+  let damage = 0;
+  const notes: string[] = [];
+  for (const o of owed) {
+    const r = afterDefenses(!ok ? o.amount : onSave === 'half' ? Math.floor(o.amount / 2) : 0, o.type, t.defenses, true);
+    damage += r.amount;
+    if (r.note && !notes.includes(r.note)) notes.push(r.note);
+  }
+  return { damage, ...(notes.length && { note: notes.join(', ') }) };
+}
+
+const mod = (score: number) => Math.floor((score - 10) / 2);
+/** A combatant as a target: a monster's AC, saves (printed, else its ability modifier) and defenses; a PC's from its sheet. */
+export function targetOf(x: Combatant, o: { monster?: MonsterDef; sheet?: Sheet }): TargetInfo {
+  const keys: Ability[] = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
+  if (o.sheet) {
+    const s = o.sheet;
+    return { id: x.id, ac: s.ac, pc: true, hidden: !!x.hidden, save: Object.fromEntries(keys.map((k) => [k, s.saves[k].bonus])) as Record<Ability, number>,
+      defenses: { resist: s.resistances, immune: s.immunities, vulnerable: s.vulnerabilities } };
+  }
+  const m = o.monster;
+  return { id: x.id, ac: x.ac ?? m?.ac[0]?.value ?? 10, pc: false, hidden: !!x.hidden,
+    save: Object.fromEntries(keys.map((k) => [k, m?.saves[k] ?? (m ? mod(m.scores[k]) : 0)])) as Record<Ability, number>,
+    defenses: { resist: m?.resist ?? [], immune: m?.immune ?? [], vulnerable: m?.vulnerable ?? [] } };
+}

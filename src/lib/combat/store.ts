@@ -3,7 +3,8 @@
 import { applyDamage, applyHealing, rollDeathSave } from '../character/rest.ts';
 import { db, DeletedError } from '../db.ts';
 import { computeSheet } from '../rules/sheet.ts';
-import type { CampaignSettings, Character, Combat, Combatant, Duration, Encounter, MonsterDef, Scene } from '../types.ts';
+import type { Applied, CampaignSettings, Character, Combat, Combatant, Duration, Encounter, MonsterDef, Outcome, Resolution, Scene } from '../types.ts';
+import { settle } from './resolve.ts';
 import { uid } from '../uid.ts';
 import { addMonsters, concentrationDc, encounterPicks, initOk, monsterHp, newCombat, next, patchCombatant, removeStep, rollInit, setInit, start, type Expired, type HpOp, type Step } from './combat.ts';
 import { restoreCombat, restoreScene, snapshotFight } from './encounters.ts';
@@ -117,6 +118,69 @@ export const changeHp = (cid: string, combatantId: string, op: HpOp, settings: C
   }
   return { combat, ...(hit && { concentrationDc: concentrationDc((op as { damage: number }).damage) }) };
 });
+
+/** HP and temp HP now: a monster's on its combatant, a PC's (with its dying state) on its character. */
+async function hpOf(cid: string, id: string): Promise<{ hp: number; temp: number; dying?: Applied['dying'] }> {
+  const x = (await db.combat.get(cid))?.combatants.find((y) => y.id === id);
+  if (x?.kind !== 'pc') return { hp: x?.hp ?? 0, temp: x?.tempHp ?? 0 };
+  const s = (await db.characters.get(x.characterId ?? ''))?.state;
+  return { hp: s?.hp ?? 0, temp: s?.tempHp ?? 0, ...(s && { dying: { deathSaves: s.deathSaves, ...(s.stable !== undefined && { stable: s.stable }), ...(s.dead !== undefined && { dead: s.dead }) } }) };
+}
+
+/** One outcome's damage through changeHp (temp HP, dying, concentration), and what it took off. */
+async function hurtOne(cid: string, id: string, damage: number, crit: boolean, settings: CampaignSettings): Promise<Applied> {
+  const before = await hpOf(cid, id);
+  await changeHp(cid, id, { damage, ...(crit && { crit }) }, settings);
+  const after = await hpOf(cid, id);
+  const dying = before.dying && JSON.stringify(before.dying) !== JSON.stringify(after.dying) ? before.dying : undefined;
+  return { id, hp: before.hp - after.hp, temp: before.temp - after.temp, ...(dying && { dying }) };
+}
+
+/** Targeting: a use worked out by resolve.ts. Its damage goes on (not a PC's pending save), and it joins the last 20 results. */
+export async function applyResolution(cid: string, r: Omit<Resolution, 'applied'>, settings: CampaignSettings): Promise<Combat> {
+  const applied: Applied[] = [];
+  for (const o of r.outcomes) if (o.damage > 0 && !o.pending) applied.push(await hurtOne(cid, o.id, o.damage, o.nat === 20 && o.part !== 'save', settings));
+  return serial(() => update(cid, (c) => ({ ...c, resolutions: [...(c.resolutions ?? []), { ...r, applied }].slice(-20) })));
+}
+
+/** Undo: puts back exactly what the result took (capped at max HP), a PC's dying state too, and drops the result. */
+export const undoResolution = (cid: string, rid: string, settings: CampaignSettings): Promise<Combat> => serial(async () => {
+  const had = await db.combat.get(cid);
+  const r = had?.resolutions?.find((x) => x.id === rid);
+  if (!had || !r) throw new Error('That result is no longer there.');
+  for (const a of r.applied) {
+    const x = had.combatants.find((y) => y.id === a.id);
+    if (x?.kind === 'pc' && x.characterId) {
+      await editCharacter(x.characterId, (c) => ({ ...c, state: { ...c.state, ...a.dying,
+        hp: Math.min(computeSheet(c, { settings, viewer: 'dm' }).maxHp, c.state.hp + a.hp), tempHp: c.state.tempHp + a.temp } }));
+    } else if (x) {
+      await update(cid, (c) => patchCombatant(c, a.id, { hp: Math.min(x.maxHp ?? Infinity, (c.combatants.find((y) => y.id === a.id)?.hp ?? 0) + a.hp),
+        tempHp: (c.combatants.find((y) => y.id === a.id)?.tempHp ?? 0) + a.temp }));
+    }
+  }
+  return update(cid, (c) => ({ ...c, resolutions: (c.resolutions ?? []).filter((x) => x.id !== rid) }));
+});
+
+/** A PC's own save roll (`d20`) for a pending outcome: against the DC with its sheet's bonus, half or none on a success. Settles once. */
+export async function settleSave(cid: string, rid: string, target: string, d20: number, settings: CampaignSettings): Promise<Combat | undefined> {
+  const k = await db.combat.get(cid);
+  const r = k?.resolutions?.find((x) => x.id === rid), x = k?.combatants.find((y) => y.id === target);
+  const ch = x?.characterId ? await db.characters.get(x.characterId) : undefined;
+  if (!r || r.dc === undefined || !ch) return undefined;
+  const sheet = computeSheet(ch, { settings, viewer: 'dm' });
+  const total = d20 + sheet.saves[r.ability ?? 'dex'].bonus, ok = total >= r.dc;
+  let owed: Outcome['owed'];
+  await serial(() => update(cid, (c) => ({ ...c, resolutions: (c.resolutions ?? []).map((y) => y.id !== rid ? y : { ...y, outcomes: y.outcomes.map((o) => {
+    if (o.id !== target || !o.pending) return o;
+    owed = o.owed;
+    const { pending: _p, owed: _o, ...rest } = o;
+    return { ...rest, save: { roll: d20, total, ok }, ...settle({ defenses: { resist: sheet.resistances, immune: sheet.immunities, vulnerable: sheet.vulnerabilities } }, o.owed ?? [], ok, y.onSave) };
+  }) }) })));
+  if (!owed) return undefined; // already settled
+  const damage = (await db.combat.get(cid))?.resolutions?.find((y) => y.id === rid)?.outcomes.find((o) => o.id === target && o.part === 'save')?.damage ?? 0;
+  const applied = damage > 0 ? await hurtOne(cid, target, damage, false, settings) : undefined;
+  return serial(() => update(cid, (c) => ({ ...c, resolutions: (c.resolutions ?? []).map((y) => (y.id === rid && applied ? { ...y, applied: [...y.applied, applied] } : y)) })));
+}
 
 /** Final M4: ends the fight (deletes the record) in the queue, so an operation sent just before it cannot write a fresh combat after. */
 export const endCombat = (cid: string): Promise<unknown> => serial(() => db.combat.update(cid, () => undefined));
