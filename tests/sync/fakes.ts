@@ -29,6 +29,7 @@ export class Device {
   errors: unknown[] = [];
   settled: { rid: string; target: string; d20: number }[] = [];
   picked: { rid: string; target: string; type: string }[] = [];
+  signedAt = new Map<string, number>();
   wall: () => number;
   constructor(wall: () => number = Date.now) { this.wall = wall; }
 
@@ -106,6 +107,12 @@ export class Device {
       },
       settleSave: async (rid, target, d20) => { this.settled.push({ rid, target, d20 }); },
       settlePick: async (rid, target, type) => { this.picked.push({ rid, target, type }); },
+      takeSignedPack: async (p, at) => {
+        if (at <= (this.signedAt.get(p.id) ?? 0)) return false;
+        this.signedAt.set(p.id, at);
+        this.packs.set(p.id, clone(p));
+        return true;
+      },
       ...(this.map && {
         loadScene: async () => (this.scene?.shown ? clone(this.scene) : undefined),
         updateScene: async (id: string, fn: (s: Scene) => Scene) => {
@@ -133,6 +140,7 @@ export class Device {
       dropCharacter: async (c) => { const { campaignId: _c, ...rest } = c; this.putSynced(rest); },
       packMeta: async () => this.packMeta(),
       savePack: async (p) => { this.packs.set(p.id, clone(p)); },
+      loadPack: async (id) => clone(this.packs.get(id)),
       hasBlob: async (hash) => this.blobs.has(hash),
       saveBlob: async (type, data) => { this.blobs.set(await sha256Bytes(data), { type, data: data.slice() }); },
       onRoll: (e, from) => { this.rolls.push({ e, from }); },

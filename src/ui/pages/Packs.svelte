@@ -11,6 +11,7 @@
   import PasteDialog from '../PasteDialog.svelte';
   import SettingsGroup from '../SettingsGroup.svelte';
   import SpellEditor from '../spells/SpellEditor.svelte';
+  import { newKey, publicText, TRUSTED_KEYS } from '../../lib/sync/signing.ts';
 
   type Counts = PackMeta['counts'];
   type Summary = { packs: { name: string; source: string; counts: Counts; patches: number }[]; errors: { file: string; message: string }[]; skipped: string[]; warnings: string[]; skipped2024: number; skippedUnknown: number; files: number };
@@ -28,6 +29,18 @@
   let spellNotice = $state('');
 
   const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+  // Publisher signatures: this device's signing key (its private half stays in this browser) and the public half to have it trusted.
+  let keyText: string | undefined = $state();
+  let copied = $state(false);
+  $effect(() => { void db.meta.get<CryptoKeyPair>('signingKey').then(async (k) => { keyText = k ? await publicText(k.publicKey) : undefined; }); });
+  const trustedKey = $derived(keyText !== undefined && TRUSTED_KEYS.includes(keyText));
+  async function makeKey() {
+    try { const k = await newKey(); await db.meta.set('signingKey', k); keyText = await publicText(k.publicKey); } catch (e) { error = message(e); }
+  }
+  async function copyKey() {
+    try { await navigator.clipboard.writeText(keyText ?? ''); copied = true; } catch (e) { error = message(e); }
+  }
   const listPacks = () => db.packs.listMeta().then((m) => (packs = m.filter((p) => p.id !== 'srd')));
   $effect(() => {
     listPacks().catch((e) => (error = message(e)));
@@ -416,7 +429,31 @@
   </ul>
 </SettingsGroup>
 
+<SettingsGroup title="Your books take priority">
+  <p class="muted">With a trusted signing key, the books you imported yourself replace a DM's copy when you join their session, and their device shares them with everyone else.</p>
+  {#if keyText === undefined}
+    <button type="button" onclick={makeKey}>Create a signing key</button>
+  {:else}
+    <label class="key">Public key (not a secret)<textarea readonly rows="3" value={keyText}></textarea></label>
+    <div class="row">
+      <button type="button" onclick={copyKey}>{copied ? 'Copied' : 'Copy'}</button>
+      <span class="muted small" role="status">{trustedKey ? 'Trusted: your books win.' : 'Not trusted yet: send this key to the app developer to add.'}</span>
+    </div>
+  {/if}
+</SettingsGroup>
+
 <style>
+  .key {
+    display: grid;
+    gap: 0.25rem;
+  }
+
+  .key textarea {
+    font-family: var(--font-mono, monospace);
+    font-size: 0.8rem;
+    word-break: break-all;
+  }
+
   .lead {
     max-width: 900px;
     margin: 0 0 1rem;

@@ -3,7 +3,9 @@
 // 2024) before anything is stored. Storage, the content index and the clock are injected, so tests run it on fakes.
 import { strip2024 } from '../character/strip2024.ts';
 import type { ContentIndex } from '../content/index.ts';
-import { idSource, is2024Source, restorablePack } from '../content/sources.ts';
+import { entityAllowed, idSource, is2024Source, packAllowed, patchAllowed, restorablePack } from '../content/sources.ts';
+import { isRec, problem, SHAPES } from '../recordShape.ts';
+import { TRUSTED_KEYS, verify } from './signing.ts';
 import type { RollEntry } from '../rolls.svelte.ts';
 import { toBase64 } from '../base64.ts';
 import { budgetApplies, combatantForToken, recordMove } from '../combat/movement.ts';
@@ -20,9 +22,9 @@ import { newJoinCode, nextPlayerId, sha256Text } from './code.ts';
 import { hlcNow, hlcReceive, MAX_AHEAD } from './hlc.ts';
 import type { Link } from './link.ts';
 import { canon, latestClock, mergeCharacter, type Synced } from './merge.ts';
-import { campaignForPlayers, characterForPlayer, currentActor, packForPlayers, rosterEntry, trackerForPlayers, unprojectCharacter, type TrackerView } from './project.ts';
+import { campaignForPlayers, characterForPlayer, currentActor, playerPack, rosterEntry, trackerForPlayers, unprojectCharacter, type TrackerView } from './project.ts';
 import { uid } from '../uid.ts';
-import { BLOB_CHUNK, cleanRoll, IMAGE_TYPES, MAX_BLOB, MAX_CHUNK, MAX_MESSAGE, MAX_PACK, parseGuestMessage, size, type GuestMsg, type HostMsg, type PackOffer, type Preview } from './protocol.ts';
+import { BLOB_CHUNK, cleanRoll, cuts, IMAGE_TYPES, LOW_WATER, MAX_BLOB, MAX_CHUNK, MAX_MESSAGE, MAX_PACK, parseGuestMessage, size, type GuestMsg, type HostMsg, type PackOffer, type Preview } from './protocol.ts';
 import { moveCost, moveProblem, previewVisible, sceneBlobs, sceneForPlayers, type PlayerScene } from './scene.ts';
 
 export interface HostDeps {
@@ -62,6 +64,10 @@ export interface HostDeps {
   settleSave?(rid: string, target: string, d20: number): Promise<void>;
   /** Targeting: a player's pick of the die that sets its hit's type (store settlePick). */
   settlePick?(rid: string, target: string, type: string): Promise<void>;
+  /** Publisher signatures (signing.ts): the trusted public keys (default TRUSTED_KEYS), and storing a signed book in place of this device's
+   *  own copy unless it is no newer than the last signed one taken (false: refused). */
+  trusted?: readonly string[];
+  takeSignedPack?(p: Pack, at: number): Promise<boolean>;
   /** Targeting: a monster's stat block (its saves and defenses). */
   loadMonster?(id: string): Promise<MonsterDef | undefined>;
   /** Stage 5: the campaign's shown scene (db.scenes.shown). Without it no scene is sent. */
@@ -83,14 +89,13 @@ export interface HostDeps {
 
 interface Conn { link: Link; playerId?: string; name?: string; bad: number; closed: boolean; offered: Set<string>; streamed: Set<string>; packs: Promise<void>; tracker?: string /* JSON of the last tracker sent (M1) */;
   scene?: string /* JSON of the last scene sent */; seen: Set<string> /* blobs offered in any scene sent */; blobs: Set<string> /* blobs streamed */;
-  actions?: string /* JSON of the last declared actions sent */ }
+  actions?: string /* JSON of the last declared actions sent */;
+  upload?: { id: string; at: number; sig: string; total: number; parts: string[]; length: number } /* a signed book arriving */ }
 
 /**
  * Characters of pack JSON per chunk. Worst case a character takes 3 UTF-8 bytes (a quote or backslash escapes to 2, anything else in
  * the BMP is at most 3), so a chunk message stays under MAX_CHUNK with room for its envelope.
  */
-const CHUNK_CHARS = 20_000;
-const LOW_WATER = MAX_CHUNK * 4;
 /** M6: a link that has not said hello by then is closed. */
 export const HELLO_TIMEOUT = 15_000;
 /** A pack stream whose send buffer has not drained for this long is dropped. */
@@ -98,17 +103,6 @@ export const STALL_TIMEOUT = 60_000;
 /** B1: live characters per player in the campaign; a new one beyond that is a violation. */
 export const MAX_CHARACTERS = 30;
 
-/** M4: chunk boundaries every CHUNK_CHARS, moved back one unit so a surrogate pair is never split (a binary transport would mangle each half). */
-function cuts(json: string): number[] {
-  const out = [0];
-  while (out.at(-1)! < json.length) {
-    let end = Math.min(out.at(-1)! + CHUNK_CHARS, json.length);
-    const u = json.charCodeAt(end - 1);
-    if (end < json.length && u >= 0xd800 && u <= 0xdbff) end--;
-    out.push(end);
-  }
-  return out;
-}
 
 /** The campaign as players get it, its enabled packs cut to the ones they are offered (M2: no DM-only pack ids). */
 const forPlayers = (camp: Campaign, offers: PackOffer[]) => {
@@ -117,13 +111,6 @@ const forPlayers = (camp: Campaign, offers: PackOffer[]) => {
   return { ...c, enabledPacks: c.enabledPacks.filter((id) => ok.has(id)) };
 };
 
-/** A pack as players get it, serialized, with the hash and byte size of exactly that JSON (R6). Undefined when nothing may be sent. */
-async function playerPack(p: Pack | undefined): Promise<{ json: string; offer: PackOffer } | undefined> {
-  const fp = p && restorablePack(p) ? packForPlayers(p) : undefined; // never the built-in SRD; never monsters (packForPlayers)
-  if (!fp) return undefined;
-  const json = JSON.stringify(fp);
-  return { json, offer: { id: fp.id, hash: await sha256Text(json), size: new TextEncoder().encode(json).length } };
-}
 
 /** Same record, ignoring updatedAt (the db sets it on every write). */
 const same = (a: Character, b: Character) => canon({ ...a, updatedAt: 0 }) === canon({ ...b, updatedAt: 0 });
@@ -302,6 +289,7 @@ export class Host {
       case 'save': return this.#save(c, c.playerId, msg);
       case 'leap': return this.#leap(c, c.playerId, msg);
       case 'pick': return this.#pick(c, c.playerId, msg);
+      case 'signedChunk': return this.#signedChunk(c, msg);
       case 'endTurn': return this.#endTurn(c, c.playerId, msg.characterId);
       case 'action': return this.#action(c, c.playerId, msg.action);
       case 'clearAction': return this.#actionsChanged(this.#board.clear(c.playerId));
@@ -444,6 +432,34 @@ export class Host {
   }
 
   /** Targeting: a player's own save roll for their character's pending area save (else a violation); a settled one is ignored. */
+  /**
+   * A trusted publisher's own book, in order (the user's ruling: their copy wins). Taken only when the signature checks against a trusted
+   * key, it is a book this device has imported itself (never a shared copy, never a new one), and it is newer than the last signed copy
+   * taken; then every player is offered it. Anything else (a gap, another book midway, too big, a bad signature or book) is dropped.
+   */
+  async #signedChunk(c: Conn, m: Extract<GuestMsg, { t: 'signedChunk' }>): Promise<void> {
+    const u = c.upload;
+    if (u && (u.id !== m.id || u.at !== m.at || u.sig !== m.sig || u.total !== m.total || m.seq !== u.parts.length)) { c.upload = undefined; return; }
+    if (!u && m.seq !== 0) return;
+    const v = c.upload = u ?? { id: m.id, at: m.at, sig: m.sig, total: m.total, parts: [], length: 0 };
+    v.parts.push(m.data);
+    v.length += m.data.length;
+    if (v.length > MAX_PACK) { c.upload = undefined; return; }
+    if (v.parts.length < v.total) return;
+    c.upload = undefined;
+    const json = v.parts.join('');
+    if (!(await verify(this.#deps.trusted ?? TRUSTED_KEYS, v.at, json, v.sig))) return;
+    let p: Pack;
+    try { p = JSON.parse(json); } catch { return; }
+    if (problem(p, SHAPES.pack) || p.id !== v.id || !restorablePack(p) || !packAllowed(p) || !p.entities.every((e) => isRec(e) && entityAllowed(e)) || !p.patches.every((x) => isRec(x) && patchAllowed(x))) return;
+    const mine = await this.#deps.loadPack(p.id);
+    if (!mine || mine.sharedBy !== undefined) return;
+    const { sharedBy: _s, ...book } = p;
+    if (!(await this.#deps.takeSignedPack?.(book, v.at))) return;
+    const camp = await this.#deps.loadCampaign();
+    if (camp) this.#broadcast({ t: 'settings', campaign: forPlayers(camp, await this.#packOffers(camp)) });
+  }
+
   /** Targeting: the player picks the die that sets its own hit's type (Chaos Bolt); only the caster's player, only a type offered. */
   async #pick(c: Conn, pid: string, m: Extract<GuestMsg, { t: 'pick' }>): Promise<void> {
     const camp = await this.#deps.loadCampaign();

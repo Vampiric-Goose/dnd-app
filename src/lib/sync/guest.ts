@@ -13,9 +13,10 @@ import { newCampaignSync, sha256Bytes, sha256Text } from './code.ts';
 import { MAX_AHEAD } from './hlc.ts';
 import type { Link } from './link.ts';
 import { canon, latestClock, mergeCharacter, type Synced } from './merge.ts';
-import type { CampaignForPlayers, HealthStatus, PickPrompt, RosterEntry, SavePrompt, TrackerRow, TrackerView } from './project.ts';
-import { BLOB_CHUNK, cleanRoll, HLC, IMAGE_TYPES, INIT_MAX, INIT_MIN, MAX_BLOB, MAX_MESSAGE, MAX_PACK, PLAYER_ID, size, type Aim, type GuestMsg, type PackOffer, type Preview, type UseOutcome } from './protocol.ts';
+import { playerPack, type CampaignForPlayers, type HealthStatus, type PickPrompt, type RosterEntry, type SavePrompt, type TrackerRow, type TrackerView } from './project.ts';
+import { BLOB_CHUNK, cleanRoll, cuts, HLC, IMAGE_TYPES, INIT_MAX, INIT_MIN, LOW_WATER, MAX_BLOB, MAX_MESSAGE, MAX_PACK, PLAYER_ID, size, type Aim, type GuestMsg, type PackOffer, type Preview, type UseOutcome } from './protocol.ts';
 import { cleanScene, sceneBlobs, type PlayerScene } from './scene.ts';
+import { publicText, sign, TRUSTED_KEYS } from './signing.ts';
 
 export type GuestStatus = 'connecting' | 'online' | 'offline' | 'rejected';
 /** Pack download progress: packs finished (stored or refused) of those wanted, and bytes received of their total. */
@@ -49,6 +50,10 @@ export interface GuestDeps {
   /** Stored pack metadata (db.packs.listMeta) and the pack store (db.packs.put). */
   packMeta(): Promise<PackMeta[]>;
   savePack(p: Pack): Promise<void>;
+  /** Publisher signatures (signing.ts): this device's own imports, its signing key, and the trusted public keys (default TRUSTED_KEYS). */
+  loadPack?(id: string): Promise<Pack | undefined>;
+  signingKey?(): Promise<CryptoKeyPair | undefined>;
+  trusted?: readonly string[];
   onPacks?(p: PackProgress): void;
   onStatus?(s: GuestStatus, reason?: string): void;
   onRoster?(roster: RosterEntry[]): void;
@@ -434,6 +439,32 @@ export class Guest {
     const del = (await this.#deps.loadCampaign(campaign.id))?.sync?.deleted ?? {};
     for (const [id, at] of Object.entries(del)) this.#send({ t: 'deleteChar', id, at });
     await this.#wantPacks(Array.isArray(m.packs) ? m.packs.filter(isOffer) : []);
+    await this.#pushSigned(Array.isArray(m.packs) ? m.packs.filter(isOffer) : []);
+  }
+
+  /**
+   * A trusted publisher's device (its key is in the trusted list) sends its own imported books where the DM's copy differs: signed, in
+   * chunks as the DM's device streams them, so the DM's device takes them in place of its own (the user's ruling: "your copy wins").
+   */
+  async #pushSigned(offers: PackOffer[]): Promise<void> {
+    const key = await this.#deps.signingKey?.(), trusted = this.#deps.trusted ?? TRUSTED_KEYS;
+    if (!key || !this.#deps.loadPack || !trusted.includes(await publicText(key.publicKey))) return;
+    const mine = new Map((await this.#deps.packMeta()).filter((p) => p.sharedBy === undefined).map((p) => [p.id, p]));
+    for (const o of offers) {
+      const p = mine.has(o.id) ? await this.#deps.loadPack(o.id) : undefined, view = p && await playerPack(p);
+      if (!p || !view || view.offer.hash === o.hash) continue; // the DM's copy is this one already
+      const json = JSON.stringify(p), at = this.#deps.now?.() ?? Date.now(), sig = await sign(key.privateKey, at, json);
+      const cut = cuts(json), total = Math.max(1, cut.length - 1);
+      for (let seq = 0; seq < total && this.#link; seq++) {
+        await this.#drained();
+        this.#send({ t: 'signedChunk', id: p.id, at, sig, seq, total, data: json.slice(cut[seq], cut[seq + 1] ?? json.length) });
+      }
+    }
+  }
+
+  /** Resolves once the link's send buffer is low again (checked every 100 ms), or there is no link. */
+  async #drained(): Promise<void> {
+    while (this.#link && (this.#link.bufferedAmount?.() ?? 0) > LOW_WATER) await new Promise((r) => setTimeout(r, 100));
   }
 
   /**

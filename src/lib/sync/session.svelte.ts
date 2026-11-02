@@ -191,6 +191,14 @@ function hostDeps(r: Run, cid: string): HostDeps {
       if (camp) await m.settleSave(cid, rid, target, d20, camp.settings);
       changed(r);
     },
+    // a trusted publisher's signed book replaces this device's own copy, unless it is no newer than the last one taken
+    takeSignedPack: async (p, at) => {
+      if (at <= ((await db.meta.get<number>(`signedAt|${p.id}`)) ?? 0)) return false;
+      await db.packs.put(p);
+      await db.meta.set(`signedAt|${p.id}`, at);
+      changed(r);
+      return true;
+    },
     settlePick: async (rid, target, type) => {
       const [m, camp] = await Promise.all([import('../combat/store.ts'), db.campaigns.get(cid)]);
       if (camp) await m.settlePick(cid, rid, target, type, camp.settings);
@@ -362,6 +370,8 @@ function guestDeps(r: Run): Omit<GuestDeps, 'code' | 'playerId' | 'name' | 'camp
     dropCharacter: ({ campaignId: _c, ...c }) => save(db.characters.putSynced(c)), // M1: kept on this device, out of the campaign
     packMeta: () => db.packs.listMeta(),
     savePack: (p) => save(db.packs.put(p)),
+    loadPack: (id) => db.packs.get(id),
+    signingKey: () => db.meta.get<CryptoKeyPair>('signingKey'),
     onStatus: (s, reason) => guestStatus(r, s, reason),
     onPacks: (p) => { if (live(r)) session.packs = p; },
     onRoster: (x) => { if (live(r)) session.roster = x; },

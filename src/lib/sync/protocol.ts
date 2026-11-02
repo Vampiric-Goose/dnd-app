@@ -11,6 +11,20 @@ import type { CampaignForPlayers, RosterEntry, TrackerView } from './project.ts'
 import type { PlayerScene } from './scene.ts';
 
 export const MAX_MESSAGE = 256 * 1024, MAX_CHUNK = 64 * 1024, MAX_PACK = 64 * 1024 * 1024;
+/** A pack stream's chunk size (characters), and the send buffer below which the next chunk goes. */
+export const CHUNK_CHARS = 20_000, LOW_WATER = MAX_CHUNK * 4;
+/** M4: chunk boundaries every CHUNK_CHARS, moved back one unit so a surrogate pair is never split (a binary transport would mangle each half). */
+export function cuts(json: string): number[] {
+  const out = [0];
+  while (out.at(-1)! < json.length) {
+    let end = Math.min(out.at(-1)! + CHUNK_CHARS, json.length);
+    const u = json.charCodeAt(end - 1);
+    if (end < json.length && u >= 0xd800 && u <= 0xdbff) end--;
+    out.push(end);
+  }
+  return out;
+}
+
 export { INIT_MAX, INIT_MIN } from '../combat/combat.ts'; // one source (M2)
 /** Stage 5: images players get (scene backgrounds, portraits): at most MAX_BLOB bytes, BLOB_CHUNK bytes (60 000 base64 chars) per chunk. */
 export const MAX_BLOB = 8 * 1024 * 1024, BLOB_CHUNK = 45_000;
@@ -29,6 +43,7 @@ export type GuestMsg =
   | { t: 'blobWant'; hashes: string[] /* stage 5: images of the current scene it lacks */ }
   | { t: 'use'; characterId: string; action: string; slot?: number; target?: string /* turn panel: the player's own character does something (a TurnAction id) */; aim?: Aim }
   | { t: 'save'; resolution: string; characterId: string; d20: number /* targeting: the player's own save roll for a pending area save */ }
+  | { t: 'signedChunk'; id: string; at: number; sig: string; seq: number; total: number; data: string /* a trusted publisher's own book, in order (signing.ts) */ }
   | { t: 'pick'; characterId: string; resolution: string; type: string /* targeting: the die picked for a hit waiting on it (Chaos Bolt), by its type */ }
   | { t: 'leap'; characterId: string; resolution: string; aim: Aim /* targeting: a leaping spell's next target (Chaos Bolt), from that result's creature */ }
   | { t: 'endTurn'; characterId: string /* the player's own character ends its turn */ }
@@ -145,6 +160,12 @@ export function parseGuestMessage(raw: unknown): GuestMsg | { error: string } {
       return str(characterId, 100) && str(action, 200) && (slot === undefined || (Number.isInteger(slot) && (slot as number) >= 1 && (slot as number) <= 9))
         && (target === undefined || str(target, 100)) && aim !== null
         ? { t: 'use', characterId, action, ...(slot !== undefined && { slot: slot as number }), ...(target !== undefined && { target: target as string }), ...(aim && { aim }) } : { error: 'bad use' };
+    }
+    case 'signedChunk': {
+      const { id, at, sig, seq, total, data } = raw;
+      return str(id, 200) && Number.isSafeInteger(at) && (at as number) > 0 && str(sig, 200) && Number.isSafeInteger(seq) && Number.isSafeInteger(total) && (total as number) >= 1
+        && (seq as number) >= 0 && (seq as number) < (total as number) && (total as number) <= Math.ceil(MAX_PACK / CHUNK_CHARS) && str(data, CHUNK_CHARS)
+        ? { t: 'signedChunk', id, at: at as number, sig, seq: seq as number, total: total as number, data } : { error: 'bad signedChunk' };
     }
     case 'pick': {
       const { resolution, characterId, type } = raw;

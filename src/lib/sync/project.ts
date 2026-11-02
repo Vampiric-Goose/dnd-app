@@ -4,12 +4,14 @@
 import { budgetApplies, originOf } from '../combat/movement.ts';
 import { attacksPerAction } from '../combat/turnActions.ts';
 import { featureList } from '../character/play.ts';
-import { entityAllowed, packAllowed, patchAllowed } from '../content/sources.ts';
+import { entityAllowed, packAllowed, patchAllowed, restorablePack } from '../content/sources.ts';
 import type { ContentIndex } from '../content/index.ts';
 import { playerCharacter, restoreSecrets } from '../items/playerView.ts';
 import { computeSheet } from '../rules/sheet.ts';
 import type { Ability, Campaign, CampaignSettings, Character, Combat, Movement, Pack } from '../types.ts';
+import { sha256Text } from './code.ts';
 import type { Synced } from './merge.ts';
+import type { PackOffer } from './protocol.ts';
 
 export interface CampaignForPlayers { id: string; name: string; settings: CampaignSettings; enabledPacks: string[] }
 export interface RosterEntry { id: string; ownerId: string; name: string; portrait?: string; race: string; classes: string; level: number; hp: number; maxHp: number; conditions: string[] }
@@ -134,3 +136,11 @@ export const characterForPlayer = (c: Synced<Character>): Synced<Character> => p
  * state (quantity, equipped, attuned, notes) is kept, and entries new to the DM stay as they are. The host runs it before mergeCharacter.
  */
 export const unprojectCharacter = (incoming: Synced<Character>, stored: Synced<Character>): Synced<Character> => restoreSecrets(incoming, stored);
+
+/** A pack as players get it, serialized, with the hash and byte size of exactly that JSON (R6). Undefined when nothing may be sent. */
+export async function playerPack(p: Pack | undefined): Promise<{ json: string; offer: PackOffer } | undefined> {
+  const fp = p && restorablePack(p) ? packForPlayers(p) : undefined; // never the built-in SRD; never monsters (packForPlayers)
+  if (!fp) return undefined;
+  const json = JSON.stringify(fp);
+  return { json, offer: { id: fp.id, hash: await sha256Text(json), size: new TextEncoder().encode(json).length } };
+}
