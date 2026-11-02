@@ -1,7 +1,8 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, test } from 'vitest';
 import { checkPick, endedSummons, scaleSummon, summonCombatants, summonCount, summonOptions } from '../../src/lib/combat/summons.ts';
-import { updateCombat } from '../../src/lib/combat/store.ts';
+import { applyResolution, undoResolution, updateCombat } from '../../src/lib/combat/store.ts';
+import { DEFAULT_SETTINGS } from '../../src/lib/settings.ts';
 import { db, resetDb } from '../../src/lib/db.ts';
 import { newScene } from '../../src/lib/map/scene.ts';
 import { summon } from '../../src/lib/map/store.ts';
@@ -68,6 +69,17 @@ describe('with the database (one roster)', () => {
     await updateCombat('c1', (c) => ({ ...c, combatants: c.combatants.map((x) => (x.id === 'pc:m' ? { ...x, concentrating: false } : x)) }));
     expect((await db.combat.get('c1'))!.combatants.map((x) => x.id)).toEqual(['pc:m']);
     expect((await db.scenes.get(sc.id))!.tokens.map((x) => x.name)).toEqual(['Mira']);
+  });
+  // final-review minor: Undo of the hit that dropped a summon brings it back (the DM's map puts its token back, placeUnplaced)
+  test('Undo of the hit that dropped a summon brings it back', async () => {
+    const caster = cb({ id: 'pc:m', kind: 'pc', name: 'Mira', characterId: 'm', init: 15, concentrating: true, concentratingOn: 'Summon Test', concentrationCount: 1 });
+    await updateCombat('c1', () => ({ campaignId: 'c1', round: 1, turn: 'pc:m', groupMonsters: false, updatedAt: 0, combatants: [caster] }));
+    const [added] = await summon('c1', 'pc:m', [scaleSummon(spirit, { level: 2, attack: 5 })], { spell: 'Summon Test', cast: 1, share: true, hpMode: 'average' });
+    await applyResolution('c1', { id: 'r1', actor: 'pc:m', action: 'Hit', outcomes: [{ id: added.id, part: 'hit', hit: true, damage: 999 }], at: 0 }, DEFAULT_SETTINGS);
+    expect((await db.combat.get('c1'))!.combatants.map((x) => x.id)).toEqual(['pc:m']);
+    await undoResolution('c1', 'r1', DEFAULT_SETTINGS);
+    const back = (await db.combat.get('c1'))!.combatants.find((x) => x.id === added.id);
+    expect([back?.hp, back?.summon?.spell]).toEqual([added.hp, 'Summon Test']);
   });
 });
 

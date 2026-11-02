@@ -9,7 +9,7 @@ import { rollSpellDice, spellMods } from './spellEffects.ts';
 import { castLive, endedSpells, snapOf, touched } from './aiming.ts';
 import { canon } from '../sync/merge.ts';
 import { uid } from '../uid.ts';
-import { addMonsters, concentrationDc, turnIds, encounterPicks, initOk, monsterHp, newCombat, next, patchCombatant, removeStep, rollInit, setInit, start, type Expired, type HpOp, type Step } from './combat.ts';
+import { addCombatants, addMonsters, concentrationDc, turnIds, encounterPicks, initOk, monsterHp, newCombat, next, patchCombatant, removeStep, rollInit, setInit, start, type Expired, type HpOp, type Step } from './combat.ts';
 import { restoreCombat, restoreScene, snapshotFight } from './encounters.ts';
 import { BLOCKING } from './economy.ts';
 import { endedSummons } from './summons.ts';
@@ -193,11 +193,11 @@ export async function applyResolution(cid: string, r: Omit<Resolution, 'applied'
   const was: Snap = { combatants: { ...extra.combatants, ...was0.combatants }, states: { ...extra.states, ...was0.states } };
   const applied: Applied[] = [];
   for (const o of r.outcomes) if (o.damage > 0 && !o.pending) applied.push(await hurtOne(cid, o.id, o.damage, o.nat === 20 && o.part !== 'save', settings));
-  for (const o of r.outcomes) { // a helpful spell: healing, and temporary hit points (they don't stack: the higher stays)
+  const inflicted = await inflict(cid, r, r.outcomes.flatMap((o) => (o.inflict ?? []).map((condition) => ({ id: o.id, condition, ...(o.save && { bonus: o.save.total - o.save.roll }) }))));
+  for (const o of r.outcomes) { // a helpful spell: healing (after its condition: Aid's higher maximum), and temp HP (the higher stays)
     if (o.heal) await changeHp(cid, o.id, { heal: o.heal }, settings);
     if (o.temp && o.temp > (await hpOf(cid, o.id)).temp) await changeHp(cid, o.id, { temp: o.temp }, settings);
   }
-  const inflicted = await inflict(cid, r, r.outcomes.flatMap((o) => (o.inflict ?? []).map((condition) => ({ id: o.id, condition, ...(o.save && { bonus: o.save.total - o.save.roll }) }))));
   if (r.rider || r.spent) await update(cid, (c) => ({ ...c, combatants: c.combatants.map((x) => (x.id !== r.actor ? x : r.rider ? { ...x, rider: r.rider } : (({ rider: _r, ...rest }) => rest)(x))) }));
   const after = await snapNow(cid, ids);
   return serial(() => update(cid, (c) => ({ ...c, resolutions: kept(c, [...(c.resolutions ?? []), { ...r, applied, ...(inflicted.length && { inflicted }), undo: { before: was, after } }]) })));
@@ -275,9 +275,14 @@ export const undoResolution = (cid: string, rid: string, settings: CampaignSetti
     for (const [chId, b] of Object.entries(before.states)) {
       if (after.states[chId]) await editCharacter(chId, (c) => ({ ...c, state: restore(c.state, b, after.states[chId], computeSheet(c, { settings, viewer: 'dm' }).maxHp) }));
     }
-    return update(cid, (c) => ({ ...c,
-      combatants: c.combatants.map((x) => (before.combatants[x.id] && after.combatants[x.id] ? restore(x, before.combatants[x.id], after.combatants[x.id], x.maxHp ?? Infinity) : x)),
-      resolutions: (c.resolutions ?? []).filter((x) => x.id !== rid) }));
+    // a summon the result dropped (it left the fight at 0 HP) comes back as it was; the DM's map puts its token back (placeUnplaced)
+    const back = Object.values(before.combatants).filter((x) => x.summon && !after.combatants[x.id]);
+    return update(cid, (c0) => {
+      const c = back.length ? { ...addCombatants(c0, back), reordered: c0.reordered } : c0;
+      return { ...c,
+        combatants: c.combatants.map((x) => (before.combatants[x.id] && after.combatants[x.id] ? restore(x, before.combatants[x.id], after.combatants[x.id], x.maxHp ?? Infinity) : x)),
+        resolutions: (c.resolutions ?? []).filter((x) => x.id !== rid) };
+    });
   }
   for (const a of r.applied) { // a result stored before Undo kept states: its HP only
     const x = had.combatants.find((y) => y.id === a.id);

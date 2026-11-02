@@ -266,3 +266,12 @@ test('a helpful spell heals and gives temp HP (the higher stays); Undo takes the
   await undoResolution('c1', 'h1', settings);
   expect(await hp('g1')).toBe(2);
 });
+
+// Final-review minor: Aid raises current hit points too, even at full health (the condition goes on before the healing).
+test('Aid on a PC at full HP raises its current HP by 5', async () => {
+  const c = (await db.characters.get('p'))!, max = computeSheet(c, { settings, viewer: 'dm' }).maxHp;
+  await db.characters.put({ ...c, state: { ...c.state, hp: max } });
+  await applyResolution('c1', res('a1', [{ id: 'pc:p', damage: 0, inflict: ['Aid'], heal: 5 }], { action: 'Aid' }), settings);
+  const after = (await db.characters.get('p'))!;
+  expect([after.state.conditions, computeSheet(after, { settings, viewer: 'dm' }).maxHp, after.state.hp]).toEqual([['Aid'], max + 5, max + 5]);
+});

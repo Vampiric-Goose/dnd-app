@@ -47,6 +47,10 @@ export const SPELL_RULES: Record<string, Partial<SpellRead>> = {
   "tenser's transformation": { save: undefined, manual: 'The extra force damage on weapon hits and the Constitution save at the end are by hand.' },
   // a buff whose save is the attacker's (a fiend or undead that hits): aimed at allies, the save by hand
   'holy aura': { save: undefined, conditions: undefined, manual: 'A fiend or undead that hits a creature in it makes the Constitution save by hand.' },
+  // the caster's own advantage, never an enemy's
+  'true strike': { range: 'self' },
+  // current hit points rise with the maximum (SPELL_EFFECTS); ponytail: the 2nd-level 5, as there
+  aid: { heal: { dice: '5', mod: false }, manual: 'Higher slots add 5 more each to both: by hand.' },
   'wrath of nature': { manual: 'Only the trees’ slashing is automated: the roots, vines and hurled rocks are by hand.' },
   // fight-changing, but nothing a roll or a number here can carry: the cast says so
   ...Object.fromEntries(Object.entries({

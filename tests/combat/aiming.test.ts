@@ -1,9 +1,10 @@
 import { describe, expect, test } from 'vitest';
 import { aimPlan, pickableAt, startsIn, workOut, type WorkIn } from '../../src/lib/combat/aiming.ts';
 import { targetOf } from '../../src/lib/combat/resolve.ts';
+import { readSpell } from '../../src/lib/combat/spellText.ts';
 import type { TurnAction } from '../../src/lib/combat/turnActions.ts';
 import { DEFAULT_GRID } from '../../src/lib/map/scene.ts';
-import type { Combat, Combatant, Resolution, Scene } from '../../src/lib/types.ts';
+import type { Combat, Combatant, Resolution, Scene, SpellDef } from '../../src/lib/types.ts';
 
 // What an action needs to be aimed, and the DM's own monster attack worked out on the scene (the host's player path is in sync tests).
 const cell = (q: number, r = 0) => ({ x: 35 + 70 * q, y: 35 + 70 * r });
@@ -253,4 +254,15 @@ describe('save spells on several creatures', () => {
     expect(await run(['b', 'b'])).toBe('pick each creature once');
     expect(await run(['b', 'c', 'd', 'e'])).toBe('too many targets');
   });
+});
+
+// Final-review minors: True Strike is the caster's own (no enemy to pick); Aid heals 5 as it raises maximum HP.
+test('True Strike goes on the caster; Aid heals 5 with its condition', () => {
+  const sp = (name: string, p: string, level: number): TurnAction => {
+    const read = readSpell({ name, level, range: '30 feet', text: [{ p }] } as unknown as SpellDef);
+    return { id: 's', name, cost: 'action', group: 'spell', spell: { id: 's', level, concentration: false }, cast: { read, attack: 5, dc: 13, charLevel: 3, mod: 3 } };
+  };
+  const ts = aimPlan(sp('True Strike', 'You point a finger at a target in range.', 0))!;
+  expect([ts.reach, ts.helps]).toEqual(['self', { max: 1 }]);
+  expect(aimPlan(sp('Aid', 'Choose up to three creatures within range. Each target\'s hit point maximum and current hit points increase by 5 for the duration.', 2))!.dice).toEqual([{ expr: '5', type: 'healing' }]);
 });

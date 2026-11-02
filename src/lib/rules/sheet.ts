@@ -139,7 +139,7 @@ export function computeSheet(c: Character, opts: SheetOpts): Sheet {
     const roll = i === 0 ? die : (c.build.levels[i].hpRoll ?? (die ? averageHp(die) : 0));
     const extra = hpPer.filter(b => !b.classId || b.classId === s.classId).reduce((n, b) => n + num(b.effect.value, b.classId), 0);
     return t + Math.max(1, roll + mods.con + extra);
-  }, 0) + bonus('hpMax')); // Aid
+  }, 0)) + bonus('hpMax'); // Aid: on top of an overridden maximum too (it's temporary)
   const dice: Record<number, number> = {};
   for (const s of steps) if (s.cls) dice[s.cls.hitDie] = (dice[s.cls.hitDie] ?? 0) + 1;
   const hitDice = Object.entries(dice).map(([d, total]) => ({ die: Number(d), total })).sort((a, b) => b.die - a.die);
