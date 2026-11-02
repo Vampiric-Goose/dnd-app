@@ -13,8 +13,8 @@ import { newCampaignSync, sha256Bytes, sha256Text } from './code.ts';
 import { MAX_AHEAD } from './hlc.ts';
 import type { Link } from './link.ts';
 import { canon, latestClock, mergeCharacter, type Synced } from './merge.ts';
-import type { CampaignForPlayers, HealthStatus, RosterEntry, TrackerRow, TrackerView } from './project.ts';
-import { BLOB_CHUNK, cleanRoll, HLC, IMAGE_TYPES, INIT_MAX, INIT_MIN, MAX_BLOB, MAX_MESSAGE, MAX_PACK, PLAYER_ID, size, type GuestMsg, type PackOffer, type Preview } from './protocol.ts';
+import type { CampaignForPlayers, HealthStatus, RosterEntry, SavePrompt, TrackerRow, TrackerView } from './project.ts';
+import { BLOB_CHUNK, cleanRoll, HLC, IMAGE_TYPES, INIT_MAX, INIT_MIN, MAX_BLOB, MAX_MESSAGE, MAX_PACK, PLAYER_ID, size, type Aim, type GuestMsg, type PackOffer, type Preview, type UseOutcome } from './protocol.ts';
 import { cleanScene, sceneBlobs, type PlayerScene } from './scene.ts';
 
 export type GuestStatus = 'connecting' | 'online' | 'offline' | 'rejected';
@@ -67,6 +67,8 @@ export interface GuestDeps {
   onActions?(list: PlayerAction[]): void;
   /** Turn panel: the DM's device turned down a use (nothing was spent). */
   onRefused?(reason: string): void;
+  /** Targeting: what the DM's device made of this player's aimed use. */
+  onOutcome?(o: UseOutcome): void;
   onError?(e: unknown): void;
   now?(): number;
 }
@@ -131,7 +133,18 @@ export function cleanTracker(v: unknown): TrackerView | undefined {
         && { econ: { used: r.econ.used as number, extra: r.econ.extra as number, attacks: r.econ.attacks as number, perAction: r.econ.perAction as number, bonus: r.econ.bonus === true, light: r.econ.light === true, surged: r.econ.surged === true, haste: r.econ.haste === true, hasted: r.econ.hasted === true, object: r.econ.object === true, readied: r.econ.readied === true, bonusSpell: r.econ.bonusSpell === true, leveledSpell: r.econ.leveledSpell === true, reaction: r.econ.reaction === true, conc: r.econ.conc === true } })}];
   })).slice(0, MAX_ROWS);
   const current = rows.some((r) => r.id === v.current) ? v.current as string : undefined;
-  return { round: v.round as number, ...(current !== undefined && { current }), rows, ...(v.ask === true && v.round === 0 && { ask: true as const }) };
+  const saves = Array.isArray(v.saves) ? v.saves.slice(0, 20).flatMap((x): SavePrompt[] =>
+    isRec(x) && s(x.resolution, 100) && s(x.characterId, 100) && typeof x.ability === 'string' && ABILITY.includes(x.ability) && fin(x.dc) && s(x.spell, 200)
+      ? [{ resolution: x.resolution, characterId: x.characterId, ability: x.ability as SavePrompt['ability'], dc: x.dc as number, spell: x.spell }] : []) : [];
+  return { round: v.round as number, ...(current !== undefined && { current }), rows, ...(v.ask === true && v.round === 0 && { ask: true as const }), ...(saves.length && { saves }) };
+}
+const ABILITY = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
+
+/** Targeting: an outcome from the DM's device, rebuilt from its known fields only. */
+export function cleanOutcome(m: unknown): UseOutcome | undefined {
+  if (!isRec(m) || !s(m.action, 200)) return undefined;
+  const caught = Array.isArray(m.caught) ? m.caught.filter((n): n is string => s(n, 200)).slice(0, 40) : undefined;
+  return { action: m.action, ...(typeof m.hit === 'boolean' && { hit: m.hit }), ...(fin(m.dc) && { dc: m.dc as number }), ...(caught && { caught }) };
 }
 /** B3: a tombstone clock from the DM, unless it claims a wall time past MAX_AHEAD (then the local clock is used). */
 const fairAt = (at: unknown, now: number): string | undefined =>
@@ -223,9 +236,11 @@ export class Guest {
   }
 
   /** Turn panel: the player's own character uses an action (or ends its turn), sent only while online. The DM's device checks it. */
-  sendUse(characterId: string, action: string, slot?: number, target?: string): void {
-    this.#own(characterId, () => this.#send({ t: 'use', characterId, action, ...(slot !== undefined && { slot }), ...(target !== undefined && { target }) }));
+  sendUse(characterId: string, action: string, slot?: number, target?: string, aim?: Aim): void {
+    this.#own(characterId, () => this.#send({ t: 'use', characterId, action, ...(slot !== undefined && { slot }), ...(target !== undefined && { target }), ...(aim && { aim }) }));
   }
+  /** Targeting: the player's own save roll for their character's pending area save. */
+  sendSave(resolution: string, characterId: string, d20: number): void { this.#own(characterId, () => this.#send({ t: 'save', resolution, characterId, d20 })); }
   sendEndTurn(characterId: string): void { this.#own(characterId, () => this.#send({ t: 'endTurn', characterId })); }
   #own(characterId: string, send: () => void): void {
     void this.#task(async () => {
@@ -334,6 +349,7 @@ export class Guest {
       case 'blobChunk': return this.#blobChunk(m);
       case 'actions': return this.#deps.onActions?.(cleanActions(m.actions));
       case 'useRefused': return this.#deps.onRefused?.(typeof m.reason === 'string' ? m.reason.slice(0, 200) : 'refused');
+      case 'outcome': { const o = cleanOutcome(m); if (o) this.#deps.onOutcome?.(o); return; }
       case 'drag': if (s(m.tokenId, 100) && fin(m.x) && fin(m.y)) this.#deps.onDrag?.({ tokenId: m.tokenId, at: { x: m.x as number, y: m.y as number } }); return;
       case 'dragEnd': if (s(m.tokenId, 100)) this.#deps.onDrag?.({ tokenId: m.tokenId }); return;
     }

@@ -7,19 +7,27 @@ import { idSource, is2024Source, restorablePack } from '../content/sources.ts';
 import type { RollEntry } from '../rolls.svelte.ts';
 import { toBase64 } from '../base64.ts';
 import { budgetApplies, combatantForToken, recordMove } from '../combat/movement.ts';
-import { applyUse, attacksPerAction, characterEffect, editsCharacter, payment, pcActions, problemOf, spendOn } from '../combat/turnActions.ts';
+import { applyUse, attacksPerAction, characterEffect, editsCharacter, payment, pcActions, problemOf, spendOn, type TurnAction } from '../combat/turnActions.ts';
+import { checkFaces, keptD20, resolveAttack, resolveSpell, targetOf, type TargetInfo } from '../combat/resolve.ts';
+import { diceAt } from '../combat/spellText.ts';
+import { attackToggles, canTarget, finalMode, reachOf, targetingOn } from '../combat/targeting.ts';
+import { feetBetween } from '../map/grid.ts';
+import { tokensInTemplate } from '../map/templates.ts';
 import { featureList } from '../character/play.ts';
 import { computeSheet } from '../rules/sheet.ts';
 import { moveTokens } from '../map/scene.ts';
 import { ActionBoard, actionProblem, actionsForPlayers, expiry, type ActionRequest, type DeclaredAction, type PlayerAction } from '../map/actions.ts';
-import type { Campaign, CampaignSettings, CampaignSync, Character, Combat, Pack, PackMeta, Scene } from '../types.ts';
+import type { Ability, Campaign, CampaignSettings, CampaignSync, Character, Combat, Combatant, MonsterDef, Pack, PackMeta, Resolution, Scene } from '../types.ts';
 import { newJoinCode, nextPlayerId, sha256Text } from './code.ts';
 import { hlcNow, hlcReceive, MAX_AHEAD } from './hlc.ts';
 import type { Link } from './link.ts';
 import { canon, latestClock, mergeCharacter, type Synced } from './merge.ts';
 import { campaignForPlayers, characterForPlayer, currentActor, packForPlayers, rosterEntry, trackerForPlayers, unprojectCharacter, type TrackerView } from './project.ts';
 import { uid } from '../uid.ts';
-import { BLOB_CHUNK, cleanRoll, IMAGE_TYPES, MAX_BLOB, MAX_CHUNK, MAX_MESSAGE, MAX_PACK, parseGuestMessage, size, type GuestMsg, type HostMsg, type PackOffer, type Preview } from './protocol.ts';
+import { BLOB_CHUNK, cleanRoll, IMAGE_TYPES, MAX_BLOB, MAX_CHUNK, MAX_MESSAGE, MAX_PACK, parseGuestMessage, size, type Aim, type GuestMsg, type HostMsg, type PackOffer, type Preview, type UseOutcome } from './protocol.ts';
+
+/** Targeting: a player's use worked out, waiting for its payment to go through. */
+type Aimed = { resolution: Omit<Resolution, 'applied'>; outcome: UseOutcome };
 import { moveCost, moveProblem, previewVisible, sceneBlobs, sceneForPlayers, type PlayerScene } from './scene.ts';
 
 export interface HostDeps {
@@ -53,6 +61,12 @@ export interface HostDeps {
   endTurn?(combatantId: string): Promise<void>;
   /** Turn panel: the DM's own edit of a character (a player's slot or resource spent by a use), stamped and synced like any DM edit. */
   editCharacter?(id: string, fn: (c: Character) => Character): Promise<unknown>;
+  /** Targeting: a worked-out use applied on this device (store applyResolution: damage through changeHp, kept for the DM's Undo). */
+  resolve?(r: Omit<Resolution, 'applied'>): Promise<void>;
+  /** Targeting: a player's own save roll for its PC's pending area save (store settleSave). */
+  settleSave?(rid: string, target: string, d20: number): Promise<void>;
+  /** Targeting: a monster's stat block (its saves and defenses). */
+  loadMonster?(id: string): Promise<MonsterDef | undefined>;
   /** Stage 5: the campaign's shown scene (db.scenes.shown). Without it no scene is sent. */
   loadScene?(): Promise<Scene | undefined>;
   /** Stage 5: a player's move, a read-modify-write of the fresh record (db.scenes.update, a network write: not reported). */
@@ -288,6 +302,7 @@ export class Host {
       case 'move': return this.#move(c, c.playerId, msg);
       case 'blobWant': return this.#blobWant(c, msg.hashes);
       case 'use': return this.#use(c, c.playerId, msg);
+      case 'save': return this.#save(c, c.playerId, msg);
       case 'endTurn': return this.#endTurn(c, c.playerId, msg.characterId);
       case 'action': return this.#action(c, c.playerId, msg.action);
       case 'clearAction': return this.#actionsChanged(this.#board.clear(c.playerId));
@@ -344,6 +359,13 @@ export class Host {
     const { level, pact, problem } = payment(a, sheet, ch, m.slot);
     if (problem) return refuse(problem);
     if (a.options && !a.options.some((o) => o.id === m.target)) return refuse('pick one');
+    let aimed: Aimed | undefined;
+    if (m.aim) { // targeting: worked out before anything is paid, so a refusal spends nothing
+      if (!targetingOn(camp.settings) || !this.#deps.resolve) return refuse('targeting is off');
+      const r = await this.#aim(camp, ch, features, a, m.aim, level);
+      if (typeof r === 'string') return refuse(r);
+      aimed = r;
+    }
     const edits = editsCharacter(a, level);
     if (edits && !this.#deps.editCharacter) return refuse('this device cannot spend it');
     const per = attacksPerAction(features);
@@ -358,8 +380,93 @@ export class Host {
     });
     if (why) return refuse(why);
     if (edits && !(await this.#deps.editCharacter!(ch.id, (x) => characterEffect(spendOn(x, level, a.resource, pact), a, m.target)).catch(() => false))) {
-      refuse('the character could not be updated, so nothing was paid');
+      return refuse('the character could not be updated, so nothing was paid');
     }
+    if (aimed) {
+      await this.#deps.resolve!(aimed.resolution);
+      this.#send(c, { t: 'outcome', ...aimed.outcome });
+    }
+  }
+
+  /**
+   * Targeting: a player's aimed use checked and worked out on this device (resolve.ts). The target must be visible and in reach or range
+   * on the shown scene (PHB range, close-combat disadvantage), the dice must fit the action, and an area catches every token in it, hidden
+   * ones too. The player hears only hit or miss, a spell's DC and the names of the visible creatures caught. A string: why not.
+   */
+  async #aim(camp: Campaign, ch: Character, features: { name: string }[], a: TurnAction, aim: Aim, level: number | undefined): Promise<Aimed | string> {
+    const k = await this.#deps.loadCombat?.(), s = await this.#deps.loadScene?.();
+    if (!k || !s) return 'no map';
+    const x = combatantForToken(k, { characterId: ch.id });
+    const tokenOf = (id: string) => s.tokens.find((t) => combatantForToken(k, t)?.id === id);
+    const me = x && tokenOf(x.id);
+    if (!x || !me) return 'not on the map';
+    const feet = (p: { x: number; y: number }) => feetBetween(s.grid, me, p, camp.settings.diagonal);
+    const target = aim.target === undefined ? undefined : k.combatants.find((z) => !z.hidden && (z.id === aim.target || this.#aliases.get(z.id) === aim.target));
+    const tt = target && tokenOf(target.id);
+    if (aim.target !== undefined && !tt) return 'pick a target';
+    const reach = reachOf(a);
+    if (!reach) return 'that cannot be aimed';
+    const out = (z: Combatant) => (z.conditions ?? []).some((c) => /incapacitated|paralyzed|petrified|stunned|unconscious/i.test(c));
+    const foe = k.combatants.some((z) => z.kind === 'monster' && !z.hidden && !out(z) && (() => { const t = tokenOf(z.id); return !!t && feet(t) <= 5; })());
+    const chars = await this.#deps.loadCharacters();
+    const infoOf = async (z: Combatant): Promise<TargetInfo> => {
+      const pc = z.characterId ? chars.find((c) => c.id === z.characterId) : undefined;
+      return pc ? targetOf(z, { sheet: computeSheet(pc, { settings: camp.settings, viewer: 'dm' }) }) : targetOf(z, { monster: z.monsterId ? await this.#deps.loadMonster?.(z.monsterId) : undefined });
+    };
+    const base = { id: uid(), actor: x.id, action: a.name, at: this.#deps.now?.() ?? Date.now() };
+    if (a.attack) {
+      if (!target || !tt) return 'pick a target';
+      const w = a.attack, dist = feet(tt), ranged = !!w.ranged || (reach !== 'self' && reach.melee !== undefined && dist > reach.melee);
+      const pick = canTarget(reach, dist, foe, ranged);
+      if (!pick.ok) return 'out of range';
+      const rolled = { ...aim.rolled, mode: finalMode(aim.rolled.mode, pick.disadvantage) };
+      if (!rolled.d20?.length || (rolled.mode && rolled.d20.length < 2)) return 'bad d20';
+      const toggles = attackToggles(a, features.map((f) => f.name)).filter((t) => aim.toggles.includes(t.id));
+      const dmg = [{ expr: w.damage, type: w.damageType }, ...toggles.map((t) => ({ expr: String(t.damage), type: w.damageType }))];
+      const crit = keptD20(rolled) === 20;
+      const bad = checkFaces(dmg.map((d) => ({ expr: d.expr, crit })), rolled);
+      if (bad) return bad;
+      const magical = ch.inventory.find((e) => e.id === w.entryId)?.item.magic ?? false;
+      const o = resolveAttack(await infoOf(target), w.toHit + toggles.reduce((n, t) => n + t.toHit, 0), dmg, rolled, magical);
+      return { resolution: { ...base, outcomes: [o] }, outcome: { action: a.name, hit: !!o.hit } };
+    }
+    const read = a.cast?.read;
+    if (!read || !a.spell || (!read.attack && !read.save)) return 'that cannot be aimed';
+    if (read.attack && !target) return 'pick a target';
+    if (tt && !canTarget(reach, feet(tt), foe, read.attack === 'ranged').ok) return 'out of range';
+    const point = aim.point ?? (tt && { x: tt.x, y: tt.y });
+    const area = read.burst && tt ? { shape: 'sphere' as const, feet: read.burst, self: false } : read.area;
+    if (area && !area.self && (!point || (reach !== 'self' && reach.spell !== undefined && feet(point) > reach.spell))) return 'out of range';
+    if (!area && read.save && !target) return 'pick a target';
+    const origin = area?.self ? { x: me.x, y: me.y } : point!;
+    const caught = area ? tokensInTemplate({ shape: area.shape, origin, aim: aim.point ?? origin, feet: area.feet, ...(area.width && { width: area.width }) }, s.grid, s.tokens)
+      .map((id) => combatantForToken(k, s.tokens.find((t) => t.id === id)!)).filter((z): z is Combatant => !!z && !(area.self && z.id === x.id)) : [];
+    const rolled = aim.rolled;
+    if (read.attack && rolled.d20?.length !== 1 && !rolled.mode) return 'bad d20';
+    const crit = !!read.attack && !!rolled.d20?.length && keptD20(rolled) === 20;
+    const dice = diceAt(read, { slot: level ?? a.spell.level, level: a.spell.level, charLevel: a.cast!.charLevel, mod: a.cast!.mod }).damage
+      .map((d, i) => { const [expr, ...type] = d.split(' '); return { expr, type: type.join(' '), ...(read.damage[i]?.on && { on: read.damage[i].on }) }; });
+    const bad = checkFaces(dice.map((d) => ({ expr: d.expr, crit: crit && d.on !== 'save' })), rolled);
+    if (bad) return bad;
+    const outcomes = resolveSpell(read, dice, a.cast!.dc, a.cast!.attack, target && await infoOf(target), await Promise.all(caught.map(infoOf)), rolled, Math.random);
+    const name = (z: Combatant) => (z.characterId ? chars.find((c) => c.id === z.characterId)?.name : undefined) ?? z.name;
+    const hit = outcomes.find((o) => o.part === 'hit')?.hit;
+    return {
+      resolution: { ...base, outcomes, ...(read.save && { dc: a.cast!.dc, ability: read.save.toLowerCase() as Ability, onSave: read.onSave }) },
+      outcome: { action: a.name, ...(hit !== undefined && { hit }), ...(read.save && a.cast!.dc !== undefined && { dc: a.cast!.dc }),
+        ...(area && { caught: caught.filter((z) => !z.hidden).map(name) }) },
+    };
+  }
+
+  /** Targeting: a player's own save roll for their character's pending area save (else a violation); a settled one is ignored. */
+  async #save(c: Conn, pid: string, m: Extract<GuestMsg, { t: 'save' }>): Promise<void> {
+    const camp = await this.#deps.loadCampaign();
+    const ch = await this.#deps.loadCharacter(m.characterId);
+    if (!camp || !ch || ch.ownerId !== pid || ch.campaignId !== camp.id) return this.#violation(c, 'not their character');
+    const k = await this.#deps.loadCombat?.();
+    const x = k && combatantForToken(k, { characterId: ch.id });
+    const r = x && k.resolutions?.find((y) => y.id === m.resolution && y.outcomes.some((o) => o.id === x.id && o.pending));
+    if (r) await this.#deps.settleSave?.(r.id, x.id, m.d20);
   }
 
   /** Turn panel: the player's own character (else a violation) ends its turn, only while it really holds the turn (not a hidden creature's after it); else ignored. */

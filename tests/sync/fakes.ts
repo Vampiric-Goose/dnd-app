@@ -27,6 +27,7 @@ export class Device {
   other: unknown[] = []; // records the engine must never read (DM monsters, homebrew items)
   rolls: { e: RollEntry; from?: string }[] = [];
   errors: unknown[] = [];
+  settled: { rid: string; target: string; d20: number }[] = [];
   wall: () => number;
   constructor(wall: () => number = Date.now) { this.wall = wall; }
 
@@ -91,6 +92,18 @@ export class Device {
       updateCombat: async (fn) => (this.combat ? clone(this.combat = clone(fn(clone(this.combat)))) : undefined),
       endTurn: async (id) => { if (this.combat?.turn === id) this.combat = next(this.combat).combat; },
       editCharacter: async (id, fn) => { const c = this.char(id); if (c) this.edit(fn(c)); return !!c; },
+      // targeting: damage straight off (no temp HP or dying here; the store's own tests cover those), the result kept
+      resolve: async (r) => {
+        if (!this.combat) return;
+        for (const o of r.outcomes) {
+          if (o.pending || o.damage <= 0) continue;
+          const x = this.combat.combatants.find((y) => y.id === o.id), c = x?.characterId ? this.char(x.characterId) : undefined;
+          if (c) this.edit({ ...c, state: { ...c.state, hp: Math.max(0, c.state.hp - o.damage) } });
+          else if (x) x.hp = Math.max(0, (x.hp ?? 0) - o.damage);
+        }
+        this.combat = { ...this.combat, resolutions: [...(this.combat.resolutions ?? []), { ...r, applied: [] }] };
+      },
+      settleSave: async (rid, target, d20) => { this.settled.push({ rid, target, d20 }); },
       ...(this.map && {
         loadScene: async () => (this.scene?.shown ? clone(this.scene) : undefined),
         updateScene: async (id: string, fn: (s: Scene) => Scene) => {

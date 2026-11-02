@@ -4,14 +4,14 @@
 import { db, hostOffKey, onLocalChange, TRASH_CAP } from '../db.ts';
 import { addRemoteRoll, rollHooks } from '../rolls.svelte.ts';
 import { app, getIndex, refreshCampaigns, setCampaign } from '../store.svelte.ts';
-import type { Campaign } from '../types.ts';
+import type { Campaign, MonsterDef } from '../types.ts';
 import { newCampaignSync, newJoinCode, peerIdFor } from './code.ts';
 import { RELAY_KEY, storedRelay } from './relay.ts';
 import type { Guest, GuestDeps, GuestStatus, PackProgress } from './guest.ts';
 import type { Host, HostDeps } from './host.ts';
 import type { Listener, Transport } from './link.ts';
 import type { RosterEntry, TrackerView } from './project.ts';
-import type { Preview } from './protocol.ts';
+import type { Aim, Preview, UseOutcome } from './protocol.ts';
 import type { PlayerScene } from './scene.ts';
 import type { Pt } from '../map/grid.ts';
 import type { ActionBoard, ActionRequest, DeclaredAction, PlayerAction } from '../map/actions.ts';
@@ -44,6 +44,8 @@ export const session = $state({
   retryAt: undefined as number | undefined,
   /** Declared actions on the map: all of them on the DM's device, the visible ones (as the DM sent them) on a player's. */
   actions: [] as (DeclaredAction | PlayerAction)[],
+  /** Player, targeting: what the DM's device made of this player's last aimed use (`at`: when it arrived). */
+  outcome: undefined as (UseOutcome & { at: number }) | undefined,
   /** Live drag previews from others (token id → where it is being dragged), dropped on dragEnd or after DRAG_TTL without updates. Never stored. */
   drags: {} as Record<string, Pt>,
 });
@@ -179,6 +181,17 @@ function hostDeps(r: Run, cid: string): HostDeps {
     updateCombat: (fn) => db.combat.update(cid, (c) => c && fn(c)).then((c) => (changed(r), c)), // the DM's tracker re-reads (session.rev)
     endTurn: (id) => import('../combat/store.ts').then((m) => m.turn(cid, 'next', id)).then(() => changed(r)),
     editCharacter: (id, fn) => import('../combat/store.ts').then((m) => m.editCharacter(id, fn)).then((ok) => (changed(r), ok)),
+    resolve: async (res) => {
+      const [m, camp] = await Promise.all([import('../combat/store.ts'), db.campaigns.get(cid)]);
+      if (camp) await m.applyResolution(cid, res, camp.settings);
+      changed(r);
+    },
+    settleSave: async (rid, target, d20) => {
+      const [m, camp] = await Promise.all([import('../combat/store.ts'), db.campaigns.get(cid)]);
+      if (camp) await m.settleSave(cid, rid, target, d20, camp.settings);
+      changed(r);
+    },
+    loadMonster: async (id) => ((await db.monsters.get(id)) as MonsterDef | undefined) ?? ((await getIndex(cid)).resolve(id) as MonsterDef | undefined),
     loadScene: () => db.scenes.shown(cid),
     updateScene: (id, fn) => db.scenes.update(id, fn, { network: true }).then((s) => (changed(r), s)),
     loadBlob: async (hash) => { const b = await db.blobs.get(hash); return b && { type: b.type, data: await b.arrayBuffer() }; },
@@ -348,6 +361,7 @@ function guestDeps(r: Run): Omit<GuestDeps, 'code' | 'playerId' | 'name' | 'camp
     onPacks: (p) => { if (live(r)) session.packs = p; },
     onRoster: (x) => { if (live(r)) session.roster = x; },
     onRefused: (reason) => { if (live(r)) void import('../toast.svelte.ts').then((m) => m.toast(`Not done: ${reason}.`, true)); },
+    onOutcome: (o) => { if (live(r)) session.outcome = { ...o, at: Date.now() }; },
     onTracker: (t) => { if (live(r)) session.tracker = t; },
     onScene: (s) => { if (live(r)) session.scene = s; },
     onActions: (list) => { if (live(r)) session.actions = list; },
@@ -404,8 +418,11 @@ export function sendDrag(sceneId: string, tokenId: string, at?: Pt): void {
 }
 
 /** Turn panel: the player's own character uses an action, or ends its turn (the guest checks owner and online; the DM checks the rest). */
-export function sendUse(characterId: string, action: string, slot?: number, target?: string): void {
-  run?.guest?.sendUse(characterId, action, slot, target);
+export function sendUse(characterId: string, action: string, slot?: number, target?: string, aim?: Aim): void {
+  run?.guest?.sendUse(characterId, action, slot, target, aim);
+}
+export function sendSave(resolution: string, characterId: string, d20: number): void {
+  run?.guest?.sendSave(resolution, characterId, d20);
 }
 export function sendEndTurn(characterId: string): void {
   run?.guest?.sendEndTurn(characterId);
