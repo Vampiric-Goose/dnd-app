@@ -3,7 +3,7 @@ import { beforeEach, expect, test } from 'vitest';
 import { db, resetDb } from '../../src/lib/db.ts';
 import { rawFile, upgradeImports } from '../../src/lib/import/fivetools/upgrade.ts';
 import { CONVERTER_5E } from '../../src/lib/import/version.ts';
-import type { ItemDef, Pack, RaceDef, SubraceDef } from '../../src/lib/types.ts';
+import type { ItemDef, Pack, RaceDef, SpellDef, SubraceDef } from '../../src/lib/types.ts';
 import { readFixture, run, srdIdx } from '../fixtures/import.ts';
 
 beforeEach(resetDb);
@@ -41,4 +41,18 @@ test('a copy shared by the DM is left alone; with no raw records only the versio
   expect(await upgradeImports(async () => srdIdx)).toBe(0);
   expect((await db.packs.get(p.id))!.hash).toBe('shared');
   expect(await db.meta.get('converter5e')).toBe(CONVERTER_5E);
+});
+
+test('an upgrade keeps a spell\'s class lists: they came from the spell-source file, which is not kept raw', async () => {
+  const res = await run({
+    'spells.json': { spell: [{ name: 'Testpult', source: 'TST', level: 1, school: 'V', time: [{ number: 1, unit: 'action' }], range: { type: 'point', distance: { type: 'feet', amount: 60 } }, entries: ['Fling.'] }] },
+    'gendata-spell-source-lookup.json': { tst: { testpult: { class: { PHB: { Wizard: true, Sorcerer: true } } } } },
+  });
+  const p = res.packs.find((x) => x.source === 'TST')!;
+  const spellOf = (q: Pack) => q.entities.find((e) => e.name === 'Testpult') as SpellDef;
+  expect([...spellOf(p).classes].sort()).toEqual(['sorcerer', 'wizard']);
+  await db.packs.put({ ...p, hash: 'old' });
+  await db.raw5e.putMany(res.raw);
+  await upgradeImports(async () => srdIdx);
+  expect([...spellOf((await db.packs.get(p.id))!).classes].sort()).toEqual(['sorcerer', 'wizard']);
 });

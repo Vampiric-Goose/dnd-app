@@ -10,7 +10,13 @@ import { import5etools, mergePack } from './index.ts';
 export function upgradedPack(stored: Pack, fresh: Pack): Pack {
   const made = new Set(fresh.entities.map((e) => e.id));
   const kept = { ...stored, entities: stored.entities.filter((e) => !(e.kind === 'item' && (e as ItemDef).baseItemId && !made.has(e.id))) };
-  return mergePack(kept, fresh);
+  // A spell's class lists come from the spell-source file, which isn't kept raw: a re-converted spell keeps the lists it was imported with.
+  const was = new Map(stored.entities.map((e) => [e.id, e]));
+  const entities = fresh.entities.map((e) => {
+    const old = was.get(e.id);
+    return e.kind === 'spell' && !e.classes.length && old?.kind === 'spell' && old.classes.length ? { ...e, classes: old.classes } : e;
+  });
+  return mergePack(kept, { ...fresh, entities });
 }
 
 /** Groups raw records by their 5etools key (the raw key's first part) into one file the importer reads; the homebrew sources this device
