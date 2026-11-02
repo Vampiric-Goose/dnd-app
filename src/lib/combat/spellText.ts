@@ -52,6 +52,8 @@ export interface SpellRead {
   rays?: { count: number; above?: number; byLevel?: true };
   /** It leaps this far from its target to another when its dice match (Chaos Bolt). */
   leap?: number;
+  /** A hit cuts the target's speed by `feet` until the start of the caster's next turn (Ray of Frost). */
+  slow?: { feet: number };
   /** Extra damage on the caster's weapon hits (`type` '' = the weapon's): the next hit only (`once`), or hits on a creature it marks. */
   rider?: { dice: string; type: string; once?: true; marked?: true; anyAttack?: true };
   area?: SpellArea;
@@ -111,6 +113,8 @@ export function readSpell(s: Pick<SpellDef, 'text' | 'level' | 'range'> & { name
   if (conds.length) out.conditions = conds;
   if (mech?.scaling && s.level === 0) out.scaling = mech.scaling;
   if (/at the end of each of its turns[^.]*saving throw/i.test(t)) out.repeat = true;
+  const slow = /speed is reduced by (\d+) feet until the start of your next turn/i.exec(t);
+  if (slow) out.slow = { feet: +slow[1] };
   const lasts = /(\d+) (round|minute|hour)s?/i.exec(s.duration ?? '');
   if (lasts) out.rounds = +lasts[1] * ({ round: 1, minute: 10, hour: 600 } as Record<string, number>)[lasts[2].toLowerCase()];
   if (out.save) out.onSave = /half as much damage on a successful/i.test(t) ? 'half' : 'none';

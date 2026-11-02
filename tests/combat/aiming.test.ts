@@ -130,6 +130,12 @@ describe('workOut on the DM\'s map', () => {
     const r = await workOut({ ...base(moon, { dmg: [] }), aim: { point: cell(0), rolled: { dmg: [] }, toggles: [] } });
     expect(r).toMatchObject({ resolution: { outcomes: [], linger: { dice: [{ expr: '2d10', type: 'radiant' }], read: { save: 'Con' }, dc: 13 } } });
   });
+  test('a slowing ray: a hit leaves a condition named after the spell with its speed cut, for one round; a miss leaves nothing', async () => {
+    const frost = { ...spell({ attack: 'ranged', slow: { feet: 10 }, damage: [{ dice: '1d8', type: 'cold' }] }), name: 'Ray of Frost' };
+    expect(await workOut(base(frost, { d20: [18, 18], dmg: [[4]] }))).toMatchObject({ resolution: { rounds: 1, outcomes: [{ id: 'pc:thorin', hit: true, inflict: ['Ray of Frost (speed −10 ft)'] }] } });
+    const miss = await workOut(base(frost, { d20: [2, 2], dmg: [[4]] }));
+    expect(typeof miss !== 'string' && miss.resolution.outcomes[0].inflict).toBeFalsy();
+  });
   test('Hex on a spell attack: its dice ride each hit on the marked creature', async () => {
     const bolt = spell({ attack: 'ranged', damage: [{ dice: '1d10', type: 'fire' }] });
     const hexed = (on: string) => workOut({ ...base(bolt, { d20: [18, 18], dmg: [[5], [3]] }), actor: { ...k.combatants[0], rider: { spell: 'Hex', dice: '1d6', type: 'necrotic', target: on, anyAttack: true } } });

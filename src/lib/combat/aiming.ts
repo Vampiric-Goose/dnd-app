@@ -244,11 +244,14 @@ export async function workOut(i: WorkIn): Promise<Aimed | string> {
   // a lasting spell's effect also leaves a condition named after the spell (the user's standard: Hold Monster, Hex, Haste)
   const lasts = !!(a.spell?.concentration || read.rounds);
   const named = (o: Outcome): Outcome => (!lasts ? o : o.inflict ? { ...o, inflict: [...o.inflict, a.name] } : o.inflicts ? { ...o, inflicts: [...o.inflicts, a.name] } : o);
+  // a slowing hit (Ray of Frost): a condition named after the spell that carries the cut, to the start of the caster's next turn
+  const slowed = (o: Outcome): Outcome => (read.slow && o.part === 'hit' && o.hit ? { ...o, inflict: [...(o.inflict ?? []), `${a.name} (speed −${read.slow.feet} ft)`] } : o);
+  const rounds = read.rounds ?? (read.slow ? 1 : undefined);
   return {
-    resolution: { ...base, outcomes: outcomes.map(withWhy).map(named), ...(placed && { caught: caught.map((z) => z.id), area: placed, sceneId: s.id, round: k.round }),
+    resolution: { ...base, outcomes: outcomes.map(withWhy).map(named).map(slowed), ...(placed && { caught: caught.map((z) => z.id), area: placed, sceneId: s.id, round: k.round }),
       ...(plan.linger && { linger: { ...plan.linger, ...(plan.linger.read.save && a.cast!.dc !== undefined && { dc: a.cast!.dc }) } }),
       ...(read.leap && target && { chain: [...(i.leapFrom?.exclude ?? []), target.id] }),
-      ...(a.spell?.concentration ? { lasting: true as const } : read.rounds && { rounds: read.rounds }), ...(read.repeat && { repeat: true as const }), ...(read.save && { dc: a.cast!.dc, ability: read.save.toLowerCase() as Ability, onSave: read.onSave }) },
+      ...(a.spell?.concentration ? { lasting: true as const } : rounds && { rounds }), ...(read.repeat && { repeat: true as const }), ...(read.save && { dc: a.cast!.dc, ability: read.save.toLowerCase() as Ability, onSave: read.onSave }) },
     outcome: { action: a.name, ...(hit !== undefined && { hit }), ...(read.save && a.cast!.dc !== undefined && { dc: a.cast!.dc }),
       ...(area && { caught: caught.filter((z) => !z.hidden && (i.seen?.(z) ?? true)).map(i.nameOf) }), ...(outcomes.some((o) => o.leap) && { leap: i.id }) },
   };

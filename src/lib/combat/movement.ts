@@ -9,7 +9,9 @@ export const STOP_CONDITIONS: readonly string[] = ['grappled', 'restrained', 'pa
 /** Walk speed after conditions and exhaustion (computeSheet applies neither): 0 when stopped or at exhaustion 5+, halved at 2–4. */
 export function effectiveSpeed(walk: number, conditions: readonly string[], exhaustion = 0): number {
   if (exhaustion >= 5 || conditions.some((n) => STOP_CONDITIONS.includes(n.toLowerCase()))) return 0;
-  return exhaustion >= 2 ? Math.floor(walk / 10) * 5 : walk;
+  // a spell's slow is a condition that names its cut: "Ray of Frost (speed −10 ft)"
+  const cut = conditions.reduce((n, c) => n + Number(/speed [−-](\d+) ft/i.exec(c)?.[1] ?? 0), 0), w = Math.max(0, walk - cut);
+  return exhaustion >= 2 ? Math.floor(w / 10) * 5 : w;
 }
 
 /** Where the token stood when its turn's movement began, if sound (an old saved fight's `{ feet, dashes }` entry has none). */

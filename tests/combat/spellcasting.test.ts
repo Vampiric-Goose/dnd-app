@@ -254,3 +254,9 @@ test('a mark that pays off on any attack (Hex) rides spell attacks too; one on w
   expect(readSpell(fix('90 feet', 'You curse a creature. Until the spell ends, you deal an extra 1d6 necrotic damage to the target whenever you hit it with an attack.')).rider)
     .toEqual({ dice: '1d6', type: 'necrotic', marked: true, anyAttack: true });
 });
+
+test('a hit that slows: its speed cut, read from the wording', () => {
+  expect(readSpell(fix('60 feet', 'Make a ranged spell attack. On a hit, it takes 1d8 cold damage, and its speed is reduced by 10 feet until the start of your next turn.')).slow).toEqual({ feet: 10 });
+  expect(readSpell(spell('Ray of Frost')).slow).toEqual({ feet: 10 });
+  expect(readSpell(spell('Fire Bolt')).slow).toBeUndefined();
+});

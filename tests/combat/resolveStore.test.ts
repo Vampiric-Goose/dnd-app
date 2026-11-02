@@ -219,3 +219,10 @@ describe('final review fixes: a running spell is keyed to its casting', () => {
     expect(await conds('g1')).toEqual(['Paralyzed', 'Hold Monster']);
   });
 });
+
+test('a slowing hit leaves its speed cut until the start of the caster\'s next turn', async () => {
+  await applyResolution('c1', res('r1', [{ id: 'g1', hit: true, damage: 0, inflict: ['Ray of Frost (speed −10 ft)'] }], { actor: 'g2', action: 'Ray of Frost', rounds: 1 }), settings);
+  const g1 = (await db.combat.get('c1'))!.combatants.find((x) => x.id === 'g1')!;
+  expect(g1.conditions).toEqual(['Ray of Frost (speed −10 ft)']);
+  expect(g1.durations).toEqual({ 'Ray of Frost (speed −10 ft)': { rounds: 1, at: 'start', of: 'g2' } });
+});

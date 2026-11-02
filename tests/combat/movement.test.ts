@@ -24,6 +24,11 @@ describe('speed and budget', () => {
     expect(effectiveSpeed(30, ['prone'])).toBe(30);
     expect(effectiveSpeed(30, [], 1)).toBe(30);
   });
+  test('effectiveSpeed: a condition that names a speed cut (Ray of Frost) takes it off; cuts add up, never below 0', () => {
+    expect(effectiveSpeed(30, ['Ray of Frost (speed −10 ft)'])).toBe(20);
+    expect(effectiveSpeed(30, ['Ray of Frost (speed −10 ft)', 'Other (speed −15 ft)'])).toBe(5);
+    expect(effectiveSpeed(10, ['Ray of Frost (speed −10 ft)', 'Other (speed −15 ft)'])).toBe(0);
+  });
   test('refundable: used = grid distance from the turn origin to the token now; moving back gives it back', () => {
     const m = { from: at(sq, 0, 0), dashes: 0 };
     expect(remainingFeet(30, undefined, at(sq, 3, 0), sq, '5-5-5')).toBe(30); // no origin yet: nothing used
