@@ -173,7 +173,7 @@
       : shown.filter((a) => inKind(a, kind) && sectionOf(a) === sec).sort((p, q) => Number(p.cost === 'none') - Number(q.cost === 'none'))}
     {#if list.length}
       {@const shared = list.every((a) => problem(a) === problem(list[0])) ? problem(list[0]) : undefined}
-      <h3>{label}{#if shared}<span class="small">{` · ${shared}`}</span>{/if}</h3>
+      <h3 class:cast={kind === 'spell'}>{label}{#if shared}<span class="small">{` · ${shared}`}</span>{/if}</h3>
       <ul class="plain list">{#each list as a (a.id)}<li>{@render entry(a, true, shared)}</li>{/each}</ul>
     {/if}
   {/each}
@@ -465,6 +465,23 @@
   .actions h3 {
     margin: 0.9rem 0 0.2rem;
     font-size: 0.95rem;
+    color: var(--muted);
+  }
+
+  /* Spells: the casting-time headers split one long list, so they stand out */
+  .actions h3.cast {
+    margin-top: 1.2rem;
+    padding-bottom: 0.25rem;
+    border-bottom: 2px solid var(--accent);
+    font-size: 1.1rem;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .actions h3.cast .small {
+    text-transform: none;
+    letter-spacing: normal;
     color: var(--muted);
   }
 
