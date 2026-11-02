@@ -7,7 +7,7 @@
   import SettingsGroup from '../SettingsGroup.svelte';
   import HostPanel from '../sync/HostPanel.svelte';
 
-  type Bool = { [K in keyof CampaignSettings]: CampaignSettings[K] extends boolean ? K : never }[keyof CampaignSettings];
+  type Bool = { [K in keyof CampaignSettings]-?: CampaignSettings[K] extends boolean ? K : never }[keyof CampaignSettings];
   type Module = keyof CampaignSettings['initiativeModules'];
 
   const rules: [Bool, string, string][] = [
