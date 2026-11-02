@@ -131,7 +131,7 @@ export async function workOut(i: WorkIn): Promise<Aimed | string> {
   const { a, aim, combat: k, scene: s, actor } = i;
   const plan = aimPlan(a, { level: i.level, features: i.features, toggles: attackToggles(a, i.features).filter((t) => aim.toggles.includes(t.id)), dtype: aim.dtype });
   if (!plan) return 'that cannot be aimed';
-  if (plan.dice.some((d) => !d.type) && plan.choices) return 'pick a damage type';
+  if (plan.dice.some((d) => !d.type) && plan.choices && !plan.read?.typeFromDie) return 'pick a damage type';
   const tokenOf = (id: string) => s.tokens.find((t) => combatantForToken(k, t)?.id === id);
   const me = tokenOf(actor.id);
   if (!me) return 'not on the map';

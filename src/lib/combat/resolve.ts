@@ -46,15 +46,35 @@ export const keptD20 = (r: Rolled): number => {
  */
 export const roundDamage = (x: number, pc: boolean): number => (pc ? Math.ceil(x - 1e-9) : Math.floor(x + 1e-9));
 
-function hurt(t: TargetInfo, dice: { expr: string; type: string }[], faces: number[][], crit: boolean, magical: boolean): { damage: number; note?: string } {
+function hurt(t: TargetInfo, dice: { expr: string; type: string }[], faces: number[][], crit: boolean, magical: boolean, pick?: SpellRead['typeFromDie']): { damage: number; note?: string } {
   let damage = 0;
   const notes: string[] = [];
   dice.forEach((d, i) => {
-    const r = afterDefenses(totalOf(d.expr, faces[i] ?? [], crit) ?? 0, d.type, t.defenses, magical);
+    const amount = totalOf(d.expr, faces[i] ?? [], crit) ?? 0;
+    const tries = !d.type && pick ? firstTwo(d.expr, faces[i] ?? [], pick.sides, crit).map((f) => ({ f, type: pick.types[f - 1] ?? '' })) : [];
+    if (pick && tries.length) { // the caster's pick of the dice, made for them: the type that hurts this target more
+      const best = tries.map((c) => ({ ...c, r: afterDefenses(amount, c.type, t.defenses, magical) })).reduce((a, b) => (b.r.amount > a.r.amount ? b : a));
+      damage += best.r.amount;
+      notes.push(`${best.type} (d${pick.sides} ${best.f})`, ...(best.r.note ? [best.r.note] : []));
+      return;
+    }
+    const r = afterDefenses(amount, d.type, t.defenses, magical);
     damage += r.amount;
     if (r.note && !notes.includes(r.note)) notes.push(r.note);
   });
   return { damage: roundDamage(damage, t.pc), ...(notes.length && { note: notes.join(', ') }) };
+}
+
+/** The first two faces rolled for the dice with `sides` sides in `expr`. */
+function firstTwo(expr: string, faces: number[], sides: number, crit: boolean): number[] {
+  let i = 0;
+  for (const t of parseDice(expr)) {
+    if ('const' in t) continue;
+    const n = crit ? t.count * 2 : t.count;
+    if (t.sides === sides) return faces.slice(i, i + Math.min(2, n));
+    i += n;
+  }
+  return [];
 }
 
 const attackRoll = (t: TargetInfo, toHit: number, r: Rolled): { hit: boolean; roll: number; nat?: 20 | 1 } => {
@@ -81,10 +101,10 @@ export function resolveSpell(read: SpellRead, dice: { expr: string; type: string
   const hitDice = read.attack ? idx.filter((d) => d.on !== 'save') : [], saveDice = read.attack ? idx.filter((d) => d.on === 'save') : idx;
   if (read.attack && target && toHit !== undefined) {
     const a = attackRoll(target, toHit, r);
-    out.push({ id: target.id, part: 'hit', ...a, ac: target.ac, ...(a.hit ? hurt(target, hitDice, hitDice.map((d) => d.faces), a.nat === 20 || autoCrit, true) : { damage: 0 }) });
+    out.push({ id: target.id, part: 'hit', ...a, ac: target.ac, ...(a.hit ? hurt(target, hitDice, hitDice.map((d) => d.faces), a.nat === 20 || autoCrit, true, read.typeFromDie) : { damage: 0 }) });
   }
   // ponytail: darts that always hit all go to the one target; split them between several when someone needs it
-  if (read.auto && target) out.push({ id: target.id, part: 'hit', hit: true, ...hurt(target, idx, idx.map((d) => d.faces), false, true) });
+  if (read.auto && target) out.push({ id: target.id, part: 'hit', hit: true, ...hurt(target, idx, idx.map((d) => d.faces), false, true, read.typeFromDie) });
   if (!read.save || dc === undefined) return out;
   const ability = ABILITY[read.save] ?? 'dex';
   const owed = saveDice.map((d) => ({ amount: totalOf(d.expr, d.faces, false) ?? 0, type: d.type }));

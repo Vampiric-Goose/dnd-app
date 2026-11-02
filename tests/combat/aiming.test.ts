@@ -94,6 +94,13 @@ describe('workOut on the DM\'s map', () => {
     expect(await workOut(at('fire'))).toMatchObject({ resolution: { outcomes: [{ hit: true, damage: 6 }] } });
     expect(await workOut(at('acid'))).toMatchObject({ resolution: { outcomes: [{ hit: true, damage: 12 }] } });
   });
+  test('Chaos Bolt: of the two d8s, the type that hurts more', async () => {
+    const bolt = spell({ attack: 'ranged', damage: [{ dice: '2d8+1d6', type: '' }], choices: ['acid', 'cold', 'fire'],
+      typeFromDie: { sides: 8, types: ['acid', 'cold', 'fire', 'force', 'lightning', 'poison', 'psychic', 'thunder'] } });
+    const rolled = { d20: [18, 18], dmg: [[3, 2, 4]] }; // d8s 3 (fire) and 2 (cold)
+    const r = await workOut({ ...base(bolt, rolled), info: (z: Combatant) => ({ ...targetOf(z, {}), ac: 14, defenses: { resist: ['fire'], immune: [], vulnerable: [] } }) });
+    expect(r).toMatchObject({ resolution: { outcomes: [{ hit: true, damage: 9, note: 'cold (d8 2)' }] } });
+  });
   test('darts that always hit: no d20, all the damage to the one target', async () => {
     const darts = spell({ auto: { count: 3, above: 1 }, damage: [{ dice: '1d4+1', type: 'force' }] });
     expect(aimPlan(darts)).toMatchObject({ attack: false, dice: [{ expr: '3d4+3' }] });

@@ -2,11 +2,14 @@
 // Spellcasting trait. Anything the wording doesn't say plainly is left out; the spell's text stays one tap away in the panel.
 import { richToPlain } from '../content/richtext.ts';
 import { spellLine } from '../monsters/library.ts';
-import type { RichText, SpellDef, Trait } from '../types.ts';
+import type { Ability, RichText, SpellDef, SpellMech, Trait } from '../types.ts';
+import { SPELL_RULES } from './spellRules.ts';
 import type { Shape } from '../map/templates.ts';
 
 const TYPES = 'acid|bludgeoning|cold|fire|force|lightning|necrotic|piercing|poison|psychic|radiant|slashing|thunder';
 const WORDS: Record<string, number> = { two: 2, three: 3, four: 4, five: 5 };
+const ABILITY_OF: Record<string, Ability> = { strength: 'str', dexterity: 'dex', constitution: 'con', intelligence: 'int', wisdom: 'wis', charisma: 'cha' };
+const SHORT: Record<Ability, string> = { str: 'Str', dex: 'Dex', con: 'Con', int: 'Int', wis: 'Wis', cha: 'Cha' };
 const SAVES: Record<string, string> = { strength: 'Str', dexterity: 'Dex', constitution: 'Con', intelligence: 'Int', wisdom: 'Wis', charisma: 'Cha' };
 
 /** An area of effect; `self`: it starts from the caster (range Self), else from a point the caster picks. */
@@ -33,16 +36,28 @@ export interface SpellRead {
   perSlot?: { dice: string; above: number; step: number };
   /** A cantrip whose damage grows at 5th, 11th and 17th level. */
   scales?: boolean;
+  /** A cantrip's damage dice by character level, from the book (wins over `scales`). */
+  scaling?: Record<number, string>;
+  /** Conditions a failed save inflicts, as the app names them ('Paralyzed'). */
+  conditions?: string[];
+  /** The type of `''` damage is the face of one of the first two dice with these sides (Chaos Bolt's d8s). */
+  typeFromDie?: { sides: number; types: string[] };
+  /** Why it can't be fully automated, shown where it is cast. */
+  manual?: string;
   area?: SpellArea;
 }
 
-export function readSpell(s: Pick<SpellDef, 'text' | 'level' | 'range'> & { higherLevels?: RichText }): SpellRead {
+/** What a spell does. Trust: a one-off rule (spellRules.ts), then the book's tags (`mech`), then the wording. */
+export function readSpell(s: Pick<SpellDef, 'text' | 'level' | 'range'> & { name?: string; mech?: SpellMech; higherLevels?: RichText }): SpellRead {
   const t = richToPlain(s.text), h = s.higherLevels ? richToPlain(s.higherLevels) : t;
   const out: SpellRead = { damage: [] };
   const atk = /make a (melee|ranged) spell attack/i.exec(t);
   if (atk) out.attack = atk[1].toLowerCase() as 'melee' | 'ranged';
   const sv = /(strength|dexterity|constitution|intelligence|wisdom|charisma) saving throw/i.exec(t);
   if (sv) out.save = SAVES[sv[1].toLowerCase()];
+  const mech = s.mech;
+  if (mech?.save?.length) { const named = sv && ABILITY_OF[sv[1].toLowerCase()]; out.save = SHORT[named && mech.save.includes(named) ? named : mech.save[0]]; }
+  if (mech?.attack) out.attack = mech.attack;
   const seen = new Set<string>();
   // the sentence a damage roll sits in says which part deals it, when the spell has both an attack and a save
   const partAt = (i: number): 'hit' | 'save' | undefined => {
@@ -70,6 +85,14 @@ export function readSpell(s: Pick<SpellDef, 'text' | 'level' | 'range'> & { high
     const more = /one more (?:dart|bolt|missile) for each slot level above (\d)/i.exec(h);
     out.auto = { count: WORDS[darts[1].toLowerCase()] ?? +darts[1], ...(more && { above: +more[1] }) };
   }
+  if (mech?.types?.length === 1) {
+    for (const d of out.damage) if (!d.type) d.type = mech.types[0];
+    delete out.choices;
+  } else if (mech?.types && mech.types.length > 1 && out.damage.some((d) => !d.type)) out.choices = mech.types;
+  const conds = mech?.conditions ?? [...new Set([...t.matchAll(/\b(?:be|is|becomes?) (blinded|charmed|deafened|frightened|incapacitated|paralyzed|petrified|poisoned|prone|restrained|stunned|unconscious)\b/gi)]
+    .map((x) => x[1].charAt(0).toUpperCase() + x[1].slice(1).toLowerCase()))];
+  if (conds.length) out.conditions = conds;
+  if (mech?.scaling && s.level === 0) out.scaling = mech.scaling;
   if (out.save) out.onSave = /half as much damage on a successful/i.test(t) ? 'half' : 'none';
   const burst = /each creature within (\d+) feet of (?:it|the target|that creature)\b/i.exec(t);
   if (burst) out.burst = +burst[1];
@@ -94,7 +117,9 @@ export function readSpell(s: Pick<SpellDef, 'text' | 'level' | 'range'> & { high
   else if (out.save && (m = /\b(?:each|all)(?: other)? creatures? (?:you choose )?within (\d+) feet of you\b/i.exec(t))) out.area = { shape: 'sphere', feet: +m[1], self: true };
   else if (out.save && typeof range === 'object' && /each creature (?:within range|other than you in that area)/i.test(t)) out.area = { shape: 'sphere', feet: range.feet, self: true };
   // ponytail: a bare "N-foot radius" is often light or an aura (Light), not an area of effect: only an explicit sphere or cylinder counts
-  return out;
+  if (out.save && mech?.area && !out.area && !out.burst) out.area = { shape: mech.area.shape, feet: mech.area.feet, self: true };
+  const rule = s.name ? SPELL_RULES[s.name.toLowerCase()] : undefined;
+  return rule ? { ...out, ...rule } : out;
 }
 
 /** `count`d`size` + more of the same die, or the two side by side. */
@@ -117,7 +142,9 @@ export function diceAt(r: SpellRead, o: { slot?: number; level: number; charLeve
   const tier = (o.charLevel ?? 1) >= 17 ? 4 : (o.charLevel ?? 1) >= 11 ? 3 : (o.charLevel ?? 1) >= 5 ? 2 : 1;
   const damage = r.damage.map((d, i) => {
     let dice = d.dice;
-    if (r.scales && i === 0) dice = dice.replace(/^(\d+)d/, (_, c) => `${+c * tier}d`);
+    const lvl = r.scaling && Object.keys(r.scaling).map(Number).filter((k) => k <= (o.charLevel ?? 1)).sort((a, b) => b - a)[0];
+    if (r.scaling && i === 0 && lvl !== undefined) dice = r.scaling[lvl];
+    else if (r.scales && i === 0) dice = dice.replace(/^(\d+)d/, (_, c) => `${+c * tier}d`);
     if (!r.heal && i === 0 && r.perSlot) dice = addDice(dice, r.perSlot.dice, n);
     if (r.auto && i === 0) dice = timesDice(dice, r.auto.count + (r.auto.above !== undefined && o.slot !== undefined ? Math.max(0, o.slot - r.auto.above) : 0));
     return `${dice}${d.mod ? signedMod(o.mod ?? 0) : ''} ${d.type}`;

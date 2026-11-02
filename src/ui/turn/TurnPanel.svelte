@@ -226,7 +226,7 @@
           {#each freeSlots(a) as l}<option value={l}>Level {l}</option>{/each}
         </select>
       {/if}
-      {@const choices = a.cast?.read.choices}
+      {@const choices = a.cast?.read.typeFromDie ? undefined : a.cast?.read.choices}
       {#if choices}
         <select aria-label="{a.name} damage type" value={typeFor[a.id] ?? choices[0]} onchange={(ev) => (typeFor[a.id] = (ev.currentTarget as HTMLSelectElement).value)}>
           {#each choices as c}<option value={c}>{c}</option>{/each}

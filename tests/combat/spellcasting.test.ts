@@ -69,6 +69,33 @@ describe('reading a spell (the interpreter)', () => {
 
 // More wording, from paraphrased fixtures: areas around the caster named by distance, damage whose type is chosen, darts that always hit.
 const fix = (range: string, p: string, h?: string) => ({ level: 1, range, text: [{ p }], ...(h && { higherLevels: [{ p: h }] }) }) as unknown as SpellDef;
+describe('reading a spell: one-off rule, then book mechanics, then wording', () => {
+  test('mechanics fill what the wording lacks; the rule table wins over both', () => {
+    const plain = fix('120 feet', 'A bolt of energy flies at the target, which takes 2d8 damage.');
+    expect(readSpell({ ...plain, mech: { attack: 'ranged', types: ['fire'] } })).toMatchObject({ attack: 'ranged', damage: [{ dice: '2d8', type: 'fire' }] });
+    const burst = fix('Self (10-foot radius)', 'Every creature nearby makes a Dexterity saving throw or takes 2d6 fire damage.');
+    expect(readSpell({ ...burst, mech: { area: { shape: 'sphere', feet: 10 } } }).area).toEqual({ shape: 'sphere', feet: 10, self: true });
+    expect(readSpell({ ...fix('120 feet', 'Make a ranged spell attack. On a hit, the target takes 2d8 + 1d6 damage.'), name: 'Chaos Bolt' }).typeFromDie?.sides).toBe(8);
+  });
+  test('two listed saves: the one the wording names', () => {
+    expect(readSpell({ ...fix('60 feet', 'The target makes a Strength saving throw or falls.'), mech: { save: ['dex', 'str'] } }).save).toBe('Str');
+    expect(readSpell({ ...fix('60 feet', 'The target resists or falls.'), mech: { save: ['dex', 'str'] } }).save).toBe('Dex');
+  });
+  test('without mechanics the reading is unchanged', () => {
+    expect(readSpell(spell('Fireball'))).toEqual(readSpell({ ...spell('Fireball'), mech: undefined }));
+  });
+  test('scaling dice from the book table', () => {
+    const r = readSpell({ ...fix('5 feet', 'Each creature within range must make a Constitution saving throw or take 1d6 thunder damage.'), level: 0,
+      mech: { scaling: { 1: '1d6', 5: '2d6', 11: '3d6', 17: '4d6' } } });
+    expect(diceAt(r, { level: 0, charLevel: 11 }).damage[0]).toBe('3d6 thunder');
+    expect(diceAt(r, { level: 0, charLevel: 4 }).damage[0]).toBe('1d6 thunder');
+  });
+  test('conditions from the wording, or from the book', () => {
+    expect(readSpell(fix('60 feet', 'The target must succeed on a Wisdom saving throw or be paralyzed for the duration.')).conditions).toEqual(['Paralyzed']);
+    expect(readSpell({ ...fix('60 feet', 'The target must succeed on a Wisdom saving throw or be held.'), mech: { conditions: ['Paralyzed'] } }).conditions).toEqual(['Paralyzed']);
+  });
+});
+
 describe('reading a spell: wording without a named shape', () => {
   test('a save against every creature within N feet of you is a burst around the caster; an aura with no save is not', () => {
     expect(readSpell(fix('Self (10-foot radius)', 'Shadows lash all creatures within 10 feet of you. Each one must make a Strength saving throw or take 2d6 necrotic damage.')).area)
