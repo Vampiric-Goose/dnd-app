@@ -133,6 +133,7 @@ export interface Combatant {
   id: string; kind: 'pc' | 'monster' | 'lair'; name: string;
   characterId?: string;                  // pc
   monsterId?: string; ac?: number;       // monster (ac shown to the DM only)
+  portrait?: string;                     // monster: the library's portrait (blob hash), for the token it gets
   group?: string;                        // grouped identical monsters share it (= monsterId) and act as one turn
   init?: number;                         // undefined = not rolled (sorts last)
   initMod: number; dex: number;          // dex: the Dex SCORE, tiebreak 1
@@ -201,7 +202,8 @@ export interface Movement { from?: { x: number; y: number }; dashes: number; /**
 /** A fight saved into an encounter: the whole combat, plus the shown scene's tokens and fog at save time (none when no scene was shown). */
 export interface SavedFight { combat: Combat; map?: { sceneId: string; tokens: Token[]; fog?: string }; savedAt: number }
 /** A prepared encounter (at most 50 lines, each count 1–99), or a saved fight (`fight`, with `monsters` empty). */
-export interface Encounter { id: string; campaignId: string; name: string; monsters: { monsterId: string; name?: string /* when prepared, to name it once it is gone */; count: number }[]; fight?: SavedFight; updatedAt: number }
+export interface Encounter { id: string; campaignId: string; name: string; monsters: { monsterId: string; name?: string /* when prepared, to name it once it is gone */; count: number;
+  /** the library's own touches: a name its creatures take (numbered), a portrait (blob hash), max HP and AC */ label?: string; portrait?: string; hp?: number; ac?: number }[]; fight?: SavedFight; updatedAt: number }
 export interface Attack { entryId: string; name: string; toHit: number; damage: string; damageType: string; versatile?: string; properties: string[]; ranged?: true; range?: [number, number] /* normal, long (ft) */ }
 export interface Sheet {
   totalLevel: number; prof: number; scores: Scores; mods: Scores;
@@ -222,5 +224,6 @@ export interface Sheet {
 export interface Grid { type: 'square' | 'hex-flat' | 'hex-pointy'; size: number /* px between neighbouring cell centres */; offsetX: number; offsetY: number; color: string /* #rrggbb */; opacity: number; feet: number }
 export interface Token { id: string; name: string; x: number; y: number /* centre, scene px */; size: Size; color: string; portrait?: string /* blob hash */; hidden?: boolean;
   characterId?: string; monsterId?: string; hp?: number; maxHp?: number /* monster instance state */; combatantId?: string /* C3: linked monster combatant */;
+  /** a monster's own AC (the library's), DM only: players' scenes never carry it */ ac?: number;
   /** Transient: the squares (token centres, ≤200) walked in the write that set it, ending where it stands; any other write drops it (db.scenes.update). */ trail?: { x: number; y: number }[] }
 export interface Scene { id: string; campaignId: string; name: string; image?: string /* blob hash */; width: number; height: number; grid: Grid; tokens: Token[]; fog?: string /* C */; shown?: boolean; updatedAt: number }

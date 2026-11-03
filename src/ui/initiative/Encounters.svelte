@@ -7,6 +7,7 @@
   import Pill from '../kit/Pill.svelte';
   import { act } from './act.ts';
   import type { FightAnswer, FightAsk } from './FightDialog.svelte';
+  import LineDetails from './LineDetails.svelte';
   import MonsterSearch from './MonsterSearch.svelte';
 
   // `prep`: the Monsters page's library: prepared groups only (no saved fights, no Start; the map's Library tab places them).
@@ -28,16 +29,19 @@
   const MAX_LINES = 50;
 
   const monById = $derived(new Map(pool.map((m) => [m.id, m])));
-  const lineName = (l: Line) => monById.get(l.monsterId)?.name ?? l.name ?? l.monsterId;
+  const lineName = (l: Line) => l.label || (monById.get(l.monsterId)?.name ?? l.name ?? l.monsterId);
+  /** A line with none of the library's own touches (more of the same monster join it). */
+  const plain = (l: Line) => !l.label && !l.portrait && l.hp === undefined && l.ac === undefined;
+  let open: number | undefined = $state();
 
   let editing: { id: string; name: string; lines: Line[] } | undefined = $state();
 
-  const startNew = () => (editing = { id: uid(), name: '', lines: [] });
-  const startEdit = (e: Encounter) => (editing = { id: e.id, name: e.name, lines: e.monsters.map((l) => ({ ...l })) });
+  const startNew = () => { open = undefined; editing = { id: uid(), name: '', lines: [] }; };
+  const startEdit = (e: Encounter) => { open = undefined; editing = { id: e.id, name: e.name, lines: e.monsters.map((l) => ({ ...l })) }; };
 
   function addLine(m: MonsterDef, count: number) {
     if (!editing) return;
-    const had = editing.lines.find((l) => l.monsterId === m.id);
+    const had = editing.lines.find((l) => l.monsterId === m.id && plain(l));
     if (had) had.count = Math.min(99, had.count + count);
     else if (editing.lines.length < MAX_LINES) editing.lines.push({ monsterId: m.id, count, name: m.name });
   }
@@ -46,7 +50,8 @@
     const e = editing;
     if (!e || !e.name.trim()) return;
     const lines = e.lines.filter((l) => Number.isInteger(l.count) && l.count >= 1 && l.count <= 99)
-      .map((l) => { const name = monById.get(l.monsterId)?.name ?? l.name; return { monsterId: l.monsterId, count: l.count, ...(name && { name }) }; });
+      .map((l) => { const name = monById.get(l.monsterId)?.name ?? l.name; return { monsterId: l.monsterId, count: l.count, ...(name && { name }),
+        ...(l.label && { label: l.label }), ...(l.portrait && { portrait: l.portrait }), ...(l.hp !== undefined && { hp: l.hp }), ...(l.ac !== undefined && { ac: l.ac }) }; });
     // Final M5: a failed save keeps the editor open, so the list is not lost.
     let ok = false;
     await act(async () => { await db.encounters.put({ id: e.id, campaignId: campaign.id, name: e.name.trim(), monsters: $state.snapshot(lines), updatedAt: Date.now() }); ok = true; });
@@ -108,27 +113,29 @@
   <h2 id="enc-h" class="sr-only">Encounters</h2>
   {#if editing}
     <div class="editor">
-      <label class="fld"><span class="caption">Encounter name</span><input bind:value={editing.name} maxlength="200" /></label>
+      <label class="fld"><span class="caption">{prep ? 'Group name' : 'Encounter name'}</span><input bind:value={editing.name} maxlength="200" /></label>
       {#if editing.lines.length}
         <ul class="plain lines">
-          {#each editing.lines as l, i (l.monsterId)}
+          {#each editing.lines as l, i (i)}
             <li>
-              <span class="grow">{lineName(l)}</span>
+              <span class="grow">{lineName(l)}{#if l.label}<span class="muted"> ({monById.get(l.monsterId)?.name ?? l.name})</span>{/if}</span>
+              <button type="button" aria-expanded={open === i} aria-label="Details of {lineName(l)}" onclick={() => (open = open === i ? undefined : i)}>Details</button>
               <label class="row"><span class="sr-only">Count</span><input type="number" class="num" min="1" max="99" step="1" inputmode="numeric" aria-label="Count of {lineName(l)}" bind:value={l.count} /></label>
-              <button type="button" class="x" aria-label="Remove {lineName(l)}" onclick={() => editing!.lines.splice(i, 1)}>Remove</button>
+              <button type="button" class="x" aria-label="Remove {lineName(l)}" onclick={() => { editing!.lines.splice(i, 1); open = undefined; }}>Remove</button>
             </li>
+            {#if open === i}<li class="more"><LineDetails bind:line={editing.lines[i]} monster={monById.get(l.monsterId)} /></li>{/if}
           {/each}
         </ul>
       {:else}
         <p class="muted">No monsters yet.</p>
       {/if}
       {#if editing.lines.length < MAX_LINES}
-        <MonsterSearch {pool} label="Add a monster to the encounter" onadd={addLine} />
+        <MonsterSearch {pool} label={prep ? 'Add a monster to the group' : 'Add a monster to the encounter'} onadd={addLine} />
       {:else}
         <p class="muted">An encounter holds at most {MAX_LINES} lines.</p>
       {/if}
       <div class="row">
-        <button type="button" class="primary" disabled={!editing.name.trim()} onclick={save}>Save encounter</button>
+        <button type="button" class="primary" disabled={!editing.name.trim()} onclick={save}>{prep ? 'Save group' : 'Save encounter'}</button>
         <button type="button" onclick={() => (editing = undefined)}>Cancel</button>
       </div>
     </div>
@@ -173,6 +180,10 @@
     display: flex;
     flex-direction: column;
     gap: 0.2rem;
+  }
+
+  .lines li.more {
+    display: block;
   }
 
   .lines li {

@@ -56,8 +56,8 @@ export function restoreScene(s: Scene, f: SavedFight, characterIds: Set<string>)
 /** Library: one more of `m` in a prepared group (its line bumped, at most 99; or a new line, at most 50), or a new group `fresh` holding one. */
 export function withMonster(e: Encounter | undefined, m: Pick<MonsterDef, 'id' | 'name'>, now: number, fresh?: Pick<Encounter, 'id' | 'campaignId' | 'name'>): Encounter {
   const base: Encounter = e ?? { ...fresh!, monsters: [] as Encounter['monsters'], updatedAt: now };
-  const had = base.monsters.some((l) => l.monsterId === m.id);
-  const monsters = had ? base.monsters.map((l) => (l.monsterId === m.id ? { ...l, name: m.name, count: Math.min(99, l.count + 1) } : l))
+  const at = base.monsters.findIndex((l) => l.monsterId === m.id && !l.label && !l.portrait && l.hp === undefined && l.ac === undefined); // a touched line stays itself
+  const monsters = at >= 0 ? base.monsters.map((l, i) => (i === at ? { ...l, name: m.name, count: Math.min(99, l.count + 1) } : l))
     : base.monsters.length < 50 ? [...base.monsters, { monsterId: m.id, name: m.name, count: 1 }] : base.monsters;
   return { ...base, monsters, updatedAt: now };
 }

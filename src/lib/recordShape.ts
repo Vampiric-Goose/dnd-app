@@ -85,7 +85,9 @@ export function characterListProblem(r: unknown): string | undefined {
 export function encounterProblem(r: unknown): string | undefined {
   if (!isRec(r) || typeof r.id !== 'string' || typeof r.campaignId !== 'string' || typeof r.name !== 'string') return 'is incomplete';
   if (!Array.isArray(r.monsters) || r.monsters.length > 50) return 'has a damaged monster list';
-  const i = r.monsters.findIndex((l) => !isRec(l) || typeof l.monsterId !== 'string' || (l.name !== undefined && typeof l.name !== 'string') || !Number.isInteger(l.count) || (l.count as number) < 1 || (l.count as number) > 99);
+  const i = r.monsters.findIndex((l) => !isRec(l) || typeof l.monsterId !== 'string' || (l.name !== undefined && typeof l.name !== 'string') || !Number.isInteger(l.count) || (l.count as number) < 1 || (l.count as number) > 99
+    || (l.label !== undefined && !(typeof l.label === 'string' && l.label.length <= 100)) || !opt(l.portrait, 'string') // the library's own touches
+    || (l.hp !== undefined && !(Number.isInteger(l.hp) && (l.hp as number) >= 1 && (l.hp as number) <= 9999)) || (l.ac !== undefined && !(Number.isInteger(l.ac) && (l.ac as number) >= 0 && (l.ac as number) <= 50)));
   if (i >= 0) return `has a damaged monster line (${i + 1})`;
   const f = r.fight;
   if (f === undefined) return;
@@ -121,7 +123,7 @@ export function tokensProblem(tokens: unknown): string | undefined {
   const i = tokens.findIndex((t) => !isRec(t) || typeof t.id !== 'string' || typeof t.name !== 'string' || !finite(t.x) || !finite(t.y)
     || !SIZES.includes(t.size as string) || typeof t.color !== 'string' || t.name.length > 100 // M4: the optional fields' types too
     || !opt(t.portrait, 'string') || !opt(t.characterId, 'string') || !opt(t.monsterId, 'string') || !opt(t.combatantId, 'string') || !opt(t.hidden, 'boolean')
-    || (t.hp !== undefined && !finite(t.hp)) || (t.maxHp !== undefined && !finite(t.maxHp))
+    || (t.hp !== undefined && !finite(t.hp)) || (t.maxHp !== undefined && !finite(t.maxHp)) || (t.ac !== undefined && !finite(t.ac))
     || (t.trail !== undefined && (!Array.isArray(t.trail) || !t.trail.every((p) => isRec(p) && finite(p.x) && finite(p.y)))));
   if (i >= 0) return `has a damaged token (${i + 1})`;
 }

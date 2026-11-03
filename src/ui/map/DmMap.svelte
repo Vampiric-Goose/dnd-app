@@ -245,7 +245,8 @@
     for (const l of lines) {
       const m = monsterById.get(l.monsterId);
       if (!m) continue;
-      for (const name of numberedNames(m.name, l.count, [...taken, ...out.map((t) => t.name)])) out.push({ ...tokenForMonster(m, name, settings.monsterHp), ...(placeHidden && { hidden: true }) });
+      for (const name of numberedNames(l.label || m.name, l.count, [...taken, ...out.map((t) => t.name)])) out.push({ ...tokenForMonster(m, name, settings.monsterHp),
+        ...(l.hp !== undefined && { hp: l.hp, maxHp: l.hp }), ...(l.ac !== undefined && { ac: l.ac }), ...(l.portrait && { portrait: l.portrait }), ...(placeHidden && { hidden: true }) });
     }
     return out.slice(0, MAX_TOKENS);
   };
@@ -753,10 +754,11 @@
                   <div class="row"><strong class="grow">{g.name}</strong>
                     <button type="button" class="primary" disabled={busy || !g.monsters.length} onclick={() => (staging = { label: g.name, lines: g.monsters })}>Place all</button></div>
                   <ul class="plain">
-                    {#each g.monsters as l (l.monsterId)}
+                    {#each g.monsters as l, i (i)}
                       {@const m = monsterById.get(l.monsterId)}
-                      <li class="row"><span class="grow">{m?.name ?? l.name ?? l.monsterId} <span class="muted">×<span class="num">{l.count}</span></span></span>
-                        <button type="button" disabled={busy || !m} aria-label="Place one {m?.name ?? l.name}" onclick={() => (staging = { label: `a ${m!.name}`, lines: [{ ...l, count: 1 }] })}>Place one</button></li>
+                      {@const shown = l.label || (m?.name ?? l.name ?? l.monsterId)}
+                      <li class="row"><span class="grow">{shown} <span class="muted">×<span class="num">{l.count}</span></span></span>
+                        <button type="button" disabled={busy || !m} aria-label="Place one {shown}" onclick={() => (staging = { label: l.label || `a ${m!.name}`, lines: [{ ...l, count: 1 }] })}>Place one</button></li>
                     {/each}
                   </ul>
                 </li>

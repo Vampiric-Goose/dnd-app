@@ -38,7 +38,7 @@ export function combatantsFromTokens(s: Scene, ids: string[], c: Combat, chars: 
       const m = lookup(t.monsterId);
       if (!m) { missing.push(t.name); continue; }
       const x = monsterCombatant(m, t.name, hpMode, rng);
-      list.push({ ...x, ...(t.hp !== undefined && { hp: t.hp }), ...(t.maxHp !== undefined && { maxHp: t.maxHp }), ...(t.hidden && { hidden: true }) });
+      list.push({ ...x, ...(t.hp !== undefined && { hp: t.hp }), ...(t.maxHp !== undefined && { maxHp: t.maxHp }), ...(t.ac !== undefined && { ac: t.ac }), ...(t.hidden && { hidden: true }) });
       links.set(t.id, x.id);
     }
   }
@@ -91,6 +91,7 @@ export async function placeCombatants(cid: string, added: Combatant[], lookup: (
       return x.kind !== 'monster' || linked.has(x.id) ? [] : [{
         name: x.name, size: (x.monsterId && lookup(x.monsterId)?.size[0]) || 'M', combatantId: x.id,
         ...(x.monsterId && { monsterId: x.monsterId }), ...(x.hp !== undefined && { hp: x.hp }), ...(x.maxHp !== undefined && { maxHp: x.maxHp }), ...(x.hidden && { hidden: true }),
+        ...(x.portrait && { portrait: x.portrait }), ...(x.ac !== undefined && x.monsterId && x.ac !== lookup(x.monsterId)?.ac[0]?.value && { ac: x.ac }), // the library's touches stay with the token
       }];
     });
     const out = list.length ? addTokens(s, list) : s;

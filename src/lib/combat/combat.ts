@@ -13,7 +13,7 @@ export type HpOp = { damage: number; crit?: boolean } | { heal: number } | { tem
 export interface Expired { combatantId: string; condition: string }
 /** `failed` (store only): names of characters whose expired conditions could not be removed (M3). */
 export interface Step { combat: Combat; expired: Expired[]; failed?: string[] }
-type Pick = { monster: MonsterDef; count: number };
+type Pick = { monster: MonsterDef; count: number; label?: string; hp?: number; ac?: number; portrait?: string }; // the last four: a library line's own
 
 export const newCombat = (campaignId: string): Combat => ({ campaignId, combatants: [], round: 0, groupMonsters: false, updatedAt: Date.now(), fightId: uid() });
 
@@ -96,12 +96,13 @@ export function addCombatants(c: Combat, list: Combatant[]): Combat {
 export function addMonsters(c: Combat, picks: Pick[], hpMode: 'average' | 'roll', rng: () => number = Math.random): Combat {
   const list: Combatant[] = [];
   let room = MAX_COMBATANTS - c.combatants.length;
-  for (const { monster, count } of picks) {
+  for (const { monster, count, label, hp, ac, portrait } of picks) {
     const n = Math.min(count, room);
     if (!(n >= 1)) continue;
     room -= n;
     const all = [...c.combatants, ...list];
-    const built = numberedNames(monster.name, n, all.map((x) => x.name)).map((name) => monsterCombatant(monster, name, hpMode, rng));
+    const built = numberedNames(label || monster.name, n, all.map((x) => x.name)).map((name) => ({ ...monsterCombatant(monster, name, hpMode, rng),
+      ...(hp !== undefined && { hp, maxHp: hp }), ...(ac !== undefined && { ac }), ...(portrait && { portrait }) }));
     if (c.groupMonsters) {
       const lead = all.find((x) => x.group === monster.id) ?? built[0];
       for (const b of built) Object.assign(b, { group: monster.id, init: lead.init, tie: lead.tie });
@@ -116,7 +117,7 @@ export function encounterPicks(e: Encounter, lookup: (id: string) => MonsterDef 
   const picks: Pick[] = [], missing: string[] = [];
   for (const l of e.monsters) {
     const m = lookup(l.monsterId);
-    if (m) picks.push({ monster: m, count: l.count }); else missing.push(l.name ?? l.monsterId);
+    if (m) picks.push({ monster: m, count: l.count, label: l.label, hp: l.hp, ac: l.ac, portrait: l.portrait }); else missing.push(l.name ?? l.monsterId);
   }
   return { picks, missing };
 }

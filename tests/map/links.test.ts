@@ -8,6 +8,7 @@ import { addTokens, newScene, tokensFromCombat } from '../../src/lib/map/scene.t
 import { addTokensToCombat, clearFightTokens, combatantsFromTokens, dropTokens, endCombatWriteBack, joinFight, placeCombatants, placeUnplaced, removeCombatant } from '../../src/lib/map/store.ts';
 import type { MonsterDef, Pack, Scene, Sheet } from '../../src/lib/types.ts';
 import { camp, char } from '../fixtures/records.ts';
+import { tokensProblem } from '../../src/lib/recordShape.ts';
 
 const srd: Pack = JSON.parse(fs.readFileSync('src/data/srd.json', 'utf8'));
 const goblin = srd.entities.find((e) => e.id === 'monster:goblin@SRD') as MonsterDef;
@@ -155,4 +156,14 @@ describe('with the database', () => {
     expect((await db.scenes.get(s.id))!.tokens.some((t) => t.id === linked.id)).toBe(false);
     expect((await db.combat.get('c1'))!.combatants.map((x) => x.name).sort()).toEqual(['Goblin 2', 'Thorin']);
   });
+});
+
+test('library: a token’s AC override and a combatant’s portrait carry across the token ↔ fighter link', async () => {
+  const s = addTokens(newScene('c1', 'Cave'), [{ name: 'Snarl', size: 'S', monsterId: goblin.id, ac: 17 }]);
+  const r = combatantsFromTokens(s, s.tokens.map((t) => t.id), newCombat('c1'), [], sheetOf, lookup, 'average', half);
+  expect(r.combat.combatants[0].ac).toBe(17);
+  expect(tokensProblem(s.tokens)).toBeUndefined();
+  await db.scenes.put({ ...newScene('c1', 'Cave'), id: 's9', shown: true });
+  await placeCombatants('c1', [{ ...monsterCombatant(goblin, 'Snarl', 'average', half), portrait: 'b'.repeat(64) }], lookup);
+  expect((await db.scenes.get('s9'))!.tokens[0].portrait).toBe('b'.repeat(64));
 });

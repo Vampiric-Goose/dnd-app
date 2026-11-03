@@ -278,3 +278,9 @@ test('library: adding a monster to a prepared group bumps its line or adds one; 
   expect(withMonster({ ...e, monsters: [{ monsterId: 'g', count: 99 }] }, g, 5).monsters[0].count).toBe(99);
   expect(withMonster(undefined, g, 5, { id: 'n', campaignId: 'c1', name: 'Goblin' })).toMatchObject({ id: 'n', name: 'Goblin', monsters: [{ monsterId: 'g', name: 'Goblin', count: 1 }], updatedAt: 5 });
 });
+
+test('library: adding a monster never bumps a line that has its own name, portrait, HP or AC', () => {
+  const g = { id: 'g', name: 'Goblin' } as unknown as MonsterDef;
+  const e: Encounter = { id: 'e', campaignId: 'c1', name: 'Camp', monsters: [{ monsterId: 'g', name: 'Goblin', count: 1, label: 'Snarl', hp: 20 }], updatedAt: 0 };
+  expect(withMonster(e, g, 5).monsters).toEqual([{ monsterId: 'g', name: 'Goblin', count: 1, label: 'Snarl', hp: 20 }, { monsterId: 'g', name: 'Goblin', count: 1 }]);
+});

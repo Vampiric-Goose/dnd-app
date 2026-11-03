@@ -242,3 +242,12 @@ describe('fix round 1', () => {
     expect(encounterProblem({ ...e, monsters: [{ monsterId: 'x', name: 5, count: 1 }] })).toBeDefined();
   });
 });
+
+test('library: a line’s own name, HP, AC and portrait reach the creatures it makes (Start and Place)', () => {
+  const e: Encounter = { id: 'e', campaignId: 'c1', name: 'Camp', updatedAt: 0, monsters: [{ monsterId: goblin.id, count: 2, label: 'Snarl', hp: 20, ac: 17, portrait: 'a'.repeat(64) }] };
+  const { picks } = encounterPicks(e, (id) => (id === goblin.id ? goblin : undefined));
+  const cs = addMonsters(newCombat('c1'), picks, 'average', half).combatants;
+  expect(cs.map((x) => [x.name, x.hp, x.maxHp, x.ac, x.portrait])).toEqual([['Snarl 1', 20, 20, 17, 'a'.repeat(64)], ['Snarl 2', 20, 20, 17, 'a'.repeat(64)]]);
+  expect(encounterProblem(e)).toBeUndefined();
+  for (const bad of [{ hp: 0 }, { ac: 'x' }, { label: 'n'.repeat(101) }, { portrait: 5 }]) expect(encounterProblem({ ...e, monsters: [{ ...e.monsters[0], ...bad }] })).toBeDefined();
+});
