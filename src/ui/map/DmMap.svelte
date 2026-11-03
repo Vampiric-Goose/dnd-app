@@ -16,7 +16,8 @@
   import { editCharacter, settlePick, turn, undoResolution, updateCombat } from '../../lib/combat/store.ts';
   import { flowCtx } from '../../lib/combat/flowCtx.ts';
   import { guardCast, guardMove, land, settle } from '../../lib/combat/reactionFlow.ts';
-  import { reset as resetReactions } from '../../lib/combat/reactionStack.svelte.ts';
+  import { answer, pass, reactions } from '../../lib/combat/reactionStack.svelte.ts';
+  import { dmAnswers, dmCards } from '../../lib/combat/reactionCard.ts';
   import { aimPlan, ALL_HP, areaRollName, areaRolls, areasOn, foeWithin5, judge, meleeAttack, moveArea, movableAreas, noteEntries, snapOf, touched, workOut, type AimPlan, type AreaKind } from '../../lib/combat/aiming.ts';
   import { monsterAc, resolveSpell, targetOf } from '../../lib/combat/resolve.ts';
   import { targetingOn, type Pickable, type Toggle } from '../../lib/combat/targeting.ts';
@@ -39,6 +40,7 @@
   import GridForm from './GridForm.svelte';
   import { detectSquareGrid } from '../../lib/map/detectGrid.ts';
   import MapCanvas from './MapCanvas.svelte';
+  import ReactionCard, { type Card } from './ReactionCard.svelte';
   import SelectedTokens from './SelectedTokens.svelte';
   import TokenList from './TokenList.svelte';
   import MonsterSearch from '../initiative/MonsterSearch.svelte';
@@ -58,21 +60,30 @@
   let selected: string[] = $state([]);
   let error = $state('');
   let notice = $state('');
-  let busy = $state(false);
+  let working = $state(0);
+  /** Buttons are off while a write runs, but not while it waits on a reaction (Next turn, Undo and Roll stay usable then). */
+  const busy = $derived(working > 0 && !reactions.open.length);
 
   const cid = $derived(campaign.id);
   const settings = $derived(campaign.settings);
   const scene = $derived(scenes.find((s) => s.id === router.query.get('scene')) ?? scenes.find((s) => s.shown) ?? scenes[0]); // W5: a resumed fight's scene is shown
 
-  resetReactions(); // a map that loads closes the asks still open from before (they resolve with no answers)
   /** The reaction flow on this device: this scene, this device's dice; a refused answer goes to its player, else a toast. */
   const flow = () => flowCtx(cid, settings, { scene: async () => (scene ? db.scenes.get(scene.id) : undefined), rollAim, onRefused: (id, why) => void tellRefused(cid, id, why) });
+
+  // The reaction card: what the DM answers for (monsters, PCs whose player isn't connected); a connected player's reactors are only waited on.
+  const reactCards = $derived.by((): Card[] => {
+    const mine = dmAnswers(combat?.combatants ?? [], (id) => chars.find((c) => c.id === id)?.ownerId, session.online), now = Date.now();
+    return dmCards(reactions.open, mine).map((c) => ({ ask: c.ask, trigger: c.trigger, ms: Math.max(0, c.deadline - now), rows: c.mine,
+      ...(c.others.length && { also: c.others.map((r) => ({ id: r.id, name: r.name })) }) }));
+  });
+  const reactPass = (ask: string, id?: string) => { for (const r of id ? [id] : reactCards.find((c) => c.ask === ask)?.rows.map((x) => x.id) ?? []) pass(ask, r); };
 
   const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
   async function run(fn: () => Promise<void>) {
     error = notice = '';
-    busy = true;
-    try { await fn(); } catch (e) { error = msg(e); } finally { busy = false; }
+    working++;
+    try { await fn(); } catch (e) { error = msg(e); } finally { working--; }
   }
 
   async function reload() {
@@ -577,6 +588,8 @@
     {#if notice}<p role="status">{notice}</p>{/if}
   </div>
 </Workspace>
+
+<ReactionCard cards={reactCards} onanswer={(ask, id, o) => void answer(ask, { reactor: id, option: o.id, ...(o.slot !== undefined && { slot: o.slot }) })} onpass={reactPass} />
 
 {#if scenes.length}
   <dialog bind:this={newDialog} aria-labelledby="new-scene-title">

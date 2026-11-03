@@ -46,7 +46,7 @@ const deps = (): HostDeps => ({ ...new Device().hostDeps(CID),
   loadCharacters: () => db.characters.list(CID), loadCharacter: (id) => db.characters.get(id), saveCharacter: (c) => db.characters.putSynced(c).then(() => {}),
   loadCombat: () => db.combat.get(CID), updateCombat: (fn) => db.combat.update(CID, (c) => c && fn(c)), editCharacter: (id, fn) => editCharacter(id, fn),
   loadMonster: async (id) => monsters.get(id), loadScene: () => db.scenes.shown(CID), updateScene: (id, fn) => db.scenes.update(id, fn, { network: true }),
-  resolve: async (r, b, o) => { await land(flow(), r, b, o); }, settleSave: async (rid, t, d) => { await settle(flow(), rid, t, d); },
+  resolve: (r, b, o) => land(flow(), r, b, o), settleSave: async (rid, t, d) => { await settle(flow(), rid, t, d); },
   guardMove: (id, to) => guardMove(flow(), id, to), guardCast: (id, s) => guardCast(flow(), id, s),
   reactions: { open: () => reactions.open, answer, pass, onChange }, onError: (e) => { errors.push(e); } });
 const errors: unknown[] = [];
@@ -97,7 +97,9 @@ test('a player’s attack: the target’s Shield card arrives while the hit ask 
   b.deliver({ t: 'react', ask: card.ask, characterId: 'mira', option: 'shield', slot: 1 });
   await settleHost(host);
   expect((await db.characters.get('mira'))!.state.hp).toBe(20); // 8 + 5 hits AC 10, not AC 15
-  expect((a.got as { t: string }[]).filter((m) => m.t === 'outcome')).toHaveLength(1);
+  const heard = (a.got as { t: string; hit?: boolean }[]).filter((m) => m.t === 'outcome');
+  expect(heard).toHaveLength(1);
+  expect(heard[0].hit).toBe(false); // the attacker hears what Shield made of it, not the roll as thrown
 });
 
 test('using a held spell again is not a cast: no Counterspell ask, and it resolves', async () => {

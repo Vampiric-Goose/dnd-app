@@ -97,6 +97,20 @@ async function hostWithGuest(o: Partial<GuestDeps> = {}) {
 }
 
 describe('DM', () => {
+  test('open reaction asks survive following the same campaign again, and close when another campaign opens', async () => {
+    await db.campaigns.put(hosted());
+    await db.campaigns.put({ ...camp('c2'), id: 'c2' });
+    await refreshCampaigns();
+    await setCampaign(CID);
+    await follow(app.campaign);
+    void ask({ id: 'k9', kind: 'counterspell', trigger: 't', playerTrigger: 'p', waiting: 'x', reactors: [{ id: 'm1', name: 'm1', options: [{ id: 'counterspell', label: 'Counter', slot: 3 }] }] });
+    await follow(app.campaign); // the campaign list re-read (a new object, the same campaign): the card stays
+    expect(reactions.open.map((o) => o.id)).toEqual(['k9']);
+    await setCampaign('c2');
+    await follow(app.campaign);
+    expect(reactions.open).toEqual([]);
+  });
+
   test('hosting resumes on startup with the campaign open; after Stop hosting it does not', async () => {
     await db.campaigns.put(hosted());
     await refreshCampaigns();

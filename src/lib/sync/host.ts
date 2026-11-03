@@ -11,7 +11,7 @@ import { toBase64 } from '../base64.ts';
 import { budgetApplies, combatantForToken, recordMove } from '../combat/movement.ts';
 import { applyUse, attacksPerAction, characterEffect, editsCharacter, payment, pcActions, problemOf, spendOn, type TurnAction } from '../combat/turnActions.ts';
 import { targetOf, type TargetInfo } from '../combat/resolve.ts';
-import { aimPlan, meleeAttack, noteEntries, snapOf, touched, workOut, type Aim, type Aimed, type WorkIn } from '../combat/aiming.ts';
+import { aimPlan, meleeAttack, noteEntries, snapOf, touched, workOut, type Aim, type Aimed, type UseOutcome, type WorkIn } from '../combat/aiming.ts';
 import { targetingOn } from '../combat/targeting.ts';
 import { featureList } from '../character/play.ts';
 import { computeSheet } from '../rules/sheet.ts';
@@ -62,7 +62,7 @@ export interface HostDeps {
   /** Turn panel: the DM's own edit of a character (a player's slot or resource spent by a use), stamped and synced like any DM edit. */
   editCharacter?(id: string, fn: (c: Character) => Character): Promise<unknown>;
   /** Targeting: a worked-out use applied on this device (store applyResolution: damage through changeHp, kept for the DM's Undo). */
-  resolve?(r: Omit<Resolution, 'applied'>, before?: Snap, o?: { melee?: boolean }): Promise<void>;
+  resolve?(r: Omit<Resolution, 'applied'>, before?: Snap, o?: { melee?: boolean }): Promise<Omit<Resolution, 'applied'> | void>; /* what landed, after reactions (Shield, Parry): the player hears that */
   /** Reactions: the current-turn mover's whole walk, asking at each reach edge (reactionFlow guardMove). Absent: the plain move. */
   guardMove?(tokenId: string, to: { x: number; y: number }): Promise<unknown>;
   /** Reactions: Counterspell asks before a player's spell takes effect, after it is paid for; false: it is countered (reactionFlow guardCast). */
@@ -135,6 +135,11 @@ function has2024(c: Character): boolean {
   return bad;
 }
 
+/** The outcome a player is told, from what landed: Shield or Parry may have turned a rolled hit into a miss. */
+const heard = (u: UseOutcome, r: Pick<Resolution, 'outcomes'>): UseOutcome => {
+  const judged = r.outcomes.filter((o) => o.roll !== undefined && o.hit !== undefined);
+  return u.hit === undefined || !judged.length ? u : { ...u, hit: judged.some((o) => o.hit), ...(u.hits && { hits: judged.map((o) => !!o.hit) }) };
+};
 const MAX_BAD = 3, EMPTY_REACTIONS = JSON.stringify({ t: 'reactions', prompts: [], waiting: false });
 
 export class Host {
@@ -408,8 +413,8 @@ export class Host {
       if (spell && guard && casterId && !(await guard(casterId, { name: a.name, level: level ?? spell.level }))) return; // countered: paid, nothing more
       if (gated && edits) await this.#deps.editCharacter!(ch.id, (x) => characterEffect(x, a, m.target, !!aimed)).catch(() => false);
       if (aimed) {
-        await this.#deps.resolve!(aimed.resolution, before, { melee: meleeAttack(aimPlan(a, { level, features: features.map((f) => f.name) })) });
-        this.#send(c, { t: 'outcome', ...aimed.outcome });
+        const landed = await this.#deps.resolve!(aimed.resolution, before, { melee: meleeAttack(aimPlan(a, { level, features: features.map((f) => f.name) })) });
+        this.#send(c, { t: 'outcome', ...heard(aimed.outcome, landed || aimed.resolution) });
       }
       if (called && spec) {
         const x = combatantForToken((await this.#deps.loadCombat?.())!, { characterId: ch.id });
@@ -454,7 +459,7 @@ export class Host {
     await this.#deps.updateCombat((y) => ({ ...y, resolutions: (y.resolutions ?? []).map((z) => (z.id !== r.id || z.leapt ? z : (taken = true, { ...z, leapt: true as const }))) }));
     if (!taken) return refuse('no leap');
     const before = snapOf(k, await this.#deps.loadCharacters(), touched(aimed.resolution)), resolve = this.#deps.resolve;
-    const tail = async () => { await resolve(aimed.resolution, before); this.#send(c, { t: 'outcome', ...aimed.outcome }); };
+    const tail = async () => { const landed = await resolve(aimed.resolution, before); this.#send(c, { t: 'outcome', ...heard(aimed.outcome, landed || aimed.resolution) }); };
     if (this.#deps.reactions) this.#detach(tail); else await tail();
   }
 

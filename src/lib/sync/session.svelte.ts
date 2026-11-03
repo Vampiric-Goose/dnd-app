@@ -1,7 +1,7 @@
 // Stage 3: the app-wide sync session (one at a time). It follows the open campaign: a campaign this device hosts resumes hosting unless
 // the DM stopped it, and a joined campaign reconnects. The engine and the PeerJS transport load only when a session starts (dynamic
 // imports), so the first load stays small. The engine writes through the db adapters below; local edits reach it through onLocalChange.
-import { answer, onChange as onReactionsChange, pass, reactions } from '../combat/reactionStack.svelte.ts';
+import { answer, onChange as onReactionsChange, pass, reactions, reset } from '../combat/reactionStack.svelte.ts';
 import { db, hostOffKey, onLocalChange, TRASH_CAP } from '../db.ts';
 import { toast } from '../toast.svelte.ts';
 import { addRemoteRoll, rollHooks } from '../rolls.svelte.ts';
@@ -113,8 +113,10 @@ function begin(role: Run['role'], code: string, campaignId?: string): Run {
 
 let follows = 0;
 /** Follows the open campaign: App calls it whenever that changes. */
+let reactionsOf: string | undefined; // the campaign the open reaction asks belong to
 export async function follow(c: Campaign | undefined): Promise<void> {
   const n = ++follows;
+  if (reactionsOf !== c?.id) { reactionsOf = c?.id; reset(); } // another campaign (or the first load): asks left from before are over; a re-read of this one keeps its cards
   if (local && local.cid !== c?.id) local = undefined; // another campaign: the local arrows go (a save of the same one keeps them)
   const key = c?.sync && keyOf(c.sync.role, c.id, c.sync.code);
   if (run && (run.key === key || (run.key === undefined && session.status !== 'rejected'))) return; // the same session, or a join underway
@@ -199,8 +201,9 @@ function hostDeps(r: Run, cid: string): HostDeps {
     editCharacter: (id, fn) => import('../combat/store.ts').then((m) => m.editCharacter(id, fn)).then((ok) => (changed(r), ok)),
     resolve: async (res, before, o) => {
       const [m, camp] = await Promise.all([import('../combat/reactionFlow.ts'), db.campaigns.get(cid)]);
-      if (camp) await m.land(await flow(camp.settings), res, before, o);
+      const landed = camp && (await m.land(await flow(camp.settings), res, before, o));
       changed(r);
+      return landed || undefined;
     },
     guardMove: async (tokenId, to) => {
       const [m, camp] = await Promise.all([import('../combat/reactionFlow.ts'), db.campaigns.get(cid)]);
