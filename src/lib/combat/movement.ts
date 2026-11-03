@@ -135,12 +135,18 @@ export function stepsBetween(g: Grid, a: Pt, b: Pt, size: Size): Pt[] {
   return out;
 }
 
-/** The route with `to` reached from its last square: steps filled in; landing on a square already in it cuts it back there (the start included). */
+/** The route with `to` reached from its last square: steps filled in one at a time, each landing on a square already in the route cutting it back there (the start included: to nothing). */
 export function extendRoute(g: Grid, start: Pt, route: Pt[], to: Pt, size: Size): Pt[] {
-  const s = snap(g, start, size), t = snap(g, to, size), k = key(g, t);
-  if (k === key(g, s)) return [];
-  const i = route.findIndex((p) => key(g, p) === k);
-  return i >= 0 ? route.slice(0, i + 1) : [...route, ...stepsBetween(g, route.at(-1) ?? s, t, size)];
+  const s = snap(g, start, size), t = snap(g, to, size), ks = key(g, s);
+  let r = route;
+  const i0 = r.findIndex((p) => key(g, p) === key(g, t));
+  if (ks === key(g, t)) return [];
+  if (i0 >= 0) return r.slice(0, i0 + 1);
+  for (const p of stepsBetween(g, r.at(-1) ?? s, t, size)) {
+    const k = key(g, p), i = r.findIndex((q) => key(g, q) === k);
+    r = k === ks ? [] : i >= 0 ? r.slice(0, i + 1) : [...r, p];
+  }
+  return r;
 }
 
 /** Feet for walking `route` from `start` (the token's snapped position: snap with its size), with `diags` diagonals already walked this turn (5-10-5: every second diagonal costs 10); `diags` returned: those this route walks. */

@@ -308,6 +308,13 @@ describe('lasting areas over time', () => {
     expect(owed(moved({ ...k0, resolutions: [cloudkill] }, 3, 6), sc(6))).toEqual(['g start']); // walked out: no entering, but its turn began there
     expect(owed(moved({ ...k0, resolutions: [cloudkill] }, 5, 3, 'o'), sc(0, 3))).toEqual(['o enter']); // pushed in on the goblin's turn
   });
+  test('a walked route that dips into the cloud and back out (the straight line misses it) is entering', () => {
+    const k = { ...k0, resolutions: [cloudkill] }, from = cell(2, 3), to = cell(4, 3), s = sc(0);
+    const g = (trail?: ReturnType<typeof cell>[]) => ({ ...s.tokens[0], ...to, ...(trail && { trail }) });
+    const dip = [cell(2, 2), cell(3, 1), cell(3, 0), cell(3, 1), cell(4, 2), to];
+    expect(noteEntries(k, s, [{ t: g(), from }]).entered ?? []).toEqual([]); // no trail: the straight line misses
+    expect((noteEntries(k, s, [{ t: g(dip), from }]).entered ?? []).map((e) => [e.rid, e.id])).toEqual([['r', 'g']]);
+  });
   test('the first time on a turn: once per creature and turn; out and back in after a start-of-turn roll is owed', () => {
     const once = moved(moved({ ...k0, resolutions: [cloudkill] }, 0, 3), 3, 0);
     expect(owed(moved(once, 0, 3), sc(3))).toEqual(['g enter']); // back in: still the one entering this turn

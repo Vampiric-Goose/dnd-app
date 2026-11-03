@@ -13,7 +13,7 @@
   import { decodeWithin, deviceSide } from '../../lib/images.ts';
   import { cellCenter, cellsIn, feetBetween, hexCorners, snap, type Cell, type Pt } from '../../lib/map/grid.ts';
   import { affordable, extendRoute, reachableCells, routeFeet } from '../../lib/combat/movement.ts';
-  import { slidePoint, slideSquares, SQUARE_MS } from './slide.ts';
+  import { nextSlide, slidePoint, slideSquares, type Slide } from './slide.ts';
   import { initials, radius, tokenAt, tokensInRect } from '../../lib/map/scene.ts';
   import { affectedCells, tokensInTemplate, type Shape, type Template } from '../../lib/map/templates.ts';
   import { fit, pinch, toScreen, toWorld, zoomAt, type View } from '../../lib/map/view.ts';
@@ -225,7 +225,7 @@
   // Sliding: a token seen before whose position changed is drawn walking to it (from where it is drawn now, if it was already sliding).
   // One that was not there before just appears.
   const lastAt = new Map<string, Pt>();
-  const slides = new Map<string, { from: Pt; squares: Pt[]; t0: number; ms: number }>();
+  const slides = new Map<string, Slide>();
   const reduceMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
   $effect(() => {
     const ts = tokens;
@@ -234,9 +234,8 @@
       for (const t of ts) {
         const o = lastAt.get(t.id);
         if (!o || (o.x === t.x && o.y === t.y)) continue;
-        const sl = slides.get(t.id), squares = still ? [] : slideSquares(grid, o, t, t.trail, t.size);
-        if (!squares.length) { slides.delete(t.id); continue; }
-        slides.set(t.id, { from: sl ? slidePoint(sl.from, sl.squares, sl.t0, now, sl.ms).at : o, squares, t0: now, ms: Math.min(SQUARE_MS, 3000 / squares.length) });
+        const sl = nextSlide(slides.get(t.id), o, still ? [] : slideSquares(grid, o, t, t.trail, t.size), now);
+        if (sl) slides.set(t.id, sl); else slides.delete(t.id);
       }
       lastAt.clear();
       for (const t of ts) lastAt.set(t.id, { x: t.x, y: t.y });

@@ -36,7 +36,7 @@ export function sceneForPlayers(s: Scene | undefined, characters: Character[], c
     const ch = t.characterId === undefined ? undefined : byId.get(t.characterId);
     const portrait = t.portrait ?? ch?.details.portrait;
     const base = { id: t.id, name: t.name, x: t.x, y: t.y, size: t.size, color: t.color, ...(portrait !== undefined && { portrait }),
-      ...(t.trail?.length && t.trail.every(seen) && { trail: t.trail.slice(-200).map((p) => ({ x: p.x, y: p.y })) }) }; // fog never shows where it walked
+      ...(Array.isArray(t.trail) && t.trail.length > 0 && t.trail.every((p) => isRec(p) && fin(p.x) && fin(p.y) && seen(p)) && { trail: t.trail.slice(-200).map((p) => ({ x: p.x, y: p.y })) }) }; // fog never shows where it walked
     if (ch?.ownerId && ch.campaignId === s.campaignId) {
       const health = healthStatus(ch.state.hp, maxHp(ch));
       tokens.push({ ...base, characterId: ch.id, conditions: [...ch.state.conditions], ...(health && { health }) });

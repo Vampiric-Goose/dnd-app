@@ -205,6 +205,13 @@ describe('routes', () => {
     expect(extendRoute(g70, o, r3, P(0, 0), 'M')).toEqual([]);
     expect(extendRoute(g70, o, [], P(3, 1), 'M')).toHaveLength(3); // a skipped stretch is filled in
   });
+  test('extendRoute: one fast pointer event back over earlier squares cuts back square by square, not appending duplicates', () => {
+    const route = [P(1, 0), P(2, 0), P(3, 0), P(4, 0)];
+    expect(extendRoute(g70, o, route, P(-1, 0), 'M')).toEqual([P(-1, 0)]); // back through the start, out the other side
+    expect(routeFeet(g70, o, extendRoute(g70, o, route, P(-1, 0), 'M'), '5-5-5').feet).toBe(5);
+    expect(extendRoute(g70, o, route, P(0, 0), 'M')).toEqual([]);
+    expect(extendRoute(g70, o, route, P(2, 0), 'M')).toEqual([P(1, 0), P(2, 0)]);
+  });
   test('routeFeet 5-10-5 counts every second diagonal as 10, carrying diagonals from earlier this turn', () => {
     const two = [P(1, 1), P(2, 2)];
     expect(routeFeet(g70, o, two, '5-10-5')).toEqual({ feet: 15, diags: 2 });

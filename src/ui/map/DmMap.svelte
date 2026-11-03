@@ -305,7 +305,7 @@
       });
       if (walked.length && combat) await updateCombat(cid, (c) => (after ? noteEntries(c, after, walked) : c));
       await reload();
-    }).finally(() => (plan = undefined));
+    }).finally(() => { if (plan?.route === route) plan = undefined; }); // only its own line: a later move's stays
   };
   /** Speed after conditions, as the host's check counts it: a PC's player-view walk, a monster's stat block. */
   const speedFor = (x: Combatant): number | undefined => {

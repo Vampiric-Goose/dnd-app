@@ -2,6 +2,7 @@
 import { describe, expect, test } from 'vitest';
 import { toBase64, fromBase64 } from '../../src/lib/base64.ts';
 import { paintFog } from '../../src/lib/map/fog.ts';
+import { tokensProblem } from '../../src/lib/recordShape.ts';
 import { DEFAULT_GRID } from '../../src/lib/map/scene.ts';
 import { DEFAULT_SETTINGS } from '../../src/lib/settings.ts';
 import { sha256Bytes } from '../../src/lib/sync/code.ts';
@@ -119,6 +120,19 @@ describe('sceneForPlayers', () => {
     expect(moveProblem(s, mv, 'A1', chars(), fight(), settings({ fog: true }))).toBeUndefined();
   });
 
+  test('a malformed stored trail (an imported backup) is left out, and the scene still goes out', () => {
+    const withTrail = (trail: unknown) => scene({ tokens: scene().tokens.map((t) => (t.id === 't-thorin' ? { ...t, trail } as typeof t : t)) });
+    for (const bad of ['xyz', 5, { length: 2 }, [null], [{ x: 1 }], [{ x: 1, y: 'a' }]]) {
+      for (const set of [settings(), settings({ fog: true })]) {
+        const out = sceneForPlayers(withTrail(bad), chars(), undefined, set);
+        expect(out).toBeDefined();
+        expect(tok(out, 'Thorin')?.trail).toBeUndefined();
+        if (!set.fog) expect(tok(out, 'Thorin')).toBeDefined();
+      }
+    }
+    expect(tokensProblem(withTrail([{ x: 1 }]).tokens)).toBe('has a damaged token (1)');
+    expect(tokensProblem(withTrail([{ x: 1, y: 2 }]).tokens)).toBeUndefined();
+  });
   test('a trail through fog never reaches players; one in the open does', () => {
     const walked = (trail: { x: number; y: number }[], o: Partial<Scene> = {}) => scene({ ...o, tokens: scene().tokens.map((t) => (t.id === 't-thorin' ? { ...t, x: 105, y: 105, trail } : t)) });
     const open = [{ x: 35, y: 105 }, { x: 105, y: 105 }], dark = [{ x: 35, y: 175 }, { x: 105, y: 105 }]; // the second leaves fog only at its first square

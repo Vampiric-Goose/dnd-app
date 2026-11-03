@@ -4,6 +4,7 @@
   // DM's device in Player view (R12) the same player scene is built locally, read-only.
   import { db } from '../../lib/db.ts';
   import { feetBetween, type Pt } from '../../lib/map/grid.ts';
+  import { walkOn } from './slide.ts';
   import { untrack } from 'svelte';
   import { aimPlan, judge, type AimPlan } from '../../lib/combat/aiming.ts';
   import { targetingOn, type Pickable, type Toggle } from '../../lib/combat/targeting.ts';
@@ -37,8 +38,8 @@
   let local: PlayerScene | undefined = $state.raw();
   let error = $state('');
   let selected: string[] = $state([]);
-  /** The dropped route, drawn as a line and ghost (the token itself stays put) until the next scene from the DM, when the token slides along it. */
-  let pending: { of: PlayerScene; id: string; route: Pt[] } | undefined = $state.raw();
+  /** The dropped route, drawn as a line and ghost (the token itself stays put) until its token has walked it (a scene where the token stands elsewhere than on its route), or 5 s. */
+  let pending: { scene: string; id: string; at: Pt; route: Pt[] } | undefined = $state.raw();
   /** Final M3: a drop while offline snaps back (nothing is sent), and the status line says so until the next drop. */
   let unsent = $state(false);
 
@@ -55,7 +56,11 @@
 
   const base = $derived(joined ? session.scene : local);
   const view = $derived(base);
-  const plan = $derived(pending && pending.of === base ? { id: pending.id, route: pending.route } : undefined);
+  const plan = $derived.by(() => {
+    const p = pending, t = p && base?.id === p.scene ? base.tokens.find((x) => x.id === p.id) : undefined;
+    return p && base && t && walkOn(base.grid, t.size, p.at, p.route, t) ? { id: p.id, route: p.route } : undefined;
+  });
+  $effect(() => { if (pending && !plan) pending = undefined; }); // walked, or its scene or token gone: never comes back if the token returns to its old square
 
   const mine = (characterId: string | undefined) => {
     const c = characterId === undefined ? undefined : chars.find((x) => x.id === characterId);
@@ -202,7 +207,8 @@
     if (!base || !t || !canDrag(primary) || !route.length) return;
     unsent = session.status !== 'online';
     if (unsent) return;
-    pending = { of: base, id: primary, route };
+    const p = (pending = { scene: base.id, id: primary, at: { x: t.x, y: t.y }, route });
+    setTimeout(() => { if (pending === p) pending = undefined; }, 5000); // a refused or stopped move leaves the host's scene as it was: nothing else says so
     sendMove(base.id, primary, route[route.length - 1], route);
   };
 

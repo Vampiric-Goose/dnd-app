@@ -121,7 +121,8 @@ export function tokensProblem(tokens: unknown): string | undefined {
   const i = tokens.findIndex((t) => !isRec(t) || typeof t.id !== 'string' || typeof t.name !== 'string' || !finite(t.x) || !finite(t.y)
     || !SIZES.includes(t.size as string) || typeof t.color !== 'string' || t.name.length > 100 // M4: the optional fields' types too
     || !opt(t.portrait, 'string') || !opt(t.characterId, 'string') || !opt(t.monsterId, 'string') || !opt(t.combatantId, 'string') || !opt(t.hidden, 'boolean')
-    || (t.hp !== undefined && !finite(t.hp)) || (t.maxHp !== undefined && !finite(t.maxHp)));
+    || (t.hp !== undefined && !finite(t.hp)) || (t.maxHp !== undefined && !finite(t.maxHp))
+    || (t.trail !== undefined && (!Array.isArray(t.trail) || !t.trail.every((p) => isRec(p) && finite(p.x) && finite(p.y)))));
   if (i >= 0) return `has a damaged token (${i + 1})`;
 }
 
