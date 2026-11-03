@@ -2,23 +2,27 @@
 // Rebuke) and the maths of the reaction. Callers build a Body per creature from the live fight; nothing here reads the fight.
 import { richToPlain } from '../content/richtext.ts';
 import { cellAt, cellCenter, cellDistance, tokenFeet, type Pt } from '../map/grid.ts';
-import type { Combatant, Grid, Outcome, Size } from '../types.ts';
+import type { Ability, Combatant, Grid, Outcome, Size } from '../types.ts';
 import { BLOCKING } from './economy.ts';
 import type { TurnAction } from './turnActions.ts';
 
 type Diagonal = '5-5-5' | '5-10-5';
 export type ReactKind = 'opportunity' | 'counterspell' | 'hit' | 'rebuke';
-export interface ReactOption { id: 'oa' | 'counterspell' | 'shield' | 'uncanny' | 'parry' | 'rebuke'; label: string; slot?: number; bonus?: number }
+/** `more`: a reaction from the name table (reactionTable.ts), `key` its name; `strike`: the player's device rolls an Opportunity Attack's aim for it
+ *  (`spell`: War Caster's cantrip instead). */
+export interface ReactOption { id: 'oa' | 'counterspell' | 'shield' | 'uncanny' | 'parry' | 'rebuke' | 'more'; label: string; slot?: number; bonus?: number; key?: string; strike?: true; spell?: string }
 export interface Reactor { id: string /* combatant */; name: string; options: ReactOption[] }
 /**
  * One creature as the rules see it: `conditions` are all of them (a PC's too), `slots` the free slot levels ascending, `reach` its melee
  * reach in feet. `side`: 'party' for a PC and a PC's summon (hostility only; `pc` is who plays it). `hidden`: not on the players' map.
  */
-export interface Body { x: Combatant; pt: Pt & { size: Size }; conditions: readonly string[]; actions: TurnAction[]; features: readonly string[]; slots: number[]; reach: number; pc: boolean; side: 'party' | 'foes'; hidden: boolean; name: string }
+export interface Body { x: Combatant; pt: Pt & { size: Size }; conditions: readonly string[]; actions: TurnAction[]; features: readonly string[]; slots: number[]; reach: number; pc: boolean; side: 'party' | 'foes'; hidden: boolean; name: string;
+  /** A PC's numbers for the name table: class levels by class name, uses left by resource name, its spell save DC, a shield worn. */
+  stats?: { prof: number; mods: Record<Ability, number>; levels: Record<string, number>; left: Record<string, number>; dc?: number; shield?: boolean } }
 
 const has = (b: Body, c: string) => b.conditions.some((n) => n.toLowerCase() === c);
 /** The viewer sees the subject: the subject isn't Invisible, the viewer isn't Blinded, and a PC never sees what the players' map hides. */
-const sees = (viewer: Body, subject: Body) => !has(subject, 'invisible') && !has(viewer, 'blinded') && !(viewer.pc && subject.hidden);
+export const sees = (viewer: Body, subject: Body) => !has(subject, 'invisible') && !has(viewer, 'blinded') && !(viewer.pc && subject.hidden);
 export const canReact = (b: Body): boolean => !b.x.reactionUsed && b.x.hp !== 0 && !b.conditions.some((c) => BLOCKING.includes(c.toLowerCase()));
 const reaction = (b: Body, name: string) => b.actions.some((a) => a.cost === 'reaction' && a.name.toLowerCase() === name);
 const slotsFrom = (b: Body, min: number) => b.slots.filter((s) => s >= min);
