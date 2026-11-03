@@ -10,12 +10,15 @@ type Diagonal = '5-5-5' | '5-10-5';
 export type ReactKind = 'opportunity' | 'counterspell' | 'hit' | 'rebuke';
 export interface ReactOption { id: 'oa' | 'counterspell' | 'shield' | 'uncanny' | 'parry' | 'rebuke'; label: string; slot?: number; bonus?: number }
 export interface Reactor { id: string /* combatant */; name: string; options: ReactOption[] }
-/** One creature as the rules see it: `conditions` are all of them (a PC's too), `slots` the free slot levels ascending, `reach` its melee reach in feet. */
-export interface Body { x: Combatant; pt: Pt & { size: Size }; conditions: readonly string[]; actions: TurnAction[]; features: readonly string[]; slots: number[]; reach: number; pc: boolean; name: string }
+/**
+ * One creature as the rules see it: `conditions` are all of them (a PC's too), `slots` the free slot levels ascending, `reach` its melee
+ * reach in feet. `side`: 'party' for a PC and a PC's summon (hostility only; `pc` is who plays it). `hidden`: not on the players' map.
+ */
+export interface Body { x: Combatant; pt: Pt & { size: Size }; conditions: readonly string[]; actions: TurnAction[]; features: readonly string[]; slots: number[]; reach: number; pc: boolean; side: 'party' | 'foes'; hidden: boolean; name: string }
 
 const has = (b: Body, c: string) => b.conditions.some((n) => n.toLowerCase() === c);
-/** The viewer sees the subject: the subject isn't Invisible and the viewer isn't Blinded. */
-const sees = (viewer: Body, subject: Body) => !has(subject, 'invisible') && !has(viewer, 'blinded');
+/** The viewer sees the subject: the subject isn't Invisible, the viewer isn't Blinded, and a PC never sees what the players' map hides. */
+const sees = (viewer: Body, subject: Body) => !has(subject, 'invisible') && !has(viewer, 'blinded') && !(viewer.pc && subject.hidden);
 export const canReact = (b: Body): boolean => !b.x.reactionUsed && b.x.hp !== 0 && !b.conditions.some((c) => BLOCKING.includes(c.toLowerCase()));
 const reaction = (b: Body, name: string) => b.actions.some((a) => a.cost === 'reaction' && a.name.toLowerCase() === name);
 const slotsFrom = (b: Body, min: number) => b.slots.filter((s) => s >= min);
@@ -38,7 +41,7 @@ function oaOption(b: Body): ReactOption | undefined {
 export function leaveStep(g: Grid, diagonal: Diagonal, mover: Body, foes: Body[], to: Pt, disengaged: boolean): { at: Pt; reactors: Reactor[] } | undefined {
   if (disengaged) return undefined;
   const from = mover.pt, c0 = cellAt(g, from), c1 = cellAt(g, to), p0 = cellCenter(g, c0), p1 = cellCenter(g, c1);
-  const n = cellDistance(g, c0, c1, '5-5-5'), eligible = foes.filter((f) => f.pc !== mover.pc && canReact(f) && sees(f, mover) && oaOption(f));
+  const n = cellDistance(g, c0, c1, '5-5-5'), eligible = foes.filter((f) => f.side !== mover.side && canReact(f) && sees(f, mover) && oaOption(f));
   const at = (i: number): Pt => { const p = cellCenter(g, cellAt(g, { x: p0.x + ((p1.x - p0.x) * i) / n, y: p0.y + ((p1.y - p0.y) * i) / n })); return { x: from.x + p.x - p0.x, y: from.y + p.y - p0.y }; };
   const inReach = (f: Body, p: Pt) => tokenFeet(g, { ...mover.pt, ...p }, f.pt, diagonal) <= f.reach;
   for (let i = 1, prev: Pt = { x: from.x, y: from.y }; i <= n; prev = at(i), i++) {
@@ -48,13 +51,13 @@ export function leaveStep(g: Grid, diagonal: Diagonal, mover: Body, foes: Body[]
   return undefined;
 }
 
-/** Creatures within 60 ft that can cast Counterspell: one option per free slot of 3rd level or higher. */
+/** Creatures within 60 ft that see the caster and can cast Counterspell: one option per free slot of 3rd level or higher. */
 export function counterReactors(g: Grid, diagonal: Diagonal, caster: Body, others: Body[]): Reactor[] {
-  return others.filter((o) => o.x.id !== caster.x.id && canReact(o) && reaction(o, 'counterspell') && tokenFeet(g, o.pt, caster.pt, diagonal) <= 60)
+  return others.filter((o) => o.x.id !== caster.x.id && canReact(o) && sees(o, caster) && reaction(o, 'counterspell') && tokenFeet(g, o.pt, caster.pt, diagonal) <= 60)
     .flatMap((o) => reactor(o, slotsFrom(o, 3).map((slot): ReactOption => ({ id: 'counterspell', label: `Counterspell ${slot}`, slot }))));
 }
 
-/** Reactions to being hit by `attacker`: Shield, Uncanny Dodge (a PC that sees it), a monster's AC reaction (Parry). */
+/** Reactions to being hit by `attacker`: Shield, Uncanny Dodge (a PC that sees it), a monster's AC reaction (Parry, seeing it). */
 export function hitReactors(target: Body, attacker: Body, o: { melee: boolean }): Reactor[] {
   if (!canReact(target)) return [];
   const out: ReactOption[] = [];
@@ -62,7 +65,7 @@ export function hitReactors(target: Body, attacker: Body, o: { melee: boolean })
   if (target.pc && target.features.includes('Uncanny Dodge') && sees(target, attacker)) out.push({ id: 'uncanny', label: 'Uncanny Dodge' });
   for (const a of target.actions) {
     const p = a.cost === 'reaction' && a.text ? acReaction({ name: a.name, text: richToPlain(a.text) }) : undefined;
-    if (p && (o.melee || !p.melee)) out.push({ id: 'parry', label: `${a.name} (+${p.bonus} AC)`, bonus: p.bonus });
+    if (p && (o.melee || !p.melee) && sees(target, attacker)) out.push({ id: 'parry', label: `${a.name} (+${p.bonus} AC)`, bonus: p.bonus });
   }
   return reactor(target, out);
 }

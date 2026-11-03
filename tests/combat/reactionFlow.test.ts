@@ -10,9 +10,13 @@ import { applyResolution, updateCombat } from '../../src/lib/combat/store.ts';
 import { db, resetDb } from '../../src/lib/db.ts';
 import { newScene } from '../../src/lib/map/scene.ts';
 import type { Character, Combatant, MonsterDef, Pack, SpellDef, Token } from '../../src/lib/types.ts';
-import { mkChar } from '../fixtures/content.ts';
+import { flowCtx } from '../../src/lib/combat/flowCtx.ts';
+import { makeEntry } from '../../src/lib/items/inventory.ts';
+import { rollHooks, rollLog, rollViewer, rollVisibility, type RollEntry } from '../../src/lib/rolls.svelte.ts';
+import { longsword, mkChar } from '../fixtures/content.ts';
 import { camp, char } from '../fixtures/records.ts';
 
+vi.mock('../../src/lib/content/srd.ts', async () => ({ loadSrd: async () => (await import('../fixtures/srdPack.ts')).srdPackFixture })); // flowCtx's index
 const srd: Pack = JSON.parse(fs.readFileSync('src/data/srd.json', 'utf8'));
 const def = (id: string) => srd.entities.find((e) => e.id === id) as MonsterDef;
 const goblin = def('monster:goblin@SRD'), mage = def('monster:mage@SRD');
@@ -34,6 +38,7 @@ async function fight(list: [Combatant, number, number][], turn: string, hp = 20,
   await db.characters.put(who);
   const tokens = list.map(([x, cx, cy]) => tok(`t:${x.id}`, cx, cy, x.characterId ? { characterId: x.characterId } : { combatantId: x.id }));
   await db.scenes.put({ ...newScene('c1', 'Field'), id: 's1', tokens });
+  await db.scenes.show('c1', 's1'); // players see the map (a creature off it is hidden from them)
   await updateCombat('c1', (c) => ({ ...addCombatants(c, list.map(([x]) => x)), round: 1, turn }));
 }
 const ctx = (o: Partial<FlowCtx> = {}): FlowCtx => ({ cid: 'c1', settings: camp('c1').settings, scene: () => db.scenes.get('s1'),
@@ -253,4 +258,119 @@ test('a countered concentration spell leaves its caster concentrating on nothing
   const [p, ma] = [await fighter('pc:p'), await fighter('ma')];
   expect([p.concentrating, p.concentratingOn, p.concentrationSlot]).toEqual([false, undefined, undefined]);
   expect([ma.concentrating, ma.concentratingOn]).toEqual([true, 'Hold Person']); // Counterspell is no concentration spell
+});
+
+// ---- Final review fixes ----
+const spellOf = (id: string) => srd.entities.find((e) => e.id === id) as SpellDef;
+/** A PC wizard (5th level: 3rd-level slots) of player A1 with `ids` prepared. */
+function wizard(ids: string[], levels = 5): Character {
+  const c = mkChar({ race: 'human', base: { int: 16 }, levels: Array(levels).fill('wizard') }), list = ids.map(spellOf);
+  return { ...c, id: 'p', name: 'p', campaignId: 'c1', ownerId: 'A1', state: { ...c.state, hp: 20 }, overrides: { maxHp: 30 }, embedded: { ...c.embedded, ...Object.fromEntries(list.map((x) => [x.id, x])) },
+    build: { ...c.build, spells: { 'class:wizard@FIX': { known: ids, prepared: ids } } } };
+}
+const hideToken = (id: string) => db.scenes.update('s1', (s) => ({ ...s, tokens: s.tokens.map((t) => (t.id === id ? { ...t, hidden: true } : t)) }));
+
+test('a monster hidden from the players (hidden row or hidden token) leaving a PC: no Opportunity Attack is offered', async () => {
+  for (const how of ['row', 'token']) {
+    await resetDb(); seen.length = 0;
+    await fight([[pcC, 1, 1], [{ ...mon(goblin, 'g1'), ...(how === 'row' && { hidden: true }) }, 1, 0]], 'g1');
+    if (how === 'token') await hideToken('t:g1');
+    answering(() => 'pass');
+    expect(await guardMove(ctx(), 't:g1', cell(6, 0))).toEqual(cell(6, 0));
+    expect(seen).toEqual([]);
+    stop();
+  }
+});
+
+test('a hidden caster: no PC is asked to Counterspell it', async () => {
+  await fight([[pcC, 0, 0], [mon(mage, 'ma'), 3, 0]], 'ma', 20, wizard(['spell:counterspell@SRD']));
+  await hideToken('t:ma');
+  answering(() => 'pass');
+  expect(await guardCast(ctx(), 'ma', { name: 'Fireball', level: 3 })).toBe(true);
+  expect(seen).toEqual([]);
+});
+
+test('a hidden attacker: the player card names nobody', async () => {
+  await fight([[pcC, 0, 0], [mon(mage, 'ma'), 1, 0]], 'ma', 20, wizard(['spell:shield@SRD'], 1));
+  await hideToken('t:ma');
+  answering(() => 'pass');
+  await land(ctx(), { id: 'r1', actor: 'ma', action: 'Dagger', outcomes: [{ id: 'pc:p', part: 'hit', hit: true, roll: 14, ac: 12, damage: 3 }], at: 0 }, undefined, { melee: true });
+  expect(seen.map((o) => [o.kind, o.playerTrigger])).toEqual([['hit', 'Something hits you (14)']]);
+});
+
+const wolf = (by = 'pc:p'): Combatant => ({ ...mon(goblin, 'w1'), summon: { by, spell: 'Conjure Animals' } });
+test('a PC walking away from its own summon: no ask, it walks on', async () => {
+  await fight([[pcC, 1, 0], [wolf(), 1, 1]], 'pc:p');
+  answering(() => ({ reactor: 'w1', option: 'oa' }));
+  expect(await guardMove(ctx(), 't:pc:p', cell(6, 0))).toEqual(cell(6, 0));
+  expect([seen, await pcHp()]).toEqual([[], 20]);
+});
+
+test('a monster leaving a PC summon (or a summon of that summon): the summon gets the attack', async () => {
+  await fight([[mon(goblin, 'g1'), 1, 0], [wolf(), 1, 1], [{ ...mon(goblin, 'w2'), summon: { by: 'w1', spell: 'Conjure' } }, 5, 1], [pcC, 9, 9]], 'g1');
+  answering((o) => ({ reactor: o.reactors[0].id, option: 'oa' }));
+  await guardMove(ctx(), 't:g1', cell(5, 0)); // leaves w1, walks up to w2
+  expect(seen.map((o) => o.reactors.map((r) => r.id))).toEqual([['w1']]);
+  expect((await fighter('w1')).reactionUsed).toBe(true);
+  await updateCombat('c1', (k) => ({ ...k, combatants: k.combatants.map((x) => (x.id === 'g1' ? { ...x, hp: 7 } : x)) }));
+  await guardMove(ctx(), 't:g1', cell(9, 0)); // leaves w2 (by w1, by the PC)
+  expect(seen.map((o) => o.reactors.map((r) => r.id))).toEqual([['w1'], ['w2']]);
+});
+
+test('a countered Haste ends the haste it gave at payment', async () => {
+  await fight([[pcC, 0, 0], [mon(mage, 'ma'), 3, 0]], 'pc:p');
+  await updateCombat('c1', (k) => ({ ...k, combatants: k.combatants.map((x) => (x.id === 'pc:p' ? { ...x, concentrating: true, concentratingOn: 'Haste', concentrationSlot: 3, hasted: { by: 'pc:p', round: 1 } } : x)) }));
+  answering(() => ({ reactor: 'ma', option: 'counterspell', slot: 3 }));
+  expect(await guardCast(ctx(), 'pc:p', { name: 'Haste', level: 3 })).toBe(false);
+  expect((await fighter('pc:p')).hasted).toEqual({ by: 'pc:p', round: 1, ended: true });
+});
+
+test('Shield can be countered: the hit stands, the slot is spent, no Shield condition', async () => {
+  await fight([[pcC, 1, 0], [mon(mage, 'ma'), 1, 1], [mon(mage, 'mb'), 3, 1]], 'pc:p');
+  answering((o) => (o.kind === 'hit' ? { reactor: 'ma', option: 'shield' } : o.reactors.some((r) => r.id === 'mb') ? { reactor: 'mb', option: 'counterspell', slot: 3 } : 'pass'));
+  await land(ctx(), { id: 'r1', actor: 'pc:p', action: 'Longsword', outcomes: [{ id: 'ma', part: 'hit', hit: true, roll: 14, ac: 12, damage: 6 }], at: 0 }, undefined, { melee: true });
+  expect(seen.map((o) => o.kind)).toEqual(['hit', 'counterspell']);
+  const ma = await fighter('ma');
+  expect([ma.hp, ma.conditions ?? [], ma.spellsUsed?.['slot:1'], ma.reactionUsed]).toEqual([34, [], 1, true]);
+  expect((await db.combat.get('c1'))!.resolutions![0].outcomes[0]).toMatchObject({ hit: true, damage: 6 });
+});
+
+/** A PC fighter (Str 16) of player A1, next to a monster that walks away; its player answers with its own dice. */
+async function playerOa(m: MonsterDef, inventory: Character['inventory'] = []) {
+  const c = mkChar({ race: 'human', base: { str: 16 }, levels: ['fighter'] });
+  await fight([[pcC, 1, 1], [mon(m, 'm1'), 1, 0]], 'm1', 20, { ...c, id: 'p', name: 'p', campaignId: 'c1', ownerId: 'A1', inventory });
+}
+test('a player answers an Opportunity Attack with its own dice: the foe is hit, the PC reaction is spent; dice that do not fit are refused', async () => {
+  const refused: [string, string][] = [];
+  const c = ctx({ rollAim: undefined, onRefused: (id, why) => { refused.push([id, why]); } });
+  await playerOa(goblin);
+  answering(() => ({ reactor: 'pc:p', option: 'oa', aim: { rolled: { d20: [19, 19], dmg: [[]] }, toggles: [] } }));
+  expect(await guardMove(c, 't:m1', cell(6, 0))).toEqual(cell(6, 0));
+  expect([(await fighter('pc:p')).reactionUsed, (await fighter('m1')).hp, refused]).toEqual([true, 3, []]); // unarmed: 1 + 3
+  stop(); await resetDb(); seen.length = 0;
+  await playerOa(goblin);
+  answering(() => ({ reactor: 'pc:p', option: 'oa', aim: { rolled: { d20: [19, 19], dmg: [[3]] }, toggles: [] } }));
+  await guardMove(c, 't:m1', cell(6, 0));
+  expect([(await fighter('pc:p')).reactionUsed, (await fighter('m1')).hp]).toEqual([undefined, 7]);
+  expect(refused).toEqual([['pc:p', expect.any(String)]]);
+});
+
+test('a player Opportunity Attack is worked out from the player view of the sheet (a hidden weapon bonus does not apply)', async () => {
+  const sword = { ...makeEntry({ ...longsword, magic: true, bonuses: { damage: 5 } }, { view: { hidden: ['bonuses'], revealed: [] } }), equipped: true };
+  await playerOa(mage, [sword]);
+  answering((o) => o.kind === 'hit' ? 'pass' : ({ reactor: 'pc:p', option: 'oa', aim: { rolled: { d20: [19, 19], dmg: [[4]] }, toggles: [] } }));
+  await guardMove(ctx({ rollAim: undefined }), 't:m1', cell(6, 0));
+  expect([(await fighter('pc:p')).reactionUsed, (await fighter('m1')).hp]).toEqual([true, 33]); // 4 + 3, not + 5
+});
+
+test('the Counterspell check d20 rolled on the DM device is never shared, even with the DM rolls public (it would name the spell)', async () => {
+  await db.campaigns.put(camp('c1'));
+  const shared: RollEntry[] = [], was = { viewer: rollViewer.value, dm: rollVisibility.dm, hook: rollHooks.public };
+  rollViewer.value = 'dm'; rollVisibility.dm = true; rollHooks.public = (e) => { shared.push(e); };
+  try {
+    const d = (await flowCtx('c1', camp('c1').settings)).d20!();
+    expect(d).toBeGreaterThanOrEqual(1);
+    expect(rollLog[0]).toMatchObject({ label: 'Counterspell check', public: false });
+    expect(shared).toEqual([]);
+  } finally { rollViewer.value = was.viewer; rollVisibility.dm = was.dm; rollHooks.public = was.hook; }
 });

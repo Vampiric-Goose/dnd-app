@@ -47,6 +47,10 @@ export function sceneForPlayers(s: Scene | undefined, characters: Character[], c
   return settings.fog ? applyFog(v, s) : v; // C2: no token whose centre is fogged; the fog (or all fogged) goes along
 }
 
+/** The ids of the tokens players see (sceneForPlayers: no hidden or fogged token; none when the scene isn't shown). */
+export const playerTokens = (s: Scene | undefined, characters: Character[], combat: Combat | undefined, settings: CampaignSettings): Set<string> =>
+  new Set(sceneForPlayers(s, characters, combat, settings)?.tokens.map((t) => t.id));
+
 /** With fog on: the token's centre is in a fogged cell (a missing or damaged fog counts as all fogged). */
 const fogged = (s: Scene, p: { x: number; y: number }, settings: CampaignSettings) =>
   settings.fog && !isRevealed(s.fog === undefined ? undefined : decodeFog(s.fog, s.width, s.height), s.width, s.height, p);

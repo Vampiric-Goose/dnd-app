@@ -6,6 +6,7 @@ import type { Pt } from '../map/grid.ts';
 import { moveTokens } from '../map/scene.ts';
 import { editScene } from '../map/store.ts';
 import { computeSheet } from '../rules/sheet.ts';
+import { playerTokens } from '../sync/scene.ts';
 import type { CampaignSettings, Character, Combat, Combatant, MonsterDef, Outcome, Resolution, Scene, Sheet, Snap, SpellDef, Token } from '../types.ts';
 import { uid } from '../uid.ts';
 import { aimPlan, foeWithin5, judge, noteEntries, snapOf, touched, workOut, type Aim, type AimPlan, type Aimed } from './aiming.ts';
@@ -41,27 +42,38 @@ const reactionNamed = (b: Body, name: string) => b.actions.find((a) => a.cost ==
 /** A reaction with no action of its own (Uncanny Dodge, Parry): its pip only. */
 const pip = (name: string): TurnAction => ({ id: `react:${name}`, name, cost: 'reaction', group: 'feature' });
 
-function bodyOf(ctx: FlowCtx, x: Combatant, t: Token, chars: Character[]): Live | undefined {
+/** 'party': a PC, or a summon whose summoner (or its summoner, and so on) is a PC. */
+function sideOf(k: Combat, x: Combatant): Body['side'] {
+  for (let y: Combatant | undefined = x, n = 0; y && n < 10; n++) {
+    if (y.characterId || y.kind === 'pc') return 'party';
+    const by: string | undefined = y.summon?.by;
+    y = by === undefined ? undefined : k.combatants.find((z) => z.id === by);
+  }
+  return 'foes';
+}
+
+function bodyOf(ctx: FlowCtx, k: Combat, x: Combatant, t: Token, chars: Character[], shown: Set<string>): Live | undefined {
   const pt = { x: t.x, y: t.y, size: t.size }, ch = x.characterId ? chars.find((c) => c.id === x.characterId) : undefined;
-  if (ch) {
-    const sheet = computeSheet(ch, { settings: ctx.settings, viewer: 'dm' }), features = featureList(ch, ctx.settings), actions = pcActions(ch, sheet, features);
+  const hidden = !!x.hidden || !shown.has(t.id), side = sideOf(k, x);
+  if (ch) { // a player's PC as its player's device sees it (their answer's dice fit that sheet, as a turn panel use's do)
+    const sheet = computeSheet(ch, { settings: ctx.settings, viewer: ch.ownerId ? 'player' : 'dm' }), features = featureList(ch, ctx.settings), actions = pcActions(ch, sheet, features);
     const reach = oaAction({ pc: true, actions })?.attack?.properties.includes('reach') ? 10 : 5;
     return { x: { ...x, hp: ch.state.hp }, pt, conditions: ch.state.conditions, actions, features: features.map((f) => f.name),
-      slots: slotsLeft(sheet, ch).flatMap((n, i) => (n > 0 ? [i + 1] : [])), reach, pc: true, name: ch.name, ch, sheet, per: attacksPerAction(features) };
+      slots: slotsLeft(sheet, ch).flatMap((n, i) => (n > 0 ? [i + 1] : [])), reach, pc: true, side, hidden, name: ch.name, ch, sheet, per: attacksPerAction(features) };
   }
   if (x.kind !== 'monster') return undefined;
   const m = x.monsterId ? ctx.monster(x.monsterId) : undefined, actions = m ? monsterActions(m, { spell: ctx.spell, used: x.spellsUsed }) : [];
   const oa = oaAction({ pc: false, actions }), r = oa && reachOf(oa);
   const slots = [...new Set(actions.flatMap((a) => (a.spend?.startsWith('slot:') && a.uses && a.uses.left > 0 ? [+a.spend.slice(5)] : [])))].sort((a, b) => a - b);
-  return { x, pt, conditions: x.conditions ?? [], actions, features: m?.traits.map((f) => f.name) ?? [], slots, reach: (r !== 'self' && r?.melee) || 5, pc: false, name: x.name, per: 1 };
+  return { x, pt, conditions: x.conditions ?? [], actions, features: m?.traits.map((f) => f.name) ?? [], slots, reach: (r !== 'self' && r?.melee) || 5, pc: false, side, hidden, name: x.name, per: 1 };
 }
 
 async function world(ctx: FlowCtx): Promise<World | undefined> {
   const [k, s, chars] = await Promise.all([db.combat.get(ctx.cid), ctx.scene(), db.characters.list(ctx.cid)]);
   if (!k || !s) return undefined;
-  const bs = new Map<string, Live>();
+  const bs = new Map<string, Live>(), shown = playerTokens(s, chars, k, ctx.settings); // host #aim's rule: no hidden or fogged token
   for (const t of s.tokens) {
-    const x = combatantForToken(k, t), b = x && !bs.has(x.id) ? bodyOf(ctx, x, t, chars) : undefined;
+    const x = combatantForToken(k, t), b = x && !bs.has(x.id) ? bodyOf(ctx, k, x, t, chars, shown) : undefined;
     if (b) bs.set(b.x.id, b);
   }
   return { k, s, chars, bs };
@@ -104,7 +116,7 @@ async function aimed(ctx: FlowCtx, w: World, b: Live, a: TurnAction, target: str
   const chOf = (y: Combatant) => (y.characterId ? w.chars.find((c) => c.id === y.characterId) : undefined);
   return workOut({ a, level, features: [...b.features], actor: b.x, combat: w.k, scene: w.s, diagonal: d, aim: { target, rolled, toggles: [] },
     findTarget: (id) => w.k.combatants.find((y) => y.id === id), conditionsOf: cond, exhaustionOf: (y) => chOf(y)?.state.exhaustion ?? 0,
-    info: (y) => { const c = chOf(y); return c ? targetOf(y, { sheet: w.bs.get(y.id)?.sheet ?? computeSheet(c, { settings: ctx.settings, viewer: 'dm' }), hp: c.state.hp, conditions: c.state.conditions })
+    info: (y) => { const c = chOf(y); return c ? targetOf(y, { sheet: computeSheet(c, { settings: ctx.settings, viewer: 'dm' }), hp: c.state.hp, conditions: c.state.conditions })
       : targetOf(y, { monster: y.monsterId ? ctx.monster(y.monsterId) : undefined }); },
     nameOf: (y) => w.bs.get(y.id)?.name ?? y.name, magical: !!b.ch?.inventory.find((e) => e.id === a.attack?.entryId)?.item.magic,
     id: uid(), now: Date.now(), rng: ctx.rng ?? Math.random });
@@ -184,8 +196,12 @@ export async function guardCast(ctx: FlowCtx, casterId: string, spell: { name: s
     // the check: d20 + its spellcasting modifier (ponytail: a stat block that names no spellcasting ability checks at +0, monsterActions' `mod`)
     const check = spell.level > 3 && slot < spell.level ? (ans.d20 ?? roll20(ctx)) + (a.cast?.mod ?? 0) : undefined;
     if (countered(spell.level, slot, check)) { // ponytail: the first that counters ends it; the rest pay nothing
-      // it never took effect: the concentration it began (at payment) is not held (the spell it replaced stays dropped, it was cast)
-      await updateCombat(ctx.cid, (k) => ({ ...k, combatants: k.combatants.map((z) => (z.id === casterId && z.concentratingOn === spell.name ? { ...z, concentrating: false, concentratingOn: undefined, concentrationSlot: undefined } : z)) }));
+      // it never took effect: the concentration it began (at payment) is not held (the spell it replaced stays dropped, it was cast), nor the haste it gave
+      const gave = (z: Combatant, round: number) => spell.name === 'Haste' && z.hasted?.by === casterId && z.hasted.round === round && !z.hasted.ended;
+      await updateCombat(ctx.cid, (k) => ({ ...k, combatants: k.combatants.map((z) => {
+        if (gave(z, k.round)) z = { ...z, hasted: { ...z.hasted!, ended: true as const } };
+        return z.id === casterId && z.concentratingOn === spell.name ? { ...z, concentrating: false, concentratingOn: undefined, concentrationSlot: undefined } : z;
+      }) }));
       return false;
     }
   }
@@ -205,12 +221,15 @@ export async function land(ctx: FlowCtx, res: Omit<Resolution, 'applied'>, befor
       asked.add(o.id); // ponytail: asked once per result (Scorching Ray's later rays don't ask again)
       const b = (await world(ctx))?.bs.get(o.id), all = b ? hitReactors(b, src, { melee: !!opts.melee }) : [];
       const reactors = mm ? all.map((r) => ({ ...r, options: r.options.filter((z) => z.id === 'shield') })).filter((r) => r.options.length) : all; // darts are not attacks: Shield only
+      const who = src.hidden ? 'Something' : src.name; // an attacker hidden from the players stays unnamed on their card
       const answers = !b ? [] : await ask({ id: uid(), kind: 'hit', trigger: `${src.name} hits ${b.name} (${mm ? 'Magic Missile' : `${o.roll} vs AC ${o.ac}`})`,
-        playerTrigger: mm ? `${src.name} hits you with ${src.pc ? 'Magic Missile' : 'a spell'}` : `${src.name} hits you (${o.roll})`, reactors, waiting: src.x.id });
+        playerTrigger: mm ? `${who} hits you with ${src.pc && !src.hidden ? 'Magic Missile' : 'a spell'}` : `${who} hits you (${o.roll})`, reactors, waiting: src.x.id });
       for (const ans of answers) {
         const opt = reactors[0]?.options.find((z) => z.id === ans.option), a = ans.option === 'shield' ? b && reactionNamed(b, 'shield') : pip(opt?.label ?? ans.option);
-        const why = b && a ? await pay(ctx, b, a, ans.option === 'shield' ? ans.slot ?? b.slots[0] : undefined) : 'not available';
+        const slot = ans.option === 'shield' ? ans.slot ?? b?.slots[0] : undefined;
+        const why = b && a ? await pay(ctx, b, a, slot) : 'not available';
         if (why) { refused(ctx, ans.reactor, why); continue; }
+        if (ans.option === 'shield' && !(await guardCast(ctx, ans.reactor, { name: 'Shield', level: slot ?? 1 }))) continue; // countered: paid, no Shield
         if (ans.option === 'shield') { await setCondition(ctx.cid, o.id, 'Shield', true, { rounds: 1, at: 'start', of: o.id }); shielded.add(o.id); o = blocked(o); }
         if (ans.option === 'parry') o = rejudge(o, opt?.bonus ?? 0, missHalf);
         if (ans.option === 'uncanny') o = halved(o);
@@ -229,7 +248,7 @@ async function rebukes(ctx: FlowCtx, actor: string, victims: string[]): Promise<
   for (const id of new Set(victims)) {
     const w = await world(ctx), v = w?.bs.get(id), s = w?.bs.get(actor);
     if (!w || !v || !s || v === s || !on(w.k, ctx.settings)) continue;
-    const answers = await ask({ id: uid(), kind: 'rebuke', trigger: `${s.name} hurts ${v.name}`, playerTrigger: `${s.name} hurts you`,
+    const answers = await ask({ id: uid(), kind: 'rebuke', trigger: `${s.name} hurts ${v.name}`, playerTrigger: `${s.hidden ? 'Something' : s.name} hurts you`,
       reactors: rebukeReactors(w.s.grid, ctx.settings.diagonal, v, s), waiting: actor });
     for (const ans of answers) await strike(ctx, ans, actor, (b) => reactionNamed(b, 'hellish rebuke'), { cast: true });
   }

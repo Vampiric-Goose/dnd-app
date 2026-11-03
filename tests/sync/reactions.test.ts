@@ -226,14 +226,14 @@ describe('moves and casts through the reaction flow', () => {
   });
 
   const ward1 = (b: { got: unknown[] }) => ({ t: 'use', characterId: 'mira', action: `spell:${ward.id}`, slot: 1, aim: { targets: [aliasOf(b, 'Thorin')], rolled: { dmg: [] }, toggles: [] } });
-  test('a player’s spell countered by a monster spends the slot and sends no outcome', async () => {
+  test('a player’s spell countered by a monster spends the slot and sends no outcome, only a notice', async () => {
     const guard = vi.fn(async () => false);
     const { d, host, b } = await hosted('pc:mira', () => ({ guardCast: guard }));
     b.deliver(ward1(b));
     await settle(host);
     expect(guard).toHaveBeenCalledWith('pc:mira', { name: 'Shield of Faith', level: 1 });
     expect(d.char('mira')!.state.slotsUsed[0]).toBe(1);
-    expect(b.got.filter((m) => ['outcome', 'useRefused'].includes((m as { t: string }).t))).toEqual([]);
+    expect(b.got.filter((m) => ['outcome', 'useRefused'].includes((m as { t: string }).t))).toEqual([{ t: 'useRefused', reason: 'your Shield of Faith was countered' }]);
     expect(d.combat!.resolutions ?? []).toEqual([]);
   });
 

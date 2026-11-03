@@ -21,7 +21,7 @@
 </script>
 
 {#if cards.length || note}
-  <div class="dock" role="region" aria-label="Reactions">
+  <div class="dock" role="region" aria-label="Reactions" aria-live="polite">
     {#each cards as c (c.ask)}
       <section class="card">
         <p class="trigger">{c.trigger}</p>

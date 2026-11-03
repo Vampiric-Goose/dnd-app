@@ -28,7 +28,7 @@ import { canon, latestClock, mergeCharacter, type Synced } from './merge.ts';
 import { campaignForPlayers, characterForPlayer, currentActor, playerPack, promptsFor, rosterEntry, trackerForPlayers, unprojectCharacter, type TrackerView } from './project.ts';
 import { uid } from '../uid.ts';
 import { BLOB_CHUNK, cleanRoll, cuts, IMAGE_TYPES, LOW_WATER, MAX_BLOB, MAX_CHUNK, MAX_MESSAGE, MAX_PACK, parseGuestMessage, size, type GuestMsg, type HostMsg, type PackOffer, type Preview } from './protocol.ts';
-import { moveCost, moveProblem, previewVisible, sceneBlobs, sceneForPlayers, type PlayerScene } from './scene.ts';
+import { moveCost, moveProblem, playerTokens, previewVisible, sceneBlobs, sceneForPlayers, type PlayerScene } from './scene.ts';
 
 export interface HostDeps {
   /** The hosted campaign (its `sync.role` is 'dm'). */
@@ -146,6 +146,8 @@ export class Host {
   #deps: HostDeps;
   #conns = new Set<Conn>();
   #queue: Promise<void> = Promise.resolve();
+  /** Characters with detached work still running (a use, save, leap or move waiting on reaction cards), counted. */
+  #pending = new Map<string, number>();
   #unsubscribe?: () => void;
 
   constructor(deps: HostDeps) {
@@ -362,6 +364,7 @@ export class Host {
     if (!camp || !ch || ch.ownerId !== pid || ch.campaignId !== camp.id) return this.#violation(c, 'not their character');
     const refuse = (reason: string) => this.#send(c, { t: 'useRefused', reason });
     if (!this.#deps.updateCombat) return refuse('no fight');
+    if (this.#pending.has(ch.id)) return refuse('waiting on reactions'); // the last one is not worked out yet: this one would be judged on stale state
     const sheet = computeSheet(ch, { settings: camp.settings, viewer: 'player' }), features = featureList(ch, camp.settings);
     const fight = await this.#deps.loadCombat?.(), fx = fight && combatantForToken(fight, { characterId: ch.id }); // the spell it holds, to use again
     const a = pcActions(ch, sheet, features, fx?.concentrating ? { spell: fx.concentratingOn, slot: fx.concentrationSlot } : undefined).find((x) => x.id === m.action);
@@ -410,7 +413,7 @@ export class Host {
       return refuse('the character could not be updated, so nothing was paid');
     }
     const effects = async () => {
-      if (spell && guard && casterId && !(await guard(casterId, { name: a.name, level: level ?? spell.level }))) return; // countered: paid, nothing more
+      if (spell && guard && casterId && !(await guard(casterId, { name: a.name, level: level ?? spell.level }))) return this.#send(c, { t: 'useRefused', reason: `your ${a.name} was countered` }); // paid, nothing more
       if (gated && edits) await this.#deps.editCharacter!(ch.id, (x) => characterEffect(x, a, m.target, !!aimed)).catch(() => false);
       if (aimed) {
         const landed = await this.#deps.resolve!(aimed.resolution, before, { melee: meleeAttack(aimPlan(a, { level, features: features.map((f) => f.name) })) });
@@ -421,11 +424,18 @@ export class Host {
         if (x) await this.#deps.summon!(x.id, called, { spell: a.name, ...(a.spell?.concentration && { cast: x.concentrationCount }), share: 'creature' in spec });
       }
     };
-    if (this.#deps.reactions) this.#detach(effects); else await effects(); // hit and Rebuke asks wait on players: never inside the queue
+    if (this.#deps.reactions) this.#detach(effects, ch.id); else await effects(); // hit and Rebuke asks wait on players: never inside the queue
   }
 
-  /** Work that waits on players' answers (a move at a reach edge, a spell open to Counterspell) runs off the message queue, or their answers would wait behind it. */
-  #detach(f: () => Promise<void>): void { void f().catch((e) => (this.#deps.onError ?? console.warn)(e)); }
+  /**
+   * Work that waits on players' answers (a move at a reach edge, a spell open to Counterspell) runs off the message queue, or their answers
+   * would wait behind it. `characterId`: whose work it is; their next use is refused until it ends (never awaited here: answers would deadlock).
+   */
+  #detach(f: () => Promise<void>, characterId?: string): void {
+    const n = this.#pending, id = characterId;
+    if (id !== undefined) n.set(id, (n.get(id) ?? 0) + 1);
+    void f().catch((e) => (this.#deps.onError ?? console.warn)(e)).finally(() => { if (id !== undefined) { const left = n.get(id)! - 1; if (left) n.set(id, left); else n.delete(id); } });
+  }
 
   /** Tells the player who owns `characterId` that their reaction was refused; false when no link of theirs is open (then the DM sees it). */
   async tell(characterId: string, reason: string): Promise<boolean> {
@@ -460,7 +470,7 @@ export class Host {
     if (!taken) return refuse('no leap');
     const before = snapOf(k, await this.#deps.loadCharacters(), touched(aimed.resolution)), resolve = this.#deps.resolve;
     const tail = async () => { const landed = await resolve(aimed.resolution, before); this.#send(c, { t: 'outcome', ...heard(aimed.outcome, landed || aimed.resolution) }); };
-    if (this.#deps.reactions) this.#detach(tail); else await tail();
+    if (this.#deps.reactions) this.#detach(tail, ch.id); else await tail();
   }
 
   async #aim(camp: Campaign, ch: Character, features: { name: string }[], a: TurnAction, aim: Aim, level: number | undefined, leapFrom?: WorkIn['leapFrom']): Promise<Aimed | string> {
@@ -469,7 +479,7 @@ export class Host {
     const x = combatantForToken(k, { characterId: ch.id });
     if (!x) return 'not on the map';
     const chars = await this.#deps.loadCharacters();
-    const onMap = new Set(sceneForPlayers(s, chars, k, camp.settings)?.tokens.map((t) => t.id)); // no hidden or fogged token
+    const onMap = playerTokens(s, chars, k, camp.settings); // no hidden or fogged token
     const seen = (z: Combatant) => s.tokens.some((t) => onMap.has(t.id) && combatantForToken(k, t)?.id === z.id);
     return workOut({
       a, level, features: features.map((f) => f.name), actor: x, combat: k, scene: s, diagonal: camp.settings.diagonal, aim,
@@ -573,7 +583,7 @@ export class Host {
     const r = x && k.resolutions?.find((y) => y.id === m.resolution && y.outcomes.some((o) => o.id === x.id && o.pending));
     if (!r) return;
     const settle = () => this.#deps.settleSave?.(r.id, x.id, m.d20); // a Hellish Rebuke ask may follow the damage: off the queue
-    if (this.#deps.reactions) this.#detach(async () => void (await settle())); else await settle();
+    if (this.#deps.reactions) this.#detach(async () => void (await settle()), ch.id); else await settle();
   }
 
   /** Turn panel: the player's own character (else a violation) ends its turn, only while it really holds the turn (not a hidden creature's after it); else ignored. */
@@ -860,7 +870,7 @@ export class Host {
     const cid = !why ? shown?.tokens.find((t) => t.id === m.tokenId)?.characterId : undefined, x = cid !== undefined && combat && combat.round >= 1 ? combatantForToken(combat, { characterId: cid }) : undefined;
     if (x && combat!.turn === x.id && this.#deps.guardMove) { // the mover's own turn: it walks the whole way through the reaction flow
       const go = this.#deps.guardMove;
-      return this.#detach(async () => { await go(m.tokenId, { x: m.x, y: m.y }); await this.#task(() => this.#sendScene(camp, c)); });
+      return this.#detach(async () => { await go(m.tokenId, { x: m.x, y: m.y }); await this.#task(() => this.#sendScene(camp, c)); }, cid);
     }
     // checked again on the fresh record, in the write (the DM may have hidden the token since); its cost is measured on that record too
     let moved: { combatantId: string; from: { x: number; y: number } } | undefined, walked: { s: Scene; from: { x: number; y: number } } | undefined;

@@ -111,3 +111,34 @@ test('using a held spell again is not a cast: no Counterspell ask, and it resolv
   expect((await db.combat.get(CID))!.resolutions!.at(-1)).toMatchObject({ outcomes: [{ id: 'pc:mira', heal: 7 }] });
   expect(errors).toEqual([]);
 });
+
+// ---- Final review fixes ----
+const refusals = (l: { got: unknown[] }) => (l.got as { t: string; reason?: string }[]).filter((m) => m.t === 'useRefused').map((m) => m.reason);
+
+test('a second use while the first still waits on a reaction card is refused; after the answer a use goes through', async () => {
+  const { host, a, b } = await table([['t-thorin', 0, 0, { characterId: 'thorin' }], ['t-mira', 1, 0, { characterId: 'mira' }]], [pcX('thorin'), pcX('mira')], 'pc:thorin');
+  a.deliver({ t: 'use', characterId: 'thorin', action: 'attack:unarmed', aim: { target: 't-mira', rolled: { d20: [8, 8], dmg: [[]] }, toggles: [] } });
+  await settleHost(host);
+  expect(reactions.open.map((o) => o.kind)).toEqual(['hit']);
+  a.deliver({ t: 'use', characterId: 'thorin', action: 'res:Second Wind' });
+  await settleHost(host);
+  expect(refusals(a)).toEqual(['waiting on reactions']);
+  expect((await db.characters.get('thorin'))!.state.resourcesUsed['Second Wind']).toBeUndefined();
+  b.deliver({ t: 'react', ask: cards(b).at(-1)!.prompts[0].ask, characterId: 'mira', option: 'shield', slot: 1 });
+  await settleHost(host);
+  a.deliver({ t: 'use', characterId: 'thorin', action: 'res:Second Wind' });
+  await settleHost(host);
+  expect(refusals(a)).toEqual(['waiting on reactions']);
+  expect((await db.characters.get('thorin'))!.state.resourcesUsed['Second Wind']).toBe(1);
+});
+
+test('a player’s countered spell: its player is told', async () => {
+  const { host, b } = await table([['t-mira', 0, 0, { characterId: 'mira' }], ['t-ma', 3, 0, { combatantId: 'ma' }]], [pcX('mira'), mon(mage, 'ma')], 'pc:mira');
+  b.deliver({ t: 'use', characterId: 'mira', action: 'spell:spell:aura-of-vitality@FIX' });
+  await settleHost(host);
+  expect(reactions.open.map((o) => o.kind)).toEqual(['counterspell']);
+  answer(reactions.open[0].id, { reactor: 'ma', option: 'counterspell', slot: 3 });
+  await settleHost(host);
+  expect(refusals(b)).toEqual(['your Aura of Vitality was countered']);
+  expect(errors).toEqual([]);
+});

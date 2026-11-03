@@ -77,7 +77,7 @@ export type HostMsg =
   | { t: 'drag'; tokenId: string; x: number; y: number /* someone drags a token this player sees (a preview, never stored) */ }
   | { t: 'dragEnd'; tokenId: string }
   | { t: 'reactions'; prompts: ReactPrompt[]; waiting: boolean /* the player's own reaction cards, and whether the fight waits on one of their characters */ }
-  | { t: 'useRefused'; reason: string /* turn panel: a use the DM's device turned down (nothing was spent) */ }
+  | { t: 'useRefused'; reason: string /* turn panel: a use the DM's device turned down (nothing was spent), or their spell countered (paid) */ }
   | ({ t: 'outcome' } & UseOutcome)
   | { t: 'bye'; reason: string };
 
@@ -123,7 +123,6 @@ function cleanAim(a: unknown): Aim | null {
 }
 
 const REACT_OPTIONS: readonly string[] = ['oa', 'counterspell', 'shield', 'uncanny', 'parry', 'rebuke'];
-/** A guest message checked against its shape, or why not. Ownership and 2024 checks need the campaign and are the host's. */
 /** A summon cast's pick (summons.ts): the option, the creatures (monster ids from the shared books), a spirit's variant. */
 export interface SummonPick { option?: number; monsterIds: string[]; variant?: string }
 /** null: malformed. */
@@ -136,6 +135,7 @@ function cleanSummon(x: unknown): SummonPick | null {
   return { monsterIds: monsterIds as string[], ...(option !== undefined && { option: option as number }), ...(variant !== undefined && { variant: variant as string }) };
 }
 
+/** A guest message checked against its shape, or why not. Ownership and 2024 checks need the campaign and are the host's. */
 export function parseGuestMessage(raw: unknown): GuestMsg | { error: string } {
   if (!isRec(raw) || poisoned(raw)) return { error: 'malformed' };
   switch (raw.t) {

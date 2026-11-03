@@ -127,7 +127,6 @@ export const cleanRoster = (v: unknown): RosterEntry[] => uniqueIds((Array.isArr
 const HEALTH: readonly string[] = ['Unhurt', 'Hurt', 'Bloodied', 'Down'] satisfies HealthStatus[];
 const MAX_ROWS = 200; // MAX_COMBATANTS (combat.ts is lazy: not imported here)
 const s = (x: unknown, max: number): x is string => typeof x === 'string' && x.length <= max;
-/** Stage 4: the DM's tracker rebuilt from its known fields: a row without a fitting id and name, or with an id already seen, is dropped; a bad optional field omitted. */
 /** The reaction cards from the DM, rebuilt from known fields (a malformed card is dropped). */
 export function cleanReactions(v: { prompts?: unknown; waiting?: unknown }): { prompts: ReactPrompt[]; waiting: boolean } {
   const prompts = (Array.isArray(v.prompts) ? v.prompts.slice(0, 20) : []).flatMap((p): ReactPrompt[] => {
@@ -140,6 +139,7 @@ export function cleanReactions(v: { prompts?: unknown; waiting?: unknown }): { p
   return { prompts, waiting: v.waiting === true };
 }
 const REACT_IDS = ['oa', 'counterspell', 'shield', 'uncanny', 'parry', 'rebuke'];
+/** Stage 4: the DM's tracker rebuilt from its known fields: a row without a fitting id and name, or with an id already seen, is dropped; a bad optional field omitted. */
 export function cleanTracker(v: unknown): TrackerView | undefined {
   if (!isRec(v) || !fin(v.round) || !Array.isArray(v.rows)) return undefined;
   const rows = uniqueIds(v.rows.flatMap((r): TrackerRow[] => {

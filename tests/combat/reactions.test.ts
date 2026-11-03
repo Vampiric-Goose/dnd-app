@@ -8,7 +8,7 @@ import type { Combat, Combatant, Grid } from '../../src/lib/types.ts';
 const g: Grid = { ...DEFAULT_GRID, size: 50, feet: 5, offsetX: 0, offsetY: 0 };
 const cb = (id: string, kind: Combatant['kind'], o: Partial<Combatant> = {}): Combatant => ({ id, kind, name: id, initMod: 0, dex: 10, tie: 0.5, conSave: 0, ...o });
 const body = (id: string, pc: boolean, x: number, y: number, o: Partial<Body> = {}): Body =>
-  ({ x: cb(id, pc ? 'pc' : 'monster'), pt: { x, y, size: 'M' }, conditions: [], actions: [], features: [], slots: [], reach: 5, pc, name: id, ...o });
+  ({ x: cb(id, pc ? 'pc' : 'monster'), pt: { x, y, size: 'M' }, conditions: [], actions: [], features: [], slots: [], reach: 5, pc, side: pc ? 'party' : 'foes', hidden: false, name: id, ...o });
 const react = (name: string): TurnAction => ({ id: `r:${name}`, name, cost: 'reaction', group: 'spell' });
 const scimitar: TurnAction = { id: 'mon:action:0', name: 'Scimitar', cost: 'action', group: 'monster', text: [{ p: 'Melee Weapon Attack: +4 to hit, reach 5 ft., one target. Hit: 5 (1d6 + 2) slashing damage.' }] };
 const gob = body('gob', false, 0, 0, { name: 'Goblin', actions: [scimitar] });
@@ -38,6 +38,18 @@ describe('leaveStep', () => {
     expect(leaveStep(g, '5-5-5', { ...pc, conditions: ['Invisible'] }, [gob], to4, false)).toBeUndefined();
     expect(leaveStep(g, '5-5-5', pc, [{ ...gob, conditions: ['Blinded'] }], to4, false)).toBeUndefined();
   });
+  test('a PC’s summon is on its side: no attack when the PC leaves it; it attacks a foe leaving it', () => {
+    const wolf = body('wolf', false, 0, 0, { side: 'party', actions: gob.actions });
+    expect(leaveStep(g, '5-5-5', pc, [wolf], to4, false)).toBeUndefined();
+    expect(leaveStep(g, '5-5-5', body('gob2', false, 50, 0), [wolf], to4, false)?.reactors.map((r) => r.id)).toEqual(['wolf']);
+  });
+  test('a creature hidden from the players: no PC attacks it (a monster still may)', () => {
+    const ally = body('ally', true, 0, 0, { actions: [{ id: 'react:opportunity', name: 'Opportunity Attack', cost: 'reaction', group: 'attack' }] });
+    const sneak = body('sneak', false, 50, 0, { hidden: true });
+    expect(leaveStep(g, '5-5-5', sneak, [ally], to4, false)).toBeUndefined();
+    expect(leaveStep(g, '5-5-5', { ...sneak, hidden: false }, [ally], to4, false)?.reactors.map((r) => r.id)).toEqual(['ally']);
+    expect(leaveStep(g, '5-5-5', { ...pc, hidden: true }, [gob], to4, false)?.reactors.map((r) => r.id)).toEqual(['gob']);
+  });
   test('a downed monster (0 hp) does not react', () => {
     expect(leaveStep(g, '5-5-5', pc, [{ ...gob, x: { ...gob.x, hp: 0 } }], to4, false)).toBeUndefined();
   });
@@ -65,6 +77,12 @@ describe('Counterspell', () => {
   });
   test('needs the spell, a reaction, and is not the caster', () => {
     expect(counterReactors(g, '5-5-5', caster, [body('x', true, 50, 0, { slots: [3] }), { ...wiz('used', 50, [3]), x: cb('used', 'pc', { reactionUsed: true }) }, { ...wiz('caster', 50, [3]), x: caster.x }])).toEqual([]);
+  });
+  test('the reactor must see the caster: not an invisible one, nor (for a PC) one hidden from the players', () => {
+    const near = wiz('near', 50, [3]);
+    expect(counterReactors(g, '5-5-5', { ...caster, hidden: true }, [near])).toEqual([]);
+    expect(counterReactors(g, '5-5-5', { ...caster, conditions: ['Invisible'] }, [near])).toEqual([]);
+    expect(counterReactors(g, '5-5-5', caster, [{ ...near, conditions: ['Blinded'] }])).toEqual([]);
   });
   test('countered: 3rd or lower always; higher needs the slot or a check of 10 + level', () => {
     expect(countered(3, 3)).toBe(true); expect(countered(5, 5)).toBe(true);
@@ -109,6 +127,8 @@ describe('hit reactions', () => {
     const knight = body('k', false, 0, 0, { name: 'Knight', actions: [parry] });
     expect(hitReactors(knight, atk, { melee: true })[0].options).toEqual([{ id: 'parry', label: 'Parry (+2 AC)', bonus: 2 }]);
     expect(hitReactors(knight, atk, { melee: false })).toEqual([]);
+    expect(hitReactors(knight, { ...atk, conditions: ['Invisible'] }, { melee: true })).toEqual([]); // it must see the attacker
+    expect(hitReactors({ ...knight, conditions: ['Blinded'] }, atk, { melee: true })).toEqual([]);
   });
 });
 
