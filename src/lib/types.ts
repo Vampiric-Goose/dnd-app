@@ -123,7 +123,7 @@ export interface CampaignSettings { allowOverrides: boolean; customOrigin: boole
   initiativeModules: { hp: boolean; conditions: boolean; deathSaves: boolean; concentration: boolean; legendary: boolean; lair: boolean; reactions: boolean }; showMonsterHealth: boolean;
   /** Targeted actions (map targeting, automatic hits, saves and damage): on unless false. */ targeting?: boolean;
   /** Ask about reactions (Opportunity Attacks, Counterspell, Shield, Hellish Rebuke) as they happen: on unless false. */ reactions?: boolean;
-  /** House rule: a critical hit doubles all its damage, modifiers too (not just the dice): on unless false. */ critAll?: boolean }
+  /** House rule: a critical hit doubles its whole damage total (rolled once), not just its dice: on unless false. */ critAll?: boolean }
 export interface Campaign { id: string; name: string; createdAt: number; updatedAt: number; settings: CampaignSettings; enabledPacks: string[]; loot: InventoryEntry[]; sync?: CampaignSync }
 /** Stage 3: a hosted (dm) or joined (player) campaign. `node`: this device's random 8-character HLC node id; `last`: its latest HLC. */
 export interface CampaignSync { role: 'dm' | 'player'; code: string; node: string; last?: Hlc;

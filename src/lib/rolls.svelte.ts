@@ -15,7 +15,7 @@ export const rollMode: { value: 'normal' | 'adv' | 'dis' } = $state({ value: 'no
  * current; a joined campaign holds nothing hidden).
  */
 export const rollViewer: { value: 'dm' | 'player' } = $state({ value: 'dm' });
-/** House rule (campaign setting critAll, on by default): a crit roll doubles its modifiers too. App keeps it current. */
+/** House rule (campaign setting critAll, on by default): a crit roll's total is doubled, not its dice. App keeps it current. */
 export const critRule: { all: boolean } = $state({ all: true });
 /** The tray's Public toggle, per viewer. R12: a DM's rolls start private; the DM shares one by ticking it. */
 export const rollVisibility: { dm: boolean; player: boolean } = $state({ dm: false, player: true });

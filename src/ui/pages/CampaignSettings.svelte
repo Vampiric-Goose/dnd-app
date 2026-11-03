@@ -186,7 +186,7 @@
       </label>
       <label class="check">
         <input type="checkbox" checked={c.settings.critAll !== false} onchange={(e) => { const v = e.currentTarget.checked; return change((n) => (n.settings.critAll = v)); }} />
-        <span>Critical hits double all damage: modifiers as well as dice (house rule)</span>
+        <span>Critical hits double the whole damage total: roll once, then double it (house rule)</span>
       </label>
     </Drawer>
 

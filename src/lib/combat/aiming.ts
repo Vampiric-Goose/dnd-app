@@ -266,7 +266,7 @@ export function foeWithin5(k: Combat, s: Scene, actor: Combatant, diagonal: '5-5
 
 export interface WorkIn {
   a: TurnAction; level?: number; features: string[]; actor: Combatant; combat: Combat; scene: Scene; diagonal: '5-5-5' | '5-10-5'; aim: Aim;
-  /** House rule (settings.critAll): a critical hit doubles its modifiers too. */ critAll?: boolean;
+  /** House rule (settings.critAll): a critical hit's damage dice come once and its total is doubled. */ critAll?: boolean;
   /** The target the aim names, if the roller may pick it (a player: visible ones only). */
   findTarget: (id: string) => Combatant | undefined;
   info: (z: Combatant) => TargetInfo | Promise<TargetInfo>;
@@ -349,7 +349,7 @@ export async function workOut(i: WorkIn): Promise<Aimed | string> {
     const e = why && o.roll !== undefined ? { ...o, edge: why } : o;
     return blessed.note && o.roll !== undefined ? { ...e, note: [e.note, blessed.note].filter(Boolean).join(', ') } : e;
   };
-  const crit = plan.attack && (keptD20(rolled) === 20 || autoCrit); // a critical's dice come doubled
+  const crit = plan.attack && (keptD20(rolled) === 20 || autoCrit) && !i.critAll; // a critical's dice come doubled (under the house rule, once: its total is doubled)
   const base = { id: i.id, actor: actor.id, action: a.name, at: i.now, round: k.round, ...(i.level !== undefined && plan.read?.leap && { slot: i.level }),
     ...(a.spell?.concentration && !i.leapFrom && { cast: (actor.concentrationCount ?? 0) + 1 }) }; // worked out before it is paid for
   if (!plan.read) { // a weapon or a monster's attack

@@ -142,13 +142,14 @@ describe('monsterAc with the library’s own AC', async () => {
   });
 });
 
-describe('house rule: a crit doubles all damage', () => {
-  test('totalOf doubles the constants too', () => {
-    expect(totalOf('2d6+3', [1, 2, 3, 4], 'all')).toBe(16);
+describe('house rule: a crit doubles the damage total', () => {
+  test('totalOf: the dice once, the whole total doubled', () => {
+    expect(totalOf('2d6+3', [1, 2], 'all')).toBe(12);
+    expect(totalOf('2d6+3', [1, 2, 3, 4], 'all')).toBeUndefined(); // no doubled dice under the rule
   });
-  test('resolveAttack on a natural 20 with the rule: dice and modifier doubled', () => {
+  test('resolveAttack on a natural 20 with the rule: the total doubled', () => {
     const sword = [{ expr: '2d6+3', type: 'slashing' }];
-    expect(resolveAttack(goblin('g', { ac: 30 }), 0, sword, { d20: [20], dmg: [[1, 2, 3, 4]] }, false, false, true)).toMatchObject({ hit: true, damage: 16 });
+    expect(resolveAttack(goblin('g', { ac: 30 }), 0, sword, { d20: [20], dmg: [[1, 2]] }, false, false, true)).toMatchObject({ hit: true, damage: 12 });
     expect(resolveAttack(goblin('g', { ac: 3 }), 0, sword, { d20: [12], dmg: [[1, 2]] }, false, false, true)).toMatchObject({ hit: true, damage: 6 }); // no crit: unchanged
   });
 });

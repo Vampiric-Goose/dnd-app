@@ -18,18 +18,18 @@ const pickAlt = <T extends Pick<Die, 'part'>>(list: T[], hurt?: boolean): T[] =>
 export interface Rolled { d20?: number[]; mode?: 'adv' | 'dis'; dmg: number[][] }
 
 /** The total of `expr` from these faces, or undefined when they don't fit it (die count, doubled on a crit; a face outside its die).
- *  `crit` 'all' (house rule): its constants doubled too. */
+ *  `crit` 'all' (house rule): the dice once, the whole total doubled. */
 export function totalOf(expr: string, faces: number[], crit: boolean | 'all'): number | undefined {
   let i = 0, total = 0;
   for (const t of parseDice(expr)) {
-    if ('const' in t) { total += t.sign * t.const * (crit === 'all' ? 2 : 1); continue; }
-    const n = crit ? t.count * 2 : t.count;
+    if ('const' in t) { total += t.sign * t.const; continue; }
+    const n = crit === true ? t.count * 2 : t.count;
     const mine = faces.slice(i, i + n);
     if (mine.length < n || mine.some((f) => !Number.isInteger(f) || f < 1 || f > t.sides)) return undefined;
     total += t.sign * mine.reduce((a, b) => a + b, 0);
     i += n;
   }
-  return i === faces.length ? total : undefined;
+  return i === faces.length ? total * (crit === 'all' ? 2 : 1) : undefined;
 }
 
 /** What is wrong with dice another device sent, or undefined. */
@@ -77,7 +77,7 @@ function firstTwo(expr: string, faces: number[], sides: number, crit: boolean | 
   let i = 0;
   for (const t of parseDice(expr)) {
     if ('const' in t) continue;
-    const n = crit ? t.count * 2 : t.count;
+    const n = crit === true ? t.count * 2 : t.count;
     if (t.sides === sides) return faces.slice(i, i + Math.min(2, n));
     i += n;
   }
@@ -90,7 +90,7 @@ const attackRoll = (t: TargetInfo, toHit: number, r: Rolled): { hit: boolean; ro
 };
 
 /** A weapon attack (or a monster's): hit or miss against AC, and its damage on a hit. Extra damage (GWM's +10) is one more expression.
- *  `all` (house rule): a critical hit doubles its modifiers too. */
+ *  `all` (house rule): a critical hit's dice come once and its damage is doubled. */
 export function resolveAttack(t: TargetInfo, toHit: number, dmg: { expr: string; type: string; vs?: string }[], r: Rolled, magical: boolean, autoCrit = false, all = false): Outcome {
   const a = attackRoll(t, toHit, r), crit = a.nat === 20 || autoCrit;
   const live = dmg.map((d, i) => ({ d, f: r.dmg[i] ?? [] })).filter((x) => !x.d.vs || x.d.vs === t.id); // a marked rider hurts only its mark

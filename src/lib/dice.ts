@@ -25,7 +25,7 @@ export function parseDice(expr: string): DiceTerm[] {
 }
 
 /** `faces`: every die rolled, in term order (both d20s with advantage), so another device can check and total them. */
-/** `crit`: a critical hit's dice doubled; 'all' (house rule): its constants doubled too. */
+/** `crit`: a critical hit's dice doubled; 'all' (house rule): the dice rolled once and the whole total doubled. */
 export function rollDice(expr: string, opts: { rng?: () => number; advantage?: 'adv' | 'dis'; crit?: boolean | 'all' } = {}): { total: number; detail: string; faces: number[] } {
   const rng = opts.rng ?? Math.random;
   const terms = parseDice(expr);
@@ -37,13 +37,13 @@ export function rollDice(expr: string, opts: { rng?: () => number; advantage?: '
   const faces: number[] = [];
   const detail = terms.map((t, i) => {
     const lead = i === 0 ? (t.sign < 0 ? '-' : '') : t.sign < 0 ? ' - ' : ' + ';
-    if ('const' in t) { const x = opts.crit === 'all' ? 2 : 1; total += t.sign * t.const * x; return lead + t.const + (x > 1 ? '×2' : ''); }
-    const count = opts.crit ? t.count * 2 : t.count; // ponytail: crit doubles only the count; a keep term (never a crit in 5e) keeps its n
+    if ('const' in t) { total += t.sign * t.const; return lead + t.const; }
+    const count = opts.crit === true ? t.count * 2 : t.count; // ponytail: crit doubles only the count; a keep term (never a crit in 5e) keeps its n
     const rolls = Array.from({ length: count }, () => 1 + Math.floor(rng() * t.sides));
     faces.push(...rolls);
     const kept = t.keep ? [...rolls].sort((a, b) => (t.keep!.highest ? b - a : a - b)).slice(0, t.keep.n) : rolls;
     total += t.sign * kept.reduce((a, b) => a + b, 0);
     return `${lead}${count}d${t.sides}${t.keep ? (t.keep.highest ? 'kh' : 'kl') + t.keep.n : ''} (${rolls.join(', ')})`;
   }).join('');
-  return { total, detail, faces };
+  return opts.crit === 'all' ? { total: total * 2, detail: `(${detail}) ×2`, faces } : { total, detail, faces };
 }
