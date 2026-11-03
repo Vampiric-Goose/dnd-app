@@ -16,7 +16,7 @@ import type { Character, Combatant, MonsterDef, Pack, SpellDef, Token } from '..
 import { flowCtx } from '../../src/lib/combat/flowCtx.ts';
 import { makeEntry } from '../../src/lib/items/inventory.ts';
 import { rollHooks, rollLog, rollViewer, rollVisibility, type RollEntry } from '../../src/lib/rolls.svelte.ts';
-import { longsword, mkChar } from '../fixtures/content.ts';
+import { longsword, mkChar, shield } from '../fixtures/content.ts';
 import { camp, char } from '../fixtures/records.ts';
 
 vi.mock('../../src/lib/content/srd.ts', async () => ({ loadSrd: async () => (await import('../fixtures/srdPack.ts')).srdPackFixture })); // flowCtx's index
@@ -448,4 +448,66 @@ test('the Counterspell check d20 rolled on the DM device is never shared, even w
     expect(rollLog[0]).toMatchObject({ label: 'Counterspell check', public: false });
     expect(shared).toEqual([]);
   } finally { rollViewer.value = was.viewer; rollVisibility.dm = was.dm; rollHooks.public = was.hook; }
+});
+
+// ---- the name table's reactions (reactionTable.ts) in land
+/** The fixture fighter (Str 16, Dex 16) with these features (as race traits: featureList lists them) and `effects` (a resource to spend). */
+function featured(names: string[], effects: Character['customEffects'] = []): Character {
+  const c = mkChar({ race: 'human', base: { str: 16, dex: 16 }, levels: ['fighter'] }), race = c.embedded[c.build.raceId] as { traits: { name: string; text: unknown }[] };
+  return { ...c, id: 'p', name: 'p', campaignId: 'c1', customEffects: effects, state: { ...c.state, hp: 20 }, overrides: { maxHp: 30 },
+    embedded: { ...c.embedded, [c.build.raceId]: { ...race, traits: [...race.traits, ...names.map((name) => ({ name, text: [{ p: 'x' }] }))] } } as Character['embedded'] };
+}
+const pet = (): Combatant => ({ ...mon(goblin, 'w1'), summon: { by: 'pc:p', spell: 'Conjure' } });
+const goblinHits = (target: string, o: Partial<import('../../src/lib/types.ts').Outcome> = {}) =>
+  ({ id: 'r1', actor: 'g1', action: 'Scimitar', outcomes: [{ id: target, part: 'hit' as const, hit: true, roll: 15, die: 11, ac: 14, damage: 6, ...o }], at: 0 });
+const pcState = async () => (await db.characters.get('p'))!.state;
+
+test('Protection: an ally’s disadvantage, rolled after the fact, turns the hit into a miss', async () => {
+  await fight([[pcC, 1, 0], [pet(), 2, 0], [mon(goblin, 'g1'), 2, 1]], 'g1', 20, { ...featured(['Protection']), inventory: [{ ...makeEntry(shield), equipped: true }] });
+  answering((o) => (o.kind === 'declared' ? { reactor: 'pc:p', option: 'more', key: 'Protection' } : undefined));
+  await land(ctx({ d20: () => 5 }), goblinHits('w1'), undefined, { melee: true });
+  expect(seen.map((o) => [o.kind, o.playerTrigger])).toEqual([['declared', 'g1 attacks w1']]);
+  expect((await db.combat.get('c1'))!.resolutions![0].outcomes[0]).toMatchObject({ hit: false, damage: 0, roll: 9, die: 5 });
+  expect((await fighter('pc:p')).reactionUsed).toBe(true);
+});
+
+test('Parry (maneuver) cuts the damage by its roll and spends a superiority die', async () => {
+  await fight([[pcC, 1, 0], [mon(goblin, 'g1'), 1, 1]], 'g1', 20, featured(['Parry'], [{ type: 'resource', name: 'Superiority Dice', max: '4', recharge: 'short' }]));
+  answering((o) => (o.kind === 'hit' ? { reactor: 'pc:p', option: 'more', key: 'Parry' } : undefined));
+  await land(ctx({ dice: () => 4 }), goblinHits('pc:p'), undefined, { melee: true });
+  expect(seen.map((o) => [o.kind, o.reactors[0].options.map((x) => x.label)])).toEqual([['hit', ['Parry (−1d8+3)']]]);
+  expect([await pcHp(), (await pcState()).resourcesUsed['Superiority Dice']]).toEqual([18, 1]);
+});
+
+test('Riposte after a melee miss: the PC’s attack lands with the die added', async () => {
+  await fight([[pcC, 1, 0], [mon(goblin, 'g1'), 1, 1]], 'g1', 20, featured(['Riposte']));
+  answering((o) => (o.kind === 'miss' ? { reactor: 'pc:p', option: 'more', key: 'Riposte' } : undefined));
+  await land(ctx({ dice: () => 4, rollAim: () => ({ rolled: { d20: [15, 15], dmg: [[]] } }) }), goblinHits('pc:p', { hit: false, roll: 8, die: 4, damage: 0 }), undefined, { melee: true });
+  expect(seen.map((o) => o.kind)).toEqual(['miss']);
+  expect([(await fighter('g1')).hp, (await fighter('pc:p')).reactionUsed]).toEqual([0, true]); // unarmed 1 + 3, + 4: 8 of its 7
+});
+
+test('Wrath of the Storm after a hit: lightning back at the attacker, a Dex save for half', async () => {
+  await fight([[pcC, 1, 0], [mon(goblin, 'g1'), 1, 1]], 'g1', 20, featured(['Wrath of the Storm']));
+  answering((o) => (o.kind === 'rebuke' ? { reactor: 'pc:p', option: 'more', key: 'Wrath of the Storm' } : undefined));
+  await land(ctx({ rollAim: () => ({ rolled: { dmg: [[5, 5]] } }) }), goblinHits('pc:p'), undefined, { melee: true });
+  expect([await pcHp(), (await fighter('g1')).hp]).toEqual([14, 0]); // a failed save (rng 0): 10 lightning
+  expect((await db.combat.get('c1'))!.resolutions!.map((r) => r.action)).toEqual(['Scimitar', 'Wrath of the Storm']);
+});
+
+test('a reminder (Misty Escape) spends the reaction and leaves a note, changing no HP', async () => {
+  await fight([[pcC, 1, 0], [mon(goblin, 'g1'), 1, 1]], 'g1', 20, featured(['Misty Escape']));
+  answering((o) => (o.kind === 'rebuke' ? { reactor: 'pc:p', option: 'more', key: 'Misty Escape' } : undefined));
+  await land(ctx(), goblinHits('pc:p'), undefined, { melee: true });
+  const rs = (await db.combat.get('c1'))!.resolutions!;
+  expect(rs.map((r) => [r.action, r.outcomes[0].note])).toEqual([['Scimitar', undefined], ['Misty Escape', 'Used: settle by hand']]);
+  expect([await pcHp(), (await fighter('pc:p')).reactionUsed]).toEqual([14, true]);
+});
+
+test('a reaction spent when the attack is declared is not offered again on the hit', async () => {
+  await fight([[pcC, 1, 0], [mon(goblin, 'g1'), 1, 1]], 'g1', 20, featured(['Shadowy Dodge', 'Parry']));
+  answering((o) => (o.kind === 'declared' ? { reactor: 'pc:p', option: 'more', key: 'Shadowy Dodge' } : undefined));
+  await land(ctx({ d20: () => 18 }), goblinHits('pc:p'), undefined, { melee: true });
+  expect(seen.map((o) => o.kind)).toEqual(['declared']);
+  expect(await pcHp()).toBe(14); // the second d20 was higher: it still hits
 });

@@ -11,5 +11,7 @@ export async function flowCtx(cid: string, settings: CampaignSettings, o: Pick<F
   const spells = new Map(index.all('spell').map((s) => [s.name.toLowerCase(), s]));
   return { cid, settings, scene: o.scene ?? (() => db.scenes.shown(cid)), rollAim: o.rollAim, onRefused: o.onRefused,
     monster: (id) => own.find((m) => m.id === id) ?? (index.resolve(id) as MonsterDef | undefined), spell: (n) => spells.get(n.toLowerCase()),
-    d20: () => roll('Counterspell check', '1d20', { mode: 'normal', public: false }).faces[0] }; // never shared: it would tell players a Counterspell was cast (R6)
+    // never shared: it would tell players a Counterspell was cast (R6), or what a reaction rolled before its result shows
+    d20: (label = 'Counterspell check') => roll(label, '1d20', { mode: 'normal', public: false }).faces[0],
+    dice: (label, expr) => roll(label, expr, { mode: 'normal', public: false }).total };
 }

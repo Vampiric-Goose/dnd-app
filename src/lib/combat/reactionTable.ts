@@ -36,6 +36,7 @@ export interface Rx {
   /** back: its damage type, and the save (half on a success with `half`) */ type?: string; save?: Ability; half?: true;
   /** ac: when it still hits, half damage; when it now misses, an attack on the actor */ then?: 'resist' | 'attack';
   /** miss: a d6 of at least this */ chance?: number;
+  /** back: as much as the damage dealt (Rebuke the Violent) */ dealt?: true;
 }
 
 const ELEMENTS = ['acid', 'cold', 'fire', 'lightning', 'thunder'];
@@ -93,7 +94,7 @@ export const TABLE: Record<string, Rx> = {
   'Deflect Missiles': { win: ['hit'], who: 'self', shape: 'cut', dice: (b) => `1d10${plus(mod(b, 'dex') + lvl(b, 'Monk'))}`, when: (t) => !!t.ranged },
   'Redirect Attack': { win: ['miss'], who: 'self', shape: 'note', res: ['Ki'], when: (t) => !!t.melee },
   // Paladin
-  'Rebuke the Violent': { win: ['damaged'], who: 'ally', near: { of: 'actor', feet: 30 }, see: 'actor', shape: 'back', res: CD, type: 'radiant', save: 'wis', half: true },
+  'Rebuke the Violent': { win: ['damaged'], who: 'ally', near: { of: 'actor', feet: 30 }, see: 'actor', shape: 'back', res: CD, type: 'radiant', save: 'wis', half: true, dealt: true },
   'Glorious Defense': { win: ['hit'], who: 'any', near: { of: 'target', feet: 10 }, see: 'target', shape: 'ac', res: ['Glorious Defense'], dice: (b) => String(Math.max(1, mod(b, 'cha'))), then: 'attack' },
   'Vigilant Rebuke': { win: ['saved'], who: 'any', near: { of: 'target', feet: 30 }, see: 'target', shape: 'back', type: 'force', dice: (b) => `2d8${plus(mod(b, 'cha'))}`, when: (t) => !!t.ok },
   'Soul of Vengeance': { win: ['after'], who: 'anyone', near: { of: 'actor', feet: 5 }, shape: 'attack', when: (t, b) => t.actor.side !== b.side },
@@ -130,7 +131,7 @@ export const TABLE: Record<string, Rx> = {
   'Flash of Genius': { win: ['saved'], who: 'any', near: { of: 'target', feet: 30 }, see: 'target', shape: 'note', res: ['Flash of Genius'] },
 };
 /** The shape after a window has its say: a damage cutter against a save's damage, or Arcane Deflection on a save, is a reminder (it already landed). */
-const shapeIn = (rx: Rx, t: Trigger): Shape => ((t.save && ['cut', 'resist'].includes(rx.shape)) || (t.window === 'saved' && rx.shape === 'ac') ? 'note' : rx.shape);
+export const shapeFor = (rx: Rx, t: Trigger): Shape => ((t.save && ['cut', 'resist'].includes(rx.shape)) || (t.window === 'saved' && rx.shape === 'ac') ? 'note' : rx.shape);
 
 export const entry = (key: string): Rx | undefined => TABLE[key];
 const named = (n: string, key: string) => { const a = n.toLowerCase(), k = key.toLowerCase(); return a === k || a.endsWith(`: ${k}`); };
@@ -177,7 +178,7 @@ export function tableReactors(g: Grid, diagonal: Diagonal, t: Trigger, all: Body
     if (!canReact(b) || b === t.actor) continue;
     const options: ReactOption[] = [];
     if (b.pc) for (const [key, rx] of Object.entries(TABLE)) {
-      const shape = shapeIn(rx, t);
+      const shape = shapeFor(rx, t);
       if (!rx.win.includes(t.window) && !(t.window === 'damaged' && t.save && rx.win.includes('hit') && shape === 'note')) continue;
       if (!holds(b, key, rx) || !relates(rx, t, b) || (rx.when && !rx.when(t, b))) continue;
       const anchor = rx.near?.of === 'target' ? t.target : t.actor, seen = rx.see === 'target' ? t.target : rx.see === 'actor' ? t.actor : undefined;

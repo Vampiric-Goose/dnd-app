@@ -7,7 +7,8 @@ import { BLOCKING } from './economy.ts';
 import type { TurnAction } from './turnActions.ts';
 
 type Diagonal = '5-5-5' | '5-10-5';
-export type ReactKind = 'opportunity' | 'counterspell' | 'hit' | 'rebuke';
+/** `rebuke`: damage was taken (Hellish Rebuke and the name table's damaged window). */
+export type ReactKind = 'opportunity' | 'counterspell' | 'hit' | 'rebuke' | 'declared' | 'miss' | 'after' | 'died' | 'saved' | 'enter' | 'cast';
 /** `more`: a reaction from the name table (reactionTable.ts), `key` its name; `strike`: the player's device rolls an Opportunity Attack's aim for it
  *  (`spell`: War Caster's cantrip instead). */
 export interface ReactOption { id: 'oa' | 'counterspell' | 'shield' | 'uncanny' | 'parry' | 'rebuke' | 'more'; label: string; slot?: number; bonus?: number; key?: string; strike?: true; spell?: string }
@@ -89,8 +90,27 @@ export function rejudge(o: Outcome, bonus: number, missHalf?: boolean): Outcome 
   if (o.ac === undefined) return o;
   const ac = o.ac + bonus;
   if (!(o.hit && o.nat !== 20 && o.roll !== undefined && o.roll < ac)) return { ...o, ac };
+  return { ...missOf(o, missHalf), ac };
+}
+
+/** The attack misses after all: it drops what only a hit brings (Illusory Self, Armor of Hexes). */
+export function missOf(o: Outcome, missHalf?: boolean): Outcome {
   const { later, inflict, choose, leap, ...rest } = o;
-  return { ...rest, hit: false, damage: missHalf ? Math.floor(o.damage / 2) : 0, ac };
+  return { ...rest, hit: false, damage: missHalf ? Math.floor(o.damage / 2) : 0 };
+}
+
+/** Its attack roll lowered by `n` and judged again (Cutting Words, Bend Luck): a natural 20 still hits. */
+export const lowered = (o: Outcome, n: number, missHalf?: boolean): Outcome => (o.roll === undefined ? o : rejudge({ ...o, roll: o.roll - n }, 0, missHalf));
+
+/**
+ * Disadvantage imposed once the attack is rolled (the reactor never saw it): a second d20, the lower kept, judged again. A result without
+ * its natural die (an older one) is left as it was. ponytail: a critical hit that drops to a plain hit keeps its doubled dice.
+ */
+export function disadvantaged(o: Outcome, d20: number, missHalf?: boolean): Outcome {
+  if (o.die === undefined || o.roll === undefined || o.ac === undefined || d20 >= o.die) return o;
+  const { nat: _, ...rest } = o, roll = o.roll - o.die + d20, nat = d20 === 20 ? 20 as const : d20 === 1 ? 1 as const : undefined;
+  const after: Outcome = { ...rest, roll, die: d20, ...(nat && { nat }) };
+  return o.hit && !(nat === 20 || (nat !== 1 && roll >= o.ac)) ? missOf(after, missHalf) : after;
 }
 
 /** Uncanny Dodge: half the damage, rounded down (a later hit and Chaos Bolt picks too). */
