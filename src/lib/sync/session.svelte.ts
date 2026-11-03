@@ -336,6 +336,7 @@ function guestStatus(r: Run, s: GuestStatus, reason?: string): void {
   if (reason !== undefined) session.reason = reason;
   if (s === 'offline') {
     session.welcomed = false;
+    session.reactions = undefined; // a card for an ask that may have closed while away
     redial(r);
   } else if (s === 'rejected') {
     clearTimeout(r.timer); // final (a new code, removed, refused): no more retries

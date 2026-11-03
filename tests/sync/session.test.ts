@@ -3,6 +3,7 @@ import 'fake-indexeddb/auto';
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
 import { db, hostOffKey, resetDb, TRASH_CAP } from '../../src/lib/db.ts';
 import { makeEntry } from '../../src/lib/items/inventory.ts';
+import { answer, ask, onChange, pass, reactions, reset as resetReactions } from '../../src/lib/combat/reactionStack.svelte.ts';
 import { roll, rollLog, rollViewer, rollVisibility } from '../../src/lib/rolls.svelte.ts';
 import { computeSheet } from '../../src/lib/rules/sheet.ts';
 import { DEFAULT_SETTINGS } from '../../src/lib/settings.ts';
@@ -417,6 +418,21 @@ describe('player', () => {
     expect(calls.length).toBe(1);
     stopSession();
     expect(session.tracker).toBeUndefined();
+  });
+
+  test('a reaction card reaches session.reactions and a dropped link clears it', async () => {
+    const { d, host } = await dmDevice({ reactions: { open: () => reactions.open, answer, pass, onChange } });
+    await join({ code: CODE, name: 'Ann' });
+    await settle(host);
+    await db.characters.put(char('n1', CID));
+    await vi.waitFor(() => expect(d.char('n1')?.ownerId).toBe('A1'), SLOW);
+    d.combat = fightWith('n1');
+    void ask({ id: 'k1', kind: 'counterspell', trigger: 'DM line', playerTrigger: 'A creature casts a spell', waiting: 'x', reactors: [{ id: 'pc:n1', name: 'n1', options: [{ id: 'counterspell', label: 'Counter', slot: 3 }] }] });
+    await vi.waitFor(() => expect(session.reactions?.prompts.map((p) => p.ask)).toEqual(['k1']), SLOW);
+    host.stop(); // the link drops: the card must not outlive it
+    await vi.waitFor(() => expect(session.status).toBe('offline'), SLOW);
+    expect(session.reactions).toBeUndefined();
+    resetReactions();
   });
 
   test("stage 5: the shown scene reaches session.scene, the player's move lands, and stopSession clears it", async () => {

@@ -125,6 +125,16 @@ describe('reaction cards for players', () => {
     expect(a.got.at(-1)).toEqual({ t: 'useRefused', reason: 'reactions are off' });
   });
 
+  test('a stopped host unsubscribes from the stack', async () => {
+    const d = new Device();
+    d.putCampaign({ ...camp(CID), sync: { role: 'dm', code: CODE, node: 'dmnode01', players: { A1: {} } } } satisfies Campaign);
+    const subs = new Set<() => void>();
+    const host = new Host({ ...d.hostDeps(CID), reactions: { open: () => reactions.open, answer, pass, onChange: (fn) => { subs.add(fn); return () => void subs.delete(fn); } } });
+    expect(subs.size).toBe(1);
+    host.stop();
+    expect(subs.size).toBe(0);
+  });
+
   test('promptsFor floors ms at 0 and drops answered reactors', () => {
     const o = { ...mkAsk(), answered: ['pc:thorin'], answers: [], deadline: 1000 };
     const own = (id: string) => (id === 'pc:thorin' ? 'thorin' : undefined);

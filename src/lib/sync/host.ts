@@ -137,10 +137,11 @@ export class Host {
   #deps: HostDeps;
   #conns = new Set<Conn>();
   #queue: Promise<void> = Promise.resolve();
+  #unsubscribe?: () => void;
 
   constructor(deps: HostDeps) {
     this.#deps = deps;
-    deps.reactions?.onChange(() => void this.#task(() => this.#sendReactions())); // ponytail: never unsubscribed, a Host lives as long as the session
+    this.#unsubscribe = deps.reactions?.onChange(() => void this.#task(() => this.#sendReactions()));
   }
 
   /** Connected players: how many links each has, and the name they gave. */
@@ -246,6 +247,7 @@ export class Host {
   }
 
   stop(): void {
+    this.#unsubscribe?.();
     for (const c of [...this.#conns]) this.#close(c, 'host stopped');
   }
 
