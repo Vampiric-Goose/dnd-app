@@ -106,3 +106,14 @@ describe('amount and enterOptions', () => {
     expect(enterOptions(pc('d', 0, ['Halo of Spores'], { levels: { Druid: 2 } }))).toEqual([{ feet: 10, option: { id: 'more', key: 'Halo of Spores', label: 'Halo of Spores (1d4 necrotic)' } }]);
   });
 });
+
+describe('review fixes', () => {
+  test('the attacker is never offered a reaction to its own attack, even as a fresh copy', () => {
+    const halfling = pc('h', 50, ['Bountiful Luck']);
+    expect(tableReactors(g, '5-5-5', { window: 'miss', actor: halfling, target: orc, nat1: true }, [{ ...halfling }, orc])).toEqual([]);
+  });
+  test('save damage offers no attack-only reminder (Second Chance)', () => {
+    const lucky = pc('l', 50, ['Second Chance']);
+    expect(tableReactors(g, '5-5-5', { window: 'damaged', actor: orc, target: lucky, save: true, damage: 5 }, [lucky, orc])).toEqual([]);
+  });
+});

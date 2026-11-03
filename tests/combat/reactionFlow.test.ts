@@ -549,3 +549,24 @@ test('Magic-User’s Nemesis: a failed Wisdom save and the spell fails', async (
   expect(await guardCast(ctx({ d20: () => 9 }), 'ma', { name: 'Fireball', level: 3 })).toBe(true); // 9 + 4 >= 10
 });
 
+test('review: a hidden caster stays unnamed on the Mage Slayer card', async () => {
+  await fight([[pcC, 1, 0], [{ ...mon(mage, 'ma'), hidden: true }, 1, 1]], 'ma', 20, featured(['Mage Slayer']));
+  answering(() => 'pass');
+  await guardCast(ctx(), 'ma', { name: 'Fire Bolt', level: 0 });
+  expect(seen.map((o) => o.playerTrigger)).toEqual([]); // unseen: no Mage Slayer card at all
+});
+
+test('review: an ally’s hit card shows no roll', async () => {
+  await fight([[pcC, 1, 0], [pet(), 2, 0], [mon(goblin, 'g1'), 2, 1]], 'g1', 20, featured(['Interception']));
+  answering(() => 'pass');
+  await land(ctx(), goblinHits('w1'), undefined, { melee: true });
+  expect(seen.map((o) => [o.kind, o.playerTrigger])).toEqual([['hit', 'g1 hits w1']]);
+});
+
+test('review: a PC who passes as a goblin enters its reach is still asked as the goblin leaves', async () => {
+  const staff = { ...makeEntry(quarterstaff), equipped: true };
+  await fight([[pcC, 2, 1], [mon(goblin, 'g1'), 0, 0]], 'g1', 20, { ...featured(['Polearm Master']), inventory: [staff] });
+  answering(() => 'pass');
+  await guardMove(ctx(), 't:g1', await line('t:g1', cell(5, 0)));
+  expect(seen.map((o) => o.kind)).toEqual(['enter', 'opportunity']);
+});

@@ -164,3 +164,19 @@ describe('War Caster', () => {
   });
 });
 
+describe('review fixes', () => {
+  test('disadvantage after the roll: already at disadvantage, unchanged; at advantage, the straight roll (the first die)', async () => {
+    const { disadvantaged } = await import('../../src/lib/combat/reactions.ts');
+    const o = { id: 'x', part: 'hit' as const, hit: true, roll: 19, die: 15, ac: 15, damage: 7 };
+    expect(disadvantaged({ ...o, two: { mode: 'dis' as const, first: 15 } }, 2)).toEqual({ ...o, two: { mode: 'dis', first: 15 } });
+    expect(disadvantaged({ ...o, two: { mode: 'adv' as const, first: 6 } }, 18)).toMatchObject({ hit: false, roll: 10, die: 6, damage: 0 });
+    expect(disadvantaged(o, 2)).toMatchObject({ hit: false, roll: 6, die: 2 });
+  });
+  test('a Disengaged mover draws no Polearm Master attack (Brace still may)', () => {
+    const pam = body('pam', true, 0, 0);
+    const enter = (f: Body) => [{ feet: 5, option: { id: 'more' as const, key: f.name, label: f.name } }];
+    const mover = body('gob2', false, 150, 0);
+    expect(leaveStep(g, '5-5-5', mover, [{ ...pam, name: 'Polearm Master' }], { x: 50, y: 0 }, true, enter)).toBeUndefined();
+    expect(leaveStep(g, '5-5-5', mover, [{ ...pam, name: 'Brace' }], { x: 50, y: 0 }, true, enter)?.enter).toBe(true);
+  });
+});

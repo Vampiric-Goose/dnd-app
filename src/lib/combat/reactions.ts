@@ -50,13 +50,15 @@ function oaOptions(b: Body): ReactOption[] {
  * asked at the first cell inside (`at`, with `enter` set). The caller drops foes already asked before stepping on from `at`.
  */
 export function leaveStep(g: Grid, diagonal: Diagonal, mover: Body, foes: Body[], to: Pt, disengaged: boolean,
-  enter?: (f: Body) => { feet: number; option: ReactOption }[]): { at: Pt; reactors: Reactor[]; enter?: true } | undefined {
+  enter?: (f: Body) => { feet: number; option: ReactOption }[], asked: (f: Body, on: 'leave' | 'enter') => boolean = () => false): { at: Pt; reactors: Reactor[]; enter?: true } | undefined {
   const from = mover.pt, c0 = cellAt(g, from), c1 = cellAt(g, to), p0 = cellCenter(g, c0), p1 = cellCenter(g, c1);
   const n = cellDistance(g, c0, c1, '5-5-5'), hostile = foes.filter((f) => f.side !== mover.side && canReact(f) && sees(f, mover));
-  const eligible = hostile.filter((f) => (!disengaged || f.features.includes('Sentinel')) && oaOptions(f).length);
+  const sentinel = (f: Body) => !disengaged || f.features.includes('Sentinel');
+  const eligible = hostile.filter((f) => sentinel(f) && !asked(f, 'leave') && oaOptions(f).length);
   const at = (i: number): Pt => { const p = cellCenter(g, cellAt(g, { x: p0.x + ((p1.x - p0.x) * i) / n, y: p0.y + ((p1.y - p0.y) * i) / n })); return { x: from.x + p.x - p0.x, y: from.y + p.y - p0.y }; };
   const within = (f: Body, p: Pt, feet: number) => tokenFeet(g, { ...mover.pt, ...p }, f.pt, diagonal) <= feet;
-  const entering = enter ? hostile.map((f) => ({ f, list: enter(f) })).filter((e) => e.list.length) : [];
+  // Polearm Master's is an Opportunity Attack: a Disengage stops it, unless Sentinel
+  const entering = enter ? hostile.filter((f) => !asked(f, 'enter')).map((f) => ({ f, list: enter(f).filter((e) => e.option.key !== 'Polearm Master' || sentinel(f)) })).filter((e) => e.list.length) : [];
   for (let i = 1, prev: Pt = { x: from.x, y: from.y }; i <= n; prev = at(i), i++) {
     const cur = at(i), left = eligible.filter((f) => within(f, prev, f.reach) && !within(f, cur, f.reach));
     if (left.length) return { at: prev, reactors: left.flatMap((f) => reactor(f, oaOptions(f))) };
@@ -113,10 +115,13 @@ export function missOf(o: Outcome, missHalf?: boolean): Outcome {
 export const lowered = (o: Outcome, n: number, missHalf?: boolean): Outcome => (o.roll === undefined ? o : rejudge({ ...o, roll: o.roll - n }, 0, missHalf));
 
 /**
- * Disadvantage imposed once the attack is rolled (the reactor never saw it): a second d20, the lower kept, judged again. A result without
- * its natural die (an older one) is left as it was. ponytail: a critical hit that drops to a plain hit keeps its doubled dice.
+ * Disadvantage imposed once the attack is rolled (the reactor never saw it): a second d20, the lower kept, judged again. Already at
+ * disadvantage: no change; at advantage: they cancel, its first die stands (a straight roll). A result without its natural die (an older
+ * one) is left as it was. ponytail: a critical hit that drops to a plain hit keeps its doubled dice.
  */
 export function disadvantaged(o: Outcome, d20: number, missHalf?: boolean): Outcome {
+  if (o.two?.mode === 'dis') return o;
+  if (o.two?.mode === 'adv') d20 = o.two.first;
   if (o.die === undefined || o.roll === undefined || o.ac === undefined || d20 >= o.die) return o;
   const { nat: _, ...rest } = o, roll = o.roll - o.die + d20, nat = d20 === 20 ? 20 as const : d20 === 1 ? 1 as const : undefined;
   const after: Outcome = { ...rest, roll, die: d20, ...(nat && { nat }) };

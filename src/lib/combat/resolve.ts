@@ -83,9 +83,9 @@ function firstTwo(expr: string, faces: number[], sides: number, crit: boolean): 
   return [];
 }
 
-const attackRoll = (t: TargetInfo, toHit: number, r: Rolled): { hit: boolean; roll: number; die: number; nat?: 20 | 1 } => {
+const attackRoll = (t: TargetInfo, toHit: number, r: Rolled): { hit: boolean; roll: number; die: number; nat?: 20 | 1; two?: Outcome['two'] } => {
   const d = keptD20(r), roll = d + toHit;
-  return { hit: d === 20 || (d !== 1 && roll >= t.ac), roll, die: d, ...(d === 20 ? { nat: 20 as const } : d === 1 ? { nat: 1 as const } : {}) };
+  return { hit: d === 20 || (d !== 1 && roll >= t.ac), roll, die: d, ...((r.mode === 'adv' || r.mode === 'dis') && (r.d20?.length ?? 0) > 1 && { two: { mode: r.mode, first: r.d20![0] } }), ...(d === 20 ? { nat: 20 as const } : d === 1 ? { nat: 1 as const } : {}) };
 };
 
 /** A weapon attack (or a monster's): hit or miss against AC, and its damage on a hit. Extra damage (GWM's +10) is one more expression. */

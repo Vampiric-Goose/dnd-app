@@ -193,12 +193,12 @@ function backAction(key: string, rx: Rx, b: Body, dealt?: number): TurnAction {
 
 /** An attack (or damage back) a table reaction brings once the result it answers has landed; `free`: already paid (Glorious Defense). */
 type Follow = { ans: Answer; t: Trigger; free?: true };
-async function follow(ctx: FlowCtx, f: Follow): Promise<void> {
+async function follow(ctx: FlowCtx, f: Follow) {
   const key = f.ans.key!, rx = entry(key);
-  if (!rx) return;
+  if (!rx) return undefined;
   const payIt = f.free ? async () => undefined : (b: Live) => payRx(ctx, b, key, f.ans.slot);
-  if (rx.shape === 'back') await strike(ctx, f.ans, f.t.actor.x.id, (b) => backAction(key, rx, b, f.t.damage), { pay: payIt });
-  else await strike(ctx, f.ans, f.t.actor.x.id, oaAction, { melee: true, pay: payIt, ...(rx.dice && { bonus: (b: Live) => amount(key, b) }) });
+  if (rx.shape === 'back') return strike(ctx, f.ans, f.t.actor.x.id, (b) => backAction(key, rx, b, f.t.damage), { pay: payIt });
+  return strike(ctx, f.ans, f.t.actor.x.id, oaAction, { melee: true, pay: payIt, ...(rx.dice && { bonus: (b: Live) => amount(key, b) }) });
 }
 
 /** A table answer to an attack before its damage: paid and worked into the outcome (or queued in `later` when it is an attack or damage back). */
@@ -283,7 +283,7 @@ export async function guardMove(ctx: FlowCtx, tokenId: string, route: Pt[]): Pro
   try { return await walk(ctx, tokenId, route); } finally { walking.delete(tokenId); }
 }
 async function walk(ctx: FlowCtx, tokenId: string, route: Pt[]): Promise<Pt> {
-  const asked = new Set<string>(); // foes asked already (answered, passed or timed out): never asked again on this move
+  const asked = new Set<string>(); // `leave:<id>` / `enter:<id>`: foes asked already on that edge (answered, passed or timed out), not asked there again this move
   for (let i = 0; ; ) { // route[i..]: the squares still to walk
     const rest = route.slice(i), w = await world(ctx), t = w?.s.tokens.find((z) => z.id === tokenId), x = w && t && combatantForToken(w.k, t), me = x && w.bs.get(x.id);
     if (!w || !t) { const s = w?.s ?? await ctx.scene(); return s ? step(ctx, s, tokenId, rest) : route.at(-1)!; } // no fight: a plain walk
@@ -291,9 +291,9 @@ async function walk(ctx: FlowCtx, tokenId: string, route: Pt[]): Promise<Pt> {
     if (me && asked.size && !currentRun(w.k).has(me.x.id)) return here; // its turn ended during an ask: it stays
     if (!me || !on(w.k, ctx.settings) || !currentRun(w.k).has(me.x.id)) return step(ctx, w.s, tokenId, rest);
     if (me.x.hp === 0 || me.conditions.some((c) => STOP.includes(c.toLowerCase())) || w.k.movement?.[me.x.id]?.mult === 0) return here;
-    const foes = [...w.bs.values()].filter((b) => b !== me && !asked.has(b.x.id)), off = !!me.x.economy?.disengaging;
+    const foes = [...w.bs.values()].filter((b) => b !== me), off = !!me.x.economy?.disengaging, was = (f: Body, on: 'leave' | 'enter') => asked.has(`${on}:${f.x.id}`);
     let j = 0, edge: ReturnType<typeof leaveStep>;
-    for (let prev = here; j < rest.length; prev = rest[j++]) if ((edge = leaveStep(w.s.grid, ctx.settings.diagonal, { ...me, pt: { ...me.pt, ...prev } }, foes, rest[j], off, enterOptions))) break;
+    for (let prev = here; j < rest.length; prev = rest[j++]) if ((edge = leaveStep(w.s.grid, ctx.settings.diagonal, { ...me, pt: { ...me.pt, ...prev } }, foes, rest[j], off, enterOptions, was))) break;
     if (!edge) return step(ctx, w.s, tokenId, rest);
     if (edge.enter) j++; // entering a reach: the mover takes that square first
     if (j) { // up to the edge (a write refused, off the map: it stays)
@@ -301,13 +301,13 @@ async function walk(ctx: FlowCtx, tokenId: string, route: Pt[]): Promise<Pt> {
       if (at.x !== e.x || at.y !== e.y) return at;
     }
     i += j;
-    edge.reactors.forEach((r) => asked.add(r.id));
+    edge.reactors.forEach((r) => asked.add(`${edge!.enter ? 'enter' : 'leave'}:${r.id}`));
     const names = edge.reactors.map((r) => r.name).join(', ');
     const answers = await ask({ id: uid(), kind: edge.enter ? 'enter' : 'opportunity', trigger: edge.enter ? `${me.name} comes within reach of ${names}` : `${me.name} leaves the reach of ${names}`,
       playerTrigger: edge.enter ? `${me.name} comes within your reach` : `${me.name} leaves your reach`, reactors: edge.reactors, waiting: me.x.id });
     for (const ans of answers) {
-      if (ans.option === 'more') { await follow(ctx, { ans, t: { window: 'enter', actor: me } }); continue; }
-      const hit = ans.spell ? await strike(ctx, ans, me.x.id, (b) => b.actions.find((a) => !!a.spell && a.name === ans.spell), { cast: true }) // War Caster
+      const hit = ans.option === 'more' ? await follow(ctx, { ans, t: { window: 'enter', actor: me } }) // Polearm Master's is an Opportunity Attack too (Sentinel)
+        : ans.spell ? await strike(ctx, ans, me.x.id, (b) => b.actions.find((a) => !!a.spell && a.name === ans.spell), { cast: true }) // War Caster
         : await strike(ctx, ans, me.x.id, oaAction, { melee: true });
       if (hit?.b.features.includes('Sentinel') && hit.landed.outcomes.some((o) => o.hit)) { // Sentinel: its speed is 0 for the turn
         await updateCombat(ctx.cid, (k) => ({ ...k, movement: { ...k.movement, [me.x.id]: { dashes: 0, ...k.movement?.[me.x.id], mult: 0 } } }));
@@ -323,7 +323,7 @@ export async function guardCast(ctx: FlowCtx, casterId: string, spell: { name: s
   const t: Trigger = { window: 'cast', actor: c }, all = [...w.bs.values()];
   const reactors = merge(counterReactors(w.s.grid, ctx.settings.diagonal, c, all), tableReactors(w.s.grid, ctx.settings.diagonal, t, all));
   const answers = await ask({ id: uid(), kind: 'counterspell', trigger: `${c.name} casts ${spell.name} (level ${spell.level})`,
-    playerTrigger: c.pc ? `${c.name} casts ${spell.name}` : `${c.name} casts a spell`, reactors, waiting: casterId }); // a monster's spell stays hidden
+    playerTrigger: c.hidden ? 'Something casts a spell' : c.pc ? `${c.name} casts ${spell.name}` : `${c.name} casts a spell`, reactors, waiting: casterId }); // a monster's spell stays hidden
   for (const ans of answers) {
     if (ans.option === 'more') { if (await castAnswer(ctx, ans, t, spell)) return false; continue; }
     const b = (await world(ctx))?.bs.get(ans.reactor), a = b && reactionNamed(b, 'counterspell'), slot = ans.slot ?? 3;
@@ -396,7 +396,7 @@ export async function land(ctx: FlowCtx, res: Omit<Resolution, 'applied'>, befor
         : merge(all, w2 && t ? tableReactors(w2.s.grid, d, t, [...w2.bs.values()]) : []);
       const them = b && (reactors.every((r) => r.id === b.x.id) ? 'you' : b.hidden ? 'something' : b.name); // an attacker hidden from the players stays unnamed on their card
       const answers = !b ? [] : await ask({ id: uid(), kind: 'hit', trigger: `${src.name} hits ${b.name} (${mm ? 'Magic Missile' : `${o.roll} vs AC ${o.ac}`})`,
-        playerTrigger: mm ? `${who} hits ${them} with ${src.pc && !src.hidden ? 'Magic Missile' : 'a spell'}` : `${who} hits ${them} (${o.roll})`, reactors, waiting: src.x.id });
+        playerTrigger: mm ? `${who} hits ${them} with ${src.pc && !src.hidden ? 'Magic Missile' : 'a spell'}` : `${who} hits ${them}${them === 'you' ? ` (${o.roll})` : ''}`, reactors, waiting: src.x.id }); // the roll for its target only
       for (const ans of answers) {
         if (ans.option === 'more') { o = await answerRx(ctx, ans, t!, o, missHalf, later); continue; }
         const opt = reactors.find((r) => r.id === ans.reactor)?.options.find((z) => z.id === ans.option), a = ans.option === 'shield' ? b && reactionNamed(b, 'shield') : pip(opt?.label ?? ans.option);

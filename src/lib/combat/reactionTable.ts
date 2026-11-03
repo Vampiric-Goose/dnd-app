@@ -37,6 +37,7 @@ export interface Rx {
   /** ac: when it still hits, half damage; when it now misses, an attack on the actor */ then?: 'resist' | 'attack';
   /** miss: a d6 of at least this */ chance?: number;
   /** back: as much as the damage dealt (Rebuke the Violent) */ dealt?: true;
+  /** a hit-window one that answers any damage too: against a save's damage it is a reminder (it already landed) */ hurt?: true;
 }
 
 const ELEMENTS = ['acid', 'cold', 'fire', 'lightning', 'thunder'];
@@ -53,11 +54,11 @@ const big = (x: Body) => ['L', 'H', 'G'].includes(x.pt.size);
 
 export const TABLE: Record<string, Rx> = {
   // spells
-  'Absorb Elements': { win: ['hit'], who: 'self', shape: 'resist', spell: true, when: (t) => ELEMENTS.includes(t.type ?? '') },
+  'Absorb Elements': { win: ['hit'], who: 'self', shape: 'resist', spell: true, hurt: true, when: (t) => ELEMENTS.includes(t.type ?? '') },
   'Soul Cage': { win: ['died'], who: 'anyone', near: { of: 'target', feet: 60 }, see: 'target', shape: 'note', spell: true },
   // feats and fighting styles
   Sentinel: { win: ['after'], who: 'ally', near: { of: 'actor', feet: 5 }, shape: 'attack', when: (t) => !t.target?.features.includes('Sentinel') },
-  'Mage Slayer': { win: ['cast'], who: 'anyone', near: { of: 'actor', feet: 5 }, shape: 'attack', when: (t, b) => t.actor.side !== b.side },
+  'Mage Slayer': { win: ['cast'], who: 'anyone', near: { of: 'actor', feet: 5 }, see: 'actor', shape: 'attack', when: (t, b) => t.actor.side !== b.side },
   'Defensive Duelist': { win: ['hit'], who: 'self', shape: 'ac', dice: (b) => String(b.stats?.prof ?? 2), when: (t, b) => !!t.melee && !!weapon(b)?.properties.includes('finesse') },
   'Shield Master': { win: ['saved'], who: 'self', shape: 'note', when: (t) => !!t.damage },
   'Orcish Fury': { win: ['damaged'], who: 'self', shape: 'note', when: (_, b) => b.x.hp === 1 },
@@ -67,17 +68,18 @@ export const TABLE: Record<string, Rx> = {
   Interception: { win: ['hit'], who: 'ally', near: { of: 'target', feet: 5 }, shape: 'cut', dice: (b) => `1d10${plus(b.stats?.prof ?? 2)}` },
   // Barbarian
   Retaliation: { win: ['damaged'], who: 'self', near: { of: 'actor', feet: 5 }, shape: 'attack', when: (t) => !t.save },
-  'Spirit Shield': { win: ['hit'], who: 'ally', near: { of: 'target', feet: 30 }, see: 'target', shape: 'cut', dice: (b) => by(lvl(b, 'Barbarian'), [[0, '2d6'], [10, '3d6'], [14, '4d6']]) },
+  'Spirit Shield': { win: ['hit'], who: 'ally', near: { of: 'target', feet: 30 }, see: 'target', shape: 'cut', hurt: true, dice: (b) => by(lvl(b, 'Barbarian'), [[0, '2d6'], [10, '3d6'], [14, '4d6']]) },
   // Bard
   'Cutting Words': { win: ['hit'], who: 'any', near: { of: 'actor', feet: 60 }, see: 'actor', shape: 'roll', res: ['Bardic Inspiration'], dice: bardic },
   // Cleric
   'Warding Flare': { win: ['declared'], who: 'any', near: { of: 'actor', feet: 30 }, see: 'actor', shape: 'dis', res: ['Warding Flare'],
-    when: (t, b) => t.target === b || b.features.includes('Improved Flare') },
+    when: (t, b) => t.target?.x.id === b.x.id || b.features.includes('Improved Flare') },
   'Wrath of the Storm': { win: ['damaged'], who: 'self', near: { of: 'actor', feet: 5 }, see: 'actor', shape: 'back', res: ['Wrath of the Storm'], dice: () => '2d8', type: 'lightning', save: 'dex', half: true, when: (t) => !t.save },
   "War God's Blessing": { win: ['miss'], who: 'friend', near: { of: 'actor', feet: 30 }, shape: 'note', res: CD },
   "Sentinel at Death's Door": { win: ['hit'], who: 'any', near: { of: 'target', feet: 30 }, see: 'target', shape: 'note', res: ["Sentinel at Death's Door"], when: (t) => !!t.crit },
-  'Dampen Elements': { win: ['hit'], who: 'any', near: { of: 'target', feet: 30 }, see: 'target', shape: 'resist', when: (t) => ELEMENTS.includes(t.type ?? '') },
-  'Protective Bond': { win: ['hit'], who: 'ally', near: { of: 'target', feet: 30 }, shape: 'note' },
+  'Dampen Elements': { win: ['hit'], who: 'any', near: { of: 'target', feet: 30 }, see: 'target', shape: 'resist', hurt: true, when: (t) => ELEMENTS.includes(t.type ?? '') },
+  'Protective Bond': { win: ['hit'], who: 'ally', near: { of: 'target', feet: 30 }, shape: 'note', hurt: true },
+  'Aura of the Guardian': { win: ['hit'], who: 'ally', near: { of: 'target', feet: 10 }, see: 'target', shape: 'note', hurt: true },
   // Druid
   'Halo of Spores': { win: ['enter'], who: 'self', near: { of: 'actor', feet: 10 }, shape: 'back', type: 'necrotic', save: 'con',
     dice: (b) => by(lvl(b, 'Druid'), [[0, '1d4'], [6, '1d6'], [10, '1d8'], [14, '1d10']]) },
@@ -87,7 +89,7 @@ export const TABLE: Record<string, Rx> = {
   Brace: { win: ['enter'], who: 'self', shape: 'attack', res: SUP, dice: sup },
   'Polearm Master': { win: ['enter'], who: 'self', shape: 'attack', when: (_, b) => /glaive|halberd|pike|quarterstaff|spear/i.test(weapon(b)?.name ?? '') },
   'Warding Maneuver': { win: ['hit'], who: 'any', near: { of: 'target', feet: 5 }, see: 'target', shape: 'ac', res: ['Warding Maneuver'], dice: () => '1d8', then: 'resist' },
-  'Protective Field': { win: ['hit'], who: 'any', near: { of: 'target', feet: 30 }, see: 'target', shape: 'cut', res: ['Psionic Energy Dice', 'Psionic Energy'], dice: (b) => `${psi(b)}${plus(mod(b, 'int'))}` },
+  'Protective Field': { win: ['hit'], who: 'any', near: { of: 'target', feet: 30 }, see: 'target', shape: 'cut', hurt: true, res: ['Psionic Energy Dice', 'Psionic Energy'], dice: (b) => `${psi(b)}${plus(mod(b, 'int'))}` },
   'Cloud Rune': { win: ['hit'], who: 'any', near: { of: 'target', feet: 30 }, see: 'target', shape: 'note', res: ['Cloud Rune'] },
   'Strength before Death': { win: ['damaged'], who: 'self', shape: 'note', when: (_, b) => b.x.hp === 0 },
   // Monk
@@ -106,7 +108,7 @@ export const TABLE: Record<string, Rx> = {
   "Magic-User's Nemesis": { win: ['cast'], who: 'anyone', near: { of: 'actor', feet: 60 }, see: 'actor', shape: 'nemesis', res: ["Magic-User's Nemesis"], when: (t, b) => t.actor.side !== b.side },
   "Slayer's Counter": { win: ['saved'], who: 'self', shape: 'note' },
   'Beguiling Twist': { win: ['saved'], who: 'any', near: { of: 'target', feet: 120 }, see: 'target', shape: 'note', when: (t) => !!t.ok },
-  'Swarming Dispersal': { win: ['hit'], who: 'self', shape: 'resist', res: ['Swarming Dispersal'] },
+  'Swarming Dispersal': { win: ['hit'], who: 'self', shape: 'resist', hurt: true, res: ['Swarming Dispersal'] },
   // Rogue
   'Spell Thief': { win: ['cast'], who: 'anyone', near: { of: 'actor', feet: 60 }, see: 'actor', shape: 'note', res: ['Spell Thief'], when: (t, b) => t.actor.side !== b.side },
   Misdirection: { win: ['declared'], who: 'self', shape: 'note' },
@@ -119,11 +121,12 @@ export const TABLE: Record<string, Rx> = {
   'Misty Escape': { win: ['damaged'], who: 'self', shape: 'note', res: ['Misty Escape'] },
   'Entropic Ward': { win: ['declared'], who: 'self', shape: 'dis', res: ['Entropic Ward'] },
   'Armor of Hexes': { win: ['hit'], who: 'self', shape: 'miss', chance: 4 },
-  'Guardian Coil': { win: ['hit'], who: 'any', near: { of: 'target', feet: 10 }, see: 'target', shape: 'cut', dice: (b) => (lvl(b, 'Warlock') >= 10 ? '2d8' : '1d8') },
+  'Guardian Coil': { win: ['hit'], who: 'any', near: { of: 'target', feet: 10 }, see: 'target', shape: 'cut', hurt: true, dice: (b) => (lvl(b, 'Warlock') >= 10 ? '2d8' : '1d8') },
   'Tomb of Levistus': { win: ['damaged'], who: 'self', shape: 'note' },
+  'Fade Away': { win: ['damaged'], who: 'self', shape: 'note', res: ['Fade Away'] },
   // Wizard
-  'Projected Ward': { win: ['hit'], who: 'ally', near: { of: 'target', feet: 30 }, see: 'target', shape: 'note' },
-  'Song of Defense': { win: ['hit'], who: 'self', shape: 'cut', slots: true, dice: (_, slot) => String(5 * (slot ?? 1)) },
+  'Projected Ward': { win: ['hit'], who: 'ally', near: { of: 'target', feet: 30 }, see: 'target', shape: 'note', hurt: true },
+  'Song of Defense': { win: ['hit'], who: 'self', shape: 'cut', slots: true, hurt: true, dice: (_, slot) => String(5 * (slot ?? 1)) },
   'Arcane Deflection': { win: ['hit', 'saved'], who: 'self', shape: 'ac', dice: () => '2', when: (t) => t.window === 'hit' || !t.ok },
   'Illusory Self': { win: ['hit'], who: 'self', shape: 'miss', res: ['Illusory Self'] },
   'Instinctive Charm': { win: ['declared'], who: 'self', near: { of: 'actor', feet: 30 }, see: 'actor', shape: 'note', res: ['Instinctive Charm'] },
@@ -131,7 +134,7 @@ export const TABLE: Record<string, Rx> = {
   'Flash of Genius': { win: ['saved'], who: 'any', near: { of: 'target', feet: 30 }, see: 'target', shape: 'note', res: ['Flash of Genius'] },
 };
 /** The shape after a window has its say: a damage cutter against a save's damage, or Arcane Deflection on a save, is a reminder (it already landed). */
-export const shapeFor = (rx: Rx, t: Trigger): Shape => ((t.save && ['cut', 'resist'].includes(rx.shape)) || (t.window === 'saved' && rx.shape === 'ac') ? 'note' : rx.shape);
+export const shapeFor = (rx: Rx, t: Trigger): Shape => ((t.save && rx.hurt) || (t.window === 'saved' && rx.shape === 'ac') ? 'note' : rx.shape);
 
 export const entry = (key: string): Rx | undefined => TABLE[key];
 const named = (n: string, key: string) => { const a = n.toLowerCase(), k = key.toLowerCase(); return a === k || a.endsWith(`: ${k}`); };
@@ -163,10 +166,10 @@ function optionsFor(b: Body, key: string, rx: Rx, shape: Shape): ReactOption[] {
 function relates(rx: Rx, t: Trigger, b: Body): boolean {
   const hostile = t.actor.side !== b.side;
   switch (rx.who) {
-    case 'self': return t.target === b && hostile;
-    case 'ally': return !!t.target && t.target !== b && t.target.side === b.side && hostile;
+    case 'self': return t.target?.x.id === b.x.id && hostile;
+    case 'ally': return !!t.target && t.target.x.id !== b.x.id && t.target.side === b.side && hostile;
     case 'any': return !!t.target && t.target.side === b.side && hostile;
-    case 'friend': return t.actor !== b && t.actor.side === b.side;
+    case 'friend': return t.actor.x.id !== b.x.id && t.actor.side === b.side;
     case 'anyone': return true;
   }
 }
@@ -175,18 +178,18 @@ function relates(rx: Rx, t: Trigger, b: Body): boolean {
 export function tableReactors(g: Grid, diagonal: Diagonal, t: Trigger, all: Body[]): Reactor[] {
   const out: Reactor[] = [];
   for (const b of all) {
-    if (!canReact(b) || b === t.actor) continue;
+    if (!canReact(b) || b.x.id === t.actor.x.id) continue; // by id: the flow's bodies are fresh copies
     const options: ReactOption[] = [];
     if (b.pc) for (const [key, rx] of Object.entries(TABLE)) {
       const shape = shapeFor(rx, t);
-      if (!rx.win.includes(t.window) && !(t.window === 'damaged' && t.save && rx.win.includes('hit') && shape === 'note')) continue;
+      if (!rx.win.includes(t.window) && !(t.window === 'damaged' && t.save && rx.win.includes('hit') && rx.hurt)) continue;
       if (!holds(b, key, rx) || !relates(rx, t, b) || (rx.when && !rx.when(t, b))) continue;
       const anchor = rx.near?.of === 'target' ? t.target : t.actor, seen = rx.see === 'target' ? t.target : rx.see === 'actor' ? t.actor : undefined;
-      if (rx.near && (!anchor || (anchor !== b && tokenFeet(g, b.pt, anchor.pt, diagonal) > rx.near.feet))) continue;
-      if (seen && seen !== b && !sees(b, seen)) continue;
+      if (rx.near && (!anchor || (anchor.x.id !== b.x.id && tokenFeet(g, b.pt, anchor.pt, diagonal) > rx.near.feet))) continue;
+      if (seen && seen.x.id !== b.x.id && !sees(b, seen)) continue;
       options.push(...optionsFor(b, key, rx, shape));
     }
-    else if (t.window === 'hit' && t.target === b) for (const a of b.actions) { // a monster's own reactions besides "+N AC" (reactions.ts) and the spells the app knows
+    else if (t.window === 'hit' && t.target?.x.id === b.x.id) for (const a of b.actions) { // a monster's own reactions besides "+N AC" (reactions.ts) and the spells the app knows
       if (a.cost !== 'reaction' || a.group !== 'monster' || (a.text && acReaction({ name: a.name, text: richToPlain(a.text) }))) continue;
       options.push({ id: 'more', key: `mon:${a.name}`, label: `${a.name} (settle by hand)` });
     }

@@ -167,7 +167,7 @@ export interface Combat { campaignId: string; combatants: Combatant[]; round: nu
 /** One target's part of a targeted use: an attack's hit, or a save. `pending`: a PC's save its player still rolls (`owed`: the damage before it). */
 export interface Outcome {
   id: string /* combatant */; part?: 'hit' | 'save';
-  hit?: boolean; nat?: 20 | 1; /** the natural d20 kept */ die?: number; roll?: number; ac?: number /* the DM's Results list (a Combat never reaches players) */; edge?: string /* why it had advantage or disadvantage */;
+  hit?: boolean; nat?: 20 | 1; /** the natural d20 kept */ die?: number; /** it rolled two d20s (advantage or disadvantage); `first`: the first, a straight roll's */ two?: { mode: 'adv' | 'dis'; first: number }; roll?: number; ac?: number /* the DM's Results list (a Combat never reaches players) */; edge?: string /* why it had advantage or disadvantage */;
   save?: { roll: number; total: number; ok: boolean };
   damage: number; note?: string;
   pending?: true; owed?: { amount: number; type: string }[];
