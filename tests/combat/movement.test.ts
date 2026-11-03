@@ -242,4 +242,24 @@ describe('routes', () => {
     expect(key(reachableCells(g70, P(5, 5), 5, '5-10-5', w, w))).toContain('6,6'); // fresh: the first diagonal is 5
     expect(key(reachableCells(g70, P(5, 5), 5, '5-10-5', w, w, 1))).not.toContain('6,6'); // after one: 10
   });
+  test('the highlight and the cost agree on every cell: a straight route costs no more than is left exactly where reachableCells says', () => {
+    for (const type of ['square', 'hex-pointy', 'hex-flat'] as const) {
+      const g: Grid = { type, size: 70, offsetX: 13, offsetY: 7, color: '#000000', opacity: 1, feet: 5 }, o = cellCenter(g, { q: 8, r: 8 });
+      for (const diagonal of ['5-5-5', '5-10-5'] as const) for (let d = 0; d < 4; d++) {
+        const reach = new Set(reachableCells(g, o, 40, diagonal, 5000, 5000, d).map((c) => `${c.q},${c.r}`)), bad: string[] = [];
+        for (let q = 0; q <= 16; q++) for (let r = 0; r <= 16; r++) {
+          const f = routeFeet(g, o, stepsBetween(g, o, cellCenter(g, { q, r }), 'M'), diagonal, d).feet;
+          if ((f <= 40) !== reach.has(`${q},${r}`)) bad.push(`${type} ${diagonal} d${d} ${q},${r}`);
+        }
+        expect(bad).toEqual([]);
+      }
+    }
+  });
+  test('affordable: nothing for no feet or a bad number', () => {
+    for (const f of [0, -5, NaN, Infinity]) expect(affordable(g70, o, [P(1, 0)], f, '5-5-5')).toEqual([]);
+  });
+  test('chargeRoute on an old mid-turn entry (an origin, no used) first counts the feet already walked from that origin', () => {
+    const c = fight({ round: 1, movement: { B: { from: o, dashes: 0 } } });
+    expect(chargeRoute(c, 'B', P(2, 0), { feet: 5, diags: 0 }, g70, '5-5-5').movement!.B).toEqual({ from: o, dashes: 0, used: 15, diags: 0 });
+  });
 });

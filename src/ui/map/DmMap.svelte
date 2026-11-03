@@ -7,15 +7,15 @@
   import { deviceSide, resizeImage } from '../../lib/images.ts';
   import { encodeFog, newFog, paintFog, type FogEdit } from '../../lib/map/fog.ts';
   import { snap, type Pt } from '../../lib/map/grid.ts';
-  import { addTokens, liveHp, MAX_IMAGE, MAX_SIDE, MAX_TOKENS, moveTokens, newScene, patchToken, regrid, resizeScene, tokenColor, type NewToken } from '../../lib/map/scene.ts';
+  import { addTokens, liveHp, MAX_IMAGE, MAX_SIDE, MAX_TOKENS, moveTokens, newScene, patchToken, regrid, resizeScene, tokenColor, walkTokens, type NewToken } from '../../lib/map/scene.ts';
   import { arrowsOn } from '../../lib/map/actions.ts';
   import { addTokensToCombat, dropTokens, editScene, joinFight, placeUnplaced, startFight, summon, tokenForCharacter, tokenForMonster } from '../../lib/map/store.ts';
   import { scaleSummon } from '../../lib/combat/summons.ts';
   import { currentRun, patchCombatant } from '../../lib/combat/combat.ts';
-  import { budgetApplies, budgetFeet, combatantForToken, effectiveSpeed, monsterSpeed, moveSpeed, originOf, recordMove } from '../../lib/combat/movement.ts';
+  import { budgetApplies, budgetFeet, combatantForToken, effectiveSpeed, monsterSpeed, moveSpeed, originOf, stepsBetween } from '../../lib/combat/movement.ts';
   import { editCharacter, settlePick, turn, undoResolution, updateCombat } from '../../lib/combat/store.ts';
   import { flowCtx } from '../../lib/combat/flowCtx.ts';
-  import { guardCast, guardMove, land, settle } from '../../lib/combat/reactionFlow.ts';
+  import { guardCast, guardMove, isWalking, land, settle } from '../../lib/combat/reactionFlow.ts';
   import { reactions } from '../../lib/combat/reactionStack.svelte.ts';
   import { aimPlan, ALL_HP, areaRollName, areaRolls, areasOn, foeWithin5, judge, meleeAttack, moveArea, movableAreas, noteEntries, snapOf, touched, workOut, type AimPlan, type AreaKind } from '../../lib/combat/aiming.ts';
   import { monsterAc, resolveSpell, targetOf } from '../../lib/combat/resolve.ts';
@@ -275,27 +275,31 @@
     await reload(); // a new hash: MapCanvas loads it without re-decoding the background (M2)
   });
 
-  /** One scene write; then a moved token whose combatant is taking its turn gets the turn's origin, where it stood (its first move only; P2). */
-  const onmove = (ids: string[], primary: string, to: Pt) => run(async () => {
-    if (!scene) return;
-    const tk = scene.tokens.find((t) => t.id === primary), mover = ids.length === 1 && combat && tk ? combatantForToken(combat, tk) : undefined;
-    if (mover && currentRun(combat!).has(mover.id)) { await guardMove(await flow(), primary, to); await reload(); return; } // a turn's mover: reach edges ask first
+  /**
+   * A drag of the selection along `route` (squares one apart from the primary; none: straight to `to`). The current-turn primary walks it through
+   * the reaction flow (asked at reach edges, charged) and the rest follow by where it ended, unguarded and free; anyone else's move is a plain
+   * walk with its trail. A token already walking stays put. Entering a lasting area (Cloudkill) is noted, on anyone's turn.
+   */
+  const onmove = (ids: string[], primary: string, to: Pt, route?: Pt[]) => run(async () => {
+    const tk = scene?.tokens.find((t) => t.id === primary);
+    if (!scene || !tk || isWalking(primary)) return;
+    const mover = combat ? combatantForToken(combat, tk) : undefined, others = ids.filter((id) => id !== primary && !isWalking(id));
+    const path = route?.length ? route : stepsBetween(scene.grid, tk, to, tk.size);
+    let move = (s: Scene) => walkTokens(s, [primary, ...others], primary, path);
+    if (mover && currentRun(combat!).has(mover.id)) {
+      const end = await guardMove(await flow(), primary, path), dx = end.x - tk.x, dy = end.y - tk.y;
+      move = (s) => { const o = s.tokens.find((t) => t.id === others[0]); return o && (dx || dy) ? moveTokens(s, others, o.id, { x: o.x + dx, y: o.y + dy }) : s; };
+    }
     let walked: { t: Token; from: Pt }[] = [], after: Scene | undefined;
     await editScene(scene.id, (s) => {
-      const out = (after = moveTokens(s, ids, primary, to));
+      const out = (after = move(s));
       walked = out.tokens.flatMap((t) => {
         const o = s.tokens.find((x) => x.id === t.id);
         return o && (o.x !== t.x || o.y !== t.y) ? [{ t, from: { x: o.x, y: o.y } }] : [];
       });
       return out;
     });
-    if (walked.length && combat) await updateCombat(cid, (c) => {
-      if (budgetApplies(c, settings)) {
-        const now = currentRun(c);
-        for (const { t, from } of walked) { const x = combatantForToken(c, t); if (x && now.has(x.id)) c = recordMove(c, x.id, from); }
-      }
-      return after ? noteEntries(c, after, walked) : c; // entering a lasting area (Cloudkill), on anyone's turn
-    });
+    if (walked.length && combat) await updateCombat(cid, (c) => (after ? noteEntries(c, after, walked) : c));
     await reload();
   });
   /** Speed after conditions, as the host's check counts it: a PC's player-view walk, a monster's stat block. */

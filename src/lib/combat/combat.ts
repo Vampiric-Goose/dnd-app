@@ -217,7 +217,7 @@ function hasteStart(c: Combat, ids: Set<string>): Combat {
     const on = !x.hasted.ended && !!out.combatants.find((z) => z.id === x.hasted!.by)?.concentrating && out.round - x.hasted.round < 10;
     const { hasted: _h, ...gone } = x;
     const y: Combatant = on ? { ...x, economy: { used: 0, extra: 1, bonus: false, attacks: 0, haste: true } } : { ...gone, economy: { used: 1, extra: 0, bonus: true, attacks: 0 } };
-    out = { ...out, combatants: out.combatants.map((z) => (z.id === id ? y : z)), movement: { ...out.movement, [id]: { dashes: 0, mult: on ? 2 : 0 } } };
+    out = { ...out, combatants: out.combatants.map((z) => (z.id === id ? y : z)), movement: { ...out.movement, [id]: { ...out.movement?.[id], dashes: 0, mult: on ? 2 : 0 } } }; // keeps any walking (used, diags, origin)
   }
   return out;
 }

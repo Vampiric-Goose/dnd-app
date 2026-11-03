@@ -2,8 +2,8 @@
 // other use, and hits and damage open their own asks. Off (no fight, targeting off, or reactions off): exactly the old paths.
 import { featureList } from '../character/play.ts';
 import { db } from '../db.ts';
-import type { Pt } from '../map/grid.ts';
-import { moveTokens } from '../map/scene.ts';
+import { snap, type Pt } from '../map/grid.ts';
+import { walkTokens } from '../map/scene.ts';
 import { editScene } from '../map/store.ts';
 import { computeSheet } from '../rules/sheet.ts';
 import { playerTokens } from '../sync/scene.ts';
@@ -12,7 +12,7 @@ import { uid } from '../uid.ts';
 import { aimPlan, foeWithin5, judge, noteEntries, snapOf, touched, workOut, type Aim, type AimPlan, type Aimed } from './aiming.ts';
 import { currentRun } from './combat.ts';
 import { BLOCKING } from './economy.ts';
-import { budgetApplies, combatantForToken, recordMove } from './movement.ts';
+import { budgetApplies, chargeRoute, combatantForToken, routeFeet } from './movement.ts';
 import { ask, type Answer } from './reactionStack.svelte.ts';
 import { counterReactors, countered, halved, hitReactors, leaveStep, oaAction, rebukeReactors, rejudge, type Body } from './reactions.ts';
 import { targetOf } from './resolve.ts';
@@ -133,42 +133,55 @@ async function strike(ctx: FlowCtx, ans: Answer, target: string, pick: (b: Live)
   return { b, landed: await land(ctx, r.resolution, snapOf(w.k, w.chars, touched(r.resolution)), { melee: o.melee }) };
 }
 
-/** Writes the token's move to `to` as a plain move does (the turn's origin, entering a lasting area); where it ended. */
-async function step(ctx: FlowCtx, s: Scene, tokenId: string, to: Pt): Promise<Pt> {
-  let walked: { t: Token; from: Pt }[] = [], after: Scene | undefined;
+/** Walks the token along `squares` (one square apart, from where it stands) in one scene write, with them as its trail; on the current-turn
+ *  mover's turn under a budget their feet are charged; entering a lasting area is noted. Where it ended. */
+async function step(ctx: FlowCtx, s: Scene, tokenId: string, squares: Pt[]): Promise<Pt> {
+  let from: Pt | undefined, after: Scene | undefined;
   await editScene(s.id, (y) => {
-    const out = (after = moveTokens(y, [tokenId], tokenId, to));
-    walked = out.tokens.flatMap((t) => { const o = y.tokens.find((z) => z.id === t.id); return o && (o.x !== t.x || o.y !== t.y) ? [{ t, from: { x: o.x, y: o.y } }] : []; });
+    const t = y.tokens.find((z) => z.id === tokenId), out = walkTokens(y, [tokenId], tokenId, squares);
+    if (t && out !== y) { from = { x: t.x, y: t.y }; after = out; }
     return out;
   });
-  if (walked.length && (await db.combat.get(ctx.cid))) await updateCombat(ctx.cid, (c) => {
-    if (budgetApplies(c, ctx.settings)) { const now = currentRun(c); for (const { t, from } of walked) { const x = combatantForToken(c, t); if (x && now.has(x.id)) c = recordMove(c, x.id, from); } }
-    return after ? noteEntries(c, after, walked) : c;
+  const t = after?.tokens.find((z) => z.id === tokenId);
+  if (t && from && (await db.combat.get(ctx.cid))) await updateCombat(ctx.cid, (c) => {
+    const x = combatantForToken(c, t), g = after!.grid, d = ctx.settings.diagonal;
+    if (x && budgetApplies(c, ctx.settings) && currentRun(c).has(x.id)) {
+      c = chargeRoute(c, x.id, from!, routeFeet(g, snap(g, from!, t.size), squares, d, c.movement?.[x.id]?.diags ?? 0), g, d);
+    }
+    return noteEntries(c, after!, [{ t, from: from! }]);
   });
-  const t = after?.tokens.find((z) => z.id === tokenId) ?? s.tokens.find((z) => z.id === tokenId);
-  return t ? { x: t.x, y: t.y } : to;
+  const now = t ?? s.tokens.find((z) => z.id === tokenId);
+  return now ? { x: now.x, y: now.y } : squares.at(-1) ?? { x: 0, y: 0 };
 }
 
 const STOP = [...BLOCKING, 'grappled'], walking = new Set<string>();
-/** The whole move of the current-turn mover's token: step by step to `to`, asking at each reach edge; returns where it ended. A token already
- *  walking (waiting on an ask) does not start a second walk: it stays where it is. */
-export async function guardMove(ctx: FlowCtx, tokenId: string, to: Pt): Promise<Pt> {
-  if (walking.has(tokenId)) { const t = (await ctx.scene())?.tokens.find((z) => z.id === tokenId); return t ? { x: t.x, y: t.y } : to; }
+/** The token is walking a route (or waiting on an ask during one): it can't start another. */
+export const isWalking = (tokenId: string) => walking.has(tokenId);
+/** The whole move of a token along `route` (squares one apart from where it stands, ending where it goes): the current-turn mover asks at the
+ *  first step that leaves each foe's reach; returns where it ended. A token already walking does not start a second walk: it stays where it is. */
+export async function guardMove(ctx: FlowCtx, tokenId: string, route: Pt[]): Promise<Pt> {
+  if (walking.has(tokenId) || !route.length) { const t = (await ctx.scene())?.tokens.find((z) => z.id === tokenId); return t ? { x: t.x, y: t.y } : route.at(-1) ?? { x: 0, y: 0 }; }
   walking.add(tokenId);
-  try { return await walk(ctx, tokenId, to); } finally { walking.delete(tokenId); }
+  try { return await walk(ctx, tokenId, route); } finally { walking.delete(tokenId); }
 }
-async function walk(ctx: FlowCtx, tokenId: string, to: Pt): Promise<Pt> {
+async function walk(ctx: FlowCtx, tokenId: string, route: Pt[]): Promise<Pt> {
   const asked = new Set<string>(); // foes asked already (answered, passed or timed out): never asked again on this move
-  for (;;) {
-    const w = await world(ctx), t = w?.s.tokens.find((z) => z.id === tokenId), x = w && t && combatantForToken(w.k, t), me = x && w.bs.get(x.id);
-    if (!w || !t) { const s = w?.s ?? await ctx.scene(); return s ? step(ctx, s, tokenId, to) : to; } // no fight: a plain move
-    if (me && asked.size && !currentRun(w.k).has(me.x.id)) return { x: t.x, y: t.y }; // its turn ended during an ask: it stays
-    if (!me || !on(w.k, ctx.settings) || !currentRun(w.k).has(me.x.id)) return step(ctx, w.s, tokenId, to);
-    if (me.x.hp === 0 || me.conditions.some((c) => STOP.includes(c.toLowerCase())) || w.k.movement?.[me.x.id]?.mult === 0) return { x: t.x, y: t.y };
-    const foes = [...w.bs.values()].filter((b) => b !== me && !asked.has(b.x.id));
-    const edge = leaveStep(w.s.grid, ctx.settings.diagonal, me, foes, to, !!me.x.economy?.disengaging);
-    if (!edge) return step(ctx, w.s, tokenId, to);
-    await step(ctx, w.s, tokenId, edge.at);
+  for (let i = 0; ; ) { // route[i..]: the squares still to walk
+    const rest = route.slice(i), w = await world(ctx), t = w?.s.tokens.find((z) => z.id === tokenId), x = w && t && combatantForToken(w.k, t), me = x && w.bs.get(x.id);
+    if (!w || !t) { const s = w?.s ?? await ctx.scene(); return s ? step(ctx, s, tokenId, rest) : route.at(-1)!; } // no fight: a plain walk
+    const here = { x: t.x, y: t.y };
+    if (me && asked.size && !currentRun(w.k).has(me.x.id)) return here; // its turn ended during an ask: it stays
+    if (!me || !on(w.k, ctx.settings) || !currentRun(w.k).has(me.x.id)) return step(ctx, w.s, tokenId, rest);
+    if (me.x.hp === 0 || me.conditions.some((c) => STOP.includes(c.toLowerCase())) || w.k.movement?.[me.x.id]?.mult === 0) return here;
+    const foes = [...w.bs.values()].filter((b) => b !== me && !asked.has(b.x.id)), off = !!me.x.economy?.disengaging;
+    let j = 0, edge: ReturnType<typeof leaveStep>;
+    for (let prev = here; j < rest.length; prev = rest[j++]) if ((edge = leaveStep(w.s.grid, ctx.settings.diagonal, { ...me, pt: { ...me.pt, ...prev } }, foes, rest[j], off))) break;
+    if (!edge) return step(ctx, w.s, tokenId, rest);
+    if (j) { // up to the edge (a write refused, off the map: it stays)
+      const at = await step(ctx, w.s, tokenId, rest.slice(0, j)), e = snap(w.s.grid, rest[j - 1], t.size);
+      if (at.x !== e.x || at.y !== e.y) return at;
+    }
+    i += j;
     edge.reactors.forEach((r) => asked.add(r.id));
     const answers = await ask({ id: uid(), kind: 'opportunity', trigger: `${me.name} leaves the reach of ${edge.reactors.map((r) => r.name).join(', ')}`,
       playerTrigger: `${me.name} leaves your reach`, reactors: edge.reactors, waiting: me.x.id });

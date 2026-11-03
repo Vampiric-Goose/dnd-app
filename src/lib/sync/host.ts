@@ -8,14 +8,14 @@ import { isRec, problem, SHAPES } from '../recordShape.ts';
 import { TRUSTED_KEYS, verify } from './signing.ts';
 import type { RollEntry } from '../rolls.svelte.ts';
 import { toBase64 } from '../base64.ts';
-import { budgetApplies, combatantForToken, recordMove } from '../combat/movement.ts';
+import { budgetApplies, chargeRoute, combatantForToken } from '../combat/movement.ts';
 import { applyUse, attacksPerAction, characterEffect, editsCharacter, payment, pcActions, problemOf, spendOn, type TurnAction } from '../combat/turnActions.ts';
 import { targetOf, type TargetInfo } from '../combat/resolve.ts';
 import { aimPlan, meleeAttack, noteEntries, snapOf, touched, workOut, type Aim, type Aimed, type UseOutcome, type WorkIn } from '../combat/aiming.ts';
 import { targetingOn } from '../combat/targeting.ts';
 import { featureList } from '../character/play.ts';
 import { computeSheet } from '../rules/sheet.ts';
-import { moveTokens } from '../map/scene.ts';
+import { walkTokens } from '../map/scene.ts';
 import { ActionBoard, actionProblem, actionsForPlayers, expiry, type ActionRequest, type DeclaredAction, type PlayerAction } from '../map/actions.ts';
 import type { Campaign, CampaignSettings, CampaignSync, Character, Combat, Combatant, MonsterDef, Pack, PackMeta, Resolution, Scene, Snap } from '../types.ts';
 import { checkPick, scaleSummon } from '../combat/summons.ts';
@@ -28,7 +28,7 @@ import { canon, latestClock, mergeCharacter, type Synced } from './merge.ts';
 import { campaignForPlayers, characterForPlayer, currentActor, playerPack, promptsFor, rosterEntry, trackerForPlayers, unprojectCharacter, type TrackerView } from './project.ts';
 import { uid } from '../uid.ts';
 import { BLOB_CHUNK, cleanRoll, cuts, IMAGE_TYPES, LOW_WATER, MAX_BLOB, MAX_CHUNK, MAX_MESSAGE, MAX_PACK, parseGuestMessage, size, type GuestMsg, type HostMsg, type PackOffer, type Preview } from './protocol.ts';
-import { moveCost, moveProblem, playerTokens, previewVisible, sceneBlobs, sceneForPlayers, type PlayerScene } from './scene.ts';
+import { moveCost, moveProblem, moveRoute, playerTokens, previewVisible, sceneBlobs, sceneForPlayers, type PlayerScene } from './scene.ts';
 
 export interface HostDeps {
   /** The hosted campaign (its `sync.role` is 'dm'). */
@@ -63,8 +63,8 @@ export interface HostDeps {
   editCharacter?(id: string, fn: (c: Character) => Character): Promise<unknown>;
   /** Targeting: a worked-out use applied on this device (store applyResolution: damage through changeHp, kept for the DM's Undo). */
   resolve?(r: Omit<Resolution, 'applied'>, before?: Snap, o?: { melee?: boolean }): Promise<Omit<Resolution, 'applied'> | void>; /* what landed, after reactions (Shield, Parry): the player hears that */
-  /** Reactions: the current-turn mover's whole walk, asking at each reach edge (reactionFlow guardMove). Absent: the plain move. */
-  guardMove?(tokenId: string, to: { x: number; y: number }): Promise<unknown>;
+  /** Reactions: the current-turn mover's whole walk along `route` (squares one apart from the token), asking at each reach edge (reactionFlow guardMove). Absent: the plain move. */
+  guardMove?(tokenId: string, route: { x: number; y: number }[]): Promise<unknown>;
   /** Reactions: Counterspell asks before a player's spell takes effect, after it is paid for; false: it is countered (reactionFlow guardCast). */
   guardCast?(casterCombatantId: string, spell: { name: string; level: number }): Promise<boolean>;
   /** Targeting: a player's own save roll for its PC's pending area save (store settleSave). */
@@ -860,32 +860,32 @@ export class Host {
   }
 
   /** Review Focus 2: shape (parse), then moveProblem: a crafted move is a violation; a stale one re-sends the scene to that link only. */
-  async #move(c: Conn, pid: string, m: { sceneId: string; tokenId: string; x: number; y: number }): Promise<void> {
+  async #move(c: Conn, pid: string, m: { sceneId: string; tokenId: string; x: number; y: number; path?: { x: number; y: number }[] }): Promise<void> {
     const camp = await this.#deps.loadCampaign();
     if (!camp || !this.#deps.loadScene || !this.#deps.updateScene) return;
     const chars = (await this.#deps.loadCharacters()).filter((ch) => ch.campaignId === camp.id);
     const combat = await this.#deps.loadCombat?.();
     const shown = await this.#deps.loadScene(), why = moveProblem(shown, m, pid, chars, combat, camp.settings);
     if (why?.violation) return this.#violation(c, why.error);
-    const cid = !why ? shown?.tokens.find((t) => t.id === m.tokenId)?.characterId : undefined, x = cid !== undefined && combat && combat.round >= 1 ? combatantForToken(combat, { characterId: cid }) : undefined;
-    if (x && combat!.turn === x.id && this.#deps.guardMove) { // the mover's own turn: it walks the whole way through the reaction flow
-      const go = this.#deps.guardMove;
-      return this.#detach(async () => { await go(m.tokenId, { x: m.x, y: m.y }); await this.#task(() => this.#sendScene(camp, c)); }, cid);
+    const tk = !why ? shown?.tokens.find((t) => t.id === m.tokenId) : undefined, cid = tk?.characterId, x = cid !== undefined && combat && combat.round >= 1 ? combatantForToken(combat, { characterId: cid }) : undefined;
+    if (tk && x && combat!.turn === x.id && this.#deps.guardMove) { // the mover's own turn: it walks the whole way through the reaction flow (a token already walking stays)
+      const go = this.#deps.guardMove, route = moveRoute(shown!.grid, tk, m);
+      return this.#detach(async () => { await go(m.tokenId, route); await this.#task(() => this.#sendScene(camp, c)); }, cid);
     }
     // checked again on the fresh record, in the write (the DM may have hidden the token since); its cost is measured on that record too
-    let moved: { combatantId: string; from: { x: number; y: number } } | undefined, walked: { s: Scene; from: { x: number; y: number } } | undefined;
+    let moved: { combatantId: string; from: { x: number; y: number }; cost: { feet: number; diags: number } } | undefined, walked: { s: Scene; from: { x: number; y: number } } | undefined;
     if (!why) await this.#deps.updateScene(m.sceneId, (s) => {
       if (moveProblem(s, m, pid, chars, combat, camp.settings)) return s;
-      const t = s.tokens.find((x) => x.id === m.tokenId)!;
+      const t = s.tokens.find((x) => x.id === m.tokenId)!, out = walkTokens(s, [m.tokenId], m.tokenId, moveRoute(s.grid, t, m));
+      if (out === s) return s;
       const cost = moveCost(s, m, chars.find((ch) => ch.id === t.characterId)!, combat, camp.settings);
-      if (cost) moved = { combatantId: cost.combatantId, from: { x: t.x, y: t.y } };
-      const out = moveTokens(s, [m.tokenId], m.tokenId, m);
+      if (cost) moved = { combatantId: cost.combatantId, from: { x: t.x, y: t.y }, cost };
       walked = { s: out, from: { x: t.x, y: t.y } };
       return out;
     });
-    const k = moved, w = walked;
-    if (k || w) await this.#deps.updateCombat?.((x) => { // the turn's first move sets its origin (the db change re-sends the tracker); entering a lasting area
-      const y = k ? recordMove(x, k.combatantId, k.from) : x, t = w?.s.tokens.find((z) => z.id === m.tokenId);
+    const k = moved, w = walked, g = w?.s.grid;
+    if (k || w) await this.#deps.updateCombat?.((x) => { // its route charged (the turn's first move sets its origin; the db change re-sends the tracker); entering a lasting area
+      const y = k ? chargeRoute(x, k.combatantId, k.from, { feet: k.cost.feet, diags: k.cost.diags }, g, camp.settings.diagonal) : x, t = w?.s.tokens.find((z) => z.id === m.tokenId);
       return w && t ? noteEntries(y, w.s, [{ t, from: w.from }]) : y;
     });
     await this.#sendScene(camp, c);

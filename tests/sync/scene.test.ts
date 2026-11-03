@@ -119,6 +119,19 @@ describe('sceneForPlayers', () => {
     expect(moveProblem(s, mv, 'A1', chars(), fight(), settings({ fog: true }))).toBeUndefined();
   });
 
+  test('a trail through fog never reaches players; one in the open does', () => {
+    const walked = (trail: { x: number; y: number }[], o: Partial<Scene> = {}) => scene({ ...o, tokens: scene().tokens.map((t) => (t.id === 't-thorin' ? { ...t, x: 105, y: 105, trail } : t)) });
+    const open = [{ x: 35, y: 105 }, { x: 105, y: 105 }], dark = [{ x: 35, y: 175 }, { x: 105, y: 105 }]; // the second leaves fog only at its first square
+    const fog = paintFog(undefined, 700, 700, { k: 'rect', a: { x: 0, y: 70 }, b: { x: 139, y: 139 }, reveal: true }); // row 1, cells 0-1
+    const thorinOf = (s: Scene, set = settings({ fog: true })) => tok(sceneForPlayers(s, chars(), undefined, set), 'Thorin');
+    expect(thorinOf(walked(open, { fog }))!.trail).toEqual(open);
+    expect(thorinOf(walked(dark, { fog }))).toBeDefined();
+    expect(thorinOf(walked(dark, { fog }))!.trail).toBeUndefined();
+    expect(thorinOf(walked(dark, { fog }), settings())!.trail).toEqual(dark); // fog off: nothing to hide
+    const hidden = { ...walked(open, { fog }), tokens: walked(open, { fog }).tokens.map((t) => (t.id === 't-thorin' ? { ...t, hidden: true } : t)) };
+    expect(JSON.stringify(sceneForPlayers(hidden, chars(), undefined, settings({ fog: true })))).not.toContain('trail');
+  });
+
   test('a full scene fits in one message (Review Focus 5)', () => {
     const tokens = Array.from({ length: 200 }, (_, i) => ({ id: `t${i}`.padEnd(36, 'x'), name: 'N'.repeat(100), x: 35, y: 35, size: 'M' as const, color: '#123456', portrait: PT }));
     const v = sceneForPlayers(scene({ tokens }), [], undefined, settings())!;
@@ -174,6 +187,9 @@ test('cleanScene', () => {
   expect(cleanScene({ ...base, tokens: Array.from({ length: 300 }, (_, i) => ({ ...t, id: `t${i}` })) })!.tokens.length).toBe(200);
   expect(cleanScene({ ...base, image: 'abc' })!.image).toBeUndefined();
   expect(cleanScene({ ...base, tokens: [{ ...t, x: NaN }] })!.tokens).toEqual([]);
+  const trail = [{ x: 35, y: 35 }, { x: 105, y: 35 }];
+  expect(cleanScene({ ...base, tokens: [{ ...t, trail }] })!.tokens).toEqual([{ ...t, trail }]);
+  for (const bad of [Array.from({ length: 201 }, () => trail[0]), [{ x: NaN, y: 0 }], [{ x: 1 }], 'x', [], [trail[0], 5]]) expect(cleanScene({ ...base, tokens: [{ ...t, trail: bad }] })!.tokens).toEqual([t]);
   expect(cleanScene('nope')).toBeUndefined();
   const fog = paintFog(undefined, 700, 700, { k: 'all', reveal: true });
   expect(cleanScene({ ...base, fog })!.fog).toBe(fog);

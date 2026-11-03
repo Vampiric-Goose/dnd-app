@@ -182,13 +182,13 @@ describe('moves and casts through the reaction flow', () => {
   const aliasOf = (r: { got: unknown[] }, name: string) => (r.got as { t: string; tracker?: { rows: { id: string; name: string }[] } }[]).filter((m) => m.t === 'tracker').at(-1)!.tracker!.rows.find((x) => x.name === name)!.id;
 
   // a stand-in for guardMove: the token waits at the edge on Mira's card, then goes on
-  const edgeWalk = (d: Device, seen: string[]) => async (tokenId: string, to: { x: number; y: number }) => {
+  const edgeWalk = (d: Device, seen: string[]) => async (tokenId: string, route: { x: number; y: number }[]) => {
     const put = (p: { x: number; y: number }) => { d.scene = { ...d.scene!, tokens: d.scene!.tokens.map((t) => (t.id === tokenId ? { ...t, ...p } : t)) }; };
     put(cell(2));
     seen.push('edge');
     await ask({ ...mkAsk('m1', 'pc:thorin'), kind: 'opportunity', trigger: 'Thorin leaves', playerTrigger: 'Thorin leaves your reach', reactors: [{ id: 'pc:mira', name: 'Mira', options: [{ id: 'oa', label: 'Opportunity Attack' }] }] });
     seen.push('answered');
-    put(to);
+    put(route.at(-1)!);
   };
 
   test('a player’s move away from a goblin stops at the edge until the DM passes, then finishes', async () => {

@@ -143,7 +143,7 @@ export function extendRoute(g: Grid, start: Pt, route: Pt[], to: Pt, size: Size)
   return i >= 0 ? route.slice(0, i + 1) : [...route, ...stepsBetween(g, route.at(-1) ?? s, t, size)];
 }
 
-/** Feet for walking `route` from `start`, with `diags` diagonals already walked this turn (5-10-5: every second diagonal costs 10); `diags` returned: those this route walks. */
+/** Feet for walking `route` from `start` (the token's snapped position: snap with its size), with `diags` diagonals already walked this turn (5-10-5: every second diagonal costs 10); `diags` returned: those this route walks. */
 export function routeFeet(g: Grid, start: Pt, route: Pt[], diagonal: '5-5-5' | '5-10-5', diags = 0): { feet: number; diags: number } {
   let feet = 0, d = 0, a = cellAt(g, start);
   for (const p of route) {
@@ -153,8 +153,9 @@ export function routeFeet(g: Grid, start: Pt, route: Pt[], diagonal: '5-5-5' | '
   return { feet, diags: d };
 }
 
-/** The route cut to what `feet` left pays for. */
+/** The route cut to what `feet` left pays for (`start` snapped, as routeFeet's; no feet or a bad number: nothing). */
 export function affordable(g: Grid, start: Pt, route: Pt[], feet: number, diagonal: '5-5-5' | '5-10-5', diags = 0): Pt[] {
+  if (!Number.isFinite(feet) || feet <= 0) return [];
   let used = 0, d = 0, a = cellAt(g, start);
   for (let i = 0; i < route.length; i++) {
     const b = cellAt(g, route[i]), w = walk(g, a, b, diagonal, diags + d);
@@ -164,9 +165,10 @@ export function affordable(g: Grid, start: Pt, route: Pt[], feet: number, diagon
   return route;
 }
 
-/** A walked route charged to the combatant's Movement: sets the origin on the first move, adds `used` feet and `diags`. ponytail: an old mid-turn entry (no `used`) starts counting from 0. */
-export const chargeRoute = (c: Combat, combatantId: string, from: Pt, cost: { feet: number; diags: number }): Combat => {
+/** A walked route from `from` (where the token stood) charged to the combatant's Movement: sets the origin on the first move, adds `used` feet
+ *  and `diags`. An old mid-turn entry (an origin, no `used`) first counts the origin distance to `from` when given the grid. */
+export const chargeRoute = (c: Combat, combatantId: string, from: Pt, cost: { feet: number; diags: number }, g?: Grid, diagonal: '5-5-5' | '5-10-5' = '5-5-5'): Combat => {
   const e = entry(c, combatantId), o = recordMove(c, combatantId, from);
   const m = entry(o, combatantId);
-  return withEntry(o, combatantId, { ...m, used: (e.used ?? 0) + cost.feet, diags: (e.diags ?? 0) + cost.diags });
+  return withEntry(o, combatantId, { ...m, used: (e.used ?? usedFeet(e, from, g, diagonal)) + cost.feet, diags: (e.diags ?? 0) + cost.diags });
 };

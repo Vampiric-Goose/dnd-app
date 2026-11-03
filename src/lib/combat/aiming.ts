@@ -90,10 +90,13 @@ export function noteEntries(k: Combat, s: Scene, moves: { t: Token; from: Pt }[]
   const areas = liveAreas(k, s.id).filter((r) => r.linger?.read.enters), turn = k.turn ?? '';
   const kept = (k.entered ?? []).filter((e) => e.round >= k.round - 1), add: NonNullable<Combat['entered']> = [];
   for (const { t, from } of moves) {
-    const x = combatantForToken(k, t), n = Math.max(1, Math.ceil(Math.hypot(t.x - from.x, t.y - from.y) / (s.grid.size / 2)));
+    const x = combatantForToken(k, t), pts = [from, ...(t.trail ?? [t])]; // a walked token: along its trail
+    const enters = (r: Resolution, a: Pt, b: Pt) => { const n = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / (s.grid.size / 2)));
+      for (let i = 1; i <= n; i++) if (inArea(k, s, r, t, { x: a.x + ((b.x - a.x) * i) / n, y: a.y + ((b.y - a.y) * i) / n })) return true;
+      return false; };
     if (x) for (const r of areas) {
       if (inArea(k, s, r, t, from) || [...kept, ...add].some((e) => e.rid === r.id && e.id === x.id && e.round === k.round && e.turn === turn)) continue;
-      for (let i = 1; i <= n; i++) if (inArea(k, s, r, t, { x: from.x + ((t.x - from.x) * i) / n, y: from.y + ((t.y - from.y) * i) / n })) { add.push({ rid: r.id, id: x.id, round: k.round, turn }); break; }
+      if (pts.some((b, j) => j > 0 && enters(r, pts[j - 1], b))) add.push({ rid: r.id, id: x.id, round: k.round, turn });
     }
   }
   return add.length || kept.length !== (k.entered ?? []).length ? { ...k, entered: [...kept, ...add] } : k;

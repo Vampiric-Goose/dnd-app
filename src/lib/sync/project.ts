@@ -93,7 +93,7 @@ export function trackerForPlayers(c: Combat | undefined, characters: Character[]
       const m = budget && ch.ownerId === viewer ? c.movement?.[x.id] : undefined, from = originOf(m);
       const e = c.round >= 1 && ch.ownerId === viewer ? { used: 0, extra: 0, bonus: false, attacks: 0, ...x.economy } : undefined;
       rows.push({ id: x.id, name: ch.name, characterId: ch.id, ...(x.init !== undefined && { init: x.init }), hp: ch.state.hp, maxHp: maxHp(ch),
-        ...(m && { moved: { ...(from && { from }), dashes: m.dashes, ...(m.mult !== undefined && { mult: m.mult }), ...(m.stood && { stood: true as const }) } }),
+        ...(m && { moved: { ...(from && { from }), dashes: m.dashes, ...(m.mult !== undefined && { mult: m.mult }), ...(m.stood && { stood: true as const }), ...(m.used !== undefined && { used: m.used }), ...(m.diags !== undefined && { diags: m.diags }) } }),
         ...(e && { econ: { ...e, reaction: !!x.reactionUsed, conc: !!x.concentrating, ...(x.concentrating && x.concentratingOn && { concOn: x.concentratingOn }), ...(x.concentrating && x.concentrationSlot !== undefined && { concSlot: x.concentrationSlot }), hasted: !!x.hasted && !x.hasted.ended, perAction: attacksPerAction(featureList(ch, settings)), ...(x.rider && { rider: { dice: x.rider.dice, type: x.rider.type, ...(x.rider.anyAttack && { anyAttack: true as const }) } }) } }) });
       sent.set(x.id, x.id);
       continue;

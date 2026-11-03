@@ -47,7 +47,7 @@ const deps = (): HostDeps => ({ ...new Device().hostDeps(CID),
   loadCombat: () => db.combat.get(CID), updateCombat: (fn) => db.combat.update(CID, (c) => c && fn(c)), editCharacter: (id, fn) => editCharacter(id, fn),
   loadMonster: async (id) => monsters.get(id), loadScene: () => db.scenes.shown(CID), updateScene: (id, fn) => db.scenes.update(id, fn, { network: true }),
   resolve: (r, b, o) => land(flow(), r, b, o), settleSave: async (rid, t, d) => { await settle(flow(), rid, t, d); },
-  guardMove: (id, to) => guardMove(flow(), id, to), guardCast: (id, s) => guardCast(flow(), id, s),
+  guardMove: (id, route) => guardMove(flow(), id, route), guardCast: (id, s) => guardCast(flow(), id, s),
   reactions: { open: () => reactions.open, answer, pass, onChange }, onError: (e) => { errors.push(e); } });
 const errors: unknown[] = [];
 

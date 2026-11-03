@@ -40,7 +40,8 @@ export type GuestMsg =
   | { t: 'roll'; entry: RollEntry }
   | { t: 'packWant'; ids: string[] }
   | { t: 'initiative'; characterId: string; total: number /* stage 4: the player's own roll, an integer INIT_MIN–INIT_MAX */ }
-  | { t: 'move'; sceneId: string; tokenId: string; x: number; y: number /* stage 5: the player's own token, scene px */ }
+  | { t: 'move'; sceneId: string; tokenId: string; x: number; y: number /* stage 5: the player's own token, scene px */;
+      /** The squares it walks (1–200 token centres, from the one next to it to x/y); none: a straight route (an old client). */ path?: { x: number; y: number }[] }
   | { t: 'blobWant'; hashes: string[] /* stage 5: images of the current scene it lacks */ }
   | { t: 'use'; characterId: string; action: string; slot?: number; target?: string /* turn panel: the player's own character does something (a TurnAction id) */; aim?: Aim; summon?: SummonPick }
   | { t: 'save'; resolution: string; characterId: string; d20: number /* targeting: the player's own save roll for a pending area save */ }
@@ -163,9 +164,11 @@ export function parseGuestMessage(raw: unknown): GuestMsg | { error: string } {
       return str(id, 100) && Number.isInteger(n) && (n as number) >= INIT_MIN && (n as number) <= INIT_MAX ? { t: 'initiative', characterId: id, total: n as number } : { error: 'bad initiative' };
     }
     case 'move': {
-      const { sceneId, tokenId, x, y } = raw;
+      const { sceneId, tokenId, x, y, path } = raw;
       const at = (v: unknown): v is number => num(v) && v >= 0 && v <= MAX_SIDE;
-      return str(sceneId, 100) && str(tokenId, 100) && at(x) && at(y) ? { t: 'move', sceneId, tokenId, x, y } : { error: 'bad move' };
+      const pts = path === undefined || (Array.isArray(path) && path.length >= 1 && path.length <= 200 && path.every((p) => isRec(p) && at(p.x) && at(p.y)));
+      return str(sceneId, 100) && str(tokenId, 100) && at(x) && at(y) && pts
+        ? { t: 'move', sceneId, tokenId, x, y, ...(Array.isArray(path) && { path: path.map((p: { x: number; y: number }) => ({ x: p.x, y: p.y })) }) } : { error: 'bad move' };
     }
     case 'blobWant': {
       const h = raw.hashes;

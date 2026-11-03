@@ -68,11 +68,17 @@ export function moveTokens(s: Scene, ids: string[], primary: string, to: Pt): Sc
   let off = false;
   const tokens = s.tokens.map((t) => {
     if (!moving.has(t.id)) return t;
-    const n = { ...t, x: t.x + dx, y: t.y + dy };
+    const { trail: _t, ...rest } = t, n = { ...rest, x: t.x + dx, y: t.y + dy }; // a plain move walks no trail
     if (!inside(s, n)) off = true;
     return n;
   });
   return off || (dx === 0 && dy === 0) ? s : { ...s, tokens };
+}
+
+/** moveTokens to the route's last square, with the primary's `trail` (the route, at most its last 200 squares). Nothing moved: `s`. */
+export function walkTokens(s: Scene, ids: string[], primary: string, route: Pt[]): Scene {
+  const end = route.at(-1), out = end ? moveTokens(s, ids, primary, end) : s;
+  return out === s ? s : { ...out, tokens: out.tokens.map((t) => (t.id === primary ? { ...t, trail: route.slice(-200).map((p) => ({ x: p.x, y: p.y })) } : t)) };
 }
 
 /**

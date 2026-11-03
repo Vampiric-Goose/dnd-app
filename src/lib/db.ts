@@ -122,6 +122,11 @@ function packMeta(p: Pack): PackMeta {
 }
 
 const maybe = <T>(f: (x: T) => T, x: T | undefined) => (x === undefined ? x : f(x));
+/** A token's `trail` belongs to the write that walked it: one carried over unchanged from the stored record goes. */
+const dropTrails = (s: Scene, had: Scene): Scene => {
+  const old = new Set(had.tokens.flatMap((t) => (t.trail ? [t.trail] : [])));
+  return s.tokens.some((t) => t.trail && old.has(t.trail)) ? { ...s, tokens: s.tokens.map((t) => { if (!t.trail || !old.has(t.trail)) return t; const { trail: _t, ...rest } = t; return rest; }) } : s;
+};
 /** Stage 5: the scene with its `shown` flag set as given (absent when off). */
 const withShown = (s: Scene, on: boolean): Scene => { const { shown: _s, ...rest } = s; return on ? { ...rest, shown: true } : rest; };
 
@@ -415,7 +420,7 @@ export const db = {
         if (!had) return;
         out = fn(had);
         if (out === had) return;
-        out = withShown(out, !!had.shown);
+        out = withShown(dropTrails(out, had), !!had.shown);
         wrote = !!had.shown;
         await store.put(out);
       });

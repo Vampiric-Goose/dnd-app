@@ -3,12 +3,15 @@ import 'fake-indexeddb/auto';
 import fs from 'node:fs';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { addCombatants, monsterCombatant } from '../../src/lib/combat/combat.ts';
-import { guardCast, guardMove, land, settle, type FlowCtx } from '../../src/lib/combat/reactionFlow.ts';
+import { guardCast, guardMove, isWalking, land, settle, type FlowCtx } from '../../src/lib/combat/reactionFlow.ts';
+import { stepsBetween } from '../../src/lib/combat/movement.ts';
+import type { Pt } from '../../src/lib/map/grid.ts';
 import { answer, AUTO_PASS_MS, onChange, pass, reactions, reset, type Answer, type Open } from '../../src/lib/combat/reactionStack.svelte.ts';
 import { applyUse, monsterActions } from '../../src/lib/combat/turnActions.ts';
 import { applyResolution, updateCombat } from '../../src/lib/combat/store.ts';
 import { db, resetDb } from '../../src/lib/db.ts';
 import { newScene } from '../../src/lib/map/scene.ts';
+import { editScene } from '../../src/lib/map/store.ts';
 import type { Character, Combatant, MonsterDef, Pack, SpellDef, Token } from '../../src/lib/types.ts';
 import { flowCtx } from '../../src/lib/combat/flowCtx.ts';
 import { makeEntry } from '../../src/lib/items/inventory.ts';
@@ -46,6 +49,9 @@ const ctx = (o: Partial<FlowCtx> = {}): FlowCtx => ({ cid: 'c1', settings: camp(
   rollAim: () => ({ rolled: { d20: [15, 15], dmg: [[4]] } }), ...o });
 const fighter = async (id: string) => (await db.combat.get('c1'))!.combatants.find((x) => x.id === id)!;
 const at = async (tokenId: string) => { const t = (await db.scenes.get('s1'))!.tokens.find((x) => x.id === tokenId)!; return { x: t.x, y: t.y }; };
+/** The straight route from where the token stands now to `to`. */
+const line = async (tokenId: string, to: Pt) => stepsBetween((await db.scenes.get('s1'))!.grid, await at(tokenId), to, 'M');
+const trail = async (tokenId: string) => (await db.scenes.get('s1'))!.tokens.find((x) => x.id === tokenId)!.trail;
 const pcHp = async () => (await db.characters.get('p'))!.state.hp;
 
 /** Answers each new ask as `fn` says (undefined: leave it open), from a microtask; `seen` keeps every ask as it opened. */
@@ -74,7 +80,7 @@ test('a PC walking away from a goblin waits at the edge; the goblin’s attack l
   await walk();
   const where: Promise<{ x: number; y: number }>[] = [];
   answering((o) => { where.push(at('t:pc:p')); return { reactor: 'g1', option: 'oa' }; });
-  expect(await guardMove(ctx(), 't:pc:p', cell(6, 0))).toEqual(cell(6, 0));
+  expect(await guardMove(ctx(), 't:pc:p', await line('t:pc:p', cell(6, 0)))).toEqual(cell(6, 0));
   expect(seen.map((o) => [o.kind, o.reactors.map((r) => r.id), o.playerTrigger, o.waiting])).toEqual([['opportunity', ['g1'], 'p leaves your reach', 'pc:p']]);
   expect(await where[0]).toEqual(cell(2, 0));
   expect(await pcHp()).toBe(14); // 15 + 4 hits AC 10; 4 + 2 slashing
@@ -86,7 +92,7 @@ test('a PC walking away from a goblin waits at the edge; the goblin’s attack l
 test('a PC dropped to 0 by the attack stays at the edge', async () => {
   await fight([[pcC, 1, 0], [mon(goblin, 'g1'), 1, 1]], 'pc:p', 3);
   answering(() => ({ reactor: 'g1', option: 'oa' }));
-  expect(await guardMove(ctx(), 't:pc:p', cell(6, 0))).toEqual(cell(2, 0));
+  expect(await guardMove(ctx(), 't:pc:p', await line('t:pc:p', cell(6, 0)))).toEqual(cell(2, 0));
   expect(await pcHp()).toBe(0);
   expect(await at('t:pc:p')).toEqual(cell(2, 0));
 });
@@ -94,8 +100,8 @@ test('a PC dropped to 0 by the attack stays at the edge', async () => {
 test('a Sentinel hit stops the move', async () => {
   await walk(mon(sentinel, 'g1'));
   answering(() => ({ reactor: 'g1', option: 'oa' }));
-  expect(await guardMove(ctx(), 't:pc:p', cell(6, 0))).toEqual(cell(2, 0));
-  expect((await db.combat.get('c1'))!.movement?.['pc:p']?.mult).toBe(0);
+  expect(await guardMove(ctx(), 't:pc:p', await line('t:pc:p', cell(6, 0)))).toEqual(cell(2, 0));
+  expect((await db.combat.get('c1'))!.movement?.['pc:p']).toMatchObject({ mult: 0, used: 5 }); // only the square it walked
   expect(await at('t:pc:p')).toEqual(cell(2, 0));
 });
 
@@ -103,10 +109,64 @@ test('nobody answers: the move finishes after 10 s', async () => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   await walk();
   answering(() => { queueMicrotask(() => vi.advanceTimersByTime(AUTO_PASS_MS)); return undefined; });
-  expect(await guardMove(ctx(), 't:pc:p', cell(6, 0))).toEqual(cell(6, 0));
+  expect(await guardMove(ctx(), 't:pc:p', await line('t:pc:p', cell(6, 0)))).toEqual(cell(6, 0));
   expect(seen).toHaveLength(1);
   expect(await pcHp()).toBe(20);
   expect((await fighter('g1')).reactionUsed).toBeFalsy();
+});
+
+// Route moves: the token walks the squares it was dragged through
+const cells = (...cs: [number, number][]) => cs.map(([x, y]) => cell(x, y));
+test('a route that loops around a goblin and back inside its reach is asked at the first step that leaves it', async () => {
+  await walk(); // PC at (1,0), goblin at (1,1); a straight line to (2,2) never leaves its reach
+  const where: Promise<Pt>[] = [], trails: Promise<Pt[] | undefined>[] = [];
+  answering(() => { where.push(at('t:pc:p')); trails.push(trail('t:pc:p')); return 'pass'; });
+  const route = cells([2, 0], [3, 0], [3, 1], [3, 2], [2, 2], [2, 3]); // out at (3,0), back in at (2,2), out again at (2,3)
+  expect(await guardMove(ctx(), 't:pc:p', route)).toEqual(cell(2, 3));
+  expect(seen.map((o) => o.reactors.map((r) => r.id))).toEqual([['g1']]); // asked once: never again on this walk
+  expect(await where[0]).toEqual(cell(2, 0));
+  expect(await trails[0]).toEqual(cells([2, 0]));
+});
+
+test('a walk writes the squares it took as the token’s trail', async () => {
+  await walk();
+  answering(() => 'pass');
+  await guardMove(ctx(), 't:pc:p', cells([2, 0], [3, 0], [4, 1]));
+  expect(await trail('t:pc:p')).toEqual(cells([3, 0], [4, 1])); // since the write that stopped it at the edge
+  expect(await at('t:pc:p')).toEqual(cell(4, 1));
+  await editScene('s1', (y) => ({ ...y, name: 'Renamed' })); // a write that is not a walk clears it
+  expect(await trail('t:pc:p')).toBeUndefined();
+});
+
+test('a walked route charges its own length, not the distance from the start', async () => {
+  await fight([[pcC, 1, 0], [mon(goblin, 'g1'), 9, 9]], 'pc:p');
+  const c = ctx({ settings: { ...camp('c1').settings, diagonal: '5-10-5' } }), mv = async () => (await db.combat.get('c1'))!.movement?.['pc:p'];
+  expect(await guardMove(c, 't:pc:p', cells([2, 0], [3, 0], [3, 1], [2, 1]))).toEqual(cell(2, 1)); // 20 ft walked, 5 ft from the start
+  expect(await mv()).toEqual({ from: cell(1, 0), dashes: 0, used: 20, diags: 0 });
+  await guardMove(c, 't:pc:p', cells([3, 2])); // the turn's first diagonal: 5
+  expect(await mv()).toMatchObject({ used: 25, diags: 1 });
+  await guardMove(c, 't:pc:p', cells([4, 3])); // its second: 10
+  expect(await mv()).toMatchObject({ used: 35, diags: 2 });
+});
+
+test('an old mid-turn entry (an origin, no running total) keeps the feet it walked before', async () => {
+  await fight([[pcC, 1, 0], [mon(goblin, 'g1'), 9, 9]], 'pc:p');
+  await updateCombat('c1', (k) => ({ ...k, movement: { 'pc:p': { from: cell(0, 0), dashes: 0 } } }));
+  await guardMove(ctx(), 't:pc:p', cells([2, 0]));
+  expect((await db.combat.get('c1'))!.movement?.['pc:p']).toMatchObject({ from: cell(0, 0), used: 10 });
+});
+
+test('outside combat, off its turn or with free movement: the walk leaves a trail and charges nothing', async () => {
+  await fight([[pcC, 1, 0], [mon(goblin, 'g1'), 9, 9]], 'g1');
+  await guardMove(ctx(), 't:pc:p', cells([2, 0], [3, 1]));
+  expect(await trail('t:pc:p')).toEqual(cells([2, 0], [3, 1]));
+  await updateCombat('c1', (k) => ({ ...k, turn: 'pc:p' }));
+  await guardMove(ctx({ settings: { ...camp('c1').settings, freeMovement: true } }), 't:pc:p', cells([4, 1]));
+  expect(await at('t:pc:p')).toEqual(cell(4, 1));
+  expect((await db.combat.get('c1'))!.movement?.['pc:p']).toBeUndefined();
+  await db.combat.update('c1', () => undefined);
+  await guardMove(ctx(), 't:pc:p', cells([5, 1]));
+  expect(await trail('t:pc:p')).toEqual(cells([5, 1]));
 });
 
 /** Mage `ma` pays for Fireball at 3rd level (as the turn panel does before the effects). */
@@ -163,7 +223,7 @@ test('settings.reactions === false or targeting off: no asks at all', async () =
     let asks = 0;
     stop = onChange(() => { asks++; });
     const c = ctx({ settings: { ...camp('c1').settings, ...off } });
-    expect(await guardMove(c, 't:pc:p', cell(6, 0))).toEqual(cell(6, 0));
+    expect(await guardMove(c, 't:pc:p', await line('t:pc:p', cell(6, 0)))).toEqual(cell(6, 0));
     expect(await guardCast(c, 'g1', { name: 'Fireball', level: 3 })).toBe(true);
     await land(c, { id: 'r1', actor: 'pc:p', action: 'Longsword', outcomes: [{ id: 'g1', part: 'hit', hit: true, roll: 20, ac: 15, damage: 3 }], at: 0 });
     expect([asks, (await fighter('g1')).hp]).toEqual([0, 4]);
@@ -174,7 +234,7 @@ test('settings.reactions === false or targeting off: no asks at all', async () =
 test('no fight: the move goes straight through', async () => {
   await walk();
   await db.combat.update('c1', () => undefined);
-  expect(await guardMove(ctx(), 't:pc:p', cell(6, 0))).toEqual(cell(6, 0));
+  expect(await guardMove(ctx(), 't:pc:p', await line('t:pc:p', cell(6, 0)))).toEqual(cell(6, 0));
   expect(await at('t:pc:p')).toEqual(cell(6, 0));
 });
 
@@ -212,21 +272,23 @@ test('(a) a saved-for-nothing or unsettled outcome opens no Rebuke ask', async (
 test('(b) a mover whose turn ends during the ask stays where it is', async () => {
   await walk();
   answering((o) => { void updateCombat('c1', (k) => ({ ...k, turn: 'g1' })).then(() => pass(o.id)); return undefined; });
-  expect(await guardMove(ctx(), 't:pc:p', cell(6, 0))).toEqual(cell(2, 0));
+  expect(await guardMove(ctx(), 't:pc:p', await line('t:pc:p', cell(6, 0)))).toEqual(cell(2, 0));
   expect(await at('t:pc:p')).toEqual(cell(2, 0));
 });
 
 test('(c) a second move of a token that is waiting on an ask does not walk', async () => {
   await walk();
   answering(() => undefined);
-  const first = guardMove(ctx(), 't:pc:p', cell(6, 0));
+  const first = guardMove(ctx(), 't:pc:p', await line('t:pc:p', cell(6, 0)));
   await vi.waitFor(() => expect(reactions.open).toHaveLength(1));
-  expect(await guardMove(ctx(), 't:pc:p', cell(1, 5))).toEqual(cell(2, 0)); // where it waits
+  expect(isWalking('t:pc:p')).toBe(true);
+  expect(await guardMove(ctx(), 't:pc:p', await line('t:pc:p', cell(1, 5)))).toEqual(cell(2, 0)); // where it waits
   expect(await at('t:pc:p')).toEqual(cell(2, 0));
   expect(reactions.open).toHaveLength(1);
   pass(reactions.open[0].id);
   expect(await first).toEqual(cell(6, 0));
-  expect(await guardMove(ctx(), 't:pc:p', cell(6, 1))).toEqual(cell(6, 1)); // free again
+  expect(isWalking('t:pc:p')).toBe(false);
+  expect(await guardMove(ctx(), 't:pc:p', await line('t:pc:p', cell(6, 1)))).toEqual(cell(6, 1)); // free again
 });
 
 test('(d) Magic Missile darts: only Shield applies, never Uncanny Dodge', async () => {
@@ -276,7 +338,7 @@ test('a monster hidden from the players (hidden row or hidden token) leaving a P
     await fight([[pcC, 1, 1], [{ ...mon(goblin, 'g1'), ...(how === 'row' && { hidden: true }) }, 1, 0]], 'g1');
     if (how === 'token') await hideToken('t:g1');
     answering(() => 'pass');
-    expect(await guardMove(ctx(), 't:g1', cell(6, 0))).toEqual(cell(6, 0));
+    expect(await guardMove(ctx(), 't:g1', await line('t:g1', cell(6, 0)))).toEqual(cell(6, 0));
     expect(seen).toEqual([]);
     stop();
   }
@@ -289,7 +351,7 @@ test('on a scene the players aren’t shown, a monster leaving a PC still gives 
     await db.scenes.show('c1', undefined);
     if (hide) await hideToken('t:g1');
     answering(() => 'pass');
-    await guardMove(ctx(), 't:g1', cell(6, 0));
+    await guardMove(ctx(), 't:g1', await line('t:g1', cell(6, 0)));
     expect(seen.map((o) => o.reactors.map((r) => r.id))).toEqual(hide ? [] : [['pc:p']]);
     stop();
   }
@@ -315,18 +377,18 @@ const wolf = (by = 'pc:p'): Combatant => ({ ...mon(goblin, 'w1'), summon: { by, 
 test('a PC walking away from its own summon: no ask, it walks on', async () => {
   await fight([[pcC, 1, 0], [wolf(), 1, 1]], 'pc:p');
   answering(() => ({ reactor: 'w1', option: 'oa' }));
-  expect(await guardMove(ctx(), 't:pc:p', cell(6, 0))).toEqual(cell(6, 0));
+  expect(await guardMove(ctx(), 't:pc:p', await line('t:pc:p', cell(6, 0)))).toEqual(cell(6, 0));
   expect([seen, await pcHp()]).toEqual([[], 20]);
 });
 
 test('a monster leaving a PC summon (or a summon of that summon): the summon gets the attack', async () => {
   await fight([[mon(goblin, 'g1'), 1, 0], [wolf(), 1, 1], [{ ...mon(goblin, 'w2'), summon: { by: 'w1', spell: 'Conjure' } }, 5, 1], [pcC, 9, 9]], 'g1');
   answering((o) => ({ reactor: o.reactors[0].id, option: 'oa' }));
-  await guardMove(ctx(), 't:g1', cell(5, 0)); // leaves w1, walks up to w2
+  await guardMove(ctx(), 't:g1', await line('t:g1', cell(5, 0))); // leaves w1, walks up to w2
   expect(seen.map((o) => o.reactors.map((r) => r.id))).toEqual([['w1']]);
   expect((await fighter('w1')).reactionUsed).toBe(true);
   await updateCombat('c1', (k) => ({ ...k, combatants: k.combatants.map((x) => (x.id === 'g1' ? { ...x, hp: 7 } : x)) }));
-  await guardMove(ctx(), 't:g1', cell(9, 0)); // leaves w2 (by w1, by the PC)
+  await guardMove(ctx(), 't:g1', await line('t:g1', cell(9, 0))); // leaves w2 (by w1, by the PC)
   expect(seen.map((o) => o.reactors.map((r) => r.id))).toEqual([['w1'], ['w2']]);
 });
 
@@ -358,12 +420,12 @@ test('a player answers an Opportunity Attack with its own dice: the foe is hit, 
   const c = ctx({ rollAim: undefined, onRefused: (id, why) => { refused.push([id, why]); } });
   await playerOa(goblin);
   answering(() => ({ reactor: 'pc:p', option: 'oa', aim: { rolled: { d20: [19, 19], dmg: [[]] }, toggles: [] } }));
-  expect(await guardMove(c, 't:m1', cell(6, 0))).toEqual(cell(6, 0));
+  expect(await guardMove(c, 't:m1', await line('t:m1', cell(6, 0)))).toEqual(cell(6, 0));
   expect([(await fighter('pc:p')).reactionUsed, (await fighter('m1')).hp, refused]).toEqual([true, 3, []]); // unarmed: 1 + 3
   stop(); await resetDb(); seen.length = 0;
   await playerOa(goblin);
   answering(() => ({ reactor: 'pc:p', option: 'oa', aim: { rolled: { d20: [19, 19], dmg: [[3]] }, toggles: [] } }));
-  await guardMove(c, 't:m1', cell(6, 0));
+  await guardMove(c, 't:m1', await line('t:m1', cell(6, 0)));
   expect([(await fighter('pc:p')).reactionUsed, (await fighter('m1')).hp]).toEqual([undefined, 7]);
   expect(refused).toEqual([['pc:p', expect.any(String)]]);
 });
@@ -372,7 +434,7 @@ test('a player Opportunity Attack is worked out from the player view of the shee
   const sword = { ...makeEntry({ ...longsword, magic: true, bonuses: { damage: 5 } }, { view: { hidden: ['bonuses'], revealed: [] } }), equipped: true };
   await playerOa(mage, [sword]);
   answering((o) => o.kind === 'hit' ? 'pass' : ({ reactor: 'pc:p', option: 'oa', aim: { rolled: { d20: [19, 19], dmg: [[4]] }, toggles: [] } }));
-  await guardMove(ctx({ rollAim: undefined }), 't:m1', cell(6, 0));
+  await guardMove(ctx({ rollAim: undefined }), 't:m1', await line('t:m1', cell(6, 0)));
   expect([(await fighter('pc:p')).reactionUsed, (await fighter('m1')).hp]).toEqual([true, 33]); // 4 + 3, not + 5
 });
 

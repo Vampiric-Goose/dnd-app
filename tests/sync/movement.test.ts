@@ -39,11 +39,12 @@ const fight = (o: Partial<Combat> = {}): Combat => ({
 /** An entry whose turn origin is cell (q, r). */
 const mv = (q: number, dashes = 0, r = 0) => ({ from: cell(q, r), dashes });
 
-test('moveCost: the distance from the turn origin and the budget; none without a budget', () => {
+test('moveCost: the route’s feet on top of those used this turn, and the budget; none without a budget', () => {
   const m = { tokenId: 't-thorin', ...cell(4, 1) };
-  expect(moveCost(scene(), m, thorin(), fight(), settings())).toEqual({ combatantId: 'pc:thorin', feet: 20, budget: 30 }); // no origin yet: from the token
-  expect(moveCost(scene(), m, thorin(), fight({ movement: { 'pc:thorin': mv(1) } }), settings())).toEqual({ combatantId: 'pc:thorin', feet: 15, budget: 30 }); // from the origin
-  expect(moveCost(scene(), m, thorin(), fight({ movement: { 'pc:thorin': { feet: 25, dashes: 1 } as never } }), settings())).toEqual({ combatantId: 'pc:thorin', feet: 20, budget: 60 }); // an old entry
+  expect(moveCost(scene(), m, thorin(), fight(), settings())).toEqual({ combatantId: 'pc:thorin', used: 0, feet: 20, diags: 1, budget: 30 }); // a straight route from the token
+  expect(moveCost(scene(), m, thorin(), fight({ movement: { 'pc:thorin': mv(1) } }), settings())).toEqual({ combatantId: 'pc:thorin', used: 5, feet: 20, diags: 1, budget: 30 }); // an old entry: used = origin to token
+  expect(moveCost(scene(), m, thorin(), fight({ movement: { 'pc:thorin': { feet: 25, dashes: 1 } as never } }), settings())).toEqual({ combatantId: 'pc:thorin', used: 0, feet: 20, diags: 1, budget: 60 }); // an older one
+  expect(moveCost(scene(), m, thorin(), fight({ movement: { 'pc:thorin': { ...mv(0), used: 10, diags: 1 } } }), settings({ diagonal: '5-10-5' }))).toMatchObject({ used: 10, feet: 25 }); // the carried diagonal makes this one 10
   expect(moveCost(scene(), m, thorin(), fight(), settings({ freeMovement: true }))).toBeUndefined();
   expect(moveCost(scene(), m, thorin(), fight({ round: 0 }), settings())).toBeUndefined();
   expect(moveCost(scene(), m, thorin(), undefined, settings())).toBeUndefined();
@@ -92,23 +93,79 @@ describe('engine', () => {
     return { d, host, a, down, move };
   }
 
-  test('the first move sets the turn origin; a drop past the budget from it is refused, re-sent, no violation; moving back refunds', async () => {
+  test('a move is charged by its route on top of what the turn has walked; past the budget it is refused, re-sent, no violation; walking back refunds nothing', async () => {
     const { d, down, move } = await joined();
     await move(4, 1);
     expect(at(d)).toEqual(cell(4, 1));
-    expect(d.combat!.movement).toEqual({ 'pc:thorin': mv(0) }); // where Thorin stood before the move
+    expect(d.combat!.movement).toEqual({ 'pc:thorin': { ...mv(0), used: 20, diags: 1 } }); // the origin: where Thorin stood before the move
     const before = JSON.stringify(d.scene), n = scenes(down);
-    await move(7, 1); // 35 ft from the origin
+    await move(7, 1); // 20 + 15
     expect(JSON.stringify(d.scene)).toBe(before);
     expect(scenes(down)).toBe(n + 1);
-    await move(6, 3); // exactly 30 ft from the origin
+    await move(6, 3); // 20 + 10: exactly 30
     expect(at(d)).toEqual(cell(6, 3));
-    await move(1); // a slip taken back: 5 ft from the origin
-    expect(at(d)).toEqual(cell(1));
-    await move(0, 6); // so 30 ft the other way is fine
-    expect(at(d)).toEqual(cell(0, 6));
-    expect(d.combat!.movement).toEqual({ 'pc:thorin': mv(0) });
+    await move(5, 3); // a square back: 35
+    expect(at(d)).toEqual(cell(6, 3));
+    expect(d.combat!.movement).toEqual({ 'pc:thorin': { ...mv(0), used: 30, diags: 3 } });
     expect(d.errors).toEqual([]);
+  });
+
+  async function owner(combat?: Combat) {
+    const { d, host } = setup(combat), raw = rawLink();
+    host.accept(raw.link);
+    raw.deliver({ t: 'hello', code: CODE, playerId: 'A1' });
+    await settle(host);
+    const go = async (path: { x: number; y: number }[], to = path.at(-1)!) => { raw.deliver({ t: 'move', sceneId: 's1', tokenId: 't-thorin', ...to, path }); await settle(host); };
+    return { d, host, raw, go };
+  }
+  const cells = (...cs: [number, number][]) => cs.map(([q, r]) => cell(q, r));
+
+  test('a player route with a gap, a diagonal jump, or over 200 points is a violation; one that costs more than is left is refused', async () => {
+    const check = (path: { x: number; y: number }[], to = path.at(-1)!) => moveProblem(scene(), { sceneId: 's1', tokenId: 't-thorin', ...to, path }, 'A1', [thorin()], fight(), settings());
+    const crafted = (error: string) => ({ error, violation: true });
+    expect(check(cells([1, 0], [3, 0]))).toEqual(crafted('a path with a gap'));
+    expect(check(cells([1, 0], [2, 2]))).toEqual(crafted('a path with a gap')); // a diagonal jump
+    expect(check(cells([1, 0], [1, 0]))).toEqual(crafted('a path with a gap')); // a step that goes nowhere
+    expect(check(cells([1, 0], [2, 0]), cell(3))).toEqual(crafted('a path that ends elsewhere'));
+    expect(check(cells([2, 0], [3, 0]))).toEqual({ error: 'stale path', violation: false }); // not next to the token (it may have just been moved)
+    expect(check(cells([1, 0], [2, 0], [3, 0], [4, 0], [5, 0], [6, 0], [7, 0]))).toEqual({ error: 'too far', violation: false });
+    expect(check(cells([1, 0], [2, 0], [3, 0], [3, 1], [2, 1], [1, 1], [0, 1]))).toEqual({ error: 'too far', violation: false }); // 35 ft, ending 5 ft away
+    expect(check(cells([1, 0], [2, 0], [3, 0], [3, 1], [2, 1], [1, 1]))).toBeUndefined(); // 30 ft
+    const big = { ...scene(), width: 210 };
+    expect(moveProblem(big, { sceneId: 's1', tokenId: 't-thorin', ...cell(2), path: cells([1, 0], [2, 0]) }, 'A1', [thorin()], fight(), settings())).toBeUndefined();
+    expect(moveProblem({ ...big, width: 140 }, { sceneId: 's1', tokenId: 't-thorin', ...cell(1), path: cells([1, 0], [2, 0], [1, 0]) }, 'A1', [thorin()], fight(), settings()))
+      .toEqual({ error: 'off the map', violation: false });
+    const msg = (path: unknown) => parseGuestMessage({ t: 'move', sceneId: 's1', tokenId: 't-thorin', ...cell(1), path });
+    expect(msg(cells([1, 0]))).toEqual({ t: 'move', sceneId: 's1', tokenId: 't-thorin', ...cell(1), path: cells([1, 0]) });
+    expect(msg(Array.from({ length: 200 }, () => cell(1)))).toMatchObject({ t: 'move' });
+    for (const bad of [[], Array.from({ length: 201 }, () => cell(1)), [{ x: 1 }], [{ x: -1, y: 0 }], 'x', [cell(1), null]]) expect(msg(bad)).toEqual({ error: 'bad move' });
+
+    const { d, go } = await owner(); // through the host: a crafted gap is a violation and the token stays
+    await go(cells([1, 0], [3, 0]));
+    expect(d.errors.map(String)).toEqual([expect.stringMatching(/a path with a gap/)]);
+    expect(at(d)).toEqual(cell(0));
+  });
+
+  test('a player route is charged by its length', async () => {
+    const { d, go } = await owner();
+    await go(cells([1, 0], [2, 0], [2, 1], [1, 1])); // 20 ft, ending 5 ft from the start
+    expect(at(d)).toEqual(cell(1, 1));
+    expect(d.combat!.movement).toEqual({ 'pc:thorin': { ...mv(0), used: 20, diags: 0 } });
+    expect(d.scene!.tokens[0].trail).toEqual(cells([1, 0], [2, 0], [2, 1], [1, 1]));
+    await go(cells([1, 2], [1, 3])); // 30 ft
+    expect(at(d)).toEqual(cell(1, 3));
+    await go(cells([1, 2])); // back one: 35, refused
+    expect(at(d)).toEqual(cell(1, 3));
+    expect(d.combat!.movement!['pc:thorin'].used).toBe(30);
+    expect(d.errors).toEqual([]);
+  });
+
+  test('a move without a path still works as a straight route', async () => {
+    const { d, move } = await joined();
+    await move(2, 2);
+    expect(at(d)).toEqual(cell(2, 2));
+    expect(d.scene!.tokens[0].trail).toEqual(cells([1, 1], [2, 2]));
+    expect(d.combat!.movement).toEqual({ 'pc:thorin': { ...mv(0), used: 10, diags: 2 } });
   });
 
   test('free movement on, or setup: no budget, nothing recorded', async () => {
@@ -123,14 +180,14 @@ describe('engine', () => {
   });
 
   test('a hidden turn after the PC keeps their leftover feet, and a move within them is accepted', async () => {
-    const hiddenTurn = next(fight({ movement: { 'pc:thorin': mv(4) } })).combat; // Thorin stands 20 ft from his turn origin
+    const hiddenTurn = next(fight({ movement: { 'pc:thorin': { ...mv(4), used: 20 } } })).combat; // Thorin has walked 20 ft
     expect(hiddenTurn.turn).toBe('x1');
     const { d, move } = await joined(hiddenTurn);
-    await move(0, 6); // 30 ft from the origin
-    expect(at(d)).toEqual(cell(0, 6));
-    expect(d.combat!.movement!['pc:thorin']).toEqual(mv(4));
-    await move(0, 7); // 35 ft: refused like any stale move
-    expect(at(d)).toEqual(cell(0, 6));
+    await move(0, 2); // 30 ft
+    expect(at(d)).toEqual(cell(0, 2));
+    expect(d.combat!.movement!['pc:thorin']).toEqual({ ...mv(4), used: 30, diags: 0 });
+    await move(0, 3); // 35 ft: refused like any stale move
+    expect(at(d)).toEqual(cell(0, 2));
     expect(d.errors).toEqual([]);
   });
 
@@ -262,7 +319,7 @@ describe('engine', () => {
     const again = player('A1'), down: string[] = [];
     connect(host, again.guest, down);
     await settle(host, again.guest);
-    expect(again.trackers[0]!.rows.find((r) => r.characterId === 'thorin')!.moved).toEqual(mv(0));
+    expect(again.trackers[0]!.rows.find((r) => r.characterId === 'thorin')!.moved).toEqual({ ...mv(0), used: 20, diags: 0 }); // the running total too: the player's budget matches the host's
     const sent = JSON.parse(down.find((m) => JSON.parse(m).t === 'tracker')!).tracker as TrackerView;
     expect(sent.rows.filter((r) => r.moved).map((r) => r.characterId)).toEqual(['thorin']);
   });
@@ -276,7 +333,7 @@ describe('engine', () => {
     host.trackerChanged(); // the session's db change hook does this
     await settle(host, a.guest, b.guest);
     const thorinRow = (t: TrackerView | undefined) => t!.rows.find((r) => r.characterId === 'thorin')!;
-    expect(thorinRow(a.trackers.at(-1)).moved).toEqual(mv(0));
+    expect(thorinRow(a.trackers.at(-1)).moved).toEqual({ ...mv(0), used: 20, diags: 0 });
     expect(thorinRow(b.trackers.at(-1))).toBeDefined();
     expect(thorinRow(b.trackers.at(-1)).moved).toBeUndefined();
     expect(downB.some((m) => m.includes('moved'))).toBe(false);
@@ -285,6 +342,8 @@ describe('engine', () => {
   test('cleanTracker keeps a well-formed moved only', () => {
     const row = { id: 'pc:thorin', name: 'Thorin', characterId: 'thorin' };
     expect(cleanTracker({ round: 1, rows: [{ ...row, moved: mv(10, 1) }] })!.rows[0].moved).toEqual(mv(10, 1));
+    expect(cleanTracker({ round: 1, rows: [{ ...row, moved: { ...mv(10, 1), used: 25, diags: 3 } }] })!.rows[0].moved).toEqual({ ...mv(10, 1), used: 25, diags: 3 });
+    expect(cleanTracker({ round: 1, rows: [{ ...row, moved: { ...mv(10, 1), used: -5, diags: 'x' } }] })!.rows[0].moved).toEqual(mv(10, 1));
     expect(cleanTracker({ round: 1, rows: [{ ...row, moved: { ...mv(5), feet: 5, x: 1 } }] })!.rows[0].moved).toEqual(mv(5));
     expect(cleanTracker({ round: 1, rows: [{ ...row, moved: { from: { x: 'a', y: 1 }, dashes: 1 } }] })!.rows[0].moved).toEqual({ dashes: 1 }); // a bad origin: none
     for (const moved of [{ from: cell(1), dashes: '0' }, { from: cell(1) }, 'x', { dashes: -1 }]) expect(cleanTracker({ round: 1, rows: [{ ...row, moved }] })!.rows[0].moved).toBeUndefined();

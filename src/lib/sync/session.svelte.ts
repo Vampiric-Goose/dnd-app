@@ -205,9 +205,9 @@ function hostDeps(r: Run, cid: string): HostDeps {
       changed(r);
       return landed || undefined;
     },
-    guardMove: async (tokenId, to) => {
+    guardMove: async (tokenId, route) => {
       const [m, camp] = await Promise.all([import('../combat/reactionFlow.ts'), db.campaigns.get(cid)]);
-      const at = camp && (await m.guardMove(await flow(camp.settings), tokenId, to));
+      const at = camp && (await m.guardMove(await flow(camp.settings), tokenId, route));
       changed(r);
       return at;
     },
