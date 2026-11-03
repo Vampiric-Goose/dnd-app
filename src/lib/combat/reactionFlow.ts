@@ -52,9 +52,9 @@ function sideOf(k: Combat, x: Combatant): Body['side'] {
   return 'foes';
 }
 
-function bodyOf(ctx: FlowCtx, k: Combat, x: Combatant, t: Token, chars: Character[], shown: Set<string>): Live | undefined {
+function bodyOf(ctx: FlowCtx, k: Combat, x: Combatant, t: Token, chars: Character[], shown: Set<string> | undefined): Live | undefined {
   const pt = { x: t.x, y: t.y, size: t.size }, ch = x.characterId ? chars.find((c) => c.id === x.characterId) : undefined;
-  const hidden = !!x.hidden || !shown.has(t.id), side = sideOf(k, x);
+  const hidden = !!x.hidden || (shown ? !shown.has(t.id) : !!t.hidden), side = sideOf(k, x);
   if (ch) { // a player's PC as its player's device sees it (their answer's dice fit that sheet, as a turn panel use's do)
     const sheet = computeSheet(ch, { settings: ctx.settings, viewer: ch.ownerId ? 'player' : 'dm' }), features = featureList(ch, ctx.settings), actions = pcActions(ch, sheet, features);
     const reach = oaAction({ pc: true, actions })?.attack?.properties.includes('reach') ? 10 : 5;
@@ -71,7 +71,8 @@ function bodyOf(ctx: FlowCtx, k: Combat, x: Combatant, t: Token, chars: Characte
 async function world(ctx: FlowCtx): Promise<World | undefined> {
   const [k, s, chars] = await Promise.all([db.combat.get(ctx.cid), ctx.scene(), db.characters.list(ctx.cid)]);
   if (!k || !s) return undefined;
-  const bs = new Map<string, Live>(), shown = playerTokens(s, chars, k, ctx.settings); // host #aim's rule: no hidden or fogged token
+  // host #aim's rule: no hidden or fogged token; a scene players aren't shown leaks nothing, so only the DM's own hides count there
+  const bs = new Map<string, Live>(), shown = s.shown ? playerTokens(s, chars, k, ctx.settings) : undefined;
   for (const t of s.tokens) {
     const x = combatantForToken(k, t), b = x && !bs.has(x.id) ? bodyOf(ctx, k, x, t, chars, shown) : undefined;
     if (b) bs.set(b.x.id, b);

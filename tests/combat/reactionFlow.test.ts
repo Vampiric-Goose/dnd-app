@@ -282,6 +282,19 @@ test('a monster hidden from the players (hidden row or hidden token) leaving a P
   }
 });
 
+test('on a scene the players aren’t shown, a monster leaving a PC still gives the PC its attack; a hidden token still doesn’t', async () => {
+  for (const hide of [false, true]) {
+    await resetDb(); seen.length = 0;
+    await fight([[pcC, 1, 1], [mon(goblin, 'g1'), 1, 0]], 'g1');
+    await db.scenes.show('c1', undefined);
+    if (hide) await hideToken('t:g1');
+    answering(() => 'pass');
+    await guardMove(ctx(), 't:g1', cell(6, 0));
+    expect(seen.map((o) => o.reactors.map((r) => r.id))).toEqual(hide ? [] : [['pc:p']]);
+    stop();
+  }
+});
+
 test('a hidden caster: no PC is asked to Counterspell it', async () => {
   await fight([[pcC, 0, 0], [mon(mage, 'ma'), 3, 0]], 'ma', 20, wizard(['spell:counterspell@SRD']));
   await hideToken('t:ma');
