@@ -13,7 +13,7 @@ import { newCampaignSync, sha256Bytes, sha256Text } from './code.ts';
 import { MAX_AHEAD } from './hlc.ts';
 import type { Link } from './link.ts';
 import { canon, latestClock, mergeCharacter, type Synced } from './merge.ts';
-import { playerPack, type CampaignForPlayers, type HealthStatus, type PickPrompt, type RosterEntry, type SavePrompt, type TrackerRow, type TrackerView } from './project.ts';
+import { playerPack, type CampaignForPlayers, type HealthStatus, type PickPrompt, type ReactPrompt, type RosterEntry, type SavePrompt, type TrackerRow, type TrackerView } from './project.ts';
 import { BLOB_CHUNK, cleanRoll, cuts, HLC, IMAGE_TYPES, INIT_MAX, INIT_MIN, LOW_WATER, MAX_BLOB, MAX_MESSAGE, MAX_PACK, PLAYER_ID, size, type Aim, type GuestMsg, type PackOffer, type Preview, type SummonPick, type UseOutcome } from './protocol.ts';
 import { cleanScene, sceneBlobs, type PlayerScene } from './scene.ts';
 import { publicText, sign, TRUSTED_KEYS } from './signing.ts';
@@ -70,6 +70,8 @@ export interface GuestDeps {
   saveBlob?(type: string, data: Uint8Array): Promise<void>;
   /** Declared actions the DM sent (cleanActions). */
   onActions?(list: PlayerAction[]): void;
+  /** The player's own reaction cards, and whether the fight waits on one of their characters (cleanReactions). */
+  onReactions?(r: { prompts: ReactPrompt[]; waiting: boolean }): void;
   /** Turn panel: the DM's device turned down a use (nothing was spent). */
   onRefused?(reason: string): void;
   /** Targeting: what the DM's device made of this player's aimed use. */
@@ -126,6 +128,18 @@ const HEALTH: readonly string[] = ['Unhurt', 'Hurt', 'Bloodied', 'Down'] satisfi
 const MAX_ROWS = 200; // MAX_COMBATANTS (combat.ts is lazy: not imported here)
 const s = (x: unknown, max: number): x is string => typeof x === 'string' && x.length <= max;
 /** Stage 4: the DM's tracker rebuilt from its known fields: a row without a fitting id and name, or with an id already seen, is dropped; a bad optional field omitted. */
+/** The reaction cards from the DM, rebuilt from known fields (a malformed card is dropped). */
+export function cleanReactions(v: { prompts?: unknown; waiting?: unknown }): { prompts: ReactPrompt[]; waiting: boolean } {
+  const prompts = (Array.isArray(v.prompts) ? v.prompts.slice(0, 20) : []).flatMap((p): ReactPrompt[] => {
+    if (!isRec(p) || !s(p.ask, 100) || !s(p.trigger, 300) || !fin(p.ms) || !Array.isArray(p.reactors)) return [];
+    const reactors = p.reactors.slice(0, 12).flatMap((r) => !isRec(r) || !s(r.characterId, 100) || !s(r.name, 200) || !Array.isArray(r.options) ? []
+      : [{ characterId: r.characterId, name: r.name, options: r.options.slice(0, 40).flatMap((o) => !isRec(o) || !s(o.label, 200) || !s(o.id, 20) || !REACT_IDS.includes(o.id) ? []
+        : [{ id: o.id as ReactPrompt['reactors'][number]['options'][number]['id'], label: o.label, ...(Number.isInteger(o.slot) && { slot: o.slot as number }), ...(fin(o.bonus) && { bonus: o.bonus as number }) }]) }]);
+    return reactors.length ? [{ ask: p.ask, trigger: p.trigger, ms: Math.max(0, p.ms as number), reactors }] : [];
+  });
+  return { prompts, waiting: v.waiting === true };
+}
+const REACT_IDS = ['oa', 'counterspell', 'shield', 'uncanny', 'parry', 'rebuke'];
 export function cleanTracker(v: unknown): TrackerView | undefined {
   if (!isRec(v) || !fin(v.round) || !Array.isArray(v.rows)) return undefined;
   const rows = uniqueIds(v.rows.flatMap((r): TrackerRow[] => {
@@ -253,6 +267,10 @@ export class Guest {
   sendUse(characterId: string, action: string, slot?: number, target?: string, aim?: Aim, summon?: SummonPick): void {
     this.#own(characterId, () => this.#send({ t: 'use', characterId, action, ...(slot !== undefined && { slot }), ...(target !== undefined && { target }), ...(aim && { aim }), ...(summon && { summon }) }));
   }
+  /** An answer to one of the player's own reaction cards (the DM's device checks it against the open ask). */
+  sendReact(ask: string, characterId: string, option: Extract<GuestMsg, { t: 'react' }>['option'], o: { slot?: number; aim?: Aim; d20?: number } = {}): void {
+    this.#own(characterId, () => this.#send({ t: 'react', ask, characterId, option, ...(o.slot !== undefined && { slot: o.slot }), ...(o.aim && { aim: o.aim }), ...(o.d20 !== undefined && { d20: o.d20 }) }));
+  }
   /** Targeting: the player's own save roll for their character's pending area save. */
   sendSave(resolution: string, characterId: string, d20: number): void { this.#own(characterId, () => this.#send({ t: 'save', resolution, characterId, d20 })); }
   /** Targeting: the die picked for a hit waiting on it (Chaos Bolt), by the type it gives. */
@@ -366,6 +384,7 @@ export class Guest {
       case 'scene': return this.#onScene(m.scene === null ? undefined : cleanScene(m.scene));
       case 'blobChunk': return this.#blobChunk(m);
       case 'actions': return this.#deps.onActions?.(cleanActions(m.actions));
+      case 'reactions': return this.#deps.onReactions?.(cleanReactions(m));
       case 'useRefused': return this.#deps.onRefused?.(typeof m.reason === 'string' ? m.reason.slice(0, 200) : 'refused');
       case 'outcome': { const o = cleanOutcome(m); if (o) this.#deps.onOutcome?.(o); return; }
       case 'drag': if (s(m.tokenId, 100) && fin(m.x) && fin(m.y)) this.#deps.onDrag?.({ tokenId: m.tokenId, at: { x: m.x as number, y: m.y as number } }); return;

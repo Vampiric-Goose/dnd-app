@@ -8,6 +8,8 @@ import { entityAllowed, packAllowed, patchAllowed, restorablePack } from '../con
 import type { ContentIndex } from '../content/index.ts';
 import { playerCharacter, restoreSecrets } from '../items/playerView.ts';
 import { computeSheet } from '../rules/sheet.ts';
+import type { ReactOption } from '../combat/reactions.ts';
+import type { Open } from '../combat/reactionStack.svelte.ts';
 import type { Ability, Campaign, CampaignSettings, Character, Combat, Movement, Pack } from '../types.ts';
 import { sha256Text } from './code.ts';
 import type { Synced } from './merge.ts';
@@ -122,6 +124,19 @@ export function trackerForPlayers(c: Combat | undefined, characters: Character[]
       options: o.choose.map(({ face, type }) => ({ face, type })), ...(o.leap && { leap: true as const }) }] : [])) : [];
   });
   return { round, ...(current !== undefined && { current }), rows, ...(c.round === 0 && c.askInit && { ask: true as const }), ...(saves.length && { saves }), ...(picks.length && { picks }) };
+}
+
+/** A reaction card: the players' line, how long is left, and only this player's own characters that have not answered (never a combatant id). */
+export interface ReactPrompt { ask: string; trigger: string; ms: number; reactors: { characterId: string; name: string; options: ReactOption[] }[] }
+/** `charOf` gives a combatant's character id when it is this player's own, else undefined. */
+export function promptsFor(open: Open[], charOf: (combatantId: string) => string | undefined, now: number): ReactPrompt[] {
+  return open.flatMap((o): ReactPrompt[] => {
+    const reactors = o.reactors.flatMap((r) => {
+      const characterId = o.answered.includes(r.id) ? undefined : charOf(r.id);
+      return characterId === undefined ? [] : [{ characterId, name: r.name, options: r.options.map((x) => ({ ...x })) }];
+    });
+    return reactors.length ? [{ ask: o.id, trigger: o.playerTrigger, ms: Math.max(0, o.deadline - now), reactors }] : [];
+  });
 }
 
 /** Stage 5's movement gate: the characterId whose turn it is, if any. */

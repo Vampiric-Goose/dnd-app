@@ -1,13 +1,14 @@
 // Pure (no Svelte/Vite/DOM). The sync messages. Every message is `{ t: <type>, ... }`. Guest messages are untrusted: the host reads
 // them only through parseGuestMessage, which checks each one against an explicit shape and returns a clean copy of the parts it reads.
 import { INIT_MAX, INIT_MIN } from '../combat/combat.ts';
+import type { ReactOption } from '../combat/reactions.ts';
 import { cleanActionRequest, type ActionRequest, type PlayerAction } from '../map/actions.ts';
 import { MAX_SIDE } from '../map/scene.ts';
 import { characterProblem, isRec } from '../recordShape.ts';
 import type { RollEntry } from '../rolls.svelte.ts';
 import type { Character } from '../types.ts';
 import type { Synced } from './merge.ts';
-import type { CampaignForPlayers, RosterEntry, TrackerView } from './project.ts';
+import type { CampaignForPlayers, ReactPrompt, RosterEntry, TrackerView } from './project.ts';
 import type { PlayerScene } from './scene.ts';
 
 export const MAX_MESSAGE = 256 * 1024, MAX_CHUNK = 64 * 1024, MAX_PACK = 64 * 1024 * 1024;
@@ -46,6 +47,7 @@ export type GuestMsg =
   | { t: 'signedChunk'; id: string; at: number; sig: string; seq: number; total: number; data: string /* a trusted publisher's own book, in order (signing.ts) */ }
   | { t: 'pick'; characterId: string; resolution: string; type: string /* targeting: the die picked for a hit waiting on it (Chaos Bolt), by its type */ }
   | { t: 'leap'; characterId: string; resolution: string; aim: Aim /* targeting: a leaping spell's next target (Chaos Bolt), from that result's creature */ }
+  | { t: 'react'; ask: string; characterId: string; option: ReactOption['id'] | 'pass'; slot?: number; aim?: Aim; d20?: number /* an answer to an open reaction card */ }
   | { t: 'endTurn'; characterId: string /* the player's own character ends its turn */ }
   | { t: 'action'; action: ActionRequest /* declared action: the player's arrow (replaces their last) */ }
   | { t: 'clearAction' /* the player's arrow goes */ }
@@ -74,6 +76,7 @@ export type HostMsg =
   | { t: 'actions'; actions: PlayerAction[] /* declared actions players may see (actionsForPlayers) */ }
   | { t: 'drag'; tokenId: string; x: number; y: number /* someone drags a token this player sees (a preview, never stored) */ }
   | { t: 'dragEnd'; tokenId: string }
+  | { t: 'reactions'; prompts: ReactPrompt[]; waiting: boolean /* the player's own reaction cards, and whether the fight waits on one of their characters */ }
   | { t: 'useRefused'; reason: string /* turn panel: a use the DM's device turned down (nothing was spent) */ }
   | ({ t: 'outcome' } & UseOutcome)
   | { t: 'bye'; reason: string };
@@ -119,6 +122,7 @@ function cleanAim(a: unknown): Aim | null {
     ...(dtype !== undefined && { dtype }) };
 }
 
+const REACT_OPTIONS: readonly string[] = ['oa', 'counterspell', 'shield', 'uncanny', 'parry', 'rebuke'];
 /** A guest message checked against its shape, or why not. Ownership and 2024 checks need the campaign and are the host's. */
 /** A summon cast's pick (summons.ts): the option, the creatures (monster ids from the shared books), a spirit's variant. */
 export interface SummonPick { option?: number; monsterIds: string[]; variant?: string }
@@ -191,6 +195,13 @@ export function parseGuestMessage(raw: unknown): GuestMsg | { error: string } {
       const { resolution, characterId, d20 } = raw;
       return str(resolution, 100) && str(characterId, 100) && Number.isInteger(d20) && (d20 as number) >= 1 && (d20 as number) <= 20
         ? { t: 'save', resolution, characterId, d20: d20 as number } : { error: 'bad save' };
+    }
+    case 'react': {
+      const { ask, characterId, option, slot, d20 } = raw, aim = raw.aim === undefined ? undefined : cleanAim(raw.aim);
+      return str(ask, 100) && str(characterId, 100) && (option === 'pass' || (typeof option === 'string' && REACT_OPTIONS.includes(option)))
+        && (slot === undefined || (Number.isInteger(slot) && (slot as number) >= 1 && (slot as number) <= 9))
+        && (d20 === undefined || (Number.isInteger(d20) && (d20 as number) >= 1 && (d20 as number) <= 20)) && aim !== null
+        ? { t: 'react', ask, characterId, option: option as ReactOption['id'] | 'pass', ...(slot !== undefined && { slot: slot as number }), ...(aim && { aim }), ...(d20 !== undefined && { d20: d20 as number }) } : { error: 'bad react' };
     }
     case 'endTurn':
       return str(raw.characterId, 100) ? { t: 'endTurn', characterId: raw.characterId } : { error: 'bad endTurn' };

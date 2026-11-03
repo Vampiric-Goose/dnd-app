@@ -21,9 +21,11 @@ import type { Campaign, CampaignSettings, CampaignSync, Character, Combat, Comba
 import { checkPick, scaleSummon } from '../combat/summons.ts';
 import { newJoinCode, nextPlayerId, sha256Text } from './code.ts';
 import { hlcNow, hlcReceive, MAX_AHEAD } from './hlc.ts';
+import type { answer, onChange, pass } from '../combat/reactionStack.svelte.ts';
+import type { Open } from '../combat/reactionStack.svelte.ts';
 import type { Link } from './link.ts';
 import { canon, latestClock, mergeCharacter, type Synced } from './merge.ts';
-import { campaignForPlayers, characterForPlayer, currentActor, playerPack, rosterEntry, trackerForPlayers, unprojectCharacter, type TrackerView } from './project.ts';
+import { campaignForPlayers, characterForPlayer, currentActor, playerPack, promptsFor, rosterEntry, trackerForPlayers, unprojectCharacter, type TrackerView } from './project.ts';
 import { uid } from '../uid.ts';
 import { BLOB_CHUNK, cleanRoll, cuts, IMAGE_TYPES, LOW_WATER, MAX_BLOB, MAX_CHUNK, MAX_MESSAGE, MAX_PACK, parseGuestMessage, size, type GuestMsg, type HostMsg, type PackOffer, type Preview } from './protocol.ts';
 import { moveCost, moveProblem, previewVisible, sceneBlobs, sceneForPlayers, type PlayerScene } from './scene.ts';
@@ -88,11 +90,13 @@ export interface HostDeps {
   onError?(e: unknown): void;
   /** Wall clock in ms (default Date.now). */
   now?(): number;
+  /** The DM's stack of open reaction asks (reactionStack.svelte.ts). Absent: reactions are off. */
+  reactions?: { open: () => Open[]; answer: typeof answer; pass: typeof pass; onChange: typeof onChange };
 }
 
 interface Conn { link: Link; playerId?: string; name?: string; bad: number; closed: boolean; offered: Set<string>; streamed: Set<string>; packs: Promise<void>; tracker?: string /* JSON of the last tracker sent (M1) */;
   scene?: string /* JSON of the last scene sent */; seen: Set<string> /* blobs offered in any scene sent */; blobs: Set<string> /* blobs streamed */;
-  actions?: string /* JSON of the last declared actions sent */;
+  actions?: string /* JSON of the last declared actions sent */; reacts?: string /* JSON of the last reactions message sent */;
   upload?: { id: string; at: number; sig: string; total: number; parts: string[]; length: number } /* a signed book arriving */ }
 
 /**
@@ -127,14 +131,17 @@ function has2024(c: Character): boolean {
   return bad;
 }
 
-const MAX_BAD = 3;
+const MAX_BAD = 3, EMPTY_REACTIONS = JSON.stringify({ t: 'reactions', prompts: [], waiting: false });
 
 export class Host {
   #deps: HostDeps;
   #conns = new Set<Conn>();
   #queue: Promise<void> = Promise.resolve();
 
-  constructor(deps: HostDeps) { this.#deps = deps; }
+  constructor(deps: HostDeps) {
+    this.#deps = deps;
+    deps.reactions?.onChange(() => void this.#task(() => this.#sendReactions())); // ponytail: never unsubscribed, a Host lives as long as the session
+  }
 
   /** Connected players: how many links each has, and the name they gave. */
   get players(): ReadonlyMap<string, { links: number; name?: string }> {
@@ -290,6 +297,7 @@ export class Host {
       case 'blobWant': return this.#blobWant(c, msg.hashes);
       case 'use': return this.#use(c, c.playerId, msg);
       case 'save': return this.#save(c, c.playerId, msg);
+      case 'react': return this.#react(c, c.playerId, msg);
       case 'leap': return this.#leap(c, c.playerId, msg);
       case 'pick': return this.#pick(c, c.playerId, msg);
       case 'signedChunk': return this.#signedChunk(c, msg);
@@ -492,6 +500,41 @@ export class Host {
     if (r && o) await this.#deps.settlePick?.(r.id, o.id, m.type);
   }
 
+  /** The player's own reaction cards, to every player whose message would differ from the last one they got (an idle player gets nothing). */
+  async #sendReactions(only?: Conn): Promise<void> {
+    const r = this.#deps.reactions;
+    if (!r) return;
+    const open = r.open(), mine = [...this.#conns].filter((c) => c.playerId && (!only || c === only));
+    if (!mine.length || (!open.length && !mine.some((c) => c.reacts))) return;
+    const [combat, chars] = await Promise.all([this.#deps.loadCombat?.(), this.#deps.loadCharacters()]), now = this.#deps.now?.() ?? Date.now();
+    for (const c of mine) {
+      const own = new Set(chars.filter((x) => x.ownerId === c.playerId).map((x) => x.id));
+      const charOf = (id: string) => { const k = combat?.combatants.find((x) => x.id === id)?.characterId; return k !== undefined && own.has(k) ? k : undefined; };
+      const waiting = open.some((o) => charOf(o.waiting) !== undefined && o.reactors.some((x) => !o.answered.includes(x.id)));
+      const msg: HostMsg = { t: 'reactions', prompts: promptsFor(open, charOf, now), waiting };
+      const json = JSON.stringify(msg);
+      if ((c.reacts ?? EMPTY_REACTIONS) === json) continue;
+      c.reacts = json;
+      this.#send(c, msg);
+    }
+  }
+
+  /** A player's answer to an open card: only for their own character, only while it is open and unanswered. */
+  async #react(c: Conn, pid: string, m: Extract<GuestMsg, { t: 'react' }>): Promise<void> {
+    const r = this.#deps.reactions;
+    if (!r) return this.#send(c, { t: 'useRefused', reason: 'reactions are off' });
+    const camp = await this.#deps.loadCampaign();
+    const ch = await this.#deps.loadCharacter(m.characterId);
+    if (!camp || !ch || ch.ownerId !== pid || ch.campaignId !== camp.id) return this.#violation(c, 'not their character');
+    const x = (await this.#deps.loadCombat?.())?.combatants.find((y) => y.characterId === ch.id);
+    const o = r.open().find((z) => z.id === m.ask);
+    if (!x || !o || !o.reactors.some((z) => z.id === x.id) || o.answered.includes(x.id)) return;
+    if (m.option === 'pass') return r.pass(o.id, x.id);
+    if (!r.answer(o.id, { reactor: x.id, option: m.option, ...(m.slot !== undefined && { slot: m.slot }), ...(m.aim && { aim: m.aim }), ...(m.d20 !== undefined && { d20: m.d20 }) })) {
+      this.#send(c, { t: 'useRefused', reason: 'that reaction is not open' });
+    }
+  }
+
   async #save(c: Conn, pid: string, m: Extract<GuestMsg, { t: 'save' }>): Promise<void> {
     const camp = await this.#deps.loadCampaign();
     const ch = await this.#deps.loadCharacter(m.characterId);
@@ -545,6 +588,7 @@ export class Host {
     for (const ch of await this.#deps.loadCharacters()) if (ch.ownerId === c.playerId) this.#send(c, { t: 'chars', characters: [characterForPlayer(ch)] });
     // I1: always (null with no fight), so a player who was offline when the fight ended drops their stale tracker
     if (this.#deps.loadCombat) this.#sendTrackerTo(c, (await this.#tracker(camp, await this.#deps.loadCombat()))(c.playerId));
+    await this.#sendReactions(c); // a card already open when it joins
     if (this.#deps.loadScene) {
       const view = await this.#scene(camp);
       this.#sendSceneTo(c, view); // always (null with none), as the tracker

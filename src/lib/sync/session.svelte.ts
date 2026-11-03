@@ -1,6 +1,7 @@
 // Stage 3: the app-wide sync session (one at a time). It follows the open campaign: a campaign this device hosts resumes hosting unless
 // the DM stopped it, and a joined campaign reconnects. The engine and the PeerJS transport load only when a session starts (dynamic
 // imports), so the first load stays small. The engine writes through the db adapters below; local edits reach it through onLocalChange.
+import { answer, onChange as onReactionsChange, pass, reactions } from '../combat/reactionStack.svelte.ts';
 import { db, hostOffKey, onLocalChange, TRASH_CAP } from '../db.ts';
 import { addRemoteRoll, rollHooks } from '../rolls.svelte.ts';
 import { app, getIndex, refreshCampaigns, setCampaign } from '../store.svelte.ts';
@@ -10,7 +11,7 @@ import { RELAY_KEY, storedRelay } from './relay.ts';
 import type { Guest, GuestDeps, GuestStatus, PackProgress } from './guest.ts';
 import type { Host, HostDeps } from './host.ts';
 import type { Listener, Transport } from './link.ts';
-import type { RosterEntry, TrackerView } from './project.ts';
+import type { ReactPrompt, RosterEntry, TrackerView } from './project.ts';
 import type { Aim, Preview, SummonPick, UseOutcome } from './protocol.ts';
 import type { PlayerScene } from './scene.ts';
 import type { Pt } from '../map/grid.ts';
@@ -44,6 +45,8 @@ export const session = $state({
   retryAt: undefined as number | undefined,
   /** Declared actions on the map: all of them on the DM's device, the visible ones (as the DM sent them) on a player's. */
   actions: [] as (DeclaredAction | PlayerAction)[],
+  /** Player: their own reaction cards and whether the fight waits on one of their characters (the DM sent it). */
+  reactions: undefined as { prompts: ReactPrompt[]; waiting: boolean } | undefined,
   /** Player, targeting: what the DM's device made of this player's last aimed use (`at`: when it arrived). */
   outcome: undefined as (UseOutcome & { at: number }) | undefined,
   /** Live drag previews from others (token id → where it is being dragged), dropped on dragEnd or after DRAG_TTL without updates. Never stored. */
@@ -95,7 +98,7 @@ export function stopSession(): void {
     r.listener?.close();
   }
   session.confirm?.answer(false);
-  Object.assign(session, { role: undefined, campaignId: undefined, status: 'off', reason: '', online: {}, roster: [], tracker: undefined, scene: undefined, packs: undefined, welcomed: false, confirm: undefined, retryAt: undefined, actions: local?.board.list() ?? [], drags: {} });
+  Object.assign(session, { role: undefined, campaignId: undefined, status: 'off', reason: '', online: {}, roster: [], tracker: undefined, reactions: undefined, scene: undefined, packs: undefined, welcomed: false, confirm: undefined, retryAt: undefined, actions: local?.board.list() ?? [], drags: {} });
 }
 
 function begin(role: Run['role'], code: string, campaignId?: string): Run {
@@ -178,6 +181,7 @@ function hostDeps(r: Run, cid: string): HostDeps {
     packMeta: () => db.packs.listMeta(),
     loadPack: (id) => db.packs.get(id),
     loadCombat: () => db.combat.get(cid),
+    reactions: { open: () => reactions.open, answer, pass, onChange: onReactionsChange },
     updateCombat: (fn) => db.combat.update(cid, (c) => c && fn(c)).then((c) => (changed(r), c)), // the DM's tracker re-reads (session.rev)
     endTurn: (id) => import('../combat/store.ts').then((m) => m.turn(cid, 'next', id)).then(() => changed(r)),
     editCharacter: (id, fn) => import('../combat/store.ts').then((m) => m.editCharacter(id, fn)).then((ok) => (changed(r), ok)),
@@ -382,6 +386,7 @@ function guestDeps(r: Run): Omit<GuestDeps, 'code' | 'playerId' | 'name' | 'camp
     onRoster: (x) => { if (live(r)) session.roster = x; },
     onRefused: (reason) => { if (live(r)) void import('../toast.svelte.ts').then((m) => m.toast(`Not done: ${reason}.`, true)); },
     onOutcome: (o) => { if (live(r)) session.outcome = { ...o, at: Date.now() }; },
+    onReactions: (x) => { if (live(r)) session.reactions = x.prompts.length || x.waiting ? x : undefined; },
     onTracker: (t) => { if (live(r)) session.tracker = t; },
     onScene: (s) => { if (live(r)) session.scene = s; },
     onActions: (list) => { if (live(r)) session.actions = list; },
@@ -449,6 +454,9 @@ export function sendLeap(resolution: string, characterId: string, aim: Aim): voi
 }
 export function sendSave(resolution: string, characterId: string, d20: number): void {
   run?.guest?.sendSave(resolution, characterId, d20);
+}
+export function sendReact(ask: string, characterId: string, option: Parameters<Guest['sendReact']>[2], o?: { slot?: number; aim?: Aim; d20?: number }): void {
+  run?.guest?.sendReact(ask, characterId, option, o);
 }
 export function sendEndTurn(characterId: string): void {
   run?.guest?.sendEndTurn(characterId);
