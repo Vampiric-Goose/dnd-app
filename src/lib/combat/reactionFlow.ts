@@ -183,7 +183,11 @@ export async function guardCast(ctx: FlowCtx, casterId: string, spell: { name: s
     if (!(await guardCast(ctx, b.x.id, { name: a.name, level: slot }))) continue;
     // the check: d20 + its spellcasting modifier (ponytail: a stat block that names no spellcasting ability checks at +0, monsterActions' `mod`)
     const check = spell.level > 3 && slot < spell.level ? (ans.d20 ?? roll20(ctx)) + (a.cast?.mod ?? 0) : undefined;
-    if (countered(spell.level, slot, check)) return false; // ponytail: the first that counters ends it; the rest pay nothing
+    if (countered(spell.level, slot, check)) { // ponytail: the first that counters ends it; the rest pay nothing
+      // it never took effect: the concentration it began (at payment) is not held (the spell it replaced stays dropped, it was cast)
+      await updateCombat(ctx.cid, (k) => ({ ...k, combatants: k.combatants.map((z) => (z.id === casterId && z.concentratingOn === spell.name ? { ...z, concentrating: false, concentratingOn: undefined, concentrationSlot: undefined } : z)) }));
+      return false;
+    }
   }
   return true;
 }

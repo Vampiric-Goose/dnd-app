@@ -400,7 +400,7 @@ export class Host {
       return applyUse(k, x, a, per, t?.id, level);
     });
     if (why) return refuse(why);
-    const spell = a.spell, guard = this.#deps.guardCast, gated = !!(spell && guard); // a spell open to Counterspell pays now, takes its effect after
+    const spell = a.again ? undefined : a.spell, guard = this.#deps.guardCast, gated = !!(spell && guard); // a spell open to Counterspell pays now, takes its effect after (using a held one again is no cast)
     if (edits && !(await this.#deps.editCharacter!(ch.id, (x) => { const paid = spendOn(x, level, a.resource, pact); return gated ? paid : characterEffect(paid, a, m.target, !!aimed); }).catch(() => false))) {
       return refuse('the character could not be updated, so nothing was paid');
     }
@@ -416,7 +416,7 @@ export class Host {
         if (x) await this.#deps.summon!(x.id, called, { spell: a.name, ...(a.spell?.concentration && { cast: x.concentrationCount }), share: 'creature' in spec });
       }
     };
-    if (spell && guard) this.#detach(effects); else await effects();
+    if (this.#deps.reactions) this.#detach(effects); else await effects(); // hit and Rebuke asks wait on players: never inside the queue
   }
 
   /** Work that waits on players' answers (a move at a reach edge, a spell open to Counterspell) runs off the message queue, or their answers would wait behind it. */
@@ -453,8 +453,9 @@ export class Host {
     let taken = false;
     await this.#deps.updateCombat((y) => ({ ...y, resolutions: (y.resolutions ?? []).map((z) => (z.id !== r.id || z.leapt ? z : (taken = true, { ...z, leapt: true as const }))) }));
     if (!taken) return refuse('no leap');
-    await this.#deps.resolve(aimed.resolution, snapOf(k, await this.#deps.loadCharacters(), touched(aimed.resolution)));
-    this.#send(c, { t: 'outcome', ...aimed.outcome });
+    const before = snapOf(k, await this.#deps.loadCharacters(), touched(aimed.resolution)), resolve = this.#deps.resolve;
+    const tail = async () => { await resolve(aimed.resolution, before); this.#send(c, { t: 'outcome', ...aimed.outcome }); };
+    if (this.#deps.reactions) this.#detach(tail); else await tail();
   }
 
   async #aim(camp: Campaign, ch: Character, features: { name: string }[], a: TurnAction, aim: Aim, level: number | undefined, leapFrom?: WorkIn['leapFrom']): Promise<Aimed | string> {
@@ -565,7 +566,9 @@ export class Host {
     const k = await this.#deps.loadCombat?.();
     const x = k && combatantForToken(k, { characterId: ch.id });
     const r = x && k.resolutions?.find((y) => y.id === m.resolution && y.outcomes.some((o) => o.id === x.id && o.pending));
-    if (r) await this.#deps.settleSave?.(r.id, x.id, m.d20);
+    if (!r) return;
+    const settle = () => this.#deps.settleSave?.(r.id, x.id, m.d20); // a Hellish Rebuke ask may follow the damage: off the queue
+    if (this.#deps.reactions) this.#detach(async () => void (await settle())); else await settle();
   }
 
   /** Turn panel: the player's own character (else a violation) ends its turn, only while it really holds the turn (not a hidden creature's after it); else ignored. */

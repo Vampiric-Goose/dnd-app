@@ -242,3 +242,15 @@ test('(e) Shield on Acid Arrow leaves half the damage on the miss', async () => 
   expect((await db.combat.get('c1'))!.resolutions![0].outcomes[0]).toMatchObject({ hit: false, damage: 4, ac: 17 });
   expect((await fighter('ma')).hp).toBe(36);
 });
+
+test('a countered concentration spell leaves its caster concentrating on nothing (the counter’s own caster keeps hers)', async () => {
+  await fight([[pcC, 0, 0], [mon(mage, 'ma'), 3, 0]], 'pc:p');
+  const held = (x: Combatant) => ({ ...x, concentrating: true, concentratingOn: 'Call Lightning', concentrationCount: 1, concentrationSlot: 3 });
+  await updateCombat('c1', (k) => ({ ...k, combatants: k.combatants.map((x) => (x.id === 'pc:p' ? held(x) : { ...x, concentrating: true, concentratingOn: 'Hold Person' }))
+  }));
+  answering(() => ({ reactor: 'ma', option: 'counterspell', slot: 3 }));
+  expect(await guardCast(ctx(), 'pc:p', { name: 'Call Lightning', level: 3 })).toBe(false);
+  const [p, ma] = [await fighter('pc:p'), await fighter('ma')];
+  expect([p.concentrating, p.concentratingOn, p.concentrationSlot]).toEqual([false, undefined, undefined]);
+  expect([ma.concentrating, ma.concentratingOn]).toEqual([true, 'Hold Person']); // Counterspell is no concentration spell
+});

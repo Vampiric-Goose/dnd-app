@@ -400,7 +400,7 @@
       return y && !why ? applyUse(k, y, a, v.perAction, target, pay.level) : k;
     });
     if (why) throw new Error(`Not done: ${why}.`);
-    const gated = !!guard && !!a.spell; // a spell open to Counterspell pays now and takes its effect after; false: countered, paid for
+    const gated = !!guard && !!a.spell && !a.again; // a spell open to Counterspell (not a held one used again) pays now and takes its effect after; false: countered, paid for
     if (v.ch && editsCharacter(a, pay.level)) await editCharacter(v.ch.id, (c) => { const paid = spendOn(c, pay.level, a.resource, pay.pact); return gated ? paid : characterEffect(paid, a, target, aimed); });
     if (!gated) return true;
     if (!(await guard!(pay.level ?? slot ?? a.spell!.level))) return false;
