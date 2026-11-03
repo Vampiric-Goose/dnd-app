@@ -569,7 +569,8 @@ export class Host {
     const o = r.open().find((z) => z.id === m.ask);
     if (!x || !o || !o.reactors.some((z) => z.id === x.id) || o.answered.includes(x.id)) return;
     if (m.option === 'pass') return r.pass(o.id, x.id);
-    if (!r.answer(o.id, { reactor: x.id, option: m.option, ...(m.slot !== undefined && { slot: m.slot }), ...(m.aim && { aim: m.aim }), ...(m.d20 !== undefined && { d20: m.d20 }) })) {
+    if (!r.answer(o.id, { reactor: x.id, option: m.option, ...(m.slot !== undefined && { slot: m.slot }), ...(m.aim && { aim: m.aim }), ...(m.d20 !== undefined && { d20: m.d20 }),
+      ...(m.key !== undefined && { key: m.key }), ...(m.spell !== undefined && { spell: m.spell }) })) {
       this.#send(c, { t: 'useRefused', reason: 'that reaction is not open' });
     }
   }

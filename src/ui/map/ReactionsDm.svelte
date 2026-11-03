@@ -28,4 +28,4 @@
   const passFor = (ask: string, id?: string) => { for (const r of id ? [id] : cards.find((c) => c.ask === ask)?.rows.map((x) => x.id) ?? []) pass(ask, r); };
 </script>
 
-<ReactionCard {cards} onanswer={(ask, id, o) => void answer(ask, { reactor: id, option: o.id, ...(o.slot !== undefined && { slot: o.slot }) })} onpass={passFor} />
+<ReactionCard {cards} onanswer={(ask, id, o) => void answer(ask, { reactor: id, option: o.id, ...(o.slot !== undefined && { slot: o.slot }), ...(o.key !== undefined && { key: o.key }), ...(o.spell !== undefined && { spell: o.spell }) })} onpass={passFor} />

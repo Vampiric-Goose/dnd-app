@@ -37,7 +37,9 @@
         return { rolled: rollAim(a.name, plan).rolled, toggles: [] }; // ponytail: the damage dice stay unshown (the DM's device rolls on from these); the target is the DM's to pick
       };
       if (o === 'pass') sendReact(ask, characterId, 'pass');
+      else if (o.id === 'oa' && o.spell) sendReact(ask, characterId, 'oa', { spell: o.spell, aim: aim(find((a) => !!a.spell && a.name === o.spell)) }); // War Caster
       else if (o.id === 'oa') sendReact(ask, characterId, 'oa', { aim: aim(find((a) => a.id === 'react:opportunity')) });
+      else if (o.id === 'more') sendReact(ask, characterId, 'more', { key: o.key, ...(o.slot !== undefined && { slot: o.slot }), ...(o.strike && { aim: aim(find((a) => a.id === 'react:opportunity')) }) });
       else if (o.id === 'rebuke') sendReact(ask, characterId, 'rebuke', { slot: o.slot, aim: aim(find((a) => !!a.spell && a.name === 'Hellish Rebuke'), o.slot) });
       else if (o.id === 'counterspell') sendReact(ask, characterId, 'counterspell', { slot: o.slot, d20: rollDie(`${c?.name ?? 'Counterspell'}: Counterspell check`, '1d20', { mode: 'normal' }).faces[0] });
       else sendReact(ask, characterId, o.id, o.slot === undefined ? {} : { slot: o.slot });

@@ -481,7 +481,7 @@ export function sendLeap(resolution: string, characterId: string, aim: Aim): voi
 export function sendSave(resolution: string, characterId: string, d20: number): void {
   run?.guest?.sendSave(resolution, characterId, d20);
 }
-export function sendReact(ask: string, characterId: string, option: Parameters<Guest['sendReact']>[2], o?: { slot?: number; aim?: Aim; d20?: number }): void {
+export function sendReact(ask: string, characterId: string, option: Parameters<Guest['sendReact']>[2], o?: { slot?: number; aim?: Aim; d20?: number; key?: string; spell?: string }): void {
   run?.guest?.sendReact(ask, characterId, option, o);
 }
 export function sendEndTurn(characterId: string): void {

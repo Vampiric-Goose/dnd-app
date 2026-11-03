@@ -28,7 +28,7 @@
         {#each c.rows as r (r.id)}
           <div class="row">
             <strong>{r.name}</strong>
-            {#each r.options as o (o.id + (o.slot ?? ''))}
+            {#each r.options as o (`${o.id}|${o.key ?? ''}|${o.spell ?? ''}|${o.slot ?? ''}`)}
               <button type="button" class="primary" onclick={() => onanswer(c.ask, r.id, o)}>{o.label}</button>
             {/each}
             <button type="button" onclick={() => onpass(c.ask, r.id)}>Pass</button>

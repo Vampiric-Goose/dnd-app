@@ -154,6 +154,19 @@ describe('reaction cards for players', () => {
   });
 });
 
+describe('table reactions on the wire', () => {
+  test('parseGuestMessage keeps a table reaction’s key and rejects a 101-character one', () => {
+    const ok = { t: 'react', ask: 'k1', characterId: 'thorin', option: 'more', key: 'Riposte' };
+    expect(parseGuestMessage(ok)).toEqual(ok);
+    expect(parseGuestMessage({ ...ok, key: 'x'.repeat(101) })).toEqual({ error: 'bad react' });
+  });
+  test('cleanReactions keeps key, strike and spell', async () => {
+    const { cleanReactions } = await import('../../src/lib/sync/guest.ts');
+    const o = { id: 'more', label: 'War Caster (Fire Bolt)', key: 'War Caster', strike: true, spell: 'Fire Bolt' };
+    expect(cleanReactions({ prompts: [{ ask: 'a', trigger: 't', ms: 1, reactors: [{ characterId: 'c', name: 'n', options: [o] }] }] }).prompts[0].reactors[0].options).toEqual([o]);
+  });
+});
+
 describe('moves and casts through the reaction flow', () => {
   const cell = (q: number, r = 0) => ({ x: 35 + 70 * q, y: 35 + 70 * r });
   const ward: SpellDef = { kind: 'spell', id: 'spell:shield-of-faith@FIX', name: 'Shield of Faith', source: 'FIX', level: 1, school: 'abjuration', castingTime: '1 action', range: '60 feet',

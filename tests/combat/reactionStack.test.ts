@@ -105,4 +105,10 @@ describe('reaction stack', () => {
     void ask(mk('b', { id: 'x' }));
     expect(fn).toHaveBeenCalledTimes(3);
   });
+  test('a table reaction is accepted only with a key that was offered', () => {
+    void ask({ ...mk('t'), reactors: [{ id: 'x', name: 'x', options: [{ id: 'more', key: 'Parry', label: 'Parry (−1d8)' }] }] });
+    expect(answer('t', { reactor: 'x', option: 'more', key: 'Riposte' })).toBe(false);
+    expect(answer('t', { reactor: 'x', option: 'more' })).toBe(false);
+    expect(answer('t', { reactor: 'x', option: 'more', key: 'Parry' })).toBe(true);
+  });
 });

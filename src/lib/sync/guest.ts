@@ -133,12 +133,13 @@ export function cleanReactions(v: { prompts?: unknown; waiting?: unknown }): { p
     if (!isRec(p) || !s(p.ask, 100) || !s(p.trigger, 300) || !fin(p.ms) || !Array.isArray(p.reactors)) return [];
     const reactors = p.reactors.slice(0, 12).flatMap((r) => !isRec(r) || !s(r.characterId, 100) || !s(r.name, 200) || !Array.isArray(r.options) ? []
       : [{ characterId: r.characterId, name: r.name, options: r.options.slice(0, 40).flatMap((o) => !isRec(o) || !s(o.label, 200) || !s(o.id, 20) || !REACT_IDS.includes(o.id) ? []
-        : [{ id: o.id as ReactPrompt['reactors'][number]['options'][number]['id'], label: o.label, ...(Number.isInteger(o.slot) && { slot: o.slot as number }), ...(fin(o.bonus) && { bonus: o.bonus as number }) }]) }]);
+        : [{ id: o.id as ReactPrompt['reactors'][number]['options'][number]['id'], label: o.label, ...(Number.isInteger(o.slot) && { slot: o.slot as number }), ...(fin(o.bonus) && { bonus: o.bonus as number }),
+          ...(s(o.key, 100) && { key: o.key }), ...(o.strike === true && { strike: true as const }), ...(s(o.spell, 100) && { spell: o.spell }) }]) }]);
     return reactors.length ? [{ ask: p.ask, trigger: p.trigger, ms: Math.max(0, p.ms as number), reactors }] : [];
   });
   return { prompts, waiting: v.waiting === true };
 }
-const REACT_IDS = ['oa', 'counterspell', 'shield', 'uncanny', 'parry', 'rebuke'];
+const REACT_IDS = ['oa', 'counterspell', 'shield', 'uncanny', 'parry', 'rebuke', 'more'];
 /** Stage 4: the DM's tracker rebuilt from its known fields: a row without a fitting id and name, or with an id already seen, is dropped; a bad optional field omitted. */
 export function cleanTracker(v: unknown): TrackerView | undefined {
   if (!isRec(v) || !fin(v.round) || !Array.isArray(v.rows)) return undefined;
@@ -269,8 +270,9 @@ export class Guest {
     this.#own(characterId, () => this.#send({ t: 'use', characterId, action, ...(slot !== undefined && { slot }), ...(target !== undefined && { target }), ...(aim && { aim }), ...(summon && { summon }) }));
   }
   /** An answer to one of the player's own reaction cards (the DM's device checks it against the open ask). */
-  sendReact(ask: string, characterId: string, option: Extract<GuestMsg, { t: 'react' }>['option'], o: { slot?: number; aim?: Aim; d20?: number } = {}): void {
-    this.#own(characterId, () => this.#send({ t: 'react', ask, characterId, option, ...(o.slot !== undefined && { slot: o.slot }), ...(o.aim && { aim: o.aim }), ...(o.d20 !== undefined && { d20: o.d20 }) }));
+  sendReact(ask: string, characterId: string, option: Extract<GuestMsg, { t: 'react' }>['option'], o: { slot?: number; aim?: Aim; d20?: number; key?: string; spell?: string } = {}): void {
+    this.#own(characterId, () => this.#send({ t: 'react', ask, characterId, option, ...(o.slot !== undefined && { slot: o.slot }), ...(o.aim && { aim: o.aim }), ...(o.d20 !== undefined && { d20: o.d20 }),
+      ...(o.key !== undefined && { key: o.key }), ...(o.spell !== undefined && { spell: o.spell }) }));
   }
   /** Targeting: the player's own save roll for their character's pending area save. */
   sendSave(resolution: string, characterId: string, d20: number): void { this.#own(characterId, () => this.#send({ t: 'save', resolution, characterId, d20 })); }

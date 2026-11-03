@@ -5,7 +5,7 @@ import type { ReactKind, ReactOption, Reactor } from './reactions.ts';
 
 export const AUTO_PASS_MS = 10_000;
 export interface Ask { id: string; kind: ReactKind; trigger: string /* the DM's line */; playerTrigger: string /* players' line: no hidden info */; reactors: Reactor[]; waiting: string /* the combatant whose thing waits */ }
-export interface Answer { reactor: string; option: ReactOption['id']; slot?: number; aim?: Aim; d20?: number }
+export interface Answer { reactor: string; option: ReactOption['id']; slot?: number; aim?: Aim; d20?: number; /** a table reaction's name */ key?: string; /** War Caster's cantrip */ spell?: string }
 /** `answered` holds every reactor that has answered or passed; `answers` only the chosen ones. */
 export interface Open extends Ask { answered: string[]; answers: Answer[]; deadline: number }
 
@@ -44,7 +44,7 @@ function close(id: string): boolean {
 export function answer(askId: string, a: Answer): boolean {
   const o = reactions.open.find((z) => z.id === askId), r = o?.reactors.find((z) => z.id === a.reactor);
   if (!o || !r || o.answered.includes(r.id)) return false;
-  const offered = r.options.filter((z) => z.id === a.option);
+  const offered = r.options.filter((z) => z.id === a.option && z.key === a.key && z.spell === a.spell);
   if (!offered.length || !offered.some((z) => z.slot === undefined || z.slot === a.slot)) return false;
   settle(o, r.id, a);
   return true;

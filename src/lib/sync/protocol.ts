@@ -48,7 +48,7 @@ export type GuestMsg =
   | { t: 'signedChunk'; id: string; at: number; sig: string; seq: number; total: number; data: string /* a trusted publisher's own book, in order (signing.ts) */ }
   | { t: 'pick'; characterId: string; resolution: string; type: string /* targeting: the die picked for a hit waiting on it (Chaos Bolt), by its type */ }
   | { t: 'leap'; characterId: string; resolution: string; aim: Aim /* targeting: a leaping spell's next target (Chaos Bolt), from that result's creature */ }
-  | { t: 'react'; ask: string; characterId: string; option: ReactOption['id'] | 'pass'; slot?: number; aim?: Aim; d20?: number /* an answer to an open reaction card */ }
+  | { t: 'react'; ask: string; characterId: string; option: ReactOption['id'] | 'pass'; slot?: number; aim?: Aim; d20?: number; key?: string; spell?: string /* an answer to an open reaction card (`key`: a table reaction, `spell`: War Caster's) */ }
   | { t: 'endTurn'; characterId: string /* the player's own character ends its turn */ }
   | { t: 'action'; action: ActionRequest /* declared action: the player's arrow (replaces their last) */ }
   | { t: 'clearAction' /* the player's arrow goes */ }
@@ -123,7 +123,7 @@ function cleanAim(a: unknown): Aim | null {
     ...(dtype !== undefined && { dtype }) };
 }
 
-const REACT_OPTIONS: readonly string[] = ['oa', 'counterspell', 'shield', 'uncanny', 'parry', 'rebuke'];
+const REACT_OPTIONS: readonly string[] = ['oa', 'counterspell', 'shield', 'uncanny', 'parry', 'rebuke', 'more'];
 /** A summon cast's pick (summons.ts): the option, the creatures (monster ids from the shared books), a spirit's variant. */
 export interface SummonPick { option?: number; monsterIds: string[]; variant?: string }
 /** null: malformed. */
@@ -200,11 +200,12 @@ export function parseGuestMessage(raw: unknown): GuestMsg | { error: string } {
         ? { t: 'save', resolution, characterId, d20: d20 as number } : { error: 'bad save' };
     }
     case 'react': {
-      const { ask, characterId, option, slot, d20 } = raw, aim = raw.aim === undefined ? undefined : cleanAim(raw.aim);
+      const { ask, characterId, option, slot, d20, key, spell } = raw, aim = raw.aim === undefined ? undefined : cleanAim(raw.aim);
       return str(ask, 100) && str(characterId, 100) && (option === 'pass' || (typeof option === 'string' && REACT_OPTIONS.includes(option)))
         && (slot === undefined || (Number.isInteger(slot) && (slot as number) >= 1 && (slot as number) <= 9))
         && (d20 === undefined || (Number.isInteger(d20) && (d20 as number) >= 1 && (d20 as number) <= 20)) && aim !== null
-        ? { t: 'react', ask, characterId, option: option as ReactOption['id'] | 'pass', ...(slot !== undefined && { slot: slot as number }), ...(aim && { aim }), ...(d20 !== undefined && { d20: d20 as number }) } : { error: 'bad react' };
+        && (key === undefined || str(key, 100)) && (spell === undefined || str(spell, 100))
+        ? { t: 'react', ask, characterId, option: option as ReactOption['id'] | 'pass', ...(slot !== undefined && { slot: slot as number }), ...(aim && { aim }), ...(d20 !== undefined && { d20: d20 as number }), ...(key !== undefined && { key: key as string }), ...(spell !== undefined && { spell: spell as string }) } : { error: 'bad react' };
     }
     case 'endTurn':
       return str(raw.characterId, 100) ? { t: 'endTurn', characterId: raw.characterId } : { error: 'bad endTurn' };
