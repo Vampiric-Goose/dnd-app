@@ -9,10 +9,12 @@
   import type { FightAnswer, FightAsk } from './FightDialog.svelte';
   import MonsterSearch from './MonsterSearch.svelte';
 
-  let { campaign, combat, encounters, pool, reload, ask }: {
+  // `prep`: the Monsters page's library: prepared groups only (no saved fights, no Start; the map's Library tab places them).
+  let { campaign, combat, encounters: all, pool, reload, ask, prep = false }: {
     campaign: Campaign; combat: Combat | undefined; encounters: Encounter[]; pool: MonsterDef[]; reload: () => Promise<void>;
-    ask: (k: FightAsk) => Promise<FightAnswer>;
+    ask?: (k: FightAsk) => Promise<FightAnswer>; prep?: boolean;
   } = $props();
+  const encounters = $derived(prep ? all.filter((e) => !e.fight) : all);
 
   const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
   function kind(e: Encounter): string {
@@ -83,7 +85,7 @@
       const live = await db.combat.get(cid);
       if (live?.combatants.length) {
         if (!(live.encounterId && (await saveFight(cid)))) {
-          const a = await ask('first');
+          const a = await ask?.('first');
           if (!a) return;
           if (typeof a === 'object') await saveFightAs(cid, a.name);
         }
@@ -131,7 +133,7 @@
       </div>
     </div>
   {:else}
-    <button type="button" onclick={startNew}>New encounter</button>
+    <button type="button" onclick={startNew}>{prep ? 'New group' : 'New encounter'}</button>
   {/if}
 
   {#if encounters.length}
@@ -144,7 +146,7 @@
             {#if e.fight}
               <button type="button" class="primary" aria-label="Resume {e.name}" onclick={() => resume(e)}>Resume</button>
             {:else}
-              <button type="button" class="primary" aria-label="Start {e.name}" disabled={!pool.length || !e.monsters.length} onclick={() => start(e)}>Start</button>
+              {#if !prep}<button type="button" class="primary" aria-label="Start {e.name}" disabled={!pool.length || !e.monsters.length} onclick={() => start(e)}>Start</button>{/if}
               <button type="button" aria-label="Edit {e.name}" onclick={() => startEdit(e)}>Edit</button>
             {/if}
             <button type="button" class="danger" aria-label="Delete {e.name}" onclick={() => del(e)}>Delete</button>
@@ -153,7 +155,7 @@
       {/each}
     </ul>
   {:else}
-    <p class="muted">No encounters yet. Prepare one here, or save a running fight from the “⋯” menu.</p>
+    <p class="muted">{prep ? 'No groups yet. Make one here, or use “Add to library” on a monster; place them from the map’s Library tab.' : 'No encounters yet. Prepare one here, or save a running fight from the “⋯” menu.'}</p>
   {/if}
 </section>
 

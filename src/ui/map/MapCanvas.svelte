@@ -51,7 +51,8 @@
      */
     aim?: { from: Pt; pickable: (id: string) => Pickable; line: boolean; area?: { shape: Shape; feet: number; width?: number; on: 'creature' | 'point' | 'self'; range?: number };
       onpick: (p: { tokenId?: string; point: Pt; caught: string[] }) => void; oncancel: () => void;
-      /** several picks (rays, darts): where it stands ("Target 2 of 3: Goblin 1"), and taking the last pick back */ status?: string; onundo?: () => void; /** a helpful spell on fewer creatures than it could take */ ondone?: () => void };
+      /** several picks (rays, darts): where it stands ("Target 2 of 3: Goblin 1"), and taking the last pick back */ status?: string; onundo?: () => void; /** a helpful spell on fewer creatures than it could take */ ondone?: () => void;
+      /** the area is where tokens will land (the library's Place), not a spell's: no "In the area" line */ footprint?: true };
     /** Spell areas cast on this scene, drawn for everyone under the tokens. */
     areas?: Template[];
   } = $props();
@@ -932,7 +933,7 @@
         {#if aim.status}<span class="inside" role="status">{aim.status}</span>{/if}
         {#if aimWhy}<span class="inside" role="status">{aimWhy}</span>{/if}
         {#if aimOut}<span class="inside out" role="status">{aimOut}</span>{/if}
-        {#if aim.area}<span class="inside" role="status">In the area: {aimCaught.length ? tokens.filter((t) => aimCaught.includes(t.id)).map((t) => t.name).join(', ') : 'none'}</span>{/if}
+        {#if aim.area && !aim.footprint}<span class="inside" role="status">In the area: {aimCaught.length ? tokens.filter((t) => aimCaught.includes(t.id)).map((t) => t.name).join(', ') : 'none'}</span>{/if}
         <span class="hint">{aim.area?.on === 'point' ? `Tap where it lands${aim.area.range !== undefined ? ` (within ${aim.area.range} ft, shaded)` : ''}` : aim.area?.on === 'self' ? 'Tap the direction' : 'Tap a ringed creature'}{aimPick ? ' — tap again to confirm' : ''}.</span>
         {#if aim.onundo}<button type="button" onclick={() => aim?.onundo?.()}>Undo pick</button>{/if}
         {#if aim.ondone}<button type="button" onclick={() => aim?.ondone?.()}>Done</button>{/if}

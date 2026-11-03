@@ -1,5 +1,5 @@
-// Pure (no Svelte/Vite/DOM): a fight saved into an encounter, and back. Lazy: only combat/store.ts imports it.
-import type { Character, Combat, Combatant, SavedFight, Scene } from '../types.ts';
+// Pure (no Svelte/Vite/DOM): a fight saved into an encounter, and back; and the library's prepared groups (withMonster).
+import type { Character, Combat, Combatant, Encounter, MonsterDef, SavedFight, Scene } from '../types.ts';
 import { uid } from '../uid.ts';
 import { currentRun, freshTurn } from './combat.ts';
 import { resetMovement } from './movement.ts';
@@ -51,4 +51,13 @@ export function restoreScene(s: Scene, f: SavedFight, characterIds: Set<string>)
   if (!m) return s;
   const tokens = m.tokens.filter((t) => (!t.characterId || characterIds.has(t.characterId)) && t.x >= 0 && t.y >= 0 && t.x <= s.width && t.y <= s.height);
   return { ...s, tokens: structuredClone(tokens), fog: m.fog ?? s.fog, updatedAt: Date.now() };
+}
+
+/** Library: one more of `m` in a prepared group (its line bumped, at most 99; or a new line, at most 50), or a new group `fresh` holding one. */
+export function withMonster(e: Encounter | undefined, m: Pick<MonsterDef, 'id' | 'name'>, now: number, fresh?: Pick<Encounter, 'id' | 'campaignId' | 'name'>): Encounter {
+  const base: Encounter = e ?? { ...fresh!, monsters: [] as Encounter['monsters'], updatedAt: now };
+  const had = base.monsters.some((l) => l.monsterId === m.id);
+  const monsters = had ? base.monsters.map((l) => (l.monsterId === m.id ? { ...l, name: m.name, count: Math.min(99, l.count + 1) } : l))
+    : base.monsters.length < 50 ? [...base.monsters, { monsterId: m.id, name: m.name, count: 1 }] : base.monsters;
+  return { ...base, monsters, updatedAt: now };
 }

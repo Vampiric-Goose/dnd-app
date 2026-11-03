@@ -120,3 +120,10 @@ test('resizing a scene keeps its revealed fog and its tokens on the map', () => 
   const small = resizeScene(s, 10, 10);
   expect([small.width, small.tokens[0].x <= small.width, decodeFog(small.fog!, 700, 700)?.length]).toEqual([700, true, decodeFog(encodeFog(newFog(700, 700, false)), 700, 700)!.length]);
 });
+
+test('library: new tokens placed near a point fill free squares around it, never on top of each other', () => {
+  const s = addTokens(scene([tok('a', 735, 735)]), [{ name: 'g1', size: 'M' }, { name: 'g2', size: 'M' }, { name: 'g3', size: 'M' }], { x: 735, y: 735 });
+  const placed = s.tokens.slice(1);
+  expect(new Set(s.tokens.map((t) => `${t.x},${t.y}`)).size).toBe(4);
+  for (const t of placed) expect(Math.max(Math.abs(t.x - 735), Math.abs(t.y - 735))).toBeLessThanOrEqual(70);
+});

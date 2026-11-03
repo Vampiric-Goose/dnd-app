@@ -47,13 +47,13 @@ export function freeSpot(s: Scene, near: Pt, size: Size): Pt | undefined {
   }
 }
 
-/** Each placed at its snapped x/y, else at a free spot near the scene's centre; stops at MAX_TOKENS. */
-export function addTokens(s: Scene, list: NewToken[]): Scene {
+/** Each placed at its snapped x/y, else at a free spot near `near` (default the scene's centre); stops at MAX_TOKENS. */
+export function addTokens(s: Scene, list: NewToken[], near: Pt = { x: s.width / 2, y: s.height / 2 }): Scene {
   let out = s;
   for (const n of list) {
     if (out.tokens.length >= MAX_TOKENS) break;
     const p = n.x !== undefined && n.y !== undefined ? snap(out.grid, { x: n.x, y: n.y }, n.size)
-      : freeSpot(out, { x: out.width / 2, y: out.height / 2 }, n.size) ?? snap(out.grid, { x: out.width / 2, y: out.height / 2 }, n.size);
+      : freeSpot(out, near, n.size) ?? snap(out.grid, near, n.size);
     out = { ...out, tokens: [...out.tokens, { ...n, id: uid(), ...p, color: n.color ?? tokenColor(n.name) }] };
   }
   return out;

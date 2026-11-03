@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import { beforeEach, describe, expect, test } from 'vitest';
 import { addCombatants, monsterCombatant, newCombat, next, prev, start } from '../../src/lib/combat/combat.ts';
 import { recordMove } from '../../src/lib/combat/movement.ts';
-import { restoreCombat, restoreScene, snapshotFight } from '../../src/lib/combat/encounters.ts';
+import { restoreCombat, restoreScene, snapshotFight, withMonster } from '../../src/lib/combat/encounters.ts';
 import { addPreparedToFight, deleteEncounter, resumeFight, saveFight, saveFightAs, updateCombat } from '../../src/lib/combat/store.ts';
 import { db, resetDb } from '../../src/lib/db.ts';
 import { addTokens, newScene } from '../../src/lib/map/scene.ts';
@@ -268,4 +268,13 @@ describe('store flows', () => {
     for (const id of ['g1', 'g2', 'pc:a', 'pc:b']) expect(c.combatants.some((x) => x.id === id)).toBe(true);
     expect(c.encounterId).toBe('old');
   });
+});
+
+test('library: adding a monster to a prepared group bumps its line or adds one; a new group starts with it', () => {
+  const g = { id: 'g', name: 'Goblin', count: 0 } as unknown as MonsterDef;
+  const e: Encounter = { id: 'e', campaignId: 'c1', name: 'Ambush', monsters: [{ monsterId: 'g', name: 'Goblin', count: 2 }], updatedAt: 0 };
+  expect(withMonster(e, g, 5).monsters).toEqual([{ monsterId: 'g', name: 'Goblin', count: 3 }]);
+  expect(withMonster(e, { ...g, id: 'o', name: 'Orc' }, 5).monsters.at(-1)).toEqual({ monsterId: 'o', name: 'Orc', count: 1 });
+  expect(withMonster({ ...e, monsters: [{ monsterId: 'g', count: 99 }] }, g, 5).monsters[0].count).toBe(99);
+  expect(withMonster(undefined, g, 5, { id: 'n', campaignId: 'c1', name: 'Goblin' })).toMatchObject({ id: 'n', name: 'Goblin', monsters: [{ monsterId: 'g', name: 'Goblin', count: 1 }], updatedAt: 5 });
 });

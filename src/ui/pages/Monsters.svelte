@@ -1,5 +1,6 @@
 <script lang="ts">
   import { exportRecord, importRecord } from '../../lib/backup.ts';
+  import { withMonster } from '../../lib/combat/encounters.ts';
   import type { ContentIndex } from '../../lib/content/index.ts';
   import { db } from '../../lib/db.ts';
   import { rehome } from '../../lib/monsters/editing.ts';
@@ -8,7 +9,9 @@
   import { leaveGuard, navigate, router } from '../../lib/router.svelte.ts';
   import { CR_LADDER, crValue } from '../../lib/rules/monsters.ts';
   import { app, getIndex } from '../../lib/store.svelte.ts';
-  import type { MonsterDef, Size, StoredMonster } from '../../lib/types.ts';
+  import type { Encounter, MonsterDef, Size, StoredMonster } from '../../lib/types.ts';
+  import { uid } from '../../lib/uid.ts';
+  import Encounters from '../initiative/Encounters.svelte';
   import { message } from '../creator/labels.ts';
   import { download, downloadPdf, fileName } from '../download.ts';
   import Menu, { type MenuItem } from '../kit/Menu.svelte';
@@ -32,6 +35,13 @@
   let index: ContentIndex | undefined = $state.raw();
   let own: StoredMonster[] = $state.raw([]);
   let error = $state('');
+  // The library: prepared groups (encounters without a saved fight) the map's Library tab places
+  let groups: Encounter[] = $state.raw([]);
+  let library = $state(false);
+  async function loadGroups() {
+    const id = app.campaign?.id;
+    groups = id ? (await db.encounters.list(id)).filter((e) => !e.fight).sort((a, b) => a.name.localeCompare(b.name)) : [];
+  }
 
   // (Re)load whenever the campaign changes; a stale load must not overwrite a newer one. Player view loads nothing (R2).
   let loadSeq = 0;
@@ -40,7 +50,7 @@
     const seq = ++loadSeq;
     error = '';
     Promise.all([getIndex(id), id ? db.monsters.list(id) : Promise.resolve([])]).then(
-      ([ix, mine]) => { if (seq === loadSeq) { index = ix; own = mine.filter(soundMonster); } }, // a damaged record would throw in the stat block
+      ([ix, mine]) => { if (seq === loadSeq) { index = ix; own = mine.filter(soundMonster); void loadGroups(); } }, // a damaged record would throw in the stat block
       (e) => { if (seq === loadSeq) error = e instanceof Error ? e.message : String(e); },
     );
   }
@@ -127,6 +137,15 @@
   let clash: { file: StoredMonster; monster: StoredMonster; existing: string; edits: string[] } | undefined = $state.raw();
   let keepBtn: HTMLButtonElement | undefined = $state();
   let notice = $state('');
+  /** One more of the monster in a library group, or a new group named after it. */
+  async function addToLibrary(m: MonsterDef, e?: Encounter) {
+    const cid = app.campaign?.id;
+    if (!cid) return;
+    const g = withMonster(e, m, Date.now(), { id: uid(), campaignId: cid, name: m.name });
+    try { await db.encounters.put($state.snapshot(g)); } catch (err) { error = message(err); return; }
+    notice = `${m.name} added to “${g.name}”.`;
+    await loadGroups();
+  }
   let pasting = $state(false);
   $effect(() => { if (clash) keepBtn?.focus(); });
 
@@ -229,6 +248,10 @@
       <div class="top">
         <h1>Monsters</h1>
         {#if app.campaign}
+          <div class="seg" role="group" aria-label="View">
+            <button type="button" aria-pressed={!library} onclick={() => (library = false)}>All monsters</button>
+            <button type="button" aria-pressed={library} onclick={() => (library = true)}>Library <span class="num">{groups.length}</span></button>
+          </div>
           <button type="button" class="primary" onclick={() => navigate('monsters/new')}>New monster</button>
           <Menu label="Import" align="end" items={[
             { label: 'Paste a stat block', onselect: togglePaste },
@@ -256,6 +279,10 @@
         <PasteDialog kind="monster" oncancel={() => (pasting = false)} onread={(draft, notes) => { pasted.monster = { draft: draft as MonsterDef, notes }; pasting = false; navigate('monsters/new?pasted=1'); }} />
       {/if}
 
+      {#if library && app.campaign}
+        <p class="muted">Groups you prepare here are placed from the map’s Library tab.</p>
+        <Encounters prep campaign={app.campaign} combat={undefined} encounters={groups} {pool} reload={loadGroups} />
+      {:else}
       <div class="filters">
         <label class="search">
           <span class="sr-only">Search</span>
@@ -292,6 +319,7 @@
           </VirtualList>
         </div>
       {/if}
+      {/if}
     </section>
 
     {#snippet panel()}
@@ -300,6 +328,10 @@
           {#if app.campaign}
             {#if isOwn}<button type="button" onclick={() => navigate(`monsters/${selected!.id}/edit`)}>Edit</button>{/if}
             <button type="button" onclick={() => navigate(`monsters/new?from=${encodeURIComponent(selected!.id)}`)}>Duplicate</button>
+            <Menu label="Add to library" items={[
+              ...groups.map((g) => ({ label: `Add to “${g.name}”`, onselect: () => addToLibrary(selected!, g) })),
+              { label: 'New group', onselect: () => addToLibrary(selected!) },
+            ]} />
           {/if}
           <Menu label="Export" align="end" items={[
             { label: 'Export JSON', onselect: () => exportJson(selected!) },
@@ -338,6 +370,30 @@
   .top h1 {
     flex: 1;
     margin: 0;
+  }
+
+  .seg {
+    display: inline-flex;
+    border: 1px solid var(--line-strong);
+    border-radius: 7px;
+    overflow: hidden;
+  }
+
+  .seg button {
+    border: 0;
+    border-radius: 0;
+    border-right: 1px solid var(--line);
+    background: transparent;
+  }
+
+  .seg button:last-child {
+    border-right: 0;
+  }
+
+  .seg button[aria-pressed='true'] {
+    background: var(--accent);
+    color: var(--on-accent);
+    font-weight: 600;
   }
 
   .note {

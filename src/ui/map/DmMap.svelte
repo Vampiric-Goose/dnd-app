@@ -35,7 +35,7 @@
   import { getIndex, saveCampaign } from '../../lib/store.svelte.ts';
   import { MAX_BLOB } from '../../lib/sync/protocol.ts';
   import { clearDeclared, declareAction, sendDrag, session, tellRefused } from '../../lib/sync/session.svelte.ts';
-  import type { Ability, Campaign, Character, Combat, Combatant, MonsterDef, Outcome, RaceDef, Resolution, Scene, Sheet, Size, Token } from '../../lib/types.ts';
+  import type { Ability, Campaign, Character, Combat, Combatant, Encounter, MonsterDef, Outcome, RaceDef, Resolution, Scene, Sheet, Size, Token } from '../../lib/types.ts';
   import GridForm from './GridForm.svelte';
   import { detectSquareGrid } from '../../lib/map/detectGrid.ts';
   import MapCanvas from './MapCanvas.svelte';
@@ -79,10 +79,11 @@
   }
 
   async function reload() {
-    const [s, c, k] = await Promise.all([db.scenes.list(cid), db.characters.list(cid), db.combat.get(cid)]);
+    const [s, c, k, e] = await Promise.all([db.scenes.list(cid), db.characters.list(cid), db.combat.get(cid), db.encounters.list(cid)]);
     scenes = s.sort((a, b) => a.name.localeCompare(b.name));
     chars = c.sort((a, b) => a.name.localeCompare(b.name));
     combat = k;
+    groups = e.filter((x) => !x.fight).sort((a, b) => a.name.localeCompare(b.name));
   }
   $effect(() => { void session.rev; reload().catch((e) => (error = msg(e))); });
   $effect(() => {
@@ -203,10 +204,10 @@
   /** What fighters made from tokens need (addTokensToCombat). */
   const fightOpts = () => ({ chars, sheetOf: (c: Character) => sheets.get(c.id) ?? computeSheet(c, { settings, viewer: 'dm' }), lookup: (id: string) => monsterById.get(id), settings });
   /** New tokens; during a fight they join it too (one roster). */
-  const add = (list: NewToken[]) => run(async () => {
+  const add = (list: NewToken[], near?: Pt) => run(async () => {
     if (!scene) return;
     if (scene.tokens.length + list.length > MAX_TOKENS) notice = `A scene holds at most ${MAX_TOKENS} tokens; only the first ones fit.`;
-    const had = new Set(scene.tokens.map((t) => t.id)), s = await editScene(scene.id, (x) => addTokens(x, list));
+    const had = new Set(scene.tokens.map((t) => t.id)), s = await editScene(scene.id, (x) => addTokens(x, list, near));
     const ids = (s?.tokens ?? []).filter((t) => !had.has(t.id)).map((t) => t.id);
     const { missing } = ids.length ? await joinFight(cid, scene.id, ids, fightOpts()) : { missing: [] };
     await reload();
@@ -234,6 +235,34 @@
   /** Every campaign character not yet on the scene, players' characters first. */
   const addParty = () => void add([...offChars].sort((a, b) => Number(!a.ownerId) - Number(!b.ownerId)).map((c) => tokenForCharacter(c, charSize(c))));
   const owner = (c: Character) => (c.ownerId ? ` (${c.ownerId})` : ' (DM)');
+
+  // The library (prepared on the Monsters page): a group, or one of its monsters, placed where the DM taps; hidden for an ambush if asked
+  let groups: Encounter[] = $state.raw([]);
+  let placeHidden = $state(false);
+  let staging: { label: string; lines: Encounter['monsters'] } | undefined = $state.raw();
+  const placeTokens = (lines: Encounter['monsters']): NewToken[] => {
+    const taken = scene!.tokens.map((t) => t.name), out: NewToken[] = [];
+    for (const l of lines) {
+      const m = monsterById.get(l.monsterId);
+      if (!m) continue;
+      for (const name of numberedNames(m.name, l.count, [...taken, ...out.map((t) => t.name)])) out.push({ ...tokenForMonster(m, name, settings.monsterHp), ...(placeHidden && { hidden: true }) });
+    }
+    return out.slice(0, MAX_TOKENS);
+  };
+  const placeAim = $derived.by(() => {
+    const p = staging, s = scene;
+    if (!p || !s) return undefined;
+    const n = p.lines.reduce((t, l) => t + l.count, 0), side = Math.max(1, Math.ceil(Math.sqrt(n)));
+    return { from: { x: s.width / 2, y: s.height / 2 }, line: false, area: { shape: 'cube' as const, feet: side * s.grid.feet, on: 'point' as const },
+      pickable: (): Pickable => ({ ok: false }), status: `Place ${p.label}: tap the map`, footprint: true as const,
+      onpick: (pk: { point: Pt }) => {
+        const missing = p.lines.filter((l) => !monsterById.has(l.monsterId)).map((l) => l.name ?? l.monsterId);
+        staging = undefined;
+        void add(placeTokens(p.lines), pk.point);
+        if (missing.length) toast(`Not in this campaign's books any more, so left out: ${missing.join(', ')}.`, true);
+      },
+      oncancel: () => (staging = undefined) };
+  });
 
   const addMonster = (m: MonsterDef, count: number) => {
     if (!scene) return;
@@ -367,7 +396,8 @@
     toast(r.waiting.length ? `Waiting for initiative from ${r.waiting.join(', ')}.` : 'Round 1.');
   });
   let viewId: string | undefined = $state();
-  $effect(() => { const on = fighting || !!waiting; untrack(() => { if (on) tab = 'turn'; else if (tab === 'turn') tab = 'tokens'; }); });
+  const live = $derived(fighting || !!waiting); // a boolean, so a reload (a new `waiting` list) doesn't pull the DM back to Turn
+  $effect(() => { const on = live; untrack(() => { if (on) tab = 'turn'; else if (tab === 'turn') tab = 'tokens'; }); });
   // A string, so only a new turn resets the view (every reload makes a new combat object).
   const turnKey = $derived(combat ? `${combat.round}:${combat.turn}` : '');
   $effect(() => { void turnKey; untrack(() => (viewId = undefined)); });
@@ -577,7 +607,7 @@
         bind:arrow={picked}
         ondrag={(id, at) => { if (scene?.shown) sendDrag(scene.id, id, at); }}
         {preset}
-        aim={moveAim ?? aim}
+        aim={moveAim ?? placeAim ?? aim}
         areas={areasOn(combat, scene)}
       />
     {/key}
@@ -639,6 +669,7 @@
       ...(fighting || waiting ? [{ id: 'turn', label: 'Turn' }] : []),
       { id: 'selected', label: 'Selected', ...(selected.length > 0 && { count: selected.length }) },
       { id: 'tokens', label: 'Tokens', count: scene.tokens.length },
+      { id: 'library', label: 'Library', ...(groups.length > 0 && { count: groups.length }) },
       { id: 'scene', label: 'Scene' },
     ]}>
       {#snippet panel(id)}
@@ -712,6 +743,29 @@
             {#if arrows.length}<button type="button" onclick={() => clearDeclared()}>Clear all arrows</button>{/if}
           </div>
           <TokenList tokens={canvasTokens} {selected} onselect={(ids) => (selected = ids)} />
+        {:else if id === 'library'}
+          {#if groups.length}
+            <label class="check"><input type="checkbox" bind:checked={placeHidden} /> Place hidden (players can’t see them until you unhide)</label>
+            {#if staging}<p class="muted" role="status">Tap the map where {staging.label} should go.</p>{/if}
+            <ul class="plain lib">
+              {#each groups as g (g.id)}
+                <li>
+                  <div class="row"><strong class="grow">{g.name}</strong>
+                    <button type="button" class="primary" disabled={busy || !g.monsters.length} onclick={() => (staging = { label: g.name, lines: g.monsters })}>Place all</button></div>
+                  <ul class="plain">
+                    {#each g.monsters as l (l.monsterId)}
+                      {@const m = monsterById.get(l.monsterId)}
+                      <li class="row"><span class="grow">{m?.name ?? l.name ?? l.monsterId} <span class="muted">×<span class="num">{l.count}</span></span></span>
+                        <button type="button" disabled={busy || !m} aria-label="Place one {m?.name ?? l.name}" onclick={() => (staging = { label: `a ${m!.name}`, lines: [{ ...l, count: 1 }] })}>Place one</button></li>
+                    {/each}
+                  </ul>
+                </li>
+              {/each}
+            </ul>
+          {:else}
+            <p class="muted">No prepared groups yet.</p>
+          {/if}
+          <p class="muted small"><a href="#/monsters">Prepare groups on the Monsters page</a> (Library), or “Add to library” on any monster.</p>
         {:else}
           <label class="field">Scene name <input maxlength="100" value={scene.name} onchange={(e) => rename((e.currentTarget as HTMLInputElement).value)} /></label>
           <Drawer title="Grid" open>
@@ -740,6 +794,19 @@
 {/snippet}
 
 <style>
+  .lib > li {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 0.5rem 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .lib .grow {
+    flex: 1 1 6rem;
+    min-width: 0;
+  }
+
   .empty {
     padding: 1.5rem var(--page-pad, 1rem);
     max-width: 32rem;
