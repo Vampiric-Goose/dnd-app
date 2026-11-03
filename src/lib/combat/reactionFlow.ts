@@ -43,7 +43,8 @@ interface World { k: Combat; s: Scene; chars: Character[]; bs: Map<string, Live>
 
 const on = (k: Combat, settings: CampaignSettings) => k.round >= 1 && targetingOn(settings) && settings.reactions !== false;
 const roll20 = (ctx: FlowCtx, label?: string) => ctx.d20?.(label) ?? 1 + Math.floor((ctx.rng ?? Math.random)() * 20);
-const rollAmt = (ctx: FlowCtx, label: string, expr: string, crit?: boolean) => ctx.dice?.(label, expr, crit) ?? rollDice(expr, { rng: ctx.rng, crit }).total;
+const rollAmt = (ctx: FlowCtx, label: string, expr: string, crit?: boolean) => ctx.dice?.(label, expr, crit)
+  ?? rollDice(expr, { rng: ctx.rng, crit: crit && ctx.settings.critAll !== false ? 'all' : crit }).total;
 const reactionNamed = (b: Body, name: string) => b.actions.find((a) => a.cost === 'reaction' && a.name.toLowerCase() === name);
 /** A reaction with no action of its own (Uncanny Dodge, Parry): its pip only. */
 const pip = (name: string): TurnAction => ({ id: `react:${name}`, name, cost: 'reaction', group: 'feature' });
@@ -124,7 +125,7 @@ async function aimed(ctx: FlowCtx, w: World, b: Live, a: TurnAction, target: str
   const rolled = ans.aim?.rolled ?? ctx.rollAim?.(a.name, plan, judged).rolled;
   if (!rolled) return 'no dice';
   const chOf = (y: Combatant) => (y.characterId ? w.chars.find((c) => c.id === y.characterId) : undefined);
-  return workOut({ a, level, features: [...b.features], actor: b.x, combat: w.k, scene: w.s, diagonal: d, aim: { target, rolled, toggles: [] },
+  return workOut({ a, level, features: [...b.features], actor: b.x, combat: w.k, scene: w.s, diagonal: d, aim: { target, rolled, toggles: [] }, critAll: ctx.settings.critAll !== false,
     findTarget: (id) => w.k.combatants.find((y) => y.id === id), conditionsOf: cond, exhaustionOf: (y) => chOf(y)?.state.exhaustion ?? 0,
     info: (y) => { const c = chOf(y); return c ? targetOf(y, { sheet: computeSheet(c, { settings: ctx.settings, viewer: 'dm' }), hp: c.state.hp, conditions: c.state.conditions })
       : targetOf(y, { monster: y.monsterId ? ctx.monster(y.monsterId) : undefined }); },

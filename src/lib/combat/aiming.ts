@@ -266,6 +266,7 @@ export function foeWithin5(k: Combat, s: Scene, actor: Combatant, diagonal: '5-5
 
 export interface WorkIn {
   a: TurnAction; level?: number; features: string[]; actor: Combatant; combat: Combat; scene: Scene; diagonal: '5-5-5' | '5-10-5'; aim: Aim;
+  /** House rule (settings.critAll): a critical hit doubles its modifiers too. */ critAll?: boolean;
   /** The target the aim names, if the roller may pick it (a player: visible ones only). */
   findTarget: (id: string) => Combatant | undefined;
   info: (z: Combatant) => TargetInfo | Promise<TargetInfo>;
@@ -354,7 +355,7 @@ export async function workOut(i: WorkIn): Promise<Aimed | string> {
   if (!plan.read) { // a weapon or a monster's attack
     const bad = checkFaces(plan.dice.map((d) => ({ expr: d.expr, crit })), rolled);
     if (bad) return bad;
-    const o = withWhy(resolveAttack(await i.info(target!), toHit ?? 0, plan.dice, rolled, i.magical, autoCrit));
+    const o = withWhy(resolveAttack(await i.info(target!), toHit ?? 0, plan.dice, rolled, i.magical, autoCrit, i.critAll));
     return { resolution: { ...base, outcomes: [o], ...(o.hit && actor.rider?.once && { spent: true as const }) }, outcome: { action: a.name, hit: !!o.hit } };
   }
   const read = plan.read, area = plan.area;
@@ -372,7 +373,7 @@ export async function workOut(i: WorkIn): Promise<Aimed | string> {
     .map((id) => combatantForToken(k, s.tokens.find((t) => t.id === id)!)).filter((z): z is Combatant => !!z && !(area?.on === 'self' && z.id === actor.id)) : [];
   const bad = checkFaces(plan.dice.map((d) => ({ expr: d.expr, crit: crit && d.on !== 'save' })), rolled);
   if (bad) return bad;
-  const outcomes = resolveSpell(read, plan.dice, a.cast!.dc, toHit, target && await i.info(target), await Promise.all(caught.map(i.info)), rolled, i.rng, autoCrit, actor.kind === 'pc');
+  const outcomes = resolveSpell(read, plan.dice, a.cast!.dc, toHit, target && await i.info(target), await Promise.all(caught.map(i.info)), rolled, i.rng, autoCrit, actor.kind === 'pc', i.critAll);
   // a draining spell (Vampiric Touch) heals its caster half the necrotic damage it deals. ponytail: a save its target rolls later (a PC's) drains nothing
   const drained = read.drain ? Math.floor(outcomes.reduce((t, o) => t + (o.damage ?? 0), 0) / 2) : 0;
   if (drained > 0) outcomes.push({ id: actor.id, damage: 0, heal: drained });

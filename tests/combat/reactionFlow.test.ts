@@ -607,3 +607,15 @@ test('gaps: a third party’s save card starts with a capital', async () => {
   await land(ctx(), { id: 'r1', actor: 'g1', action: 'Scimitar', outcomes: [{ id: 'w1', part: 'save', save: { roll: 15, total: 15, ok: true }, damage: 0 }], at: 0 });
   expect(seen.map((o) => o.playerTrigger)).toEqual(['W1 succeeds on a save against g1']);
 });
+
+test('house rule: a reaction’s critical hit doubles its modifier too, unless the campaign turns it off', async () => {
+  for (const [critAll, hp] of [[undefined, 15 - 9], [false, 15 - 5]] as const) {
+    stop(); await resetDb(); seen.length = 0;
+    const big = { ...mon(goblin, 'g1'), hp: 15, maxHp: 15 };
+    await fight([[pcC, 1, 0], [big, 1, 1]], 'g1', 20, featured(['Riposte']));
+    answering((o) => (o.kind === 'miss' ? { reactor: 'pc:p', option: 'more', key: 'Riposte' } : 'pass'));
+    const c = ctx({ settings: { ...camp('c1').settings, critAll }, dice: () => 1, rollAim: () => ({ rolled: { d20: [20, 20], dmg: [[]] } }) });
+    await land(c, goblinHits('pc:p', { hit: false, roll: 8, die: 4, damage: 0 }), undefined, { melee: true });
+    expect((await fighter('g1')).hp).toBe(hp); // unarmed 1 + 3 (doubled: 8), + the die's 1
+  }
+});

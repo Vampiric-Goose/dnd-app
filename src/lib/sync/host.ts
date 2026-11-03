@@ -482,7 +482,7 @@ export class Host {
     const onMap = playerTokens(s, chars, k, camp.settings); // no hidden or fogged token
     const seen = (z: Combatant) => s.tokens.some((t) => onMap.has(t.id) && combatantForToken(k, t)?.id === z.id);
     return workOut({
-      a, level, features: features.map((f) => f.name), actor: x, combat: k, scene: s, diagonal: camp.settings.diagonal, aim,
+      a, level, features: features.map((f) => f.name), actor: x, combat: k, scene: s, diagonal: camp.settings.diagonal, aim, critAll: camp.settings.critAll !== false,
       findTarget: (id) => { // a visible token's id (the player's map) or a tracker row's; players pick visible creatures only
         const t = s.tokens.find((x) => x.id === id), z = t ? combatantForToken(k, t) : k.combatants.find((y) => y.id === id || this.#aliases.get(y.id) === id);
         return z && !z.hidden && seen(z) ? z : undefined;

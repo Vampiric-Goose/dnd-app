@@ -15,6 +15,8 @@ export const rollMode: { value: 'normal' | 'adv' | 'dis' } = $state({ value: 'no
  * current; a joined campaign holds nothing hidden).
  */
 export const rollViewer: { value: 'dm' | 'player' } = $state({ value: 'dm' });
+/** House rule (campaign setting critAll, on by default): a crit roll doubles its modifiers too. App keeps it current. */
+export const critRule: { all: boolean } = $state({ all: true });
 /** The tray's Public toggle, per viewer. R12: a DM's rolls start private; the DM shares one by ticking it. */
 export const rollVisibility: { dm: boolean; player: boolean } = $state({ dm: false, player: true });
 
@@ -25,7 +27,7 @@ export const rollVisibility: { dm: boolean; player: boolean } = $state({ dm: fal
  */
 export function roll(label: string, expr: string, opts: { crit?: boolean; public?: boolean; shareAs?: string; mode?: 'normal' | 'adv' | 'dis'; hold?: boolean } = {}): RollEntry & { faces: number[] } {
   const m = opts.mode ?? rollMode.value, advantage = m === 'normal' ? undefined : m;
-  const { total, detail, faces } = rollDice(expr, { advantage, crit: opts.crit });
+  const { total, detail, faces } = rollDice(expr, { advantage, crit: opts.crit && critRule.all ? 'all' : opts.crit });
   const entry: RollEntry = { id: uid(), label, expr, total, detail, at: Date.now(), public: opts.public ?? rollVisibility[rollViewer.value] };
   if (!opts.hold) publish(entry, opts.shareAs);
   rollMode.value = 'normal';

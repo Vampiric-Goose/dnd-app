@@ -17,11 +17,12 @@ const pickAlt = <T extends Pick<Die, 'part'>>(list: T[], hurt?: boolean): T[] =>
 /** Raw faces: `d20` one die, or two with advantage or disadvantage; `dmg[i]` the faces of damage expression i (twice the dice on a crit). */
 export interface Rolled { d20?: number[]; mode?: 'adv' | 'dis'; dmg: number[][] }
 
-/** The total of `expr` from these faces, or undefined when they don't fit it (die count, doubled on a crit; a face outside its die). */
-export function totalOf(expr: string, faces: number[], crit: boolean): number | undefined {
+/** The total of `expr` from these faces, or undefined when they don't fit it (die count, doubled on a crit; a face outside its die).
+ *  `crit` 'all' (house rule): its constants doubled too. */
+export function totalOf(expr: string, faces: number[], crit: boolean | 'all'): number | undefined {
   let i = 0, total = 0;
   for (const t of parseDice(expr)) {
-    if ('const' in t) { total += t.sign * t.const; continue; }
+    if ('const' in t) { total += t.sign * t.const * (crit === 'all' ? 2 : 1); continue; }
     const n = crit ? t.count * 2 : t.count;
     const mine = faces.slice(i, i + n);
     if (mine.length < n || mine.some((f) => !Number.isInteger(f) || f < 1 || f > t.sides)) return undefined;
@@ -51,7 +52,7 @@ export const keptD20 = (r: Rolled): number => {
  */
 export const roundDamage = (x: number, pc: boolean): number => (pc ? Math.ceil(x - 1e-9) : Math.floor(x + 1e-9));
 
-function hurt(t: TargetInfo, dice: { expr: string; type: string }[], faces: number[][], crit: boolean, magical: boolean, pick?: SpellRead['typeFromDie']): { damage: number; note?: string; matched?: true } {
+function hurt(t: TargetInfo, dice: { expr: string; type: string }[], faces: number[][], crit: boolean | 'all', magical: boolean, pick?: SpellRead['typeFromDie']): { damage: number; note?: string; matched?: true } {
   let damage = 0, matched = false;
   const notes: string[] = [];
   dice.forEach((d, i) => {
@@ -72,7 +73,7 @@ function hurt(t: TargetInfo, dice: { expr: string; type: string }[], faces: numb
 }
 
 /** The first two faces rolled for the dice with `sides` sides in `expr`. */
-function firstTwo(expr: string, faces: number[], sides: number, crit: boolean): number[] {
+function firstTwo(expr: string, faces: number[], sides: number, crit: boolean | 'all'): number[] {
   let i = 0;
   for (const t of parseDice(expr)) {
     if ('const' in t) continue;
@@ -88,11 +89,12 @@ const attackRoll = (t: TargetInfo, toHit: number, r: Rolled): { hit: boolean; ro
   return { hit: d === 20 || (d !== 1 && roll >= t.ac), roll, die: d, ...((r.mode === 'adv' || r.mode === 'dis') && (r.d20?.length ?? 0) > 1 && { two: { mode: r.mode, first: r.d20![0] } }), ...(d === 20 ? { nat: 20 as const } : d === 1 ? { nat: 1 as const } : {}) };
 };
 
-/** A weapon attack (or a monster's): hit or miss against AC, and its damage on a hit. Extra damage (GWM's +10) is one more expression. */
-export function resolveAttack(t: TargetInfo, toHit: number, dmg: { expr: string; type: string; vs?: string }[], r: Rolled, magical: boolean, autoCrit = false): Outcome {
-  const a = attackRoll(t, toHit, r);
+/** A weapon attack (or a monster's): hit or miss against AC, and its damage on a hit. Extra damage (GWM's +10) is one more expression.
+ *  `all` (house rule): a critical hit doubles its modifiers too. */
+export function resolveAttack(t: TargetInfo, toHit: number, dmg: { expr: string; type: string; vs?: string }[], r: Rolled, magical: boolean, autoCrit = false, all = false): Outcome {
+  const a = attackRoll(t, toHit, r), crit = a.nat === 20 || autoCrit;
   const live = dmg.map((d, i) => ({ d, f: r.dmg[i] ?? [] })).filter((x) => !x.d.vs || x.d.vs === t.id); // a marked rider hurts only its mark
-  return { id: t.id, ...a, ac: t.ac, ...(a.hit ? hurt(t, live.map((x) => x.d), live.map((x) => x.f), a.nat === 20 || autoCrit, magical) : { damage: 0 }) };
+  return { id: t.id, ...a, ac: t.ac, ...(a.hit ? hurt(t, live.map((x) => x.d), live.map((x) => x.f), crit && all ? 'all' : crit, magical) : { damage: 0 }) };
 }
 
 const ABILITY: Record<string, Ability> = { Str: 'str', Dex: 'dex', Con: 'con', Int: 'int', Wis: 'wis', Cha: 'cha' };
@@ -102,19 +104,19 @@ const ABILITY: Record<string, Ability> = { Str: 'str', Dex: 'dex', Con: 'con', I
  * is rolled once: a failure takes it all, a success half (rounded down) or none, each after its own defenses. Spell damage is magical.
  */
 export function resolveSpell(read: SpellRead, dice: Die[], dc: number | undefined, toHit: number | undefined,
-  target: TargetInfo | undefined, caught: TargetInfo[], r: Rolled, rng: () => number, autoCrit = false, ask = false): Outcome[] {
+  target: TargetInfo | undefined, caught: TargetInfo[], r: Rolled, rng: () => number, autoCrit = false, ask = false, all = false): Outcome[] {
   const out: Outcome[] = [];
   const idx = dice.map((d, i) => ({ ...d, faces: r.dmg[i] ?? [] }));
   const hitDice = read.attack ? idx.filter((d) => d.on !== 'save') : [], saveDice = read.attack ? idx.filter((d) => d.on === 'save') : idx;
   if (read.attack && target && toHit !== undefined) {
-    const a = attackRoll(target, toHit, r);
+    const a = attackRoll(target, toHit, r), crits = a.nat === 20 || autoCrit, critAs = crits && all ? 'all' as const : crits;
     const marked = pickAlt(hitDice.filter((d) => !d.vs || d.vs === target.id), target.hurt); // a marked rider (Hex) hurts only its mark
     const live = marked.filter((d) => d.part !== 'later'), later = marked.filter((d) => d.part === 'later');
-    const h = a.hit ? hurt(target, live, live.map((d) => d.faces), a.nat === 20 || autoCrit, true, read.typeFromDie)
+    const h = a.hit ? hurt(target, live, live.map((d) => d.faces), critAs, true, read.typeFromDie)
       : read.missHalf ? (({ damage, ...rest }) => ({ ...rest, damage: roundDamage(damage / 2, target.pc) }))(hurt(target, live, live.map((d) => d.faces), false, true)) : { damage: 0 };
-    const due = a.hit && later.length ? hurt(target, later, later.map((d) => d.faces), a.nat === 20 || autoCrit, true).damage : 0;
+    const due = a.hit && later.length ? hurt(target, later, later.map((d) => d.faces), critAs, true).damage : 0;
     const { matched, ...dealt } = h as ReturnType<typeof hurt>;
-    const pick = read.typeFromDie, open = live.find((d) => !d.type), crit = a.nat === 20 || autoCrit;
+    const pick = read.typeFromDie, open = live.find((d) => !d.type), crit = critAs;
     // `ask` (a PC casts it): its player picks the die; each pick's damage is worked out here, where the defenses are known
     const choose = a.hit && ask && pick && open ? [...new Set(firstTwo(open.expr, open.faces, pick.sides, crit))].map((face) => {
       const type = pick.types[face - 1] ?? '', c = hurt(target, live.map((d) => (d.type ? d : { ...d, type })), live.map((d) => d.faces), crit, true);

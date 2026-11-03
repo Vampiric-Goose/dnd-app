@@ -512,7 +512,7 @@
     const where = many ? { targets: ps.map((p) => idOf(p) ?? '') } : target ? { target } : { point: ps[0].point };
     const res = await workOut({ a: m.a, level: m.slot, features: ch ? featureList(ch, settings).map((f) => f.name) : [], actor: m.v.x, combat: k, scene: s,
       ...(m.leap && { leapFrom: { from: m.leap.from, exclude: m.leap.exclude } }),
-      diagonal: settings.diagonal, aim: { ...where, rolled: r.rolled, toggles: m.toggles.map((x) => x.id), ...(m.dtype && { dtype: m.dtype }) },
+      diagonal: settings.diagonal, critAll: settings.critAll !== false, aim: { ...where, rolled: r.rolled, toggles: m.toggles.map((x) => x.id), ...(m.dtype && { dtype: m.dtype }) },
       findTarget: (id) => k.combatants.find((z) => z.id === id), conditionsOf,
       exhaustionOf: (z) => (z.characterId ? chars.find((c) => c.id === z.characterId)?.state.exhaustion : undefined) ?? 0,
       info: infoOf,

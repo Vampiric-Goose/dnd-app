@@ -24,3 +24,12 @@ test('natD20 reads the kept d20', () => {
   expect(natD20('2d6 (6, 6) + 3')).toBeUndefined(); // no d20
   expect(natD20('1d100 (20)')).toBeUndefined(); // 'd100' is not a d20
 });
+
+test('house rule: a crit roll doubles its modifier while the campaign has it on (the default), not when off', async () => {
+  const { critRule } = await import('../src/lib/rolls.svelte.ts');
+  expect(critRule.all).toBe(true);
+  expect(roll('Damage', '1d4+2', { crit: true }).detail).toMatch(/\+ 2×2$/);
+  critRule.all = false;
+  expect(roll('Damage', '1d4+2', { crit: true }).detail).toMatch(/\+ 2$/);
+  critRule.all = true;
+});

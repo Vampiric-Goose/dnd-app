@@ -4,7 +4,7 @@
   import { dmOnly, router } from './lib/router.svelte.ts';
   import { app, startup } from './lib/store.svelte.ts';
   import { follow, session } from './lib/sync/session.svelte.ts';
-  import { rollViewer } from './lib/rolls.svelte.ts';
+  import { critRule, rollViewer } from './lib/rolls.svelte.ts';
   import { reactions } from './lib/combat/reactionStack.svelte.ts';
   import BackupBanner from './ui/BackupBanner.svelte';
   import CampaignPicker from './ui/CampaignPicker.svelte';
@@ -21,6 +21,7 @@
   // R12: who is rolling. A joined campaign holds nothing hidden, so its rolls are a player's whatever the view toggle says.
   $effect(() => {
     rollViewer.value = app.campaign?.sync?.role === 'player' ? 'player' : app.viewer;
+    critRule.all = app.campaign?.settings.critAll !== false; // the house rule follows the open campaign
   });
 
   // Stage 3: hosting resumes, or a joined campaign reconnects, for the open campaign (the session loads the engine only then).

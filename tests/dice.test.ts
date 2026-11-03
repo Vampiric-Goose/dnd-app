@@ -54,3 +54,8 @@ test('R16: whitespace only around signs, upper-case D', () => {
   for (const bad of ['1d20 5', '1 d20', '2 d 6', '1d20 kh1'])
     expect(() => parseDice(bad), bad).toThrow('Bad dice: ' + bad);
 });
+
+test('house rule: a crit doubles all damage, its modifiers too', () => {
+  expect(rollDice('2d6+3', { rng: () => 0.999, crit: 'all' })).toMatchObject({ total: 30, detail: '4d6 (6, 6, 6, 6) + 3×2' });
+  expect(rollDice('1d8-1', { rng: () => 0, crit: 'all' }).total).toBe(1 + 1 - 2);
+});

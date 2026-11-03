@@ -25,7 +25,8 @@ export function parseDice(expr: string): DiceTerm[] {
 }
 
 /** `faces`: every die rolled, in term order (both d20s with advantage), so another device can check and total them. */
-export function rollDice(expr: string, opts: { rng?: () => number; advantage?: 'adv' | 'dis'; crit?: boolean } = {}): { total: number; detail: string; faces: number[] } {
+/** `crit`: a critical hit's dice doubled; 'all' (house rule): its constants doubled too. */
+export function rollDice(expr: string, opts: { rng?: () => number; advantage?: 'adv' | 'dis'; crit?: boolean | 'all' } = {}): { total: number; detail: string; faces: number[] } {
   const rng = opts.rng ?? Math.random;
   const terms = parseDice(expr);
   if (opts.advantage) {
@@ -36,7 +37,7 @@ export function rollDice(expr: string, opts: { rng?: () => number; advantage?: '
   const faces: number[] = [];
   const detail = terms.map((t, i) => {
     const lead = i === 0 ? (t.sign < 0 ? '-' : '') : t.sign < 0 ? ' - ' : ' + ';
-    if ('const' in t) { total += t.sign * t.const; return lead + t.const; }
+    if ('const' in t) { const x = opts.crit === 'all' ? 2 : 1; total += t.sign * t.const * x; return lead + t.const + (x > 1 ? '×2' : ''); }
     const count = opts.crit ? t.count * 2 : t.count; // ponytail: crit doubles only the count; a keep term (never a crit in 5e) keeps its n
     const rolls = Array.from({ length: count }, () => 1 + Math.floor(rng() * t.sides));
     faces.push(...rolls);
