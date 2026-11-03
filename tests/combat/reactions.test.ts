@@ -152,3 +152,15 @@ describe('Disengage', () => {
       expect(applyUse(k, x, { id, name: 'Disengage', cost: 'action', group: 'standard' }, 1).combatants[0].economy?.disengaging).toBe(true);
   });
 });
+
+describe('War Caster', () => {
+  test('a War Caster’s one-target cantrips are offered beside its Opportunity Attack', () => {
+    const bolt: TurnAction = { id: 'spell:fb', name: 'Fire Bolt', cost: 'action', group: 'spell', spell: { id: 'fb', level: 0, concentration: false },
+      cast: { read: { attack: 'ranged', damage: [{ dice: '1d10', type: 'fire' }], range: { feet: 120 } }, attack: 5, charLevel: 1, mod: 3 } };
+    const burst: TurnAction = { ...bolt, id: 'spell:tc', name: 'Thunderclap', cast: { ...bolt.cast!, read: { save: 'Con', damage: [], area: { shape: 'cube', feet: 15, self: true } } } };
+    const caster = body('ally', true, 0, 0, { features: ['War Caster'], actions: [{ id: 'react:opportunity', name: 'Opportunity Attack', cost: 'reaction', group: 'attack' }, bolt, burst] });
+    expect(leaveStep(g, '5-5-5', body('gob2', false, 50, 0), [caster], to4, false)?.reactors[0].options).toEqual([
+      { id: 'oa', label: 'Attack (Attack)' }, { id: 'oa', label: 'War Caster (Fire Bolt)', spell: 'Fire Bolt' }]);
+  });
+});
+

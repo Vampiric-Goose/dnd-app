@@ -16,7 +16,7 @@ import type { Character, Combatant, MonsterDef, Pack, SpellDef, Token } from '..
 import { flowCtx } from '../../src/lib/combat/flowCtx.ts';
 import { makeEntry } from '../../src/lib/items/inventory.ts';
 import { rollHooks, rollLog, rollViewer, rollVisibility, type RollEntry } from '../../src/lib/rolls.svelte.ts';
-import { longsword, mkChar, shield } from '../fixtures/content.ts';
+import { longsword, mkChar, quarterstaff, shield } from '../fixtures/content.ts';
 import { camp, char } from '../fixtures/records.ts';
 
 vi.mock('../../src/lib/content/srd.ts', async () => ({ loadSrd: async () => (await import('../fixtures/srdPack.ts')).srdPackFixture })); // flowCtx's index
@@ -511,3 +511,41 @@ test('a reaction spent when the attack is declared is not offered again on the h
   expect(seen.map((o) => o.kind)).toEqual(['declared']);
   expect(await pcHp()).toBe(14); // the second d20 was higher: it still hits
 });
+
+test('Polearm Master: a goblin entering the PC’s reach stops on that square for the attack', async () => {
+  const staff = { ...makeEntry(quarterstaff), equipped: true };
+  await fight([[pcC, 1, 0], [mon(goblin, 'g1'), 4, 0]], 'g1', 20, { ...featured(['Polearm Master']), inventory: [staff] });
+  const where: Promise<Pt>[] = [];
+  answering((o) => { where.push(at('t:g1')); return o.kind === 'enter' ? { reactor: 'pc:p', option: 'more', key: 'Polearm Master' } : undefined; });
+  expect(await guardMove(ctx({ rollAim: () => ({ rolled: { d20: [15, 15], dmg: [[4]] } }) }), 't:g1', await line('t:g1', cell(2, 0)))).toEqual(cell(2, 0));
+  expect(seen.map((o) => [o.kind, o.playerTrigger])).toEqual([['enter', 'g1 comes within your reach']]);
+  expect(await where[0]).toEqual(cell(2, 0));
+  expect([(await fighter('g1')).hp, (await fighter('pc:p')).reactionUsed]).toEqual([0, true]); // 4 + 3 of its 7
+});
+
+test('Sentinel: a Disengaged goblin leaving the PC still provokes', async () => {
+  await fight([[pcC, 1, 1], [mon(goblin, 'g1'), 1, 0]], 'g1', 20, featured(['Sentinel']));
+  await updateCombat('c1', (k) => ({ ...k, combatants: k.combatants.map((x) => (x.id === 'g1' ? { ...x, economy: { used: 1, extra: 0, bonus: true, attacks: 0, disengaging: true } } : x)) }));
+  answering(() => 'pass');
+  await guardMove(ctx(), 't:g1', await line('t:g1', cell(6, 0)));
+  expect(seen.map((o) => [o.kind, o.reactors.map((r) => r.id)])).toEqual([['opportunity', ['pc:p']]]);
+});
+
+test('Mage Slayer: a creature casting within 5 ft is attacked before its spell', async () => {
+  await fight([[pcC, 1, 0], [mon(mage, 'ma'), 1, 1]], 'ma', 20, featured(['Mage Slayer']));
+  answering((o) => (o.kind === 'counterspell' ? { reactor: 'pc:p', option: 'more', key: 'Mage Slayer' } : 'pass'));
+  expect(await guardCast(ctx({ rollAim: () => ({ rolled: { d20: [15, 15], dmg: [[]] } }) }), 'ma', { name: 'Fire Bolt', level: 0 })).toBe(true);
+  expect(seen.map((o) => [o.kind, o.reactors[0].options[0].label])).toEqual([['counterspell', 'Mage Slayer (attack)'], ['hit', 'Shield']]); // the mage may Shield the attack
+  expect([(await fighter('ma')).hp, (await fighter('pc:p')).reactionUsed]).toEqual([36, true]); // unarmed 1 + 3
+});
+
+test('Magic-User’s Nemesis: a failed Wisdom save and the spell fails', async () => {
+  await fight([[pcC, 1, 0], [mon(mage, 'ma'), 3, 3]], 'ma', 20, featured(['Magic-User’s Nemesis'.replace('’', "'")]));
+  answering(() => ({ reactor: 'pc:p', option: 'more', key: "Magic-User's Nemesis" }));
+  expect(await guardCast(ctx({ d20: () => 2 }), 'ma', { name: 'Fireball', level: 3 })).toBe(false); // 2 + 4 < 10
+  stop(); await resetDb(); seen.length = 0;
+  await fight([[pcC, 1, 0], [mon(mage, 'ma'), 3, 3]], 'ma', 20, featured(["Magic-User's Nemesis"]));
+  answering(() => ({ reactor: 'pc:p', option: 'more', key: "Magic-User's Nemesis" }));
+  expect(await guardCast(ctx({ d20: () => 9 }), 'ma', { name: 'Fireball', level: 3 })).toBe(true); // 9 + 4 >= 10
+});
+

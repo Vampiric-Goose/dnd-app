@@ -17,7 +17,7 @@ import { currentRun } from './combat.ts';
 import { BLOCKING } from './economy.ts';
 import { budgetApplies, chargeRoute, combatantForToken, routeFeet } from './movement.ts';
 import { ask, type Answer } from './reactionStack.svelte.ts';
-import { amount, entry, resourceOf, shapeFor, tableReactors, type Rx, type Trigger } from './reactionTable.ts';
+import { amount, enterOptions, entry, resourceOf, shapeFor, tableReactors, type Rx, type Trigger } from './reactionTable.ts';
 import { counterReactors, countered, disadvantaged, halved, hitReactors, leaveStep, lowered, missOf, oaAction, rebukeReactors, rejudge, type Body, type ReactKind, type Reactor } from './reactions.ts';
 import { targetOf } from './resolve.ts';
 import { readSpell } from './spellText.ts';
@@ -293,18 +293,22 @@ async function walk(ctx: FlowCtx, tokenId: string, route: Pt[]): Promise<Pt> {
     if (me.x.hp === 0 || me.conditions.some((c) => STOP.includes(c.toLowerCase())) || w.k.movement?.[me.x.id]?.mult === 0) return here;
     const foes = [...w.bs.values()].filter((b) => b !== me && !asked.has(b.x.id)), off = !!me.x.economy?.disengaging;
     let j = 0, edge: ReturnType<typeof leaveStep>;
-    for (let prev = here; j < rest.length; prev = rest[j++]) if ((edge = leaveStep(w.s.grid, ctx.settings.diagonal, { ...me, pt: { ...me.pt, ...prev } }, foes, rest[j], off))) break;
+    for (let prev = here; j < rest.length; prev = rest[j++]) if ((edge = leaveStep(w.s.grid, ctx.settings.diagonal, { ...me, pt: { ...me.pt, ...prev } }, foes, rest[j], off, enterOptions))) break;
     if (!edge) return step(ctx, w.s, tokenId, rest);
+    if (edge.enter) j++; // entering a reach: the mover takes that square first
     if (j) { // up to the edge (a write refused, off the map: it stays)
       const at = await step(ctx, w.s, tokenId, rest.slice(0, j)), e = snap(w.s.grid, rest[j - 1], t.size);
       if (at.x !== e.x || at.y !== e.y) return at;
     }
     i += j;
     edge.reactors.forEach((r) => asked.add(r.id));
-    const answers = await ask({ id: uid(), kind: 'opportunity', trigger: `${me.name} leaves the reach of ${edge.reactors.map((r) => r.name).join(', ')}`,
-      playerTrigger: `${me.name} leaves your reach`, reactors: edge.reactors, waiting: me.x.id });
+    const names = edge.reactors.map((r) => r.name).join(', ');
+    const answers = await ask({ id: uid(), kind: edge.enter ? 'enter' : 'opportunity', trigger: edge.enter ? `${me.name} comes within reach of ${names}` : `${me.name} leaves the reach of ${names}`,
+      playerTrigger: edge.enter ? `${me.name} comes within your reach` : `${me.name} leaves your reach`, reactors: edge.reactors, waiting: me.x.id });
     for (const ans of answers) {
-      const hit = await strike(ctx, ans, me.x.id, oaAction, { melee: true });
+      if (ans.option === 'more') { await follow(ctx, { ans, t: { window: 'enter', actor: me } }); continue; }
+      const hit = ans.spell ? await strike(ctx, ans, me.x.id, (b) => b.actions.find((a) => !!a.spell && a.name === ans.spell), { cast: true }) // War Caster
+        : await strike(ctx, ans, me.x.id, oaAction, { melee: true });
       if (hit?.b.features.includes('Sentinel') && hit.landed.outcomes.some((o) => o.hit)) { // Sentinel: its speed is 0 for the turn
         await updateCombat(ctx.cid, (k) => ({ ...k, movement: { ...k.movement, [me.x.id]: { dashes: 0, ...k.movement?.[me.x.id], mult: 0 } } }));
       }
@@ -316,10 +320,12 @@ async function walk(ctx: FlowCtx, tokenId: string, route: Pt[]): Promise<Pt> {
 export async function guardCast(ctx: FlowCtx, casterId: string, spell: { name: string; level: number }): Promise<boolean> {
   const w = await world(ctx), c = w?.bs.get(casterId);
   if (!w || !c || !on(w.k, ctx.settings)) return true;
-  const reactors = counterReactors(w.s.grid, ctx.settings.diagonal, c, [...w.bs.values()]);
+  const t: Trigger = { window: 'cast', actor: c }, all = [...w.bs.values()];
+  const reactors = merge(counterReactors(w.s.grid, ctx.settings.diagonal, c, all), tableReactors(w.s.grid, ctx.settings.diagonal, t, all));
   const answers = await ask({ id: uid(), kind: 'counterspell', trigger: `${c.name} casts ${spell.name} (level ${spell.level})`,
     playerTrigger: c.pc ? `${c.name} casts ${spell.name}` : `${c.name} casts a spell`, reactors, waiting: casterId }); // a monster's spell stays hidden
   for (const ans of answers) {
+    if (ans.option === 'more') { if (await castAnswer(ctx, ans, t, spell)) return false; continue; }
     const b = (await world(ctx))?.bs.get(ans.reactor), a = b && reactionNamed(b, 'counterspell'), slot = ans.slot ?? 3;
     if (!b || !a) continue;
     const why = await pay(ctx, b, a, slot);
@@ -327,16 +333,33 @@ export async function guardCast(ctx: FlowCtx, casterId: string, spell: { name: s
     if (!(await guardCast(ctx, b.x.id, { name: a.name, level: slot }))) continue;
     // the check: d20 + its spellcasting modifier (ponytail: a stat block that names no spellcasting ability checks at +0, monsterActions' `mod`)
     const check = spell.level > 3 && slot < spell.level ? (ans.d20 ?? roll20(ctx)) + (a.cast?.mod ?? 0) : undefined;
-    if (countered(spell.level, slot, check)) { // ponytail: the first that counters ends it; the rest pay nothing
-      // it never took effect: the concentration it began (at payment) is not held (the spell it replaced stays dropped, it was cast), nor the haste it gave
-      const gave = (z: Combatant, round: number) => spell.name === 'Haste' && z.hasted?.by === casterId && z.hasted.round === round && !z.hasted.ended;
-      await updateCombat(ctx.cid, (k) => ({ ...k, combatants: k.combatants.map((z) => {
-        if (gave(z, k.round)) z = { ...z, hasted: { ...z.hasted!, ended: true as const } };
-        return z.id === casterId && z.concentratingOn === spell.name ? { ...z, concentrating: false, concentratingOn: undefined, concentrationSlot: undefined } : z;
-      }) }));
-      return false;
-    }
+    if (countered(spell.level, slot, check)) { await fizzle(ctx, casterId, spell.name); return false; } // ponytail: the first that counters ends it; the rest pay nothing
   }
+  return true;
+}
+
+/** A spell that never took effect: the concentration it began (at payment) is not held (the spell it replaced stays dropped, it was cast), nor the haste it gave. */
+async function fizzle(ctx: FlowCtx, casterId: string, name: string): Promise<void> {
+  const gave = (z: Combatant, round: number) => name === 'Haste' && z.hasted?.by === casterId && z.hasted.round === round && !z.hasted.ended;
+  await updateCombat(ctx.cid, (k) => ({ ...k, combatants: k.combatants.map((z) => {
+    if (gave(z, k.round)) z = { ...z, hasted: { ...z.hasted!, ended: true as const } };
+    return z.id === casterId && z.concentratingOn === name ? { ...z, concentrating: false, concentratingOn: undefined, concentrationSlot: undefined } : z;
+  }) }));
+}
+
+/** A table answer to a spell being cast (Mage Slayer's attack, Magic-User's Nemesis, a reminder); true: the spell fails. */
+async function castAnswer(ctx: FlowCtx, ans: Answer, t: Trigger, spell: { name: string }): Promise<boolean> {
+  const rb = (await world(ctx))?.bs.get(ans.reactor), key = ans.key, rx = key ? entry(key) : undefined;
+  if (!rb || !key) return false;
+  if (rx?.shape === 'attack') { await follow(ctx, { ans, t }); return false; }
+  const why = await payRx(ctx, rb, key, ans.slot);
+  if (why) { refused(ctx, rb.x.id, why); return false; }
+  if (rx?.shape !== 'nemesis') { await remind(ctx, rb, key, t.actor.x.id); return false; }
+  // the caster's Wisdom save against the reactor's spell save DC (none: 10), rolled on this device
+  const c = (await world(ctx))?.bs.get(t.actor.x.id), m = c?.x.monsterId ? ctx.monster(c.x.monsterId) : undefined;
+  const bonus = c?.sheet ? c.sheet.saves.wis.bonus : m ? m.saves.wis ?? Math.floor((m.scores.wis - 10) / 2) : 0;
+  if (roll20(ctx, `${t.actor.name}: Wisdom save`) + bonus >= (rb.stats?.dc ?? 10)) return false;
+  await fizzle(ctx, t.actor.x.id, spell.name);
   return true;
 }
 

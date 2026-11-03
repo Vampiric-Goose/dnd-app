@@ -33,25 +33,35 @@ const MELEE = /melee (?:or ranged )?weapon attack/i;
 /** The action an Opportunity Attack uses: a PC's own (its melee weapon), a monster's first melee attack. */
 export const oaAction = (b: Pick<Body, 'pc' | 'actions'>): TurnAction | undefined => (b.pc ? b.actions.find((z) => z.id === 'react:opportunity')
   : b.actions.find((z) => z.group === 'monster' && z.cost === 'action' && z.text && MELEE.test(richToPlain(z.text))));
-function oaOption(b: Body): ReactOption | undefined {
+/** A War Caster's spells it may cast as its Opportunity Attack. ponytail: its one-target cantrips; a leveled spell would need a slot picked. */
+const warCasts = (b: Body): TurnAction[] => (b.pc && b.features.includes('War Caster') ? b.actions.filter((a) => {
+  const r = a.cast?.read;
+  return a.spell?.level === 0 && a.cost === 'action' && !!r && !!(r.attack || r.save) && !r.area && !r.burst && !r.auto && !r.rays && !((r.targets?.count ?? 1) > 1);
+}) : []);
+function oaOptions(b: Body): ReactOption[] {
   const a = oaAction(b);
-  return a && { id: 'oa', label: `Attack (${b.pc ? a.attack?.name ?? 'Attack' : a.name})` };
+  return a ? [{ id: 'oa', label: `Attack (${b.pc ? a.attack?.name ?? 'Attack' : a.name})` }, ...warCasts(b).map((s): ReactOption => ({ id: 'oa', label: `War Caster (${s.name})`, spell: s.name }))] : [];
 }
 
 /**
  * Walks the straight line from the mover to `to`, cell by cell (the token keeps its offset in its cell). Stops at the first cell where
  * a hostile foe that can react and sees the mover is left behind out of its reach: `at` is the last cell inside that reach. Nothing
- * after a Disengage. The caller drops foes already asked before stepping on from `at` (else the same foe is returned again).
+ * after a Disengage, but from a Sentinel. `enter` (reactionTable enterOptions): a foe's reactions to the mover coming within `feet` of it,
+ * asked at the first cell inside (`at`, with `enter` set). The caller drops foes already asked before stepping on from `at`.
  */
-export function leaveStep(g: Grid, diagonal: Diagonal, mover: Body, foes: Body[], to: Pt, disengaged: boolean): { at: Pt; reactors: Reactor[] } | undefined {
-  if (disengaged) return undefined;
+export function leaveStep(g: Grid, diagonal: Diagonal, mover: Body, foes: Body[], to: Pt, disengaged: boolean,
+  enter?: (f: Body) => { feet: number; option: ReactOption }[]): { at: Pt; reactors: Reactor[]; enter?: true } | undefined {
   const from = mover.pt, c0 = cellAt(g, from), c1 = cellAt(g, to), p0 = cellCenter(g, c0), p1 = cellCenter(g, c1);
-  const n = cellDistance(g, c0, c1, '5-5-5'), eligible = foes.filter((f) => f.side !== mover.side && canReact(f) && sees(f, mover) && oaOption(f));
+  const n = cellDistance(g, c0, c1, '5-5-5'), hostile = foes.filter((f) => f.side !== mover.side && canReact(f) && sees(f, mover));
+  const eligible = hostile.filter((f) => (!disengaged || f.features.includes('Sentinel')) && oaOptions(f).length);
   const at = (i: number): Pt => { const p = cellCenter(g, cellAt(g, { x: p0.x + ((p1.x - p0.x) * i) / n, y: p0.y + ((p1.y - p0.y) * i) / n })); return { x: from.x + p.x - p0.x, y: from.y + p.y - p0.y }; };
-  const inReach = (f: Body, p: Pt) => tokenFeet(g, { ...mover.pt, ...p }, f.pt, diagonal) <= f.reach;
+  const within = (f: Body, p: Pt, feet: number) => tokenFeet(g, { ...mover.pt, ...p }, f.pt, diagonal) <= feet;
+  const entering = enter ? hostile.map((f) => ({ f, list: enter(f) })).filter((e) => e.list.length) : [];
   for (let i = 1, prev: Pt = { x: from.x, y: from.y }; i <= n; prev = at(i), i++) {
-    const cur = at(i), left = eligible.filter((f) => inReach(f, prev) && !inReach(f, cur));
-    if (left.length) return { at: prev, reactors: left.flatMap((f) => reactor(f, [oaOption(f)!])) };
+    const cur = at(i), left = eligible.filter((f) => within(f, prev, f.reach) && !within(f, cur, f.reach));
+    if (left.length) return { at: prev, reactors: left.flatMap((f) => reactor(f, oaOptions(f))) };
+    const came = entering.flatMap(({ f, list }) => reactor(f, list.filter((e) => !within(f, prev, e.feet) && within(f, cur, e.feet)).map((e) => e.option)));
+    if (came.length) return { at: cur, reactors: came, enter: true };
   }
   return undefined;
 }
