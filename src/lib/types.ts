@@ -121,7 +121,8 @@ export interface Character {
 }
 export interface CampaignSettings { allowOverrides: boolean; customOrigin: boolean; optionalClassFeatures: boolean; multiclassing: boolean; feats: boolean; hpMethod: 'average' | 'roll'; encumbrance: 'off' | 'standard' | 'variant'; crSuggestion: boolean; fog: boolean; diagonal: '5-5-5' | '5-10-5'; freeMovement: boolean; monsterHp: 'average' | 'roll';
   initiativeModules: { hp: boolean; conditions: boolean; deathSaves: boolean; concentration: boolean; legendary: boolean; lair: boolean; reactions: boolean }; showMonsterHealth: boolean;
-  /** Targeted actions (map targeting, automatic hits, saves and damage): on unless false. */ targeting?: boolean }
+  /** Targeted actions (map targeting, automatic hits, saves and damage): on unless false. */ targeting?: boolean;
+  /** Ask about reactions (Opportunity Attacks, Counterspell, Shield, Hellish Rebuke) as they happen: on unless false. */ reactions?: boolean }
 export interface Campaign { id: string; name: string; createdAt: number; updatedAt: number; settings: CampaignSettings; enabledPacks: string[]; loot: InventoryEntry[]; sync?: CampaignSync }
 /** Stage 3: a hosted (dm) or joined (player) campaign. `node`: this device's random 8-character HLC node id; `last`: its latest HLC. */
 export interface CampaignSync { role: 'dm' | 'player'; code: string; node: string; last?: Hlc;

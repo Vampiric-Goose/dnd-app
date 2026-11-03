@@ -22,11 +22,12 @@ const slotsFrom = (b: Body, min: number) => b.slots.filter((s) => s >= min);
 const reactor = (b: Body, options: ReactOption[]): Reactor[] => (options.length ? [{ id: b.x.id, name: b.name, options }] : []);
 const MELEE = /melee (?:or ranged )?weapon attack/i;
 
-/** The Opportunity Attack a creature would make: a PC's own weapon, a monster's first melee attack. */
+/** The action an Opportunity Attack uses: a PC's own (its melee weapon), a monster's first melee attack. */
+export const oaAction = (b: Pick<Body, 'pc' | 'actions'>): TurnAction | undefined => (b.pc ? b.actions.find((z) => z.id === 'react:opportunity')
+  : b.actions.find((z) => z.group === 'monster' && z.cost === 'action' && z.text && MELEE.test(richToPlain(z.text))));
 function oaOption(b: Body): ReactOption | undefined {
-  if (b.pc) { const a = b.actions.find((z) => z.id === 'react:opportunity'); return a && { id: 'oa', label: `Attack (${a.attack?.name ?? 'Attack'})` }; }
-  const a = b.actions.find((z) => z.group === 'monster' && z.cost === 'action' && z.text && MELEE.test(richToPlain(z.text)));
-  return a && { id: 'oa', label: `Attack (${a.name})` };
+  const a = oaAction(b);
+  return a && { id: 'oa', label: `Attack (${b.pc ? a.attack?.name ?? 'Attack' : a.name})` };
 }
 
 /**
