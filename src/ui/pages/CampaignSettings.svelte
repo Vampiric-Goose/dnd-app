@@ -180,6 +180,10 @@
         <input type="checkbox" checked={c.settings.targeting !== false} onchange={(e) => { const v = e.currentTarget.checked; return change((n) => (n.settings.targeting = v)); }} />
         <span>Targeting: pick targets on the map; hits, saves and damage are worked out for you</span>
       </label>
+      <label class="check">
+        <input type="checkbox" checked={c.settings.reactions !== false} onchange={(e) => { const v = e.currentTarget.checked; return change((n) => (n.settings.reactions = v)); }} />
+        <span>Ask about reactions: Opportunity Attacks, Counterspell, Shield and Hellish Rebuke wait for an answer (needs targeting)</span>
+      </label>
     </Drawer>
 
     <Drawer title="Initiative tracker modules">

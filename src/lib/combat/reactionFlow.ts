@@ -15,7 +15,8 @@ import { budgetApplies, combatantForToken, recordMove } from './movement.ts';
 import { ask, type Answer } from './reactionStack.svelte.ts';
 import { counterReactors, countered, halved, hitReactors, leaveStep, oaAction, rebukeReactors, rejudge, type Body } from './reactions.ts';
 import { targetOf } from './resolve.ts';
-import { applyResolution, editCharacter, setCondition, updateCombat } from './store.ts';
+import { readSpell } from './spellText.ts';
+import { applyResolution, editCharacter, setCondition, settleSave, updateCombat } from './store.ts';
 import { reachOf, targetingOn, type Pickable } from './targeting.ts';
 import { applyUse, attacksPerAction, monsterActions, payment, pcActions, problemOf, slotsLeft, spendOn, type TurnAction } from './turnActions.ts';
 
@@ -135,13 +136,20 @@ async function step(ctx: FlowCtx, s: Scene, tokenId: string, to: Pt): Promise<Pt
   return t ? { x: t.x, y: t.y } : to;
 }
 
-const STOP = [...BLOCKING, 'grappled'];
-/** The whole move of the current-turn mover's token: step by step to `to`, asking at each reach edge; returns where it ended. */
+const STOP = [...BLOCKING, 'grappled'], walking = new Set<string>();
+/** The whole move of the current-turn mover's token: step by step to `to`, asking at each reach edge; returns where it ended. A token already
+ *  walking (waiting on an ask) does not start a second walk: it stays where it is. */
 export async function guardMove(ctx: FlowCtx, tokenId: string, to: Pt): Promise<Pt> {
+  if (walking.has(tokenId)) { const t = (await ctx.scene())?.tokens.find((z) => z.id === tokenId); return t ? { x: t.x, y: t.y } : to; }
+  walking.add(tokenId);
+  try { return await walk(ctx, tokenId, to); } finally { walking.delete(tokenId); }
+}
+async function walk(ctx: FlowCtx, tokenId: string, to: Pt): Promise<Pt> {
   const asked = new Set<string>(); // foes asked already (answered, passed or timed out): never asked again on this move
   for (;;) {
     const w = await world(ctx), t = w?.s.tokens.find((z) => z.id === tokenId), x = w && t && combatantForToken(w.k, t), me = x && w.bs.get(x.id);
     if (!w || !t) { const s = w?.s ?? await ctx.scene(); return s ? step(ctx, s, tokenId, to) : to; } // no fight: a plain move
+    if (me && asked.size && !currentRun(w.k).has(me.x.id)) return { x: t.x, y: t.y }; // its turn ended during an ask: it stays
     if (!me || !on(w.k, ctx.settings) || !currentRun(w.k).has(me.x.id)) return step(ctx, w.s, tokenId, to);
     if (me.x.hp === 0 || me.conditions.some((c) => STOP.includes(c.toLowerCase())) || w.k.movement?.[me.x.id]?.mult === 0) return { x: t.x, y: t.y };
     const foes = [...w.bs.values()].filter((b) => b !== me && !asked.has(b.x.id));
@@ -185,12 +193,14 @@ export async function land(ctx: FlowCtx, res: Omit<Resolution, 'applied'>, befor
   const w = await world(ctx), src = w?.bs.get(res.actor);
   if (!w || !on(w.k, ctx.settings)) { await applyResolution(ctx.cid, res, ctx.settings, before); return res; }
   const mm = res.action === 'Magic Missile', shielded = new Set<string>(), asked = new Set<string>(), outcomes: Outcome[] = [];
-  const blocked = (o: Outcome) => (mm ? { ...o, damage: 0, note: 'Shield' } : rejudge(o, 5)); // each dart is a hit Shield stops
+  const missHalf = readSpell(ctx.spell(res.action.toLowerCase()) ?? { text: [], level: 0, range: '' })?.missHalf; // Acid Arrow: Shield leaves half on the miss
+  const blocked = (o: Outcome) => (mm ? { ...o, damage: 0, note: 'Shield' } : rejudge(o, 5, missHalf)); // each dart is a hit Shield stops
   for (let o of res.outcomes) {
     if (shielded.has(o.id)) o = blocked(o);
     else if (src && o.hit && o.id !== src.x.id && (o.roll !== undefined || mm) && !asked.has(o.id)) {
       asked.add(o.id); // ponytail: asked once per result (Scorching Ray's later rays don't ask again)
-      const b = (await world(ctx))?.bs.get(o.id), reactors = b ? hitReactors(b, src, { melee: !!opts.melee }) : [];
+      const b = (await world(ctx))?.bs.get(o.id), all = b ? hitReactors(b, src, { melee: !!opts.melee }) : [];
+      const reactors = mm ? all.map((r) => ({ ...r, options: r.options.filter((z) => z.id === 'shield') })).filter((r) => r.options.length) : all; // darts are not attacks: Shield only
       const answers = !b ? [] : await ask({ id: uid(), kind: 'hit', trigger: `${src.name} hits ${b.name} (${mm ? 'Magic Missile' : `${o.roll} vs AC ${o.ac}`})`,
         playerTrigger: mm ? `${src.name} hits you with ${src.pc ? 'Magic Missile' : 'a spell'}` : `${src.name} hits you (${o.roll})`, reactors, waiting: src.x.id });
       for (const ans of answers) {
@@ -198,7 +208,7 @@ export async function land(ctx: FlowCtx, res: Omit<Resolution, 'applied'>, befor
         const why = b && a ? await pay(ctx, b, a, ans.option === 'shield' ? ans.slot ?? b.slots[0] : undefined) : 'not available';
         if (why) { refused(ctx, ans.reactor, why); continue; }
         if (ans.option === 'shield') { await setCondition(ctx.cid, o.id, 'Shield', true, { rounds: 1, at: 'start', of: o.id }); shielded.add(o.id); o = blocked(o); }
-        if (ans.option === 'parry') o = rejudge(o, opt?.bonus ?? 0);
+        if (ans.option === 'parry') o = rejudge(o, opt?.bonus ?? 0, missHalf);
         if (ans.option === 'uncanny') o = halved(o);
       }
     }
@@ -206,12 +216,27 @@ export async function land(ctx: FlowCtx, res: Omit<Resolution, 'applied'>, befor
   }
   const out = { ...res, outcomes };
   await applyResolution(ctx.cid, out, ctx.settings, before);
-  for (const id of new Set(outcomes.filter((o) => o.damage > 0 && !o.pending).map((o) => o.id))) {
-    const w2 = await world(ctx), v = w2?.bs.get(id), s = w2?.bs.get(res.actor);
-    if (!w2 || !v || !s || v === s) continue;
-    const answers = await ask({ id: uid(), kind: 'rebuke', trigger: `${s.name} hurts ${v.name}`, playerTrigger: `${s.name} hurts you`,
-      reactors: rebukeReactors(w2.s.grid, ctx.settings.diagonal, v, s), waiting: res.actor });
-    for (const ans of answers) await strike(ctx, ans, res.actor, (b) => reactionNamed(b, 'hellish rebuke'), { cast: true });
-  }
+  await rebukes(ctx, res.actor, outcomes.filter((o) => o.damage > 0 && !o.pending).map((o) => o.id));
   return out;
+}
+
+/** Hellish Rebuke asks: each of `victims` (once) against `actor`, who just hurt them. */
+async function rebukes(ctx: FlowCtx, actor: string, victims: string[]): Promise<void> {
+  for (const id of new Set(victims)) {
+    const w = await world(ctx), v = w?.bs.get(id), s = w?.bs.get(actor);
+    if (!w || !v || !s || v === s || !on(w.k, ctx.settings)) continue;
+    const answers = await ask({ id: uid(), kind: 'rebuke', trigger: `${s.name} hurts ${v.name}`, playerTrigger: `${s.name} hurts you`,
+      reactors: rebukeReactors(w.s.grid, ctx.settings.diagonal, v, s), waiting: actor });
+    for (const ans of answers) await strike(ctx, ans, actor, (b) => reactionNamed(b, 'hellish rebuke'), { cast: true });
+  }
+}
+
+/** Damage that landed outside `land` (a PC's settled save): the target's Hellish Rebuke against the result's actor. */
+export const afterDamage = (ctx: FlowCtx, res: Pick<Resolution, 'actor' | 'outcomes'>, targetId: string): Promise<void> =>
+  rebukes(ctx, res.actor, res.outcomes.filter((o) => o.id === targetId && o.damage > 0 && !o.pending).map((o) => o.id));
+
+/** store.settleSave, then the damage it dealt asks for the PC's Hellish Rebuke (a save already settled asks nothing). */
+export async function settle(ctx: FlowCtx, rid: string, target: string, d20: number): Promise<void> {
+  const k = await settleSave(ctx.cid, rid, target, d20, ctx.settings), r = k?.resolutions?.find((y) => y.id === rid);
+  if (r) await afterDamage(ctx, r, target);
 }

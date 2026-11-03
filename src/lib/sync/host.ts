@@ -11,7 +11,7 @@ import { toBase64 } from '../base64.ts';
 import { budgetApplies, combatantForToken, recordMove } from '../combat/movement.ts';
 import { applyUse, attacksPerAction, characterEffect, editsCharacter, payment, pcActions, problemOf, spendOn, type TurnAction } from '../combat/turnActions.ts';
 import { targetOf, type TargetInfo } from '../combat/resolve.ts';
-import { noteEntries, snapOf, touched, workOut, type Aim, type Aimed, type WorkIn } from '../combat/aiming.ts';
+import { aimPlan, meleeAttack, noteEntries, snapOf, touched, workOut, type Aim, type Aimed, type WorkIn } from '../combat/aiming.ts';
 import { targetingOn } from '../combat/targeting.ts';
 import { featureList } from '../character/play.ts';
 import { computeSheet } from '../rules/sheet.ts';
@@ -62,7 +62,11 @@ export interface HostDeps {
   /** Turn panel: the DM's own edit of a character (a player's slot or resource spent by a use), stamped and synced like any DM edit. */
   editCharacter?(id: string, fn: (c: Character) => Character): Promise<unknown>;
   /** Targeting: a worked-out use applied on this device (store applyResolution: damage through changeHp, kept for the DM's Undo). */
-  resolve?(r: Omit<Resolution, 'applied'>, before?: Snap): Promise<void>;
+  resolve?(r: Omit<Resolution, 'applied'>, before?: Snap, o?: { melee?: boolean }): Promise<void>;
+  /** Reactions: the current-turn mover's whole walk, asking at each reach edge (reactionFlow guardMove). Absent: the plain move. */
+  guardMove?(tokenId: string, to: { x: number; y: number }): Promise<unknown>;
+  /** Reactions: Counterspell asks before a player's spell takes effect, after it is paid for; false: it is countered (reactionFlow guardCast). */
+  guardCast?(casterCombatantId: string, spell: { name: string; level: number }): Promise<boolean>;
   /** Targeting: a player's own save roll for its PC's pending area save (store settleSave). */
   settleSave?(rid: string, target: string, d20: number): Promise<void>;
   /** Targeting: a player's pick of the die that sets its hit's type (store settlePick). */
@@ -385,27 +389,44 @@ export class Host {
     const k0 = aimed && await this.#deps.loadCombat?.(); // before paying: Undo gives the pip and slot back too
     const before = aimed && k0 ? snapOf(k0, await this.#deps.loadCharacters(), touched(aimed.resolution)) : undefined;
     const per = attacksPerAction(features);
-    let why: string | undefined = 'not in the fight';
+    let why: string | undefined = 'not in the fight', casterId: string | undefined;
     await this.#deps.updateCombat((k) => {
       const x = k.round >= 1 ? combatantForToken(k, { characterId: ch.id }) : undefined;
       why = x && problemOf(x, a, ch.state.conditions, k.turn === x.id, per); // the real turn: a hidden creature's turn is not theirs (final review)
       if (!x || why) { why ??= 'not in the fight'; return k; }
+      casterId = x.id;
       const t = a.target && m.target !== undefined ? k.combatants.find((z) => !z.hidden && (z.id === m.target || this.#aliases.get(z.id) === m.target)) : undefined;
       if (a.target && !t) { why = 'pick a target'; return k; }
       return applyUse(k, x, a, per, t?.id, level);
     });
     if (why) return refuse(why);
-    if (edits && !(await this.#deps.editCharacter!(ch.id, (x) => characterEffect(spendOn(x, level, a.resource, pact), a, m.target, !!aimed)).catch(() => false))) {
+    const spell = a.spell, guard = this.#deps.guardCast, gated = !!(spell && guard); // a spell open to Counterspell pays now, takes its effect after
+    if (edits && !(await this.#deps.editCharacter!(ch.id, (x) => { const paid = spendOn(x, level, a.resource, pact); return gated ? paid : characterEffect(paid, a, m.target, !!aimed); }).catch(() => false))) {
       return refuse('the character could not be updated, so nothing was paid');
     }
-    if (aimed) {
-      await this.#deps.resolve!(aimed.resolution, before);
-      this.#send(c, { t: 'outcome', ...aimed.outcome });
-    }
-    if (called && spec) {
-      const x = combatantForToken((await this.#deps.loadCombat?.())!, { characterId: ch.id });
-      if (x) await this.#deps.summon!(x.id, called, { spell: a.name, ...(a.spell?.concentration && { cast: x.concentrationCount }), share: 'creature' in spec });
-    }
+    const effects = async () => {
+      if (spell && guard && casterId && !(await guard(casterId, { name: a.name, level: level ?? spell.level }))) return; // countered: paid, nothing more
+      if (gated && edits) await this.#deps.editCharacter!(ch.id, (x) => characterEffect(x, a, m.target, !!aimed)).catch(() => false);
+      if (aimed) {
+        await this.#deps.resolve!(aimed.resolution, before, { melee: meleeAttack(aimPlan(a, { level, features: features.map((f) => f.name) })) });
+        this.#send(c, { t: 'outcome', ...aimed.outcome });
+      }
+      if (called && spec) {
+        const x = combatantForToken((await this.#deps.loadCombat?.())!, { characterId: ch.id });
+        if (x) await this.#deps.summon!(x.id, called, { spell: a.name, ...(a.spell?.concentration && { cast: x.concentrationCount }), share: 'creature' in spec });
+      }
+    };
+    if (spell && guard) this.#detach(effects); else await effects();
+  }
+
+  /** Work that waits on players' answers (a move at a reach edge, a spell open to Counterspell) runs off the message queue, or their answers would wait behind it. */
+  #detach(f: () => Promise<void>): void { void f().catch((e) => (this.#deps.onError ?? console.warn)(e)); }
+
+  /** Tells the player who owns `characterId` that their reaction was refused; false when no link of theirs is open (then the DM sees it). */
+  async tell(characterId: string, reason: string): Promise<boolean> {
+    const owner = (await this.#deps.loadCharacter(characterId))?.ownerId, mine = [...this.#conns].filter((c) => owner !== undefined && c.playerId === owner);
+    for (const c of mine) this.#send(c, { t: 'useRefused', reason });
+    return mine.length > 0;
   }
 
   /**
@@ -826,8 +847,13 @@ export class Host {
     if (!camp || !this.#deps.loadScene || !this.#deps.updateScene) return;
     const chars = (await this.#deps.loadCharacters()).filter((ch) => ch.campaignId === camp.id);
     const combat = await this.#deps.loadCombat?.();
-    const why = moveProblem(await this.#deps.loadScene(), m, pid, chars, combat, camp.settings);
+    const shown = await this.#deps.loadScene(), why = moveProblem(shown, m, pid, chars, combat, camp.settings);
     if (why?.violation) return this.#violation(c, why.error);
+    const cid = !why ? shown?.tokens.find((t) => t.id === m.tokenId)?.characterId : undefined, x = cid !== undefined && combat && combat.round >= 1 ? combatantForToken(combat, { characterId: cid }) : undefined;
+    if (x && combat!.turn === x.id && this.#deps.guardMove) { // the mover's own turn: it walks the whole way through the reaction flow
+      const go = this.#deps.guardMove;
+      return this.#detach(async () => { await go(m.tokenId, { x: m.x, y: m.y }); await this.#task(() => this.#sendScene(camp, c)); });
+    }
     // checked again on the fresh record, in the write (the DM may have hidden the token since); its cost is measured on that record too
     let moved: { combatantId: string; from: { x: number; y: number } } | undefined, walked: { s: Scene; from: { x: number; y: number } } | undefined;
     if (!why) await this.#deps.updateScene(m.sceneId, (s) => {

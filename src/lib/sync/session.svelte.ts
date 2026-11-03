@@ -3,6 +3,7 @@
 // imports), so the first load stays small. The engine writes through the db adapters below; local edits reach it through onLocalChange.
 import { answer, onChange as onReactionsChange, pass, reactions } from '../combat/reactionStack.svelte.ts';
 import { db, hostOffKey, onLocalChange, TRASH_CAP } from '../db.ts';
+import { toast } from '../toast.svelte.ts';
 import { addRemoteRoll, rollHooks } from '../rolls.svelte.ts';
 import { app, getIndex, refreshCampaigns, setCampaign } from '../store.svelte.ts';
 import type { Campaign, MonsterDef } from '../types.ts';
@@ -168,7 +169,18 @@ const changed = (r: Run) => { if (live(r)) session.rev++; };
 /** Who rolled, as the roll log shows it: "DM", or the player ID and their characters' names. */
 const who = (from: string | undefined, names: string[]) => (from === undefined ? 'DM' : names.length ? `${from} · ${names.join(', ')}` : from);
 
+/** A refused reaction (payment or dice): the reactor's player is told on their device, else (a monster, a DM-run character) the DM sees it. */
+export async function tellRefused(cid: string, reactor: string, why: string): Promise<void> {
+  const x = (await db.combat.get(cid))?.combatants.find((z) => z.id === reactor);
+  if (!(x?.characterId !== undefined && run?.host && (await run.host.tell(x.characterId, why)))) toast(`${x?.name ?? 'A reaction'}: ${why}`, true);
+}
+
 function hostDeps(r: Run, cid: string): HostDeps {
+  // The reaction flow on this device (dynamic: the combat engine stays out of the first load). ponytail: lib reaches into ui for the dice roller; it moves to lib if a third caller wants it
+  const flow = async (settings: Campaign['settings']) => {
+    const [{ flowCtx }, { rollAim }] = await Promise.all([import('../combat/flowCtx.ts'), import('../../ui/map/aimRoll.ts')]);
+    return flowCtx(cid, settings, { rollAim, onRefused: (id, why) => void tellRefused(cid, id, why) });
+  };
   return {
     loadCampaign: () => db.campaigns.get(cid),
     updateSync: (fn) => db.campaigns.updateSync(cid, (s) => fn(s!)),
@@ -185,14 +197,24 @@ function hostDeps(r: Run, cid: string): HostDeps {
     updateCombat: (fn) => db.combat.update(cid, (c) => c && fn(c)).then((c) => (changed(r), c)), // the DM's tracker re-reads (session.rev)
     endTurn: (id) => import('../combat/store.ts').then((m) => m.turn(cid, 'next', id)).then(() => changed(r)),
     editCharacter: (id, fn) => import('../combat/store.ts').then((m) => m.editCharacter(id, fn)).then((ok) => (changed(r), ok)),
-    resolve: async (res, before) => {
-      const [m, camp] = await Promise.all([import('../combat/store.ts'), db.campaigns.get(cid)]);
-      if (camp) await m.applyResolution(cid, res, camp.settings, before);
+    resolve: async (res, before, o) => {
+      const [m, camp] = await Promise.all([import('../combat/reactionFlow.ts'), db.campaigns.get(cid)]);
+      if (camp) await m.land(await flow(camp.settings), res, before, o);
       changed(r);
     },
+    guardMove: async (tokenId, to) => {
+      const [m, camp] = await Promise.all([import('../combat/reactionFlow.ts'), db.campaigns.get(cid)]);
+      const at = camp && (await m.guardMove(await flow(camp.settings), tokenId, to));
+      changed(r);
+      return at;
+    },
+    guardCast: async (casterId, spell) => {
+      const [m, camp] = await Promise.all([import('../combat/reactionFlow.ts'), db.campaigns.get(cid)]);
+      return !camp || m.guardCast(await flow(camp.settings), casterId, spell);
+    },
     settleSave: async (rid, target, d20) => {
-      const [m, camp] = await Promise.all([import('../combat/store.ts'), db.campaigns.get(cid)]);
-      if (camp) await m.settleSave(cid, rid, target, d20, camp.settings);
+      const [m, camp] = await Promise.all([import('../combat/reactionFlow.ts'), db.campaigns.get(cid)]);
+      if (camp) await m.settle(await flow(camp.settings), rid, target, d20);
       changed(r);
     },
     // a trusted publisher's signed book replaces this device's own copy, unless it is no newer than the last one taken

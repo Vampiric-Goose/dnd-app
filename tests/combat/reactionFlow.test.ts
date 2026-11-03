@@ -3,13 +3,14 @@ import 'fake-indexeddb/auto';
 import fs from 'node:fs';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { addCombatants, monsterCombatant } from '../../src/lib/combat/combat.ts';
-import { guardCast, guardMove, land, type FlowCtx } from '../../src/lib/combat/reactionFlow.ts';
+import { guardCast, guardMove, land, settle, type FlowCtx } from '../../src/lib/combat/reactionFlow.ts';
 import { answer, AUTO_PASS_MS, onChange, pass, reactions, reset, type Answer, type Open } from '../../src/lib/combat/reactionStack.svelte.ts';
 import { applyUse, monsterActions } from '../../src/lib/combat/turnActions.ts';
-import { updateCombat } from '../../src/lib/combat/store.ts';
+import { applyResolution, updateCombat } from '../../src/lib/combat/store.ts';
 import { db, resetDb } from '../../src/lib/db.ts';
 import { newScene } from '../../src/lib/map/scene.ts';
 import type { Character, Combatant, MonsterDef, Pack, SpellDef, Token } from '../../src/lib/types.ts';
+import { mkChar } from '../fixtures/content.ts';
 import { camp, char } from '../fixtures/records.ts';
 
 const srd: Pack = JSON.parse(fs.readFileSync('src/data/srd.json', 'utf8'));
@@ -28,9 +29,9 @@ const mon = (m: MonsterDef, id: string): Combatant => ({ ...monsterCombatant(m, 
 const pcC: Combatant = { id: 'pc:p', kind: 'pc', name: 'p', characterId: 'p', initMod: 0, dex: 10, tie: 0.5, conSave: 0 };
 const pc = (hp = 20): Character => ({ ...char('p', 'c1'), state: { ...char('p').state, hp }, overrides: { maxHp: 30 } });
 
-async function fight(list: [Combatant, number, number][], turn: string, hp = 20) {
+async function fight(list: [Combatant, number, number][], turn: string, hp = 20, who: Character = pc(hp)) {
   await db.campaigns.put(camp('c1'));
-  await db.characters.put(pc(hp));
+  await db.characters.put(who);
   const tokens = list.map(([x, cx, cy]) => tok(`t:${x.id}`, cx, cy, x.characterId ? { characterId: x.characterId } : { combatantId: x.id }));
   await db.scenes.put({ ...newScene('c1', 'Field'), id: 's1', tokens });
   await updateCombat('c1', (c) => ({ ...addCombatants(c, list.map(([x]) => x)), round: 1, turn }));
@@ -170,4 +171,74 @@ test('no fight: the move goes straight through', async () => {
   await db.combat.update('c1', () => undefined);
   expect(await guardMove(ctx(), 't:pc:p', cell(6, 0))).toEqual(cell(6, 0));
   expect(await at('t:pc:p')).toEqual(cell(6, 0));
+});
+
+// ---- Task 5 rulings ----
+const hr = srd.entities.find((e) => e.id === 'spell:hellish-rebuke@SRD') as SpellDef;
+/** A PC that can Hellish Rebuke (a wizard with the spell prepared; 2 first-level slots). */
+function rebuker(): Character {
+  const c = mkChar({ race: 'human', base: { int: 16 }, levels: ['wizard'] });
+  return { ...c, id: 'p', name: 'p', campaignId: 'c1', state: { ...c.state, hp: 20 }, overrides: { maxHp: 30 }, embedded: { ...c.embedded, [hr.id]: hr },
+    build: { ...c.build, spells: { 'class:wizard@FIX': { known: [hr.id], prepared: [hr.id] } } } };
+}
+const rogue5 = (): Character => { const c = mkChar({ race: 'human', base: { dex: 16 }, levels: ['rogue', 'rogue', 'rogue', 'rogue', 'rogue'] }); return { ...c, id: 'p', name: 'p', campaignId: 'c1', state: { ...c.state, hp: 20 }, overrides: { maxHp: 30 } }; };
+const owed = { id: 'r1', actor: 'g1', action: 'Fireball', at: 0, dc: 30, ability: 'dex' as const, outcomes: [{ id: 'pc:p', part: 'save' as const, pending: true as const, damage: 0, owed: [{ amount: 9, type: 'fire' }] }] };
+
+test('(a) a PC’s settled failed save takes the damage and is asked about Hellish Rebuke, once', async () => {
+  await fight([[pcC, 0, 0], [mon(goblin, 'g1'), 3, 0]], 'g1', 20, rebuker());
+  await applyResolution('c1', owed, camp('c1').settings);
+  answering(() => ({ reactor: 'pc:p', option: 'rebuke', slot: 1 }));
+  await settle(ctx({ rollAim: () => ({ rolled: { dmg: [[5, 5]] } }) }), 'r1', 'pc:p', 2);
+  expect(seen.map((o) => [o.kind, o.reactors.map((r) => r.id), o.waiting])).toEqual([['rebuke', ['pc:p'], 'g1']]);
+  expect(await pcHp()).toBe(11);
+  expect([(await fighter('g1')).hp, (await fighter('pc:p')).reactionUsed]).toEqual([0, true]);
+  await settle(ctx(), 'r1', 'pc:p', 2); // already settled: nothing more
+  expect(seen).toHaveLength(1);
+});
+
+test('(a) a saved-for-nothing or unsettled outcome opens no Rebuke ask', async () => {
+  await fight([[pcC, 0, 0], [mon(goblin, 'g1'), 3, 0]], 'g1', 20, rebuker());
+  await applyResolution('c1', { ...owed, outcomes: [{ ...owed.outcomes[0], owed: [{ amount: 9, type: 'fire' }] }], dc: 1 }, camp('c1').settings);
+  answering(() => 'pass');
+  await settle(ctx(), 'r1', 'pc:p', 20); // saves; onSave none: no damage
+  expect(seen).toEqual([]);
+});
+
+test('(b) a mover whose turn ends during the ask stays where it is', async () => {
+  await walk();
+  answering((o) => { void updateCombat('c1', (k) => ({ ...k, turn: 'g1' })).then(() => pass(o.id)); return undefined; });
+  expect(await guardMove(ctx(), 't:pc:p', cell(6, 0))).toEqual(cell(2, 0));
+  expect(await at('t:pc:p')).toEqual(cell(2, 0));
+});
+
+test('(c) a second move of a token that is waiting on an ask does not walk', async () => {
+  await walk();
+  answering(() => undefined);
+  const first = guardMove(ctx(), 't:pc:p', cell(6, 0));
+  await vi.waitFor(() => expect(reactions.open).toHaveLength(1));
+  expect(await guardMove(ctx(), 't:pc:p', cell(1, 5))).toEqual(cell(2, 0)); // where it waits
+  expect(await at('t:pc:p')).toEqual(cell(2, 0));
+  expect(reactions.open).toHaveLength(1);
+  pass(reactions.open[0].id);
+  expect(await first).toEqual(cell(6, 0));
+  expect(await guardMove(ctx(), 't:pc:p', cell(6, 1))).toEqual(cell(6, 1)); // free again
+});
+
+test('(d) Magic Missile darts: only Shield applies, never Uncanny Dodge', async () => {
+  await fight([[pcC, 0, 0], [mon(mage, 'ma'), 3, 0]], 'ma', 20, rogue5());
+  answering(() => 'pass');
+  await land(ctx(), { id: 'r1', actor: 'ma', action: 'Magic Missile', outcomes: [{ id: 'pc:p', part: 'hit', hit: true, damage: 7 }], at: 0 });
+  expect(seen).toEqual([]);
+  expect(await pcHp()).toBe(13);
+  // the same hit by a weapon does offer it
+  await land(ctx(), { id: 'r2', actor: 'ma', action: 'Dagger', outcomes: [{ id: 'pc:p', part: 'hit', hit: true, roll: 15, ac: 12, damage: 4 }], at: 0 });
+  expect(seen.map((o) => o.reactors[0].options.map((z) => z.id))).toEqual([['uncanny']]);
+});
+
+test('(e) Shield on Acid Arrow leaves half the damage on the miss', async () => {
+  await fight([[pcC, 1, 0], [mon(mage, 'ma'), 1, 1]], 'pc:p');
+  answering(() => ({ reactor: 'ma', option: 'shield' }));
+  await land(ctx(), { id: 'r1', actor: 'pc:p', action: 'Acid Arrow', outcomes: [{ id: 'ma', part: 'hit', hit: true, roll: 14, ac: 12, damage: 8 }], at: 0 });
+  expect((await db.combat.get('c1'))!.resolutions![0].outcomes[0]).toMatchObject({ hit: false, damage: 4, ac: 17 });
+  expect((await fighter('ma')).hp).toBe(36);
 });

@@ -29,6 +29,9 @@ export interface AimArea { shape: Shape; feet: number; width?: number; on: 'crea
 export interface AimPlan { reach: Reach; line: boolean; attack: boolean; toHit?: number; area?: AimArea; dice: { expr: string; type: string; on?: 'hit' | 'save'; vs?: string; part?: 'alt' | 'later' }[]; read?: SpellRead;
   ignore?: { long?: true; close?: true }; choices?: string[]; mark?: true; /** rays, beams or darts: a target each */ count?: number; /** `count` is a most, each creature once (Bane) */ upTo?: true; /** a helpful spell: up to `max` creatures, the caster included */ helps?: { max: number }; /** damage over time, kept for the turns to come */ linger?: { dice: { expr: string; type: string }[]; read: SpellRead } }
 
+/** A melee weapon attack (Parry applies to it): an attack whose reach has a melee part. */
+export const meleeAttack = (p?: AimPlan): boolean => !!p?.attack && p.reach !== 'self' && p.reach.melee !== undefined;
+
 /**
  * The spell areas to draw on a scene, for everyone: an instant one until its caster's next turn, a concentration one while its caster
  * keeps concentrating. Undo drops the result, and its area with it.

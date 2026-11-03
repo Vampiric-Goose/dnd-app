@@ -13,8 +13,11 @@
   import { scaleSummon } from '../../lib/combat/summons.ts';
   import { currentRun, patchCombatant } from '../../lib/combat/combat.ts';
   import { budgetApplies, budgetFeet, combatantForToken, effectiveSpeed, monsterSpeed, moveSpeed, originOf, recordMove } from '../../lib/combat/movement.ts';
-  import { applyResolution, editCharacter, settlePick, settleSave, turn, undoResolution, updateCombat } from '../../lib/combat/store.ts';
-  import { aimPlan, ALL_HP, areaRollName, areaRolls, areasOn, foeWithin5, judge, moveArea, movableAreas, noteEntries, snapOf, touched, workOut, type AimPlan, type AreaKind } from '../../lib/combat/aiming.ts';
+  import { editCharacter, settlePick, turn, undoResolution, updateCombat } from '../../lib/combat/store.ts';
+  import { flowCtx } from '../../lib/combat/flowCtx.ts';
+  import { guardCast, guardMove, land, settle } from '../../lib/combat/reactionFlow.ts';
+  import { reset as resetReactions } from '../../lib/combat/reactionStack.svelte.ts';
+  import { aimPlan, ALL_HP, areaRollName, areaRolls, areasOn, foeWithin5, judge, meleeAttack, moveArea, movableAreas, noteEntries, snapOf, touched, workOut, type AimPlan, type AreaKind } from '../../lib/combat/aiming.ts';
   import { monsterAc, resolveSpell, targetOf } from '../../lib/combat/resolve.ts';
   import { targetingOn, type Pickable, type Toggle } from '../../lib/combat/targeting.ts';
   import { roll } from '../../lib/rolls.svelte.ts';
@@ -31,7 +34,7 @@
   import { computeSheet } from '../../lib/rules/sheet.ts';
   import { getIndex, saveCampaign } from '../../lib/store.svelte.ts';
   import { MAX_BLOB } from '../../lib/sync/protocol.ts';
-  import { clearDeclared, declareAction, sendDrag, session } from '../../lib/sync/session.svelte.ts';
+  import { clearDeclared, declareAction, sendDrag, session, tellRefused } from '../../lib/sync/session.svelte.ts';
   import type { Ability, Campaign, Character, Combat, Combatant, MonsterDef, Outcome, RaceDef, Resolution, Scene, Sheet, Size, Token } from '../../lib/types.ts';
   import GridForm from './GridForm.svelte';
   import { detectSquareGrid } from '../../lib/map/detectGrid.ts';
@@ -60,6 +63,10 @@
   const cid = $derived(campaign.id);
   const settings = $derived(campaign.settings);
   const scene = $derived(scenes.find((s) => s.id === router.query.get('scene')) ?? scenes.find((s) => s.shown) ?? scenes[0]); // W5: a resumed fight's scene is shown
+
+  resetReactions(); // a map that loads closes the asks still open from before (they resolve with no answers)
+  /** The reaction flow on this device: this scene, this device's dice; a refused answer goes to its player, else a toast. */
+  const flow = () => flowCtx(cid, settings, { scene: async () => (scene ? db.scenes.get(scene.id) : undefined), rollAim, onRefused: (id, why) => void tellRefused(cid, id, why) });
 
   const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
   async function run(fn: () => Promise<void>) {
@@ -268,6 +275,8 @@
   /** One scene write; then a moved token whose combatant is taking its turn gets the turn's origin, where it stood (its first move only; P2). */
   const onmove = (ids: string[], primary: string, to: Pt) => run(async () => {
     if (!scene) return;
+    const tk = scene.tokens.find((t) => t.id === primary), mover = ids.length === 1 && combat && tk ? combatantForToken(combat, tk) : undefined;
+    if (mover && currentRun(combat!).has(mover.id)) { await guardMove(await flow(), primary, to); await reload(); return; } // a turn's mover: reach edges ask first
     let walked: { t: Token; from: Pt }[] = [], after: Scene | undefined;
     await editScene(scene.id, (s) => {
       const out = (after = moveTokens(s, ids, primary, to));
@@ -365,21 +374,23 @@
   const useAction = (a: TurnAction, slot?: number, target?: string) => run(async () => {
     const v = view;
     if (!v || !combat) return;
-    await pay(v, a, slot, target);
+    await pay(v, a, slot, target, false, guardOf(v, a));
     await reload();
   });
+  /** A spell's Counterspell asks, once it is paid for (a level: the slot it was cast at). */
+  const guardOf = (v: NonNullable<typeof view>, a: TurnAction) => async (level: number) => guardCast(await flow(), v.x.id, { name: a.name, level });
   /** A summon cast: paid for like any use, then its creatures (a spirit scaled to the slot) join the fight beside the caster. */
   const summonAction = (a: TurnAction, slot: number | undefined, p: { option?: number; monsters: MonsterDef[]; variant?: string }) => run(async () => {
     const v = view, spec = a.cast?.read.summon;
     if (!v || !combat || !spec || !p.monsters.length) return;
-    await pay(v, a, slot);
+    if (!(await pay(v, a, slot, undefined, false, guardOf(v, a)))) { await reload(); return; } // countered: paid, nobody joins
     const level = slot ?? a.spell!.level, caster = (await db.combat.get(cid))?.combatants.find((x) => x.id === v.x.id);
     const list = 'creature' in spec ? [scaleSummon(p.monsters[0], { level, attack: a.cast!.attack ?? 0, variant: p.variant, campaignId: cid })] : p.monsters;
     await summon(cid, v.x.id, list, { spell: a.name, ...(a.spell?.concentration && caster && { cast: caster.concentrationCount }), share: 'creature' in spec, hpMode: settings.monsterHp });
     await reload();
   });
   /** Pays for a use (the pip on the fresh fight, then a slot or resource on the character); throws why when it can't. */
-  async function pay(v: NonNullable<typeof view>, a: TurnAction, slot?: number, target?: string, aimed = false) {
+  async function pay(v: NonNullable<typeof view>, a: TurnAction, slot?: number, target?: string, aimed = false, guard?: (level: number) => Promise<boolean>): Promise<boolean> {
     const pay = v.ch && v.sheet ? payment(a, v.sheet, v.ch, slot) : {};
     if (pay.problem) throw new Error(`Not done: ${pay.problem}.`);
     let why: string | undefined;
@@ -389,7 +400,12 @@
       return y && !why ? applyUse(k, y, a, v.perAction, target, pay.level) : k;
     });
     if (why) throw new Error(`Not done: ${why}.`);
-    if (v.ch && editsCharacter(a, pay.level)) await editCharacter(v.ch.id, (c) => characterEffect(spendOn(c, pay.level, a.resource, pay.pact), a, target, aimed));
+    const gated = !!guard && !!a.spell; // a spell open to Counterspell pays now and takes its effect after; false: countered, paid for
+    if (v.ch && editsCharacter(a, pay.level)) await editCharacter(v.ch.id, (c) => { const paid = spendOn(c, pay.level, a.resource, pay.pact); return gated ? paid : characterEffect(paid, a, target, aimed); });
+    if (!gated) return true;
+    if (!(await guard!(pay.level ?? slot ?? a.spell!.level))) return false;
+    if (v.ch && editsCharacter(a, pay.level)) await editCharacter(v.ch.id, (c) => characterEffect(c, a, target, aimed));
+    return true;
   }
 
   // Targeting (the DM's setting): the action being aimed on the map, then rolled here and worked out by the same rules as a player's use.
@@ -460,9 +476,9 @@
     const before = snapOf(k, chars, touched(res.resolution)); // before paying: Undo gives the pip and slot back too
     const rid = m.leap?.rid;
     if (rid) await updateCombat(cid, (c) => ({ ...c, resolutions: (c.resolutions ?? []).map((y) => (y.id === rid ? { ...y, leapt: true as const } : y)) })); // the same casting: nothing to pay
-    else await pay(m.v, m.a, m.slot, undefined, true);
+    else if (!(await pay(m.v, m.a, m.slot, undefined, true, guardOf(m.v, m.a)))) { await reload(); return; } // countered: paid, nothing lands
     reveal(r.held, res.outcome.hit, undefined, res.outcome.hits);
-    await applyResolution(cid, res.resolution, settings, before);
+    await land(await flow(), res.resolution, before, { melee: meleeAttack(m.plan) });
     await reload();
   });
   const infoOf = (z: Combatant) => {
@@ -480,8 +496,8 @@
     const dice = kind === 'end' && l.read.atEnd ? l.read.atEnd.damage.map((d) => ({ expr: d.dice, type: d.type })) : l.dice;
     const rolled = { dmg: dice.map((d) => roll(`${r.action}: ${d.type} damage`, d.expr).faces) };
     const outcomes = resolveSpell(read, dice, l.dc, undefined, infoOf(z), [], rolled, Math.random);
-    await applyResolution(cid, { id: uid(), actor: r.actor, action: areaRollName(r, kind), outcomes, at: Date.now(), round: k.round, ...(k.turn && { turn: k.turn }),
-      ...(l.dc !== undefined && read.save && { dc: l.dc, ability: read.save.toLowerCase() as Ability, onSave: read.onSave }) }, settings);
+    await land(await flow(), { id: uid(), actor: r.actor, action: areaRollName(r, kind), outcomes, at: Date.now(), round: k.round, ...(k.turn && { turn: k.turn }),
+      ...(l.dc !== undefined && read.save && { dc: l.dc, ability: read.save.toLowerCase() as Ability, onSave: read.onSave }) });
     await reload();
   });
   /** A leaping spell's next target (Chaos Bolt): aimed from the creature it hit, while its caster's turn panel is open. */
@@ -495,7 +511,7 @@
   const undo = (rid: string) => run(async () => { await undoResolution(cid, rid, settings); await reload(); });
   const rollFor = (rid: string, target: string) => run(async () => {
     const d = roll(`${nameOfCombatant(target)}: save (rolled by the DM)`, '1d20', { mode: 'normal' });
-    await settleSave(cid, rid, target, d.faces[0], settings);
+    await settle(await flow(), rid, target, d.faces[0]);
     await reload();
   });
   const pickFor = (rid: string, target: string, type: string) => run(async () => { await settlePick(cid, rid, target, type, settings); await reload(); });
