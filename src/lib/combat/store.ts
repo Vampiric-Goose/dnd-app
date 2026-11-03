@@ -4,6 +4,8 @@ import { applyDamage, applyHealing, rollDeathSave } from '../character/rest.ts';
 import { db, DeletedError } from '../db.ts';
 import { computeSheet } from '../rules/sheet.ts';
 import type { Applied, CampaignSettings, Character, Combat, Combatant, Duration, Encounter, MonsterDef, Outcome, Resolution, Scene, Snap } from '../types.ts';
+import { roll } from '../rolls.svelte.ts';
+import { recharge } from './breath.ts';
 import { settle } from './resolve.ts';
 import { rollSpellDice, spellMods } from './spellEffects.ts';
 import { castLive, driftAreas, endedSpells, snapOf, touched } from './aiming.ts';
@@ -100,7 +102,11 @@ export const turn = async (cid: string, dir: 'start' | 'next', expect?: string):
     const combat = await update(cid, (c) => {
       if (expect !== undefined && c.turn !== expect) return c;
       if (dir === 'next') ended = turnIds(c);
-      const s = dir === 'start' ? start(c) : next(c); expired = s.expired; return s.combat;
+      const s = dir === 'start' ? start(c) : next(c); expired = s.expired;
+      // a turn that starts now (not one Previous stepped back over): its spent breath weapons roll to recharge, on the DM's private log
+      const k = s.combat, starts = k.turn !== undefined && !(c.done ?? []).includes(`${k.round}:s:${k.turn}`) ? new Set(turnIds(k)) : new Set<string>();
+      return starts.size ? { ...k, combatants: k.combatants.map((x) => (starts.has(x.id)
+        ? recharge(x, (key) => roll(`${x.name}: ${key.split(':').slice(2).join(':').replace(/\s*\(Recharge[^)]*\)/i, '')} recharge`, '1d6', { mode: 'normal', public: false }).total) : x)) } : k;
     });
     const out = await clearExpired({ combat, expired });
     for (const id of ended) await repeatSaves(cid, id);

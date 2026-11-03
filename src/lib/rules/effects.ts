@@ -33,6 +33,8 @@ export function gather(c: Character, opts: SheetOpts, lookup: Lookup = id => c.e
     if (!r) continue;
     add(r.name, r.effects);
     for (const t of r.traits) add(t.name, t.effects);
+    // a dragonborn's Breath Weapon: once per short or long rest (by name: any book's dragonborn, whose trait carries no use of its own)
+    if (r.traits.some((t) => t.name === 'Breath Weapon')) add('Breath Weapon', [{ type: 'resource', name: 'Breath Weapon', max: '1', recharge: 'short' }]);
   }
   const bg = getKind(lookup, c.build.backgroundId, 'background');
   if (bg) { add(bg.name, bg.effects); add(bg.feature.name, bg.feature.effects); }

@@ -1,5 +1,6 @@
 // Pure (no Svelte/Vite/DOM): everything a creature can do on its turn, each with what it costs (turn panel spec). Ids are stable on
 // every device, so a player's "use" names the action and the DM's device rebuilds the same list to check it.
+import { dragonbornBreath, readBreath, rechargeOf } from './breath.ts';
 import { spellList } from '../character/play.ts';
 import { getKind } from '../character/choices.ts';
 import { richToPlain } from '../content/richtext.ts';
@@ -34,9 +35,14 @@ export interface TurnAction {
   cast?: { read: SpellRead; attack?: number; dc?: number; charLevel: number; mod: number };
   /** Why it can't be used at all right now (casting in armor without proficiency). */
   blocked?: string;
-  /** A monster's spell use it spends ('slot:3', 'day:<spell id>'). */
+  /** A monster's spell use it spends ('slot:3', 'day:<spell id>'; a breath weapon's 'recharge:<n>:<name>'). */
   spend?: string;
+  /** A breath weapon (breath.ts): aimed and worked out as a spell's area, but no spell (never open to Counterspell). */
+  breath?: true;
 }
+
+/** Open to Counterspell: a spell cast (not a held one used again, not a breath weapon). */
+export const counterable = (a: TurnAction): boolean => !!a.spell && !a.again && !a.breath;
 
 /** The cost a feature's text states: "as a bonus action" / "use a bonus action", "as an action" / "use your action", a reaction; else none. */
 export function costOfText(text: string): Cost {
@@ -141,9 +147,11 @@ export function pcActions(c: Character, sheet: Sheet, features: { name: string; 
   }
   for (const r of sheet.resources) {
     const f = features.find((x) => x.name === r.name || x.name.startsWith(`${r.name} (`)), surge = r.name === 'Action Surge'; // SRD: "Action Surge (1 use)"
+    const breath = r.name === 'Breath Weapon' ? dragonbornBreath([...names], { level: sheet.totalLevel ?? c.build.levels.length, dc: 8 + (sheet.mods?.con ?? 0) + sheet.prof }) : undefined;
     out.push({
       id: `res:${r.name}`, name: r.name, cost: surge ? 'none' : f ? costOfText(richToPlain(f.text)) : 'none', group: 'resource', resource: r.name,
       uses: { left: Math.max(0, r.max - (c.state.resourcesUsed[r.name] ?? 0)), max: r.max }, ...(f && { text: f.text }), ...(surge && { grants: 'action' as const }),
+      ...(breath && { ...breath, cost: 'action' as const }),
     });
   }
   return out;
@@ -177,7 +185,13 @@ export function monsterActions(m: MonsterDef, o: { spell?: (name: string) => Spe
         cast: { ...base, read: readSpell(s) }, ...(key && max !== undefined && { spend: key, uses: { left: Math.max(0, max - (o.used?.[key] ?? 0)), max } }) });
     }
   }
-  return [...of(m.actions, 'action', 'action'), ...of(m.bonusActions, 'bonus', 'bonus'), ...traits, ...of(m.reactions, 'reaction', 'reaction'), ...legendary, ...spells, ...basic];
+  // a breath weapon (breath.ts): one use for each it offers, spent until it recharges (a spent one: 'recharge:<n>:<name>' in spellsUsed)
+  const actions = of(m.actions, 'action', 'action').flatMap((a, i): TurnAction[] => {
+    const list = readBreath(a.name, m.actions[i].text), n = rechargeOf(a.name), key = n === undefined ? undefined : `recharge:${n}:${a.name}`;
+    return list.length ? list.map((b, j) => ({ ...a, id: list.length > 1 ? `${a.id}:${j}` : a.id, name: b.name, breath: true as const, spell: { id: `breath:${b.name}`, level: 0, concentration: false },
+      cast: { read: b.read, dc: b.dc, charLevel: 1, mod: 0 }, ...(key && { spend: key, uses: { left: Math.max(0, 1 - (o.used?.[key] ?? 0)), max: 1 } }) })) : [a];
+  });
+  return [...actions, ...of(m.bonusActions, 'bonus', 'bonus'), ...traits, ...of(m.reactions, 'reaction', 'reaction'), ...legendary, ...spells, ...basic];
 }
 
 /** Whether it applies now (Escape only while grappled, Stand up only while prone, Drop prone only while standing). */

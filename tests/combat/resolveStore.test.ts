@@ -290,3 +290,20 @@ test('ending the turn before its caster\'s moves Cloudkill 10 feet away from the
   const k = (await db.combat.get('c1'))!;
   expect([k.turn, k.resolutions!.find((r) => r.id === 'ck')!.area!.origin]).toEqual(['pc:p', { x: 175, y: 35 }]);
 });
+
+describe('breath weapon recharge', () => {
+  afterEach(() => vi.restoreAllMocks());
+  const spent = { 'recharge:5:Fire Breath (Recharge 5–6)': 1, 'slot:1': 1 };
+  const used = async (id: string) => (await db.combat.get('c1'))!.combatants.find((x) => x.id === id)!.spellsUsed;
+  test('a spent breath rolls a d6 as its turn starts: 5 or more brings it back; less keeps it spent', async () => {
+    // g1, g2, p by order of addition (all at initiative 0): ending g1's turn starts g2's
+    await updateCombat('c1', (c) => ({ ...c, round: 1, turn: 'g1', combatants: c.combatants.map((x) => (x.id === 'g2' ? { ...x, spellsUsed: spent } : x)) }));
+    vi.spyOn(Math, 'random').mockReturnValue(0.5); // a 4
+    await turn('c1', 'next');
+    expect(await used('g2')).toEqual(spent);
+    await updateCombat('c1', (c) => ({ ...c, turn: 'g1', done: [] }));
+    vi.spyOn(Math, 'random').mockReturnValue(0.7); // a 5
+    await turn('c1', 'next');
+    expect(await used('g2')).toEqual({ 'slot:1': 1 });
+  });
+});

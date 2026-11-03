@@ -24,7 +24,7 @@
   import { uid } from '../../lib/uid.ts';
   import { rollAim, reveal } from './aimRoll.ts';
   import { setPip } from '../../lib/combat/economy.ts';
-  import { applyUse, attacksPerAction, characterEffect, editsCharacter, monsterActions, payment, pcActions, problemOf, slotsLeft, spendOn, type TurnAction } from '../../lib/combat/turnActions.ts';
+  import { applyUse, attacksPerAction, characterEffect, counterable, editsCharacter, monsterActions, payment, pcActions, problemOf, slotsLeft, spendOn, type TurnAction } from '../../lib/combat/turnActions.ts';
   import { featureList } from '../../lib/character/play.ts';
   import TurnPanel from '../turn/TurnPanel.svelte';
   import type { SpellArea } from '../../lib/combat/spellText.ts';
@@ -445,7 +445,7 @@
       return y && !why ? applyUse(k, y, a, v.perAction, target, pay.level) : k;
     });
     if (why) throw new Error(`Not done: ${why}.`);
-    const gated = !!guard && !!a.spell && !a.again; // a spell open to Counterspell (not a held one used again) pays now and takes its effect after; false: countered, paid for
+    const gated = !!guard && counterable(a); // a spell open to Counterspell (not a held one used again, not a breath) pays now and takes its effect after; false: countered, paid for
     if (v.ch && editsCharacter(a, pay.level)) await editCharacter(v.ch.id, (c) => { const paid = spendOn(c, pay.level, a.resource, pay.pact); return gated ? paid : characterEffect(paid, a, target, aimed); });
     if (!gated) return true;
     if (!(await guard!(pay.level ?? slot ?? a.spell!.level))) return false;

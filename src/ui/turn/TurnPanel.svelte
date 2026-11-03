@@ -210,7 +210,7 @@
   {@const parts = a.group === 'monster' && a.text ? rollParts(richToPlain(a.text)).filter((p) => 'expr' in p) : []}
   <div class="what">
     <strong>{a.name}</strong>
-    {#if full && a.spell}<span class="muted small">{a.spell.level ? `Level ${a.spell.level}` : 'Cantrip'}</span>{/if}
+    {#if full && a.spell && !a.breath}<span class="muted small">{a.spell.level ? `Level ${a.spell.level}` : 'Cantrip'}</span>{/if}
     {#if full && a.cost === 'none'}<span class="cost small">{a.legendary ? `Legendary ×${a.legendary}` : 'Free'}</span>{/if}
     {#if a.uses}<span class="muted small"><span class="num">{a.uses.left}</span>/<span class="num">{a.uses.max}</span> left</span>{/if}
     {#if a.legendary}<span class="muted small">{x.legendary ? `${x.legendary.max - x.legendary.used} legendary left` : ''}</span>{/if}

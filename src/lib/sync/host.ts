@@ -9,7 +9,7 @@ import { TRUSTED_KEYS, verify } from './signing.ts';
 import type { RollEntry } from '../rolls.svelte.ts';
 import { toBase64 } from '../base64.ts';
 import { budgetApplies, chargeRoute, combatantForToken } from '../combat/movement.ts';
-import { applyUse, attacksPerAction, characterEffect, editsCharacter, payment, pcActions, problemOf, spendOn, type TurnAction } from '../combat/turnActions.ts';
+import { applyUse, attacksPerAction, characterEffect, counterable, editsCharacter, payment, pcActions, problemOf, spendOn, type TurnAction } from '../combat/turnActions.ts';
 import { targetOf, type TargetInfo } from '../combat/resolve.ts';
 import { aimPlan, meleeAttack, noteEntries, snapOf, touched, workOut, type Aim, type Aimed, type UseOutcome, type WorkIn } from '../combat/aiming.ts';
 import { targetingOn } from '../combat/targeting.ts';
@@ -408,7 +408,7 @@ export class Host {
       return applyUse(k, x, a, per, t?.id, level);
     });
     if (why) return refuse(why);
-    const spell = a.again ? undefined : a.spell, guard = this.#deps.guardCast, gated = !!(spell && guard); // a spell open to Counterspell pays now, takes its effect after (using a held one again is no cast)
+    const spell = counterable(a) ? a.spell : undefined, guard = this.#deps.guardCast, gated = !!(spell && guard); // a spell open to Counterspell pays now, takes its effect after (using a held one again is no cast)
     if (edits && !(await this.#deps.editCharacter!(ch.id, (x) => { const paid = spendOn(x, level, a.resource, pact); return gated ? paid : characterEffect(paid, a, m.target, !!aimed); }).catch(() => false))) {
       return refuse('the character could not be updated, so nothing was paid');
     }
