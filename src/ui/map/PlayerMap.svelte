@@ -206,8 +206,6 @@
     sendMove(base.id, primary, route[route.length - 1], route);
   };
 
-  // Live drag previews from others (the DM, other players): the token drawn where it is being dragged.
-  const dragged = $derived(view ? view.tokens.map((t) => (session.drags[t.id] ? { ...t, ...session.drags[t.id] } : t)) : []);
 
   // Declared actions: only what players may see (on the DM's device in Player view the list holds everything); a player clears their
   // own, points from their own token or a point, and only while online (as moves).
@@ -238,7 +236,8 @@
         height={view.height}
         image={view.image}
         grid={view.grid}
-        tokens={dragged}
+        tokens={view.tokens}
+        ghosts={session.drags}
         fog={view.fog}
         dm={false}
         diagonal={settings.diagonal}

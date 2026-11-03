@@ -335,7 +335,7 @@
     const c = t.characterId ? chars.find((x) => x.id === t.characterId) : undefined;
     const pc = c && { hp: c.state.hp, maxHp: sheets.get(c.id)?.maxHp, conditions: c.state.conditions };
     // M6: a character token follows the character's current portrait unless the DM gave the token its own
-    return { ...t, ...(pc ?? liveHp(t, combat)), ...(c && !t.portrait && c.details.portrait && { portrait: c.details.portrait }), ...session.drags[t.id] }; // a player's live drag: where it is now
+    return { ...t, ...(pc ?? liveHp(t, combat)), ...(c && !t.portrait && c.details.portrait && { portrait: c.details.portrait }) };
   }));
   // Declared actions: the DM sees and may clear every arrow, and may point from any token, on the shown scene (arrows are table state:
   // another scene ends them). The DM's no-token arrow is --text-strong.
@@ -564,6 +564,7 @@
         {limitOf}
         {leadOf}
         {plan}
+        ghosts={session.drags}
         onselect={(ids) => (selected = ids)}
         {onmove}
         fog={settings.fog ? scene.fog ?? encodeFog(newFog(scene.width, scene.height, false)) : undefined}

@@ -27,15 +27,16 @@
   // route stops where the feet run out; without, the label turns red past it.
   // leadOf: of a dragged group, the one that walks the route and pays for it (the current-turn creature); the rest shift by its offset.
   // plan: a route dropped and not yet walked (the move is on its way): its line and ghost stay until it is cleared.
+  // ghosts: others' live drag previews by token id; drawn as a ghost while the token itself stays where it is (it then slides when the move lands).
   // A token whose position changes slides to it square by square (along its `trail` when it has one), unless it was not there before.
   // arrows: declared actions to draw; ondeclare: a right-drag (touch: long-press then drag) drew one (unset = no arrow gesture);
   // arrow (bindable): the arrow picked with the Select tool (a tap on its line or head); onclear: Delete / Backspace with a clearable one picked.
   // ondelete: Delete / Backspace with tokens selected (unset = the key does nothing, as for players).
   // ondrag: the dragged token's ghost moved to a new cell (`at` undefined: the drag ended).
-  let { width, height, image, grid, tokens, dm, diagonal, selected, canDrag, speedOf, limitOf, leadOf, plan, onselect, onmove, rev = 0, fog, fogStyle = dm ? 'shade' : 'black', onfog, corner, arrows = [], ondeclare, onclear, ondelete, arrow = $bindable(), ondrag, preset, aim, areas = [] }: {
+  let { width, height, image, grid, tokens, dm, diagonal, selected, canDrag, speedOf, limitOf, leadOf, plan, ghosts = {}, onselect, onmove, rev = 0, fog, fogStyle = dm ? 'shade' : 'black', onfog, corner, arrows = [], ondeclare, onclear, ondelete, arrow = $bindable(), ondrag, preset, aim, areas = [] }: {
     width: number; height: number; image?: string; grid: Grid; tokens: CanvasToken[]; dm: boolean; diagonal: '5-5-5' | '5-10-5'; selected: string[];
     canDrag: (id: string) => boolean; speedOf?: (id: string) => number | undefined; limitOf?: (id: string) => { left: number; diags: number; clamp: boolean } | undefined;
-    leadOf?: (ids: string[]) => string | undefined; plan?: { id: string; route: Pt[] };
+    leadOf?: (ids: string[]) => string | undefined; plan?: { id: string; route: Pt[] }; ghosts?: Record<string, Pt>;
     onselect: (ids: string[]) => void; onmove: (ids: string[], primary: string, to: Pt, route: Pt[]) => void; rev?: number;
     fog?: string; fogStyle?: 'black' | 'shade'; onfog?: (e: FogEdit) => void; corner?: Snippet;
     arrows?: Arrow[]; ondeclare?: (d: { from: Pt; fromToken?: string; to: Pt; toToken?: string }) => void; onclear?: (id: string) => void;
@@ -219,7 +220,7 @@
   }
 
   // Redraw on any prop change; refit when the scene's sides or image change; reload images when rev bumps.
-  $effect(() => { void [width, height, image, grid, tokens, selected, dm, arrows, arrow, plan]; untrack(schedule); });
+  $effect(() => { void [width, height, image, grid, tokens, selected, dm, arrows, arrow, plan, ghosts]; untrack(schedule); });
 
   // Sliding: a token seen before whose position changed is drawn walking to it (from where it is drawn now, if it was already sliding).
   // One that was not there before just appears.
@@ -404,7 +405,7 @@
     const at = (t: CanvasToken) => drawn.get(t.id) ?? t;
     // the route being planned (dragged) or walked (dropped): a line from the token through its squares, then ghosts of the token(s) at the end
     const route = drag ? drag.route : plan?.route ?? [], routeId = drag?.id ?? plan?.id, walker = routeId === undefined ? undefined : tokens.find((t) => t.id === routeId);
-    const ghosts: { t: CanvasToken; p: Pt }[] = [];
+    const shown: { t: CanvasToken; p: Pt }[] = [];
     if (walker && route.length) {
       const i = drag ? -1 : route.findIndex((q) => Math.abs(q.x - walker.x) < 1 && Math.abs(q.y - walker.y) < 1), rest = route.slice(i + 1);
       if (rest.length) {
@@ -420,11 +421,15 @@
         ctx.stroke();
         ctx.restore();
         const end = route[route.length - 1];
-        if (drag) for (const t of tokens) { if (drag.ids.includes(t.id)) ghosts.push({ t, p: { x: t.x + dx, y: t.y + dy } }); }
-        else ghosts.push({ t: walker, p: end });
+        if (drag) for (const t of tokens) { if (drag.ids.includes(t.id)) shown.push({ t, p: { x: t.x + dx, y: t.y + dy } }); }
+        else shown.push({ t: walker, p: end });
       }
     }
-    for (const { t, p, ghost } of [...tokens.map((t) => ({ t, p: at(t), ghost: false })), ...ghosts.map((g) => ({ ...g, ghost: true }))]) {
+    for (const [id, p] of Object.entries(ghosts)) {
+      const t = tokens.find((k) => k.id === id);
+      if (t && !drag?.ids.includes(id) && (p.x !== t.x || p.y !== t.y)) shown.push({ t, p });
+    }
+    for (const { t, p, ghost } of [...tokens.map((t) => ({ t, p: at(t), ghost: false })), ...shown.map((g) => ({ ...g, ghost: true }))]) {
       const r = radius(grid, t.size);
       ctx.save();
       ctx.globalAlpha = (t.hidden ? 0.4 : 1) * (ghost ? 0.5 : 1);
