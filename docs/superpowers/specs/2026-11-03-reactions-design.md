@@ -6,6 +6,7 @@
 - The app spots each trigger, pauses what triggered it, asks, resolves, then carries on.
 - Reactions can answer reactions (a stack): Shield against the Opportunity Attack, Counterspell against a Counterspell. The newest resolves first.
 - Only creatures that can actually react are asked. Nobody else sees anything.
+- Nothing waits unless a reaction is actually available (the user's ruling, 11-03). With no eligible reactor there is no pause, no card, no "waiting" line and no delay: the move, cast or hit goes straight through.
 
 ## Non-goals
 - Readied actions, War Caster (casting a spell as an Opportunity Attack), Polearm Master and Mobile: these stay by hand.

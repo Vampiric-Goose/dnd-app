@@ -22,6 +22,7 @@ The DmMap and the host both call the same flow functions.
 - The DM's device (`host.ts`) validates everything a player sends. A refused answer counts as a pass, and the player gets a `useRefused` message.
 - An ask times out after `AUTO_PASS_MS = 10_000`.
 - Asks happen only when all of these hold: round ≥ 1, `targetingOn(settings)`, and `settings.reactions !== false`.
+- Nothing waits unless a reaction is actually available. No eligible reactor means no pause, no card, no waiting line and no delay: the move, cast or hit goes straight through.
 - Only the moves of the creature whose turn it is (the current run) provoke. Group moves and the DM's repositioning of others never do.
 
 ## Review Focus
