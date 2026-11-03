@@ -1,6 +1,6 @@
 // Pure (no Svelte/Vite/DOM): the movement budget (spec 1). Combat.movement holds each combatant's turn origin (where its token stood
 // when its turn's movement began) and Dashes taken this turn; movement used = grid distance origin → token. combat.ts drops an entry where its own turn starts.
-import { cellAt, cellDistance, cellsIn, feetBetween, snap, type Cell, type Pt } from '../map/grid.ts';
+import { cellAt, cellCenter, cellDistance, cellsIn, feetBetween, snap, type Cell, type Pt } from '../map/grid.ts';
 import type { Combat, Combatant, Grid, MonsterDef, Movement, Size, Speeds } from '../types.ts';
 import { spellMods } from './spellEffects.ts';
 
@@ -28,8 +28,9 @@ export function monsterSpeed(m: Pick<MonsterDef, 'speed'>, held: readonly string
 export const originOf = (m: Movement | undefined): Pt | undefined =>
   m?.from && Number.isFinite(m.from.x) && Number.isFinite(m.from.y) ? { x: m.from.x, y: m.from.y } : undefined;
 
-/** Movement used this turn: the grid distance from the turn's origin to where the token stands now (moving back gives it back). */
+/** Movement used this turn: the running total of feet walked (`used`), else (an old saved fight) the grid distance from the turn's origin to the token now. */
 export const usedFeet = (m: Movement | undefined, at: Pt | undefined, g: Grid | undefined, diagonal: '5-5-5' | '5-10-5'): number => {
+  if (typeof m?.used === 'number' && Number.isFinite(m.used)) return m.used;
   const o = originOf(m);
   return o && at && g ? feetBetween(g, o, at, diagonal) : 0;
 };
@@ -44,13 +45,20 @@ export const budgetFeet = (speed: number, m: Movement | undefined): number => {
 export const remainingFeet = (speed: number, m: Movement | undefined, at?: Pt, g?: Grid, diagonal: '5-5-5' | '5-10-5' = '5-5-5'): number =>
   Math.max(0, budgetFeet(speed, m) - usedFeet(m, at, g, diagonal));
 
-/** The cells within `feet` of `origin`'s cell by the grid's distance rule, inside the w × h scene: the squares a token can reach (the highlight). */
-export function reachableCells(g: Grid, origin: Pt, feet: number, diagonal: '5-5-5' | '5-10-5', w: number, h: number): Cell[] {
+/** Feet of the cheapest walk from cell a to b with `d` diagonals already walked this turn (square: every diagonal it can; 5-10-5 makes every second one cost double), and the diagonals in it. */
+const walk = (g: Grid, a: Cell, b: Cell, diagonal: '5-5-5' | '5-10-5', d: number): { feet: number; diags: number } => {
+  if (g.type !== 'square') return { feet: cellDistance(g, a, b, diagonal) * g.feet, diags: 0 };
+  const dq = Math.abs(b.q - a.q), dr = Math.abs(b.r - a.r), hi = Math.max(dq, dr), lo = Math.min(dq, dr);
+  return { feet: (hi + (diagonal === '5-10-5' ? Math.floor((d + lo) / 2) - Math.floor(d / 2) : 0)) * g.feet, diags: lo };
+};
+
+/** The cells `feet` pays for from `origin`'s cell (`diags`: diagonals already walked this turn, for 5-10-5), inside the w × h scene: the squares a token can reach (the highlight). */
+export function reachableCells(g: Grid, origin: Pt, feet: number, diagonal: '5-5-5' | '5-10-5', w: number, h: number, diags = 0): Cell[] {
   if (!(feet > 0)) return [];
   const reach = (feet / g.feet + 1) * g.size, o = cellAt(g, origin);
   const x0 = Math.max(0, origin.x - reach), y0 = Math.max(0, origin.y - reach), x1 = Math.min(w, origin.x + reach), y1 = Math.min(h, origin.y + reach);
   if (x0 >= x1 || y0 >= y1) return [];
-  return cellsIn(g, x0, y0, x1, y1).filter((c) => cellDistance(g, o, c, diagonal) * g.feet <= feet);
+  return cellsIn(g, x0, y0, x1, y1).filter((c) => walk(g, o, c, diagonal, diags).feet <= feet);
 }
 
 /** A monster token's linked combatant, or a character's. */
@@ -62,8 +70,8 @@ export const budgetApplies = (c: Combat | undefined, settings: { freeMovement: b
 
 /** The entry rebuilt from its known fields (an old `feet` goes). */
 const entry = (c: Combat, id: string): Movement => {
-  const m = c.movement?.[id], from = originOf(m), dashes = m?.dashes, mult = m?.mult;
-  return { ...(from && { from }), dashes: typeof dashes === 'number' && dashes >= 0 ? dashes : 0, ...(mult === 0 || mult === 2 ? { mult } : {}), ...(m?.stood === true && { stood: true as const }) };
+  const m = c.movement?.[id], from = originOf(m), dashes = m?.dashes, mult = m?.mult, num = (n: number | undefined) => typeof n === 'number' && n >= 0 && Number.isFinite(n);
+  return { ...(from && { from }), ...(num(m?.used) && { used: m!.used }), ...(num(m?.diags) && { diags: m!.diags }), dashes: typeof dashes === 'number' && dashes >= 0 ? dashes : 0, ...(mult === 0 || mult === 2 ? { mult } : {}), ...(m?.stood === true && { stood: true as const }) };
 };
 const withEntry = (c: Combat, id: string, m: Movement): Combat => ({ ...c, movement: { ...c.movement, [id]: m } });
 
@@ -101,3 +109,64 @@ export function clampMove(g: Grid, from: Pt, to: Pt, size: Size, budget: number,
   }
   return best;
 }
+
+const key = (g: Grid, p: Pt): string => { const c = cellAt(g, p); return `${c.q},${c.r}`; };
+/** Where a step from cell `a` toward `b` lands: the king (hex: neighbour) step that gets nearest, the straighter one on a tie. */
+const stepToward = (g: Grid, a: Cell, b: Cell): Cell => {
+  const dirs = g.type === 'square' ? [-1, 0, 1].flatMap((q) => [-1, 0, 1].map((r) => ({ q, r }))) : [{ q: 1, r: 0 }, { q: -1, r: 0 }, { q: 0, r: 1 }, { q: 0, r: -1 }, { q: 1, r: -1 }, { q: -1, r: 1 }];
+  const t = cellCenter(g, b);
+  let best = a, bd = Infinity, be = Infinity;
+  for (const d of dirs) {
+    if (!d.q && !d.r) continue;
+    const n = { q: a.q + d.q, r: a.r + d.r }, p = cellCenter(g, n), nd = cellDistance(g, n, b, '5-5-5'), e = Math.hypot(p.x - t.x, p.y - t.y);
+    if (nd < bd || (nd === bd && e < be)) { best = n; bd = nd; be = e; }
+  }
+  return best;
+};
+
+/** The squares from cell a to cell b, one king step at a time (b included, a not). Positions are token centres for `size` (see snap). */
+export function stepsBetween(g: Grid, a: Pt, b: Pt, size: Size): Pt[] {
+  const sa = snap(g, a, size), ca = cellAt(g, sa), cb = cellAt(g, snap(g, b, size)), c0 = cellCenter(g, ca), out: Pt[] = [];
+  for (let c = ca; (c.q !== cb.q || c.r !== cb.r) && out.length < 1000; ) { // 1000: a guard, never reached
+    c = stepToward(g, c, cb);
+    const p = cellCenter(g, c);
+    out.push({ x: sa.x + p.x - c0.x, y: sa.y + p.y - c0.y });
+  }
+  return out;
+}
+
+/** The route with `to` reached from its last square: steps filled in; landing on a square already in it cuts it back there (the start included). */
+export function extendRoute(g: Grid, start: Pt, route: Pt[], to: Pt, size: Size): Pt[] {
+  const s = snap(g, start, size), t = snap(g, to, size), k = key(g, t);
+  if (k === key(g, s)) return [];
+  const i = route.findIndex((p) => key(g, p) === k);
+  return i >= 0 ? route.slice(0, i + 1) : [...route, ...stepsBetween(g, route.at(-1) ?? s, t, size)];
+}
+
+/** Feet for walking `route` from `start`, with `diags` diagonals already walked this turn (5-10-5: every second diagonal costs 10); `diags` returned: those this route walks. */
+export function routeFeet(g: Grid, start: Pt, route: Pt[], diagonal: '5-5-5' | '5-10-5', diags = 0): { feet: number; diags: number } {
+  let feet = 0, d = 0, a = cellAt(g, start);
+  for (const p of route) {
+    const b = cellAt(g, p), w = walk(g, a, b, diagonal, diags + d);
+    feet += w.feet; d += w.diags; a = b;
+  }
+  return { feet, diags: d };
+}
+
+/** The route cut to what `feet` left pays for. */
+export function affordable(g: Grid, start: Pt, route: Pt[], feet: number, diagonal: '5-5-5' | '5-10-5', diags = 0): Pt[] {
+  let used = 0, d = 0, a = cellAt(g, start);
+  for (let i = 0; i < route.length; i++) {
+    const b = cellAt(g, route[i]), w = walk(g, a, b, diagonal, diags + d);
+    if (used + w.feet > feet) return route.slice(0, i);
+    used += w.feet; d += w.diags; a = b;
+  }
+  return route;
+}
+
+/** A walked route charged to the combatant's Movement: sets the origin on the first move, adds `used` feet and `diags`. ponytail: an old mid-turn entry (no `used`) starts counting from 0. */
+export const chargeRoute = (c: Combat, combatantId: string, from: Pt, cost: { feet: number; diags: number }): Combat => {
+  const e = entry(c, combatantId), o = recordMove(c, combatantId, from);
+  const m = entry(o, combatantId);
+  return withEntry(o, combatantId, { ...m, used: (e.used ?? 0) + cost.feet, diags: (e.diags ?? 0) + cost.diags });
+};

@@ -196,7 +196,8 @@ export interface Area { shape: 'cone' | 'sphere' | 'cube' | 'line' | 'cylinder';
 export interface Snap { combatants: Record<string, Combatant>; states: Record<string, Character['state']> }
 /** Map ↔ combat: where the token stood when its turn's movement began (set by its first move) and Dashes taken this turn. */
 export interface Movement { from?: { x: number; y: number }; dashes: number; /** speed multiplier this turn: 2 Hasted, 0 after Haste ends */ mult?: number;
-  /** stood up from prone this turn: half the speed spent */ stood?: true }
+  /** stood up from prone this turn: half the speed spent */ stood?: true;
+  /** feet walked this turn (the running total; an old saved fight has none: origin distance) */ used?: number; /** diagonals walked this turn (5-10-5 parity) */ diags?: number }
 /** A fight saved into an encounter: the whole combat, plus the shown scene's tokens and fog at save time (none when no scene was shown). */
 export interface SavedFight { combat: Combat; map?: { sceneId: string; tokens: Token[]; fog?: string }; savedAt: number }
 /** A prepared encounter (at most 50 lines, each count 1–99), or a saved fight (`fight`, with `monsters` empty). */

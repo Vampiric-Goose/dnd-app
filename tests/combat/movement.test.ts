@@ -2,8 +2,8 @@
 import { describe, expect, test } from 'vitest';
 import { currentRun, newCombat, next, prev, removeStep, start } from '../../src/lib/combat/combat.ts';
 import {
-  addDash, budgetApplies, budgetFeet, clampMove, combatantForToken, effectiveSpeed, MAX_DASHES, originOf, reachableCells, recordMove, remainingFeet,
-  monsterSpeed, moveSpeed, resetMovement, usedFeet,
+  addDash, affordable, budgetApplies, budgetFeet, clampMove, chargeRoute, combatantForToken, effectiveSpeed, extendRoute, MAX_DASHES, originOf, reachableCells, recordMove, remainingFeet,
+  monsterSpeed, moveSpeed, resetMovement, routeFeet, stepsBetween, usedFeet,
 } from '../../src/lib/combat/movement.ts';
 import { cellAt, cellCenter, feetBetween, snap } from '../../src/lib/map/grid.ts';
 import type { Combat, Combatant, Grid, Movement } from '../../src/lib/types.ts';
@@ -177,4 +177,69 @@ test('a monster\'s moving speed: its wings, a Fly spell, Longstrider', () => {
   const mon = (speed: object) => ({ speed }) as never;
   expect([monsterSpeed(mon({ walk: 30 }), []), monsterSpeed(mon({ walk: 40, fly: 80 }), []), monsterSpeed(mon({ walk: 30 }), ['Fly']), monsterSpeed(mon({ walk: 30 }), ['Longstrider'])]).toEqual([30, 80, 60, 40]);
   expect(moveSpeed({ walk: 30, fly: 60 })).toBe(60);
+});
+
+describe('routes', () => {
+  const g70: Grid = { ...sq, size: 70 }, P = (q: number, r: number) => at(g70, q, r), o = P(0, 0);
+  const adj = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y)) === 70;
+  test('stepsBetween fills a jump of three squares with king steps', () => {
+    const s = stepsBetween(g70, o, P(3, 1), 'M');
+    expect(s).toHaveLength(3);
+    expect(s[2]).toEqual(P(3, 1));
+    expect([o, ...s].every((p, i, a) => i === 0 || adj(a[i - 1], p))).toBe(true);
+    expect(stepsBetween(g70, o, o, 'M')).toEqual([]);
+  });
+  test('stepsBetween keeps a large token on its vertices, and walks hexes one neighbour at a time', () => {
+    const s = stepsBetween(g70, snap(g70, { x: 70, y: 70 }, 'L'), snap(g70, { x: 280, y: 70 }, 'L'), 'L');
+    expect(s.map((p) => p.x)).toEqual([140, 210, 280]);
+    const hx: Grid = { ...g70, type: 'hex-pointy' };
+    const h = stepsBetween(hx, cellCenter(hx, { q: 0, r: 0 }), cellCenter(hx, { q: 3, r: -1 }), 'M');
+    expect(h).toHaveLength(3);
+    expect(routeFeet(hx, cellCenter(hx, { q: 0, r: 0 }), h, '5-10-5').feet).toBe(15);
+  });
+  test('extendRoute cuts back when the pointer returns to an earlier square, and to nothing at the start', () => {
+    const r1 = extendRoute(g70, o, [], P(1, 0), 'M'), r2 = extendRoute(g70, o, r1, P(2, 0), 'M'), r3 = extendRoute(g70, o, r2, P(2, 1), 'M');
+    expect(r3).toEqual([P(1, 0), P(2, 0), P(2, 1)]);
+    expect(extendRoute(g70, o, r3, P(2, 1), 'M')).toEqual(r3); // same square: unchanged
+    expect(extendRoute(g70, o, r3, P(1, 0), 'M')).toEqual([P(1, 0)]);
+    expect(extendRoute(g70, o, r3, P(0, 0), 'M')).toEqual([]);
+    expect(extendRoute(g70, o, [], P(3, 1), 'M')).toHaveLength(3); // a skipped stretch is filled in
+  });
+  test('routeFeet 5-10-5 counts every second diagonal as 10, carrying diagonals from earlier this turn', () => {
+    const two = [P(1, 1), P(2, 2)];
+    expect(routeFeet(g70, o, two, '5-10-5')).toEqual({ feet: 15, diags: 2 });
+    expect(routeFeet(g70, o, [P(1, 1)], '5-10-5', 1)).toEqual({ feet: 10, diags: 1 });
+    expect(routeFeet(g70, o, two, '5-5-5').feet).toBe(10);
+    expect(routeFeet(g70, o, [P(1, 0), P(2, 0), P(2, 1)], '5-10-5')).toEqual({ feet: 15, diags: 0 });
+    expect(routeFeet(g70, o, [], '5-10-5')).toEqual({ feet: 0, diags: 0 });
+  });
+  test('affordable stops the route where the feet run out', () => {
+    const line = [P(1, 0), P(2, 0), P(3, 0), P(4, 0)], diag = [P(1, 1), P(2, 2), P(3, 3)]; // 5, 10, 5
+    expect(affordable(g70, o, line, 15, '5-10-5')).toEqual(line.slice(0, 3));
+    expect(affordable(g70, o, line, 4, '5-10-5')).toEqual([]);
+    expect(affordable(g70, o, line, 99, '5-10-5')).toEqual(line);
+    expect(affordable(g70, o, diag, 10, '5-10-5')).toEqual(diag.slice(0, 1));
+    expect(affordable(g70, o, diag, 15, '5-10-5')).toEqual(diag.slice(0, 2));
+    expect(affordable(g70, o, diag, 10, '5-10-5', 1)).toEqual(diag.slice(0, 1)); // first costs 10 now, the next 5
+    expect(affordable(g70, o, diag, 15, '5-10-5', 1)).toEqual(diag.slice(0, 2));
+  });
+  test('chargeRoute adds to used and keeps the first origin; usedFeet falls back to the origin distance for an old entry', () => {
+    const c = fight({ round: 1 }), a = chargeRoute(c, 'B', o, { feet: 10, diags: 1 }), b = chargeRoute(a, 'B', P(5, 5), { feet: 15, diags: 2 });
+    expect(a.movement!.B).toEqual({ from: o, dashes: 0, used: 10, diags: 1 });
+    expect(b.movement!.B).toEqual({ from: o, dashes: 0, used: 25, diags: 3 });
+    expect(usedFeet(b.movement!.B, P(0, 0), g70, '5-5-5')).toBe(25); // walking back refunds nothing
+    expect(remainingFeet(30, b.movement!.B, P(0, 0), g70)).toBe(5);
+    expect(usedFeet({ from: o, dashes: 0 }, P(4, 0), g70, '5-5-5')).toBe(20); // an old entry: origin distance
+    expect(addDash(b, 'B').movement!.B).toMatchObject({ used: 25, diags: 3, dashes: 1 }); // entry() keeps them
+    expect(chargeRoute(c, 'B', { x: NaN, y: 0 }, { feet: 5, diags: 0 }).movement?.B?.from).toBeUndefined();
+  });
+  test('reachableCells with diagonals already walked matches routeFeet', () => {
+    const w = 700, key = (cs: { q: number; r: number }[]) => cs.map((c) => `${c.q},${c.r}`);
+    const near = key(reachableCells(g70, P(5, 5), 10, '5-10-5', w, w, 1));
+    expect(near).toContain('6,6'); // one diagonal: 10 ft
+    expect(near).not.toContain('7,7'); // 10 + 5 = 15 ft
+    expect(near).toContain('7,5');
+    expect(key(reachableCells(g70, P(5, 5), 5, '5-10-5', w, w))).toContain('6,6'); // fresh: the first diagonal is 5
+    expect(key(reachableCells(g70, P(5, 5), 5, '5-10-5', w, w, 1))).not.toContain('6,6'); // after one: 10
+  });
 });
