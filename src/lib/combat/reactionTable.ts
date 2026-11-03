@@ -158,7 +158,8 @@ function label(key: string, rx: Rx, shape: Shape, b: Body, slot?: number): strin
 }
 
 function optionsFor(b: Body, key: string, rx: Rx, shape: Shape): ReactOption[] {
-  if (!affordable(b, key, rx) || (rx.spell && !b.slots.length) || (shape === 'attack' && !oaAction(b))) return [];
+  const level = rx.spell ? b.actions.find((a) => a.cost === 'reaction' && named(a.name, key))?.spell?.level ?? 1 : 0;
+  if (!affordable(b, key, rx) || (rx.spell && !b.slots.some((s) => s >= level)) || (shape === 'attack' && !oaAction(b))) return [];
   const one = (slot?: number): ReactOption => ({ id: 'more', key, label: label(key, rx, shape, b, slot), ...(slot !== undefined && { slot }), ...(shape === 'attack' && { strike: true as const }) });
   return rx.slots ? b.slots.map(one) : [one()];
 }

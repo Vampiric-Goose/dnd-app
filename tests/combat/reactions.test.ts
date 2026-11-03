@@ -154,7 +154,19 @@ describe('Disengage', () => {
 });
 
 describe('War Caster', () => {
-  test('a War Caster’s one-target cantrips are offered beside its Opportunity Attack', () => {
+  test('any 1-action spell that can target only the mover is offered, a leveled one at its lowest free slot; areas, bonus actions, buffs and out-of-range touch spells are not', () => {
+    const base: TurnAction = { id: 'spell:x', name: 'x', cost: 'action', group: 'spell', spell: { id: 'x', level: 0, concentration: false },
+      cast: { read: { damage: [], range: { feet: 60 } }, charLevel: 5, mod: 3 } };
+    const sp = (name: string, level: number, read: Partial<NonNullable<TurnAction['cast']>['read']>, o: Partial<TurnAction> = {}): TurnAction =>
+      ({ ...base, id: `spell:${name}`, name, spell: { id: name, level, concentration: false }, cast: { ...base.cast!, read: { ...base.cast!.read, ...read } }, ...o });
+    const list = [sp('Hold Person', 2, { save: 'Wis', targets: { count: 1, above: 2 } }), sp('Magic Missile', 1, { auto: { count: 3, above: 1 } }), sp('Inflict Wounds', 1, { attack: 'melee', range: 'touch' }),
+      sp('Fireball', 3, { save: 'Dex', area: { shape: 'sphere', feet: 20, self: false } }), sp('Healing Word', 1, { heal: { dice: '1d4', mod: true } }, { cost: 'bonus' }), sp('Bless', 1, {}), sp('Misty Step', 2, { range: 'self' })];
+    const caster = (reach: number) => body('ally', true, 0, 0, { features: ['War Caster'], reach, slots: [1, 3], actions: [{ id: 'react:opportunity', name: 'Opportunity Attack', cost: 'reaction', group: 'attack' }, ...list] });
+    const opts = (b: Body) => leaveStep(g, '5-5-5', body('gob2', false, 50, 0), [b], to4, false)?.reactors[0].options.map((o) => [o.label, o.spell, o.slot]);
+    expect(opts(caster(5))).toEqual([['Attack (Attack)', undefined, undefined], ['War Caster (Hold Person 3)', 'Hold Person', 3], ['War Caster (Magic Missile 1)', 'Magic Missile', 1], ['War Caster (Inflict Wounds 1)', 'Inflict Wounds', 1]]);
+    expect(opts(caster(10))?.map((o) => o[1])).toEqual([undefined, 'Hold Person', 'Magic Missile']); // touch: 5 ft, short of a 10-ft reach's edge
+  });
+  test('a War Caster’s cantrip is offered beside its Opportunity Attack', () => {
     const bolt: TurnAction = { id: 'spell:fb', name: 'Fire Bolt', cost: 'action', group: 'spell', spell: { id: 'fb', level: 0, concentration: false },
       cast: { read: { attack: 'ranged', damage: [{ dice: '1d10', type: 'fire' }], range: { feet: 120 } }, attack: 5, charLevel: 1, mod: 3 } };
     const burst: TurnAction = { ...bolt, id: 'spell:tc', name: 'Thunderclap', cast: { ...bolt.cast!, read: { save: 'Con', damage: [], area: { shape: 'cube', feet: 15, self: true } } } };

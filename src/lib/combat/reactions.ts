@@ -33,14 +33,21 @@ const MELEE = /melee (?:or ranged )?weapon attack/i;
 /** The action an Opportunity Attack uses: a PC's own (its melee weapon), a monster's first melee attack. */
 export const oaAction = (b: Pick<Body, 'pc' | 'actions'>): TurnAction | undefined => (b.pc ? b.actions.find((z) => z.id === 'react:opportunity')
   : b.actions.find((z) => z.group === 'monster' && z.cost === 'action' && z.text && MELEE.test(richToPlain(z.text))));
-/** A War Caster's spells it may cast as its Opportunity Attack. ponytail: its one-target cantrips; a leveled spell would need a slot picked. */
-const warCasts = (b: Body): TurnAction[] => (b.pc && b.features.includes('War Caster') ? b.actions.filter((a) => {
-  const r = a.cast?.read;
-  return a.spell?.level === 0 && a.cost === 'action' && !!r && !!(r.attack || r.save) && !r.area && !r.burst && !r.auto && !r.rays && !((r.targets?.count ?? 1) > 1);
-}) : []);
+/**
+ * War Caster: instead of the Opportunity Attack, a spell with a casting time of 1 action that can target only the mover (an attack, a save
+ * or darts; no area, not on itself) and reaches it at the reach's edge. A leveled one is cast with its lowest free slot.
+ * ponytail: one button per spell, at that slot; upcasting it as a reaction would need a slot per button.
+ */
+const warCasts = (b: Body): ReactOption[] => (!b.pc || !b.features.includes('War Caster') ? [] : b.actions.flatMap((a): ReactOption[] => {
+  const r = a.cast?.read, level = a.spell?.level;
+  if (!r || level === undefined || a.cost !== 'action' || a.again || a.blocked || !(r.attack || r.save || r.auto || r.rays) || r.area || r.burst) return [];
+  const feet = r.reach ?? (r.range === 'touch' ? 5 : typeof r.range === 'object' ? r.range.feet : 0); // range Self without a reach: itself
+  const slot = level ? b.slots.find((s) => s >= level) : undefined;
+  return feet < b.reach || (level && slot === undefined) ? [] : [{ id: 'oa', label: `War Caster (${a.name}${slot ? ` ${slot}` : ''})`, spell: a.name, ...(slot && { slot }) }];
+}));
 function oaOptions(b: Body): ReactOption[] {
   const a = oaAction(b);
-  return a ? [{ id: 'oa', label: `Attack (${b.pc ? a.attack?.name ?? 'Attack' : a.name})` }, ...warCasts(b).map((s): ReactOption => ({ id: 'oa', label: `War Caster (${s.name})`, spell: s.name }))] : [];
+  return a ? [{ id: 'oa', label: `Attack (${b.pc ? a.attack?.name ?? 'Attack' : a.name})` }, ...warCasts(b)] : [];
 }
 
 /**

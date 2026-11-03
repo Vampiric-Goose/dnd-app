@@ -32,7 +32,7 @@ export interface FlowCtx {
   /** Rolls a monster's or a DM-controlled PC's reaction on this device (ui/map/aimRoll.ts); a player's answer brings its own dice. */
   rollAim?: (name: string, plan: AimPlan, judged?: Pickable) => { rolled: Aim['rolled'] };
   /** A d20 rolled on this device, never shown to players (a Counterspell check the answer brings none for, a disadvantage's second die). */ d20?: (label?: string) => number;
-  /** A reaction's amount (a Parry's die), rolled on this device. */ dice?: (label: string, expr: string) => number;
+  /** A reaction's amount (a Parry's die), rolled on this device; `crit`: its dice doubled. */ dice?: (label: string, expr: string, crit?: boolean) => number;
   /** An answer that could not be paid or worked out: it counts as a pass, and the reactor's player is told why. */
   onRefused?: (reactor: string, why: string) => void;
 }
@@ -43,7 +43,7 @@ interface World { k: Combat; s: Scene; chars: Character[]; bs: Map<string, Live>
 
 const on = (k: Combat, settings: CampaignSettings) => k.round >= 1 && targetingOn(settings) && settings.reactions !== false;
 const roll20 = (ctx: FlowCtx, label?: string) => ctx.d20?.(label) ?? 1 + Math.floor((ctx.rng ?? Math.random)() * 20);
-const rollAmt = (ctx: FlowCtx, label: string, expr: string) => ctx.dice?.(label, expr) ?? rollDice(expr, { rng: ctx.rng }).total;
+const rollAmt = (ctx: FlowCtx, label: string, expr: string, crit?: boolean) => ctx.dice?.(label, expr, crit) ?? rollDice(expr, { rng: ctx.rng, crit }).total;
 const reactionNamed = (b: Body, name: string) => b.actions.find((a) => a.cost === 'reaction' && a.name.toLowerCase() === name);
 /** A reaction with no action of its own (Uncanny Dodge, Parry): its pip only. */
 const pip = (name: string): TurnAction => ({ id: `react:${name}`, name, cost: 'reaction', group: 'feature' });
@@ -143,7 +143,7 @@ async function strike(ctx: FlowCtx, ans: Answer, target: string, pick: (b: Live)
   const r = await aimed(ctx, w, b, a, target, ans, ans.slot), why = typeof r === 'string' ? r : await (o.pay ? o.pay(b) : pay(ctx, b, a, ans.slot));
   if (why || typeof r === 'string') { refused(ctx, b.x.id, why ?? 'not done'); return undefined; }
   if (o.cast && !(await guardCast(ctx, b.x.id, { name: a.name, level: ans.slot ?? a.spell?.level ?? 1 }))) return undefined;
-  const extra = o.bonus?.(b), res = extra ? { ...r.resolution, outcomes: r.resolution.outcomes.map((z) => (z.hit ? { ...z, damage: z.damage + rollAmt(ctx, `${b.name}: ${a.name}`, extra) } : z)) } : r.resolution;
+  const extra = o.bonus?.(b), res = extra ? { ...r.resolution, outcomes: r.resolution.outcomes.map((z) => (z.hit ? { ...z, damage: z.damage + rollAmt(ctx, `${b.name}: ${a.name}`, extra, z.nat === 20) } : z)) } : r.resolution; // a critical hit doubles the die too
   return { b, landed: await land(ctx, res, snapOf(w.k, w.chars, touched(r.resolution)), { melee: o.melee }) };
 }
 
@@ -179,6 +179,9 @@ async function payRx(ctx: FlowCtx, b: Live, key: string, slot?: number): Promise
   return undefined;
 }
 
+/** The slot a table spell is cast with: the answer's, else the lowest free one of at least its level (what payment() takes). */
+const castLevel = (b: Body, key: string, slot?: number) => { const min = reactionNamed(b, key.toLowerCase())?.spell?.level ?? 1; return slot ?? b.slots.find((s) => s >= min) ?? min; };
+
 /** A reminder's note on the DM's Results list: the reaction was used, the DM settles it. */
 const remind = (ctx: FlowCtx, b: Live, key: string, about: string) => applyResolution(ctx.cid,
   { id: uid(), actor: b.x.id, action: key.replace(/^mon:/, ''), outcomes: [{ id: about, damage: 0, note: 'Used: settle by hand' }], at: Date.now() }, ctx.settings);
@@ -209,7 +212,7 @@ async function answerRx(ctx: FlowCtx, ans: Answer, t: Trigger, o: Outcome, missH
   if (shape === 'attack' || shape === 'back') { later.push({ ans, t }); return o; } // paid as it is worked out
   const why = await payRx(ctx, rb, key, ans.slot);
   if (why) { refused(ctx, rb.x.id, why); return o; }
-  if (rx?.spell && !(await guardCast(ctx, rb.x.id, { name: key, level: ans.slot ?? rb.slots[0] ?? 1 }))) return o; // countered: paid, no effect
+  if (rx?.spell && !(await guardCast(ctx, rb.x.id, { name: key, level: castLevel(rb, key, ans.slot) }))) return o; // countered: paid, no effect
   const n = () => rollAmt(ctx, `${rb.name}: ${key}`, amount(key, rb, ans.slot));
   switch (shape) {
     case 'dis': return disadvantaged(o, roll20(ctx, `${rb.name}: ${key}`), missHalf);
@@ -237,7 +240,7 @@ async function askAfter(ctx: FlowCtx, kind: ReactKind, t: Omit<Trigger, 'actor' 
   const who = s.hidden ? 'Something' : s.name, you = reactors.every((r) => r.id === v.x.id), them = you ? 'you' : v.hidden ? 'something' : v.name;
   const [dm, pl] = kind === 'after' ? [`${s.name} attacks ${v.name}`, `${who} attacks ${them}`]
     : kind === 'died' ? [`${v.name} drops`, `${v.hidden ? 'Something' : v.name} drops`]
-    : kind === 'saved' ? [`${v.name} ${t.ok ? 'succeeds on' : 'fails'} a save against ${s.name}`, `${you ? 'You' : them} ${t.ok ? (you ? 'succeed on' : 'succeeds on') : you ? 'fail' : 'fails'} a save against ${who}`]
+    : kind === 'saved' ? [`${v.name} ${t.ok ? 'succeeds on' : 'fails'} a save against ${s.name}`, `${you ? 'You' : them[0].toUpperCase() + them.slice(1)} ${t.ok ? (you ? 'succeed on' : 'succeeds on') : you ? 'fail' : 'fails'} a save against ${who}`]
     : [`${s.name} hurts ${v.name}`, `${who} hurts ${them}`];
   const answers = await ask({ id: uid(), kind, trigger: dm, playerTrigger: pl, reactors, waiting: actorId });
   for (const ans of answers) {
@@ -247,7 +250,8 @@ async function askAfter(ctx: FlowCtx, kind: ReactKind, t: Omit<Trigger, 'actor' 
     const shape = rx ? shapeFor(rx, trig) : 'note';
     if (shape === 'attack' || shape === 'back') { await follow(ctx, { ans, t: trig }); continue; }
     const why = await payRx(ctx, rb, key, ans.slot);
-    if (why) refused(ctx, rb.x.id, why); else await remind(ctx, rb, key, targetId);
+    if (why) refused(ctx, rb.x.id, why);
+    else if (!rx?.spell || (await guardCast(ctx, rb.x.id, { name: key, level: castLevel(rb, key, ans.slot) }))) await remind(ctx, rb, key, targetId); // Soul Cage can be countered
   }
 }
 
@@ -378,12 +382,14 @@ export async function land(ctx: FlowCtx, res: Omit<Resolution, 'applied'>, befor
   const kind = { melee: !!opts.melee, ranged: !opts.melee && !spellish, type: src && damageType(src, res.action) }; // ranged: a ranged weapon attack (Deflect Missiles)
   const who = src?.hidden ? 'Something' : src?.name, later: Follow[] = [];
   const attackOn = (o: Outcome) => !!src && o.id !== src.x.id && o.roll !== undefined && o.part !== 'save';
+  /** Not a reactor whose attack waits in `later` (its reaction is taken, paid once it is worked out). */
+  const free = (rs: Reactor[]) => rs.filter((r) => !later.some((f) => f.ans.reactor === r.id));
   for (let o of res.outcomes) {
     if (shielded.has(o.id)) { outcomes.push(blocked(o)); continue; }
     if (src && attackOn(o) && !declared.has(o.id)) { // ponytail: asked once per result (Scorching Ray's later rays don't ask again)
       declared.add(o.id);
       const w2 = await world(ctx), b = w2?.bs.get(o.id), t: Trigger | undefined = b && { window: 'declared', actor: src, target: b, ...kind, edge: !!o.edge };
-      const reactors = w2 && t ? tableReactors(w2.s.grid, d, t, [...w2.bs.values()]) : [];
+      const reactors = w2 && t ? free(tableReactors(w2.s.grid, d, t, [...w2.bs.values()])) : [];
       const them = b && (reactors.every((r) => r.id === b.x.id) ? 'you' : b.hidden ? 'something' : b.name);
       const answers = !b || !t ? [] : await ask({ id: uid(), kind: 'declared', trigger: `${src.name} attacks ${b.name}`, playerTrigger: `${who} attacks ${them}`, reactors, waiting: src.x.id });
       for (const ans of answers) o = await answerRx(ctx, ans, t!, o, missHalf, later);
@@ -393,7 +399,7 @@ export async function land(ctx: FlowCtx, res: Omit<Resolution, 'applied'>, befor
       const w2 = await world(ctx), b = w2?.bs.get(o.id), all = b ? hitReactors(b, src, { melee: !!opts.melee }) : [];
       const t: Trigger | undefined = b && { window: 'hit', actor: src, target: b, ...kind, damage: o.damage, crit: o.nat === 20, edge: !!o.edge };
       const reactors = mm ? all.map((r) => ({ ...r, options: r.options.filter((z) => z.id === 'shield') })).filter((r) => r.options.length) // darts are not attacks: Shield only
-        : merge(all, w2 && t ? tableReactors(w2.s.grid, d, t, [...w2.bs.values()]) : []);
+        : free(merge(all, w2 && t ? tableReactors(w2.s.grid, d, t, [...w2.bs.values()]) : []));
       const them = b && (reactors.every((r) => r.id === b.x.id) ? 'you' : b.hidden ? 'something' : b.name); // an attacker hidden from the players stays unnamed on their card
       const answers = !b ? [] : await ask({ id: uid(), kind: 'hit', trigger: `${src.name} hits ${b.name} (${mm ? 'Magic Missile' : `${o.roll} vs AC ${o.ac}`})`,
         playerTrigger: mm ? `${who} hits ${them} with ${src.pc && !src.hidden ? 'Magic Missile' : 'a spell'}` : `${who} hits ${them}${them === 'you' ? ` (${o.roll})` : ''}`, reactors, waiting: src.x.id }); // the roll for its target only
@@ -411,7 +417,7 @@ export async function land(ctx: FlowCtx, res: Omit<Resolution, 'applied'>, befor
     } else if (src && attackOn(o) && !o.hit && !asked.has(o.id)) {
       asked.add(o.id);
       const w2 = await world(ctx), b = w2?.bs.get(o.id), t: Trigger | undefined = b && { window: 'miss', actor: src, target: b, ...kind, nat1: o.nat === 1, edge: !!o.edge };
-      const reactors = w2 && t ? tableReactors(w2.s.grid, d, t, [...w2.bs.values()]) : [];
+      const reactors = w2 && t ? free(tableReactors(w2.s.grid, d, t, [...w2.bs.values()])) : [];
       const them = b && (reactors.every((r) => r.id === b.x.id) ? 'you' : b.hidden ? 'something' : b.name);
       const answers = !b || !t ? [] : await ask({ id: uid(), kind: 'miss', trigger: `${src.name} misses ${b.name}`, playerTrigger: `${who} misses ${them}`, reactors, waiting: src.x.id });
       for (const ans of answers) o = await answerRx(ctx, ans, t!, o, missHalf, later);

@@ -570,3 +570,40 @@ test('review: a PC who passes as a goblin enters its reach is still asked as the
   await guardMove(ctx(), 't:g1', await line('t:g1', cell(5, 0)));
   expect(seen.map((o) => o.kind)).toEqual(['enter', 'opportunity']);
 });
+
+test('gaps: a Riposte waiting to be worked out keeps its reactor off later cards of the same attack', async () => {
+  await fight([[pcC, 1, 0], [pet(), 2, 0], [mon(goblin, 'g1'), 2, 1]], 'g1', 20, featured(['Riposte', 'Interception']));
+  answering((o) => (o.kind === 'miss' ? { reactor: 'pc:p', option: 'more', key: 'Riposte' } : 'pass'));
+  const res = goblinHits('pc:p', { hit: false, roll: 8, die: 4, damage: 0 });
+  await land(ctx({ dice: () => 1, rollAim: () => ({ rolled: { d20: [15, 15], dmg: [[]] } }) }), { ...res, outcomes: [...res.outcomes, { id: 'w1', part: 'hit', hit: true, roll: 18, die: 14, ac: 12, damage: 5 }] }, undefined, { melee: true });
+  expect(seen.map((o) => o.kind)).toEqual(['miss']); // no Interception card for the wolf's hit
+  expect((await fighter('g1')).hp).toBe(2); // the Riposte still lands: 1 + 3 + 1
+});
+
+test('gaps: Riposte’s die is doubled on a critical hit', async () => {
+  await fight([[pcC, 1, 0], [mon(goblin, 'g1'), 1, 1]], 'g1', 20, featured(['Riposte']));
+  const rolls: [string, boolean | undefined][] = [];
+  answering((o) => (o.kind === 'miss' ? { reactor: 'pc:p', option: 'more', key: 'Riposte' } : 'pass'));
+  await land(ctx({ dice: (_l, expr, crit) => { rolls.push([expr, crit]); return 1; }, rollAim: () => ({ rolled: { d20: [20, 20], dmg: [[]] } }) }),
+    goblinHits('pc:p', { hit: false, roll: 8, die: 4, damage: 0 }), undefined, { melee: true });
+  expect(rolls).toEqual([['1d8', true]]);
+});
+
+test('gaps: Soul Cage can be Counterspelled', async () => {
+  const id = 'spell:soul-cage@FIX', c = mkChar({ race: 'human', base: { int: 16 }, levels: Array(11).fill('wizard') });
+  const cage = { kind: 'spell', id, name: 'Soul Cage', source: 'FIX', text: [], level: 6, school: 'necromancy', castingTime: '1 reaction', range: '60 feet',
+    components: { v: true, s: true }, duration: '8 hours', concentration: false, ritual: false, classes: ['wizard'] };
+  const wiz: Character = { ...c, id: 'p', name: 'p', campaignId: 'c1', state: { ...c.state, hp: 20 }, embedded: { ...c.embedded, [id]: cage } as Character['embedded'],
+    build: { ...c.build, spells: { 'class:wizard@FIX': { known: [id], prepared: [id] } } } };
+  await fight([[pcC, 1, 0], [mon(goblin, 'g1'), 2, 0], [mon(goblin, 'g2'), 3, 0], [mon(mage, 'ma'), 1, 3]], 'g2', 20, wiz);
+  answering((o) => (o.kind === 'died' ? { reactor: 'pc:p', option: 'more', key: 'Soul Cage' } : 'pass'));
+  await land(ctx(), { id: 'r1', actor: 'g2', action: 'Scimitar', outcomes: [{ id: 'g1', part: 'hit', hit: true, roll: 18, die: 14, ac: 15, damage: 7 }], at: 0 }, undefined, { melee: true });
+  expect(seen.map((o) => [o.kind, o.reactors.map((r) => r.id)])).toEqual([['died', ['pc:p']], ['counterspell', ['ma']]]);
+});
+
+test('gaps: a third party’s save card starts with a capital', async () => {
+  await fight([[pcC, 1, 0], [pet(), 2, 0], [mon(goblin, 'g1'), 2, 1]], 'g1', 20, featured(['Beguiling Twist']));
+  answering(() => 'pass');
+  await land(ctx(), { id: 'r1', actor: 'g1', action: 'Scimitar', outcomes: [{ id: 'w1', part: 'save', save: { roll: 15, total: 15, ok: true }, damage: 0 }], at: 0 });
+  expect(seen.map((o) => o.playerTrigger)).toEqual(['W1 succeeds on a save against g1']);
+});
