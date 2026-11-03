@@ -166,8 +166,8 @@ export function monsterAc(x: Combatant, m: MonsterDef | undefined, held: readonl
   let ac = worn;
   if (sp.acBase) {
     const printed = m?.ac.find((a) => /mage armor/i.test(a.from ?? ''))?.value;
-    const armored = /armor/.test(from.replace(/natural armor/g, ''));
-    const own = sp.acBase.base + sp.acBase.abilities.reduce((t, a) => t + mod(m?.scores[a as Ability] ?? x.dex), 0) + (/shield/.test(from) ? 2 : 0);
+    const armored = /\barmor\b/.test(from.replace(/natural armor/g, ''));
+    const own = sp.acBase.base + sp.acBase.abilities.reduce((t, a) => t + mod(m?.scores[a as Ability] ?? x.dex), 0) + (/\bshield\b/.test(from) ? 2 : 0);
     if (printed !== undefined) ac = Math.max(worn, printed); else if (!armored) ac = Math.max(worn, own);
   }
   return Math.max(sp.acMin ?? 0, ac + sp.ac);

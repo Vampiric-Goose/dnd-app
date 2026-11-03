@@ -123,3 +123,21 @@ describe('damage parts when resolved', () => {
     expect([hit[0].damage, hit[0].later, miss[0].damage, miss[0].later]).toEqual([16, 6, 8, undefined]);
   });
 });
+
+describe('monsterAc with the library’s own AC', async () => {
+  const fs = await import('node:fs'), { monsterCombatant } = await import('../../src/lib/combat/combat.ts'), { monsterAc } = await import('../../src/lib/combat/resolve.ts');
+  const srd = JSON.parse(fs.readFileSync('src/data/srd.json', 'utf8')) as { entities: { id: string }[] };
+  const def = (id: string) => srd.entities.find((e) => e.id === id) as never as import('../../src/lib/types.ts').MonsterDef;
+  const mage = def('monster:mage@SRD'), knight = def('monster:knight@SRD');
+  const as = (m: typeof mage, ac?: number) => ({ ...monsterCombatant(m, m.name, 'average', () => 0.5), ...(ac !== undefined && { ac }) });
+  test('Mage Armor: the higher of the chosen AC and 15 (the Mage’s printed “with mage armor”)', () => {
+    expect([undefined, 9, 13, 17].map((ac) => [monsterAc(as(mage, ac), mage, []), monsterAc(as(mage, ac), mage, ['Mage Armor'])])).toEqual([[12, 15], [9, 15], [13, 15], [17, 17]]);
+  });
+  test('Mage Armor with Shield and Barkskin stacks as usual on a chosen AC', () => {
+    expect(monsterAc(as(mage, 9), mage, ['Mage Armor', 'Shield'])).toBe(20);
+    expect(monsterAc(as(mage, 9), mage, ['Barkskin'])).toBe(16);
+  });
+  test('an armoured stat block (plate) gets nothing from Mage Armor, even with a lower chosen AC', () => {
+    expect(monsterAc(as(knight, 10), knight, ['Mage Armor'])).toBe(10);
+  });
+});
