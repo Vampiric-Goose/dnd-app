@@ -38,6 +38,9 @@ describe('leaveStep', () => {
     expect(leaveStep(g, '5-5-5', { ...pc, conditions: ['Invisible'] }, [gob], to4, false)).toBeUndefined();
     expect(leaveStep(g, '5-5-5', pc, [{ ...gob, conditions: ['Blinded'] }], to4, false)).toBeUndefined();
   });
+  test('a downed monster (0 hp) does not react', () => {
+    expect(leaveStep(g, '5-5-5', pc, [{ ...gob, x: { ...gob.x, hp: 0 } }], to4, false)).toBeUndefined();
+  });
   test('a foe with no melee attack has no Opportunity Attack', () => {
     expect(leaveStep(g, '5-5-5', pc, [{ ...gob, actions: [] }], to4, false)).toBeUndefined();
   });
@@ -76,7 +79,18 @@ describe('hit reactions', () => {
     expect(rejudge({ id: 'a', part: 'hit', hit: true, nat: 20, roll: 25, ac: 15, damage: 8 }, 5)).toMatchObject({ hit: true, damage: 8 });
     expect(rejudge({ id: 'a', part: 'hit', hit: true, roll: 21, ac: 15, damage: 8 }, 5)).toMatchObject({ hit: true, damage: 8, ac: 20 });
   });
-  test('halved rounds down', () => { expect(halved({ id: 'a', damage: 9 }).damage).toBe(4); });
+  test('a hit turned into a miss keeps nothing a hit brings (a later hit, a condition, Chaos Bolt)', () => {
+    const o = rejudge({ id: 'a', part: 'hit', hit: true, roll: 17, ac: 15, damage: 8, later: 4, inflict: ['Slowed'], leap: true, choose: [{ face: 1, type: 'fire', damage: 8 }] }, 5);
+    expect(o).toMatchObject({ hit: false, damage: 0 });
+    expect(o).not.toHaveProperty('later'); expect(o).not.toHaveProperty('inflict'); expect(o).not.toHaveProperty('leap'); expect(o).not.toHaveProperty('choose');
+  });
+  test('a spell that does half damage on a miss keeps it', () => {
+    expect(rejudge({ id: 'a', part: 'hit', hit: true, roll: 17, ac: 15, damage: 10 }, 5, true)).toMatchObject({ hit: false, damage: 5 });
+  });
+  test('halved rounds down, later damage and Chaos Bolt picks too', () => {
+    expect(halved({ id: 'a', damage: 9 }).damage).toBe(4);
+    expect(halved({ id: 'a', damage: 9, later: 7, choose: [{ face: 1, type: 'fire', damage: 9 }] })).toMatchObject({ damage: 4, later: 3, choose: [{ face: 1, type: 'fire', damage: 4 }] });
+  });
   test('acReaction reads Parry', () => {
     expect(acReaction({ name: 'Parry', text: 'The knight adds 2 to its AC against one melee attack that would hit it.' })).toEqual({ bonus: 2, melee: true });
     expect(acReaction({ name: 'Roar', text: 'The beast roars.' })).toBeUndefined();

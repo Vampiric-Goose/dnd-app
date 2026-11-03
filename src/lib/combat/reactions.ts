@@ -16,7 +16,7 @@ export interface Body { x: Combatant; pt: Pt & { size: Size }; conditions: reado
 const has = (b: Body, c: string) => b.conditions.some((n) => n.toLowerCase() === c);
 /** The viewer sees the subject: the subject isn't Invisible and the viewer isn't Blinded. */
 const sees = (viewer: Body, subject: Body) => !has(subject, 'invisible') && !has(viewer, 'blinded');
-export const canReact = (b: Body): boolean => !b.x.reactionUsed && !b.conditions.some((c) => BLOCKING.includes(c.toLowerCase()));
+export const canReact = (b: Body): boolean => !b.x.reactionUsed && b.x.hp !== 0 && !b.conditions.some((c) => BLOCKING.includes(c.toLowerCase()));
 const reaction = (b: Body, name: string) => b.actions.some((a) => a.cost === 'reaction' && a.name.toLowerCase() === name);
 const slotsFrom = (b: Body, min: number) => b.slots.filter((s) => s >= min);
 const reactor = (b: Body, options: ReactOption[]): Reactor[] => (options.length ? [{ id: b.x.id, name: b.name, options }] : []);
@@ -32,7 +32,7 @@ function oaOption(b: Body): ReactOption | undefined {
 /**
  * Walks the straight line from the mover to `to`, cell by cell (the token keeps its offset in its cell). Stops at the first cell where
  * a hostile foe that can react and sees the mover is left behind out of its reach: `at` is the last cell inside that reach. Nothing
- * after a Disengage.
+ * after a Disengage. The caller drops foes already asked before stepping on from `at` (else the same foe is returned again).
  */
 export function leaveStep(g: Grid, diagonal: Diagonal, mover: Body, foes: Body[], to: Pt, disengaged: boolean): { at: Pt; reactors: Reactor[] } | undefined {
   if (disengaged) return undefined;
@@ -68,7 +68,7 @@ export function hitReactors(target: Body, attacker: Body, o: { melee: boolean })
 
 /** Hellish Rebuke: the victim of damage, still up, sees the source within 60 ft; one option per free slot. */
 export function rebukeReactors(g: Grid, diagonal: Diagonal, victim: Body, source: Body): Reactor[] {
-  if (!canReact(victim) || victim.x.hp === 0 || !sees(victim, source) || tokenFeet(g, victim.pt, source.pt, diagonal) > 60 || !reaction(victim, 'hellish rebuke')) return [];
+  if (!canReact(victim) || !sees(victim, source) || tokenFeet(g, victim.pt, source.pt, diagonal) > 60 || !reaction(victim, 'hellish rebuke')) return [];
   return reactor(victim, slotsFrom(victim, 1).map((slot): ReactOption => ({ id: 'rebuke', label: `Hellish Rebuke ${slot}`, slot })));
 }
 
@@ -76,15 +76,18 @@ export function rebukeReactors(g: Grid, diagonal: Diagonal, victim: Body, source
 export const countered = (spellLevel: number, slot: number, checkTotal?: number): boolean =>
   spellLevel <= 3 || slot >= spellLevel || (checkTotal !== undefined && checkTotal >= 10 + spellLevel);
 
-/** A hit judged again against AC + `bonus` (Shield, Parry): a natural 20 still hits. */
-export function rejudge(o: Outcome, bonus: number): Outcome {
+/** A hit judged again against AC + `bonus` (Shield, Parry): a natural 20 still hits. A miss drops what only a hit brings; `missHalf`: the spell does half damage on a miss. */
+export function rejudge(o: Outcome, bonus: number, missHalf?: boolean): Outcome {
   if (o.ac === undefined) return o;
   const ac = o.ac + bonus;
-  return o.hit && o.nat !== 20 && o.roll !== undefined && o.roll < ac ? { ...o, hit: false, damage: 0, ac } : { ...o, ac };
+  if (!(o.hit && o.nat !== 20 && o.roll !== undefined && o.roll < ac)) return { ...o, ac };
+  const { later, inflict, choose, leap, ...rest } = o;
+  return { ...rest, hit: false, damage: missHalf ? Math.floor(o.damage / 2) : 0, ac };
 }
 
-/** Uncanny Dodge: half the damage, rounded down. */
-export const halved = (o: Outcome): Outcome => ({ ...o, damage: Math.floor(o.damage / 2) });
+/** Uncanny Dodge: half the damage, rounded down (a later hit and Chaos Bolt picks too). */
+export const halved = (o: Outcome): Outcome => ({ ...o, damage: Math.floor(o.damage / 2),
+  ...(o.later !== undefined && { later: Math.floor(o.later / 2) }), ...(o.choose && { choose: o.choose.map((c) => ({ ...c, damage: Math.floor(c.damage / 2) })) }) });
 
 /** A monster reaction trait that adds to its AC ("The knight adds 2 to its AC against one melee attack that would hit it"). */
 export function acReaction(t: { name: string; text: string }): { bonus: number; melee: boolean } | undefined {
