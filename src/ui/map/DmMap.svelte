@@ -16,8 +16,7 @@
   import { editCharacter, settlePick, turn, undoResolution, updateCombat } from '../../lib/combat/store.ts';
   import { flowCtx } from '../../lib/combat/flowCtx.ts';
   import { guardCast, guardMove, land, settle } from '../../lib/combat/reactionFlow.ts';
-  import { answer, pass, reactions } from '../../lib/combat/reactionStack.svelte.ts';
-  import { dmAnswers, dmCards } from '../../lib/combat/reactionCard.ts';
+  import { reactions } from '../../lib/combat/reactionStack.svelte.ts';
   import { aimPlan, ALL_HP, areaRollName, areaRolls, areasOn, foeWithin5, judge, meleeAttack, moveArea, movableAreas, noteEntries, snapOf, touched, workOut, type AimPlan, type AreaKind } from '../../lib/combat/aiming.ts';
   import { monsterAc, resolveSpell, targetOf } from '../../lib/combat/resolve.ts';
   import { targetingOn, type Pickable, type Toggle } from '../../lib/combat/targeting.ts';
@@ -40,7 +39,6 @@
   import GridForm from './GridForm.svelte';
   import { detectSquareGrid } from '../../lib/map/detectGrid.ts';
   import MapCanvas from './MapCanvas.svelte';
-  import ReactionCard, { type Card } from './ReactionCard.svelte';
   import SelectedTokens from './SelectedTokens.svelte';
   import TokenList from './TokenList.svelte';
   import MonsterSearch from '../initiative/MonsterSearch.svelte';
@@ -61,8 +59,10 @@
   let error = $state('');
   let notice = $state('');
   let working = $state(0);
-  /** Buttons are off while a write runs, but not while it waits on a reaction (Next turn, Undo and Roll stay usable then). */
-  const busy = $derived(working > 0 && !reactions.open.length);
+  /** Buttons are off while a write runs. */
+  const busy = $derived(working > 0);
+  /** Only Next turn, Undo and Roll stay usable while a write waits on a reaction card: nothing else may overlap it or repeat it. */
+  const held = $derived(working > 0 && !reactions.open.length);
 
   const cid = $derived(campaign.id);
   const settings = $derived(campaign.settings);
@@ -71,17 +71,9 @@
   /** The reaction flow on this device: this scene, this device's dice; a refused answer goes to its player, else a toast. */
   const flow = () => flowCtx(cid, settings, { scene: async () => (scene ? db.scenes.get(scene.id) : undefined), rollAim, onRefused: (id, why) => void tellRefused(cid, id, why) });
 
-  // The reaction card: what the DM answers for (monsters, PCs whose player isn't connected); a connected player's reactors are only waited on.
-  const reactCards = $derived.by((): Card[] => {
-    const mine = dmAnswers(combat?.combatants ?? [], (id) => chars.find((c) => c.id === id)?.ownerId, session.online), now = Date.now();
-    return dmCards(reactions.open, mine).map((c) => ({ ask: c.ask, trigger: c.trigger, ms: Math.max(0, c.deadline - now), rows: c.mine,
-      ...(c.others.length && { also: c.others.map((r) => ({ id: r.id, name: r.name })) }) }));
-  });
-  const reactPass = (ask: string, id?: string) => { for (const r of id ? [id] : reactCards.find((c) => c.ask === ask)?.rows.map((x) => x.id) ?? []) pass(ask, r); };
-
   const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
   async function run(fn: () => Promise<void>) {
-    error = notice = '';
+    if (!working) error = notice = ''; // a write still waiting on a reaction card keeps its place to report an error
     working++;
     try { await fn(); } catch (e) { error = msg(e); } finally { working--; }
   }
@@ -589,8 +581,6 @@
   </div>
 </Workspace>
 
-<ReactionCard cards={reactCards} onanswer={(ask, id, o) => void answer(ask, { reactor: id, option: o.id, ...(o.slot !== undefined && { slot: o.slot }) })} onpass={reactPass} />
-
 {#if scenes.length}
   <dialog bind:this={newDialog} aria-labelledby="new-scene-title">
     <h2 id="new-scene-title">New scene</h2>
@@ -642,7 +632,7 @@
           <TurnPanel dm name={view.name} order={combat.combatants} self={view.x.id} current={combat.turn} round={combat.round}
             ac={view.ac} hp={view.hp} maxHp={view.maxHp} tempHp={view.tempHp} tone={view.ch ? 'accent' : 'danger'} conditions={[...view.conditions, ...(view.x.hasted && !view.x.hasted.ended ? ['Haste'] : [])]}
             x={view.x} perAction={view.perAction} onTurn={turnIds.has(view.x.id)} actions={view.actions} slots={view.slots}
-            concentrating={!!view.x.concentrating} {busy} canEnd={!busy} endLabel="Next turn ▶" onuse={(a, slot, target) => void useAction(a, slot, target)} onsummon={summonAction} summonPool={pool} onend={nextTurn} {onpip}
+            concentrating={!!view.x.concentrating} {busy} canEnd={!held} endLabel="Next turn ▶" onuse={(a, slot, target) => void useAction(a, slot, target)} onsummon={summonAction} summonPool={pool} onend={nextTurn} {onpip}
             onstrip={(id) => (viewId = id)} ontemplate={placeTemplate}
             targeting={targetingOn(settings)} features={view.ch ? featureList(view.ch, settings).map((f) => f.name) : []} {onaim}>
             {#snippet top()}
@@ -657,7 +647,7 @@
             <section class="results" aria-labelledby="res-h">
               <h3 id="res-h">Results</h3>
               {#each hurtsNow as h (h.r.id + h.kind + h.id)}<p class="row small"><span><strong>{nameOfCombatant(h.id)}</strong> {AREA_WHEN[h.kind]} {h.r.action}</span>
-                <button type="button" disabled={busy} onclick={() => lingerRoll(h.r, h.kind, h.id)}>Roll</button></p>{/each}
+                <button type="button" disabled={held} onclick={() => lingerRoll(h.r, h.kind, h.id)}>Roll</button></p>{/each}
               {#each movable as r (r.id)}<p class="row small"><span>{r.action}</span>
                 <button type="button" disabled={busy} onclick={() => { aiming = undefined; moving = r; }}>Move ({r.linger?.read.move?.cost === 'bonus' ? 'bonus action' : 'action'})</button></p>{/each}
               <ol class="plain">
@@ -665,11 +655,11 @@
                   <li>
                     <div class="row"><strong>{nameOfCombatant(r.actor)}: {r.action}</strong>{#if r.dc !== undefined}<span class="muted small">DC {r.dc} {r.ability?.toUpperCase()}</span>{/if}
                       {#if r.outcomes.some((o) => o.leap) && !r.leapt && view?.x.id === r.actor}<button type="button" disabled={busy} onclick={() => startLeap(r)}>Leap</button>{/if}
-                      <button type="button" disabled={busy} onclick={() => undo(r.id)}>Undo</button></div>
+                      <button type="button" disabled={held} onclick={() => undo(r.id)}>Undo</button></div>
                     {#if r.caught?.length}<p class="muted small">In the area: {r.caught.map(nameOfCombatant).join(', ')}</p>{/if}
                     <ul class="plain small">
                       {#each r.outcomes as o, i (i)}
-                        <li>{nameOfCombatant(o.id)}: {describe(o)}{#if o.pending} <button type="button" disabled={busy} onclick={() => rollFor(r.id, o.id)}>Roll for them</button>{/if}
+                        <li>{nameOfCombatant(o.id)}: {describe(o)}{#if o.pending} <button type="button" disabled={held} onclick={() => rollFor(r.id, o.id)}>Roll for them</button>{/if}
                           {#each o.choose ?? [] as c (c.face)} <button type="button" disabled={busy} onclick={() => pickFor(r.id, o.id, c.type)}>{c.type} ({c.damage})</button>{/each}</li>
                       {/each}
                       {#each r.applied.filter((x) => x.conc) as x (x.id)}<li><strong>{nameOfCombatant(x.id)}</strong>: Con save DC {x.conc} to keep concentrating</li>{/each}

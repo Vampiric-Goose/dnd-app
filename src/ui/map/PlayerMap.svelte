@@ -13,16 +13,13 @@
   import { computeSheet } from '../../lib/rules/sheet.ts';
   import { currentActor } from '../../lib/sync/project.ts';
   import { sceneForPlayers, type PlayerScene } from '../../lib/sync/scene.ts';
-  import { clearDeclared, declareAction, sendDrag, sendEndTurn, sendLeap, sendReact, sendUse, sendMove, session } from '../../lib/sync/session.svelte.ts';
+  import { clearDeclared, declareAction, sendDrag, sendEndTurn, sendLeap, sendUse, sendMove, session } from '../../lib/sync/session.svelte.ts';
   import { budgetFeet, effectiveSpeed, moveSpeed, originOf, remainingFeet } from '../../lib/combat/movement.ts';
   import { pcActions, slotsLeft, type TurnAction } from '../../lib/combat/turnActions.ts';
   import { featureList } from '../../lib/character/play.ts';
   import type { Campaign, Character, Combatant, MonsterDef } from '../../lib/types.ts';
   import { getIndex } from '../../lib/store.svelte.ts';
   import MapCanvas from './MapCanvas.svelte';
-  import ReactionCard, { type Card } from './ReactionCard.svelte';
-  import type { ReactOption } from '../../lib/combat/reactions.ts';
-  import { roll as rollDie } from '../../lib/rolls.svelte.ts';
   import TurnPanel from '../turn/TurnPanel.svelte';
   import type { SpellArea } from '../../lib/combat/spellText.ts';
   import { toast } from '../../lib/toast.svelte.ts';
@@ -167,31 +164,6 @@
     clearTimeout(sentTimer);
     sentTimer = setTimeout(() => (sentUnder = undefined), 3000);
   }
-  // Reactions: this player's own cards (the DM's device chose who may react and checks every answer). An answer that needs dice rolls them here.
-  /** Rows answered or passed, hidden until the DM's next message drops them (a double tap sends one answer). */
-  let answered: Record<string, true> = $state({});
-  const cards = $derived((session.reactions?.prompts ?? []).map((p): Card => ({ ask: p.ask, trigger: p.trigger, ms: p.ms,
-    rows: p.reactors.filter((r) => !answered[p.ask + r.characterId]).map((r) => ({ id: r.characterId, name: r.name, options: r.options })) })).filter((c) => c.rows.length));
-  function react(ask: string, characterId: string, o: ReactOption | 'pass') {
-    if (offline()) return;
-    const c = chars.find((x) => x.id === characterId);
-    try {
-      const sheet = c && computeSheet(c, { settings, viewer: 'player' }), features = c ? featureList(c, settings) : [];
-      const find = (f: (a: TurnAction) => boolean) => (c && sheet ? pcActions(c, sheet, features).find(f) : undefined);
-      const aim = (a: TurnAction | undefined, level?: number) => {
-        const plan = a && aimPlan(a, { level, features: features.map((f) => f.name) });
-        if (!a || !plan) throw new Error(`${c?.name ?? 'That character'} can't do that.`);
-        return { rolled: rollAim(a.name, plan).rolled, toggles: [] }; // ponytail: the damage dice stay unshown (the DM's device rolls on from these); the target is the DM's to pick
-      };
-      if (o === 'pass') sendReact(ask, characterId, 'pass');
-      else if (o.id === 'oa') sendReact(ask, characterId, 'oa', { aim: aim(find((a) => a.id === 'react:opportunity')) });
-      else if (o.id === 'rebuke') sendReact(ask, characterId, 'rebuke', { slot: o.slot, aim: aim(find((a) => !!a.spell && a.name === 'Hellish Rebuke'), o.slot) });
-      else if (o.id === 'counterspell') sendReact(ask, characterId, 'counterspell', { slot: o.slot, d20: rollDie(`${c?.name ?? 'Counterspell'}: Counterspell check`, '1d20', { mode: 'normal' }).faces[0] });
-      else sendReact(ask, characterId, o.id, o.slot === undefined ? {} : { slot: o.slot });
-      answered[ask + characterId] = true;
-    } catch (e) { toast(e instanceof Error ? e.message : String(e), true); }
-  }
-  const reactPass = (ask: string, id?: string) => { for (const r of id ? [id] : cards.find((c) => c.ask === ask)?.rows.map((x) => x.id) ?? []) react(ask, r, 'pass'); };
   // The DM's answer: hit or miss (the damage shows only on a hit), a spell's DC and the creatures its area caught.
   const opened = Date.now();
   $effect(() => {
@@ -336,8 +308,6 @@
     {/snippet}
   </Workspace>
 {/if}
-
-<ReactionCard {cards} note={session.reactions?.waiting ? 'Waiting on reactions…' : undefined} onanswer={react} onpass={reactPass} />
 
 {#snippet row(t: { id: string; name: string; color: string; health?: string; conditions: string[] })}
   <li><span class="dot" style:background={t.color} aria-hidden="true"></span><span class="nm">{t.name}</span>{#if t.health}<span class="muted"> · {t.health}</span>{/if}{#if t.conditions.length}<span class="muted"> · {t.conditions.join(', ')}</span>{/if}</li>

@@ -5,6 +5,7 @@
   import { app, startup } from './lib/store.svelte.ts';
   import { follow, session } from './lib/sync/session.svelte.ts';
   import { rollViewer } from './lib/rolls.svelte.ts';
+  import { reactions } from './lib/combat/reactionStack.svelte.ts';
   import BackupBanner from './ui/BackupBanner.svelte';
   import CampaignPicker from './ui/CampaignPicker.svelte';
   import DiceTray from './ui/DiceTray.svelte';
@@ -170,6 +171,11 @@
 {/if}
 {#if app.campaign?.sync?.role === 'player' && session.tracker?.saves?.length}
   {#await import('./ui/initiative/SavePrompt.svelte') then { default: SavePrompt }}<SavePrompt campaign={app.campaign} />{/await}
+{/if}
+{#if app.campaign?.sync?.role === 'player' && session.reactions}
+  {#await import('./ui/map/ReactionsPlayer.svelte') then { default: ReactionsPlayer }}<ReactionsPlayer campaign={app.campaign} />{/await}
+{:else if app.campaign && app.campaign.sync?.role !== 'player' && reactions.open.length}
+  {#await import('./ui/map/ReactionsDm.svelte') then { default: ReactionsDm }}<ReactionsDm campaign={app.campaign} />{/await}
 {/if}
 {#if app.campaign?.sync?.role === 'player' && session.tracker?.picks?.length}
   {#await import('./ui/initiative/PickPrompt.svelte') then { default: PickPrompt }}<PickPrompt />{/await}
