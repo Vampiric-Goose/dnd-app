@@ -439,8 +439,8 @@ onLocalChange((kind, id) => {
 });
 
 /** Stage 5: the player's own token, dropped at `to` (the guest checks owner and that it is online; the DM checks the turn). */
-export function sendMove(sceneId: string, tokenId: string, to: Pt): void {
-  run?.guest?.sendMove(sceneId, tokenId, to);
+export function sendMove(sceneId: string, tokenId: string, to: Pt, path?: Pt[]): void {
+  run?.guest?.sendMove(sceneId, tokenId, to, path);
 }
 
 // ---- Live drag previews (never stored) ----

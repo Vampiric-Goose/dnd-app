@@ -1,6 +1,6 @@
 <script module lang="ts">
   import type { Token } from '../../lib/types.ts';
-  export type CanvasToken = Pick<Token, 'id' | 'name' | 'x' | 'y' | 'size' | 'color' | 'portrait' | 'hidden'> & { monsterId?: string; hp?: number; maxHp?: number; conditions?: string[]; health?: string };
+  export type CanvasToken = Pick<Token, 'id' | 'name' | 'x' | 'y' | 'size' | 'color' | 'portrait' | 'hidden' | 'trail'> & { monsterId?: string; hp?: number; maxHp?: number; conditions?: string[]; health?: string };
 </script>
 
 <script lang="ts">
@@ -12,7 +12,8 @@
   import { decodeFog, FOG_CELL, fogSize, newFog, paintBrush, paintRect, type FogEdit } from '../../lib/map/fog.ts';
   import { decodeWithin, deviceSide } from '../../lib/images.ts';
   import { cellCenter, cellsIn, feetBetween, hexCorners, snap, type Cell, type Pt } from '../../lib/map/grid.ts';
-  import { clampMove, reachableCells } from '../../lib/combat/movement.ts';
+  import { affordable, extendRoute, reachableCells, routeFeet } from '../../lib/combat/movement.ts';
+  import { slidePoint, slideSquares, SQUARE_MS } from './slide.ts';
   import { initials, radius, tokenAt, tokensInRect } from '../../lib/map/scene.ts';
   import { affectedCells, tokensInTemplate, type Shape, type Template } from '../../lib/map/templates.ts';
   import { fit, pinch, toScreen, toWorld, zoomAt, type View } from '../../lib/map/view.ts';
@@ -22,16 +23,20 @@
   // fog: drawn only when set (the caller passes it only with the Fog of war setting on); black for players, a shade for the DM.
   // onfog: the DM's fog tools, shown only when it is set; one call per stroke, rectangle or Reveal all / Hide all.
   // corner: extra controls floated top-right, beside the tool switcher (the DM's scene picker).
-  // limitOf: a token's movement this turn: the turn's origin (none yet: the token) and its budget; with `clamp` the drag ghost stays within
-  // the budget of the origin, without, the label turns red past it.
+  // limitOf: a token's movement this turn: the feet it has left, the diagonals it has walked (5-10-5 parity), and with `clamp` the dragged
+  // route stops where the feet run out; without, the label turns red past it.
+  // leadOf: of a dragged group, the one that walks the route and pays for it (the current-turn creature); the rest shift by its offset.
+  // plan: a route dropped and not yet walked (the move is on its way): its line and ghost stay until it is cleared.
+  // A token whose position changes slides to it square by square (along its `trail` when it has one), unless it was not there before.
   // arrows: declared actions to draw; ondeclare: a right-drag (touch: long-press then drag) drew one (unset = no arrow gesture);
   // arrow (bindable): the arrow picked with the Select tool (a tap on its line or head); onclear: Delete / Backspace with a clearable one picked.
   // ondelete: Delete / Backspace with tokens selected (unset = the key does nothing, as for players).
   // ondrag: the dragged token's ghost moved to a new cell (`at` undefined: the drag ended).
-  let { width, height, image, grid, tokens, dm, diagonal, selected, canDrag, speedOf, limitOf, onselect, onmove, rev = 0, fog, fogStyle = dm ? 'shade' : 'black', onfog, corner, arrows = [], ondeclare, onclear, ondelete, arrow = $bindable(), ondrag, preset, aim, areas = [] }: {
+  let { width, height, image, grid, tokens, dm, diagonal, selected, canDrag, speedOf, limitOf, leadOf, plan, onselect, onmove, rev = 0, fog, fogStyle = dm ? 'shade' : 'black', onfog, corner, arrows = [], ondeclare, onclear, ondelete, arrow = $bindable(), ondrag, preset, aim, areas = [] }: {
     width: number; height: number; image?: string; grid: Grid; tokens: CanvasToken[]; dm: boolean; diagonal: '5-5-5' | '5-10-5'; selected: string[];
-    canDrag: (id: string) => boolean; speedOf?: (id: string) => number | undefined; limitOf?: (id: string) => { from?: Pt; budget: number; clamp: boolean } | undefined;
-    onselect: (ids: string[]) => void; onmove: (ids: string[], primary: string, to: Pt) => void; rev?: number;
+    canDrag: (id: string) => boolean; speedOf?: (id: string) => number | undefined; limitOf?: (id: string) => { left: number; diags: number; clamp: boolean } | undefined;
+    leadOf?: (ids: string[]) => string | undefined; plan?: { id: string; route: Pt[] };
+    onselect: (ids: string[]) => void; onmove: (ids: string[], primary: string, to: Pt, route: Pt[]) => void; rev?: number;
     fog?: string; fogStyle?: 'black' | 'shade'; onfog?: (e: FogEdit) => void; corner?: Snippet;
     arrows?: Arrow[]; ondeclare?: (d: { from: Pt; fromToken?: string; to: Pt; toToken?: string }) => void; onclear?: (id: string) => void;
     ondelete?: (ids: string[]) => void; arrow?: string;
@@ -133,7 +138,7 @@
     | { k: 'none' }
     | { k: 'pan'; from: Pt; view0: View; moved: boolean; shift: boolean; arrow?: string /* pressed on this arrow: a tap picks it */ }
     | { k: 'press'; from: Pt; id: string; grab: Pt; shift: boolean }
-    | { k: 'drag'; id: string; ids: string[]; grab: Pt; ghost: Pt }
+    | { k: 'drag'; id: string; ids: string[]; grab: Pt; ghost: Pt; route: Pt[] }
     | { k: 'box'; a: Pt; b: Pt; shift: boolean }
     | { k: 'ruler' }
     | { k: 'pinch'; a0: Pt; b0: Pt; view0: View }
@@ -214,7 +219,30 @@
   }
 
   // Redraw on any prop change; refit when the scene's sides or image change; reload images when rev bumps.
-  $effect(() => { void [width, height, image, grid, tokens, selected, dm, arrows, arrow]; untrack(schedule); });
+  $effect(() => { void [width, height, image, grid, tokens, selected, dm, arrows, arrow, plan]; untrack(schedule); });
+
+  // Sliding: a token seen before whose position changed is drawn walking to it (from where it is drawn now, if it was already sliding).
+  // One that was not there before just appears.
+  const lastAt = new Map<string, Pt>();
+  const slides = new Map<string, { from: Pt; squares: Pt[]; t0: number; ms: number }>();
+  const reduceMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  $effect(() => {
+    const ts = tokens;
+    untrack(() => {
+      const now = performance.now(), still = reduceMotion();
+      for (const t of ts) {
+        const o = lastAt.get(t.id);
+        if (!o || (o.x === t.x && o.y === t.y)) continue;
+        const sl = slides.get(t.id), squares = still ? [] : slideSquares(grid, o, t, t.trail, t.size);
+        if (!squares.length) { slides.delete(t.id); continue; }
+        slides.set(t.id, { from: sl ? slidePoint(sl.from, sl.squares, sl.t0, now, sl.ms).at : o, squares, t0: now, ms: Math.min(SQUARE_MS, 3000 / squares.length) });
+      }
+      lastAt.clear();
+      for (const t of ts) lastAt.set(t.id, { x: t.x, y: t.y });
+      for (const id of slides.keys()) if (!lastAt.has(id)) slides.delete(id);
+      schedule();
+    });
+  });
   let fitKey = '';
   $effect(() => {
     const k = `${width}x${height}:${image ?? ''}`;
@@ -343,7 +371,7 @@
       ctx.fill();
       ctx.restore();
     };
-    if (mover && lim) tint(reachableCells(grid, lim.from ?? mover, lim.budget, diagonal, width, height), 0.16);
+    if (mover && lim) tint(reachableCells(grid, snap(grid, mover, mover.size), lim.left, diagonal, width, height, lim.diags), 0.16);
     // a placed area's range from its caster (Fireball's 150 ft), by the grid's distance rule: where its center may go
     if (aim?.area?.on === 'point' && aim.area.range !== undefined) tint(reachableCells(grid, aim.from, aim.area.range, diagonal, width, height), 0.12);
     if (castCells.length) { // spell areas as cast, under the tokens
@@ -361,14 +389,45 @@
       ctx.fill();
       ctx.restore();
     }
-    const dragged = new Set(drag?.ids ?? []);
     const primary = drag && tokens.find((t) => t.id === drag.id);
     const dx = drag && primary ? drag.ghost.x - primary.x : 0, dy = drag && primary ? drag.ghost.y - primary.y : 0;
-    const at = (t: CanvasToken) => (dragged.has(t.id) ? { x: t.x + dx, y: t.y + dy } : { x: t.x, y: t.y });
+    // where each token is drawn now: sliding ones part-way (and another frame is asked for), the rest where they stand
+    const now = performance.now(), drawn = new Map<string, Pt>();
+    let sliding = false;
     for (const t of tokens) {
-      const p = at(t), r = radius(grid, t.size);
+      const sl = slides.get(t.id), r = sl && slidePoint(sl.from, sl.squares, sl.t0, now, sl.ms);
+      if (sl && r && r.done) slides.delete(t.id);
+      if (r && !r.done) sliding = true;
+      drawn.set(t.id, r && !r.done ? r.at : { x: t.x, y: t.y });
+    }
+    if (sliding) schedule();
+    const at = (t: CanvasToken) => drawn.get(t.id) ?? t;
+    // the route being planned (dragged) or walked (dropped): a line from the token through its squares, then ghosts of the token(s) at the end
+    const route = drag ? drag.route : plan?.route ?? [], routeId = drag?.id ?? plan?.id, walker = routeId === undefined ? undefined : tokens.find((t) => t.id === routeId);
+    const ghosts: { t: CanvasToken; p: Pt }[] = [];
+    if (walker && route.length) {
+      const i = drag ? -1 : route.findIndex((q) => Math.abs(q.x - walker.x) < 1 && Math.abs(q.y - walker.y) < 1), rest = route.slice(i + 1);
+      if (rest.length) {
+        const start = drag ? snap(grid, walker, walker.size) : at(walker);
+        ctx.save();
+        ctx.lineWidth = 4 * px;
+        ctx.lineCap = ctx.lineJoin = 'round';
+        ctx.strokeStyle = accent;
+        ctx.globalAlpha = 0.7;
+        ctx.beginPath();
+        ctx.moveTo(start.x, start.y);
+        for (const q of rest) ctx.lineTo(q.x, q.y);
+        ctx.stroke();
+        ctx.restore();
+        const end = route[route.length - 1];
+        if (drag) for (const t of tokens) { if (drag.ids.includes(t.id)) ghosts.push({ t, p: { x: t.x + dx, y: t.y + dy } }); }
+        else ghosts.push({ t: walker, p: end });
+      }
+    }
+    for (const { t, p, ghost } of [...tokens.map((t) => ({ t, p: at(t), ghost: false })), ...ghosts.map((g) => ({ ...g, ghost: true }))]) {
+      const r = radius(grid, t.size);
       ctx.save();
-      ctx.globalAlpha = t.hidden ? 0.4 : 1;
+      ctx.globalAlpha = (t.hidden ? 0.4 : 1) * (ghost ? 0.5 : 1);
       const face = t.portrait ? bitmap(t.portrait) : undefined;
       ctx.beginPath();
       ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
@@ -391,7 +450,7 @@
       if (t.hidden) ctx.setLineDash([5 * px, 4 * px]);
       ctx.stroke();
       ctx.restore();
-      if (sel.has(t.id)) {
+      if (sel.has(t.id) && !ghost) {
         ctx.beginPath();
         ctx.arc(p.x, p.y, r + 3 * px, 0, Math.PI * 2);
         ctx.lineWidth = 3 * px;
@@ -546,12 +605,12 @@
       label(ctx, pal, `${feetBetween(grid, ruler.a, ruler.b, diagonal)} ft`, b);
     }
     if (drag && primary) {
-      const feet = feetBetween(grid, primary, drag.ghost, diagonal), lim = limitOf?.(drag.id), speed = lim ? undefined : speedOf?.(drag.id);
-      const used = lim ? feetBetween(grid, lim.from ?? primary, drag.ghost, diagonal) : 0; // from the turn's origin: moving back gives movement back
+      const lim = limitOf?.(drag.id), speed = lim ? undefined : speedOf?.(drag.id);
+      const feet = routeFeet(grid, snap(grid, primary, primary.size), drag.route, diagonal, lim?.diags ?? 0).feet; // the route's own cost: backing up cuts it
       // M5: the drop would be refused (any moved token would leave the scene)
       const off = tokens.some((t) => (t.id === drag.id || drag.ids.includes(t.id)) && !(t.x + dx >= 0 && t.x + dx <= width && t.y + dy >= 0 && t.y + dy <= height));
-      const text = lim ? `${feet} ft · ${Math.max(0, lim.budget - used)} left` : speed !== undefined && feet > speed ? `${feet} ft · past speed ${speed} ft` : `${feet} ft`;
-      label(ctx, pal, off ? `${text} · off the map` : text, toScreen(view, drag.ghost), !!lim && used > lim.budget);
+      const text = lim ? `${feet} ft · ${Math.max(0, lim.left - feet)} left` : speed !== undefined && feet > speed ? `${feet} ft · past speed ${speed} ft` : `${feet} ft`;
+      label(ctx, pal, off ? `${text} · off the map` : text, toScreen(view, drag.ghost), !!lim && feet > lim.left);
     }
   }
 
@@ -721,14 +780,19 @@
         if (!canDrag(id)) { mode = { k: 'pan', from: mode.from, view0: view, moved: true, shift: false }; return move(e); }
         const ids = selected.includes(id) ? selected.filter(canDrag) : [id];
         if (!selected.includes(id)) onselect([id]);
-        mode = { k: 'drag', id, ids, grab: mode.grab, ghost: { x: 0, y: 0 } };
+        const lead = leadOf?.(ids) ?? id, a = tokens.find((x) => x.id === id), b = tokens.find((x) => x.id === lead);
+        const grab = a && b ? { x: mode.grab.x - (b.x - a.x), y: mode.grab.y - (b.y - a.y) } : mode.grab; // the pointer holds the lead where it held the token
+        mode = { k: 'drag', id: lead, ids, grab, ghost: { x: 0, y: 0 }, route: [] };
         return move(e);
       }
       case 'drag': {
         const t = tokens.find((x) => x.id === (mode as { id: string }).id);
         if (!t) { mode = { k: 'none' }; break; }
-        const to = { x: w.x - mode.grab.x, y: w.y - mode.grab.y }, lim = limitOf?.(t.id), was = mode.ghost;
-        mode.ghost = lim?.clamp ? clampMove(grid, t, to, t.size, lim.budget, diagonal, lim.from) : snap(grid, to, t.size);
+        const to = { x: w.x - mode.grab.x, y: w.y - mode.grab.y }, lim = limitOf?.(t.id), was = mode.ghost, home = snap(grid, t, t.size);
+        let route = extendRoute(grid, home, mode.route, to, t.size); // squares skipped are filled in; back over the route cuts it
+        if (lim?.clamp) route = affordable(grid, home, route, lim.left, diagonal, lim.diags);
+        mode.route = route;
+        mode.ghost = route[route.length - 1] ?? home;
         if (mode.ghost.x !== was.x || mode.ghost.y !== was.y) ondrag?.(t.id, mode.ghost); // a live preview for whoever sees the token
         break;
       }
@@ -780,7 +844,7 @@
     if (m.k === 'press') onselect(m.shift ? (selected.includes(m.id) ? selected.filter((x) => x !== m.id) : [...selected, m.id]) : [m.id]);
     else if (m.k === 'drag') {
       const t = tokens.find((x) => x.id === m.id);
-      if (t && (t.x !== m.ghost.x || t.y !== m.ghost.y)) onmove(m.ids, m.id, m.ghost); // a single write per drop
+      if (t && m.route.length) onmove(m.ids, m.id, m.ghost, m.route); // a single write per drop
     } else if (m.k === 'box') {
       const ids = tokensInRect(scene(), m.a, m.b, dm);
       onselect(m.shift ? [...new Set([...selected, ...ids])] : ids);

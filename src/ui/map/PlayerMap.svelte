@@ -1,9 +1,9 @@
 <script lang="ts">
   // The players' live map. A joined campaign shows session.scene (as the DM last sent it) and lets the player drag their own token on
-  // their turn: the drop moves it here at once, then goes to the DM, whose next scene replaces it (a refusal snaps it back). On the
+  // their turn: the drop draws its route here and goes to the DM, whose next scene slides the token along it (a refusal just clears the route). On the
   // DM's device in Player view (R12) the same player scene is built locally, read-only.
   import { db } from '../../lib/db.ts';
-  import { feetBetween, snap, type Pt } from '../../lib/map/grid.ts';
+  import { feetBetween, type Pt } from '../../lib/map/grid.ts';
   import { untrack } from 'svelte';
   import { aimPlan, judge, type AimPlan } from '../../lib/combat/aiming.ts';
   import { targetingOn, type Pickable, type Toggle } from '../../lib/combat/targeting.ts';
@@ -14,7 +14,7 @@
   import { currentActor } from '../../lib/sync/project.ts';
   import { sceneForPlayers, type PlayerScene } from '../../lib/sync/scene.ts';
   import { clearDeclared, declareAction, sendDrag, sendEndTurn, sendLeap, sendUse, sendMove, session } from '../../lib/sync/session.svelte.ts';
-  import { budgetFeet, effectiveSpeed, moveSpeed, originOf, remainingFeet } from '../../lib/combat/movement.ts';
+  import { effectiveSpeed, moveSpeed, remainingFeet } from '../../lib/combat/movement.ts';
   import { pcActions, slotsLeft, type TurnAction } from '../../lib/combat/turnActions.ts';
   import { featureList } from '../../lib/character/play.ts';
   import type { Campaign, Character, Combatant, MonsterDef } from '../../lib/types.ts';
@@ -37,8 +37,8 @@
   let local: PlayerScene | undefined = $state.raw();
   let error = $state('');
   let selected: string[] = $state([]);
-  /** The optimistic drop, until the next scene from the DM. */
-  let pending: { of: PlayerScene; id: string; at: Pt } | undefined = $state.raw();
+  /** The dropped route, drawn as a line and ghost (the token itself stays put) until the next scene from the DM, when the token slides along it. */
+  let pending: { of: PlayerScene; id: string; route: Pt[] } | undefined = $state.raw();
   /** Final M3: a drop while offline snaps back (nothing is sent), and the status line says so until the next drop. */
   let unsent = $state(false);
 
@@ -54,8 +54,8 @@
   $effect(() => { void session.rev; void settings; reload().catch((e) => (error = e instanceof Error ? e.message : String(e))); });
 
   const base = $derived(joined ? session.scene : local);
-  const view = $derived(base && pending?.of === base
-    ? { ...base, tokens: base.tokens.map((t) => (t.id === pending!.id ? { ...t, ...pending!.at } : t)) } : base);
+  const view = $derived(base);
+  const plan = $derived(pending && pending.of === base ? { id: pending.id, route: pending.route } : undefined);
 
   const mine = (characterId: string | undefined) => {
     const c = characterId === undefined ? undefined : chars.find((x) => x.id === characterId);
@@ -74,7 +74,7 @@
     try {
       const speed = effectiveSpeed(moveSpeed(computeSheet(c, { settings, viewer: 'player' }).speed), c.state.conditions, c.state.exhaustion);
       const at = view.tokens.find((t) => t.characterId === c.id);
-      return { left: remainingFeet(speed, row.moved, at, view.grid, settings.diagonal), from: originOf(row.moved), budget: budgetFeet(speed, row.moved), dashes: row.moved?.dashes ?? 0 };
+      return { left: remainingFeet(speed, row.moved, at, view.grid, settings.diagonal), diags: row.moved?.diags ?? 0, dashes: row.moved?.dashes ?? 0 };
     } catch { return undefined; }
   };
   // Turn panel: in a fight, the player's character that is acting, else their next to act; a switcher when they have several there.
@@ -185,25 +185,25 @@
     preset = { shape: area.shape, feet: area.feet, ...(area.width && { width: area.width }), ...(area.self && t && { origin: { x: t.x, y: t.y } }), n: (preset?.n ?? 0) + 1 };
   };
   const turnBudget = $derived(myTurn && !(unsent && session.status !== 'online') ? budgetOf(actor) : undefined);
-  const limitOf = (id: string) => { const b = budgetOf(tokenOf(id)?.characterId); return b && { from: b.from, budget: b.budget, clamp: true }; };
+  const limitOf = (id: string) => { const b = budgetOf(tokenOf(id)?.characterId); return b && { left: b.left, diags: b.diags, clamp: true }; };
 
   const tokenOf = (id: string) => view?.tokens.find((t) => t.id === id);
   const canDrag = (id: string) => {
     const t = tokenOf(id);
-    return !!t && !!mine(t.characterId) && (settings.freeMovement || actor === t.characterId);
+    return !!t && !!mine(t.characterId) && (settings.freeMovement || actor === t.characterId) && plan?.id !== id; // not while its last move is on its way
   };
   const speedOf = (id: string) => {
     const c = mine(tokenOf(id)?.characterId);
     if (!c) return undefined;
     try { return moveSpeed(computeSheet(c, { settings, viewer: 'player' }).speed); } catch { return undefined; }
   };
-  const onmove = (_ids: string[], primary: string, to: Pt) => {
+  const onmove = (_ids: string[], primary: string, _to: Pt, route: Pt[]) => {
     const t = tokenOf(primary);
-    if (!base || !t || !canDrag(primary)) return;
+    if (!base || !t || !canDrag(primary) || !route.length) return;
     unsent = session.status !== 'online';
     if (unsent) return;
-    pending = { of: base, id: primary, at: snap(base.grid, to, t.size) };
-    sendMove(base.id, primary, to);
+    pending = { of: base, id: primary, route };
+    sendMove(base.id, primary, route[route.length - 1], route);
   };
 
   // Live drag previews from others (the DM, other players): the token drawn where it is being dragged.
@@ -246,6 +246,7 @@
         {canDrag}
         {speedOf}
         {limitOf}
+        {plan}
         onselect={(ids) => (selected = ids)}
         {onmove}
         rev={session.rev}

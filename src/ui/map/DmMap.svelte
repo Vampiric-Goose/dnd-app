@@ -12,7 +12,7 @@
   import { addTokensToCombat, dropTokens, editScene, joinFight, placeUnplaced, startFight, summon, tokenForCharacter, tokenForMonster } from '../../lib/map/store.ts';
   import { scaleSummon } from '../../lib/combat/summons.ts';
   import { currentRun, patchCombatant } from '../../lib/combat/combat.ts';
-  import { budgetApplies, budgetFeet, combatantForToken, effectiveSpeed, monsterSpeed, moveSpeed, originOf, stepsBetween } from '../../lib/combat/movement.ts';
+  import { budgetApplies, combatantForToken, effectiveSpeed, monsterSpeed, moveSpeed, remainingFeet, stepsBetween } from '../../lib/combat/movement.ts';
   import { editCharacter, settlePick, turn, undoResolution, updateCombat } from '../../lib/combat/store.ts';
   import { flowCtx } from '../../lib/combat/flowCtx.ts';
   import { guardCast, guardMove, isWalking, land, settle } from '../../lib/combat/reactionFlow.ts';
@@ -280,28 +280,33 @@
    * the reaction flow (asked at reach edges, charged) and the rest follow by where it ended, unguarded and free; anyone else's move is a plain
    * walk with its trail. A token already walking stays put. Entering a lasting area (Cloudkill) is noted, on anyone's turn.
    */
-  const onmove = (ids: string[], primary: string, to: Pt, route?: Pt[]) => run(async () => {
-    const tk = scene?.tokens.find((t) => t.id === primary);
-    if (!scene || !tk || isWalking(primary)) return;
-    const mover = combat ? combatantForToken(combat, tk) : undefined, others = ids.filter((id) => id !== primary && !isWalking(id));
-    const path = route?.length ? route : stepsBetween(scene.grid, tk, to, tk.size);
-    let move = (s: Scene) => walkTokens(s, [primary, ...others], primary, path);
-    if (mover && currentRun(combat!).has(mover.id)) {
-      const end = await guardMove(await flow(), primary, path), dx = end.x - tk.x, dy = end.y - tk.y;
-      move = (s) => { const o = s.tokens.find((t) => t.id === others[0]); return o && (dx || dy) ? moveTokens(s, others, o.id, { x: o.x + dx, y: o.y + dy }) : s; };
-    }
-    let walked: { t: Token; from: Pt }[] = [], after: Scene | undefined;
-    await editScene(scene.id, (s) => {
-      const out = (after = move(s));
-      walked = out.tokens.flatMap((t) => {
-        const o = s.tokens.find((x) => x.id === t.id);
-        return o && (o.x !== t.x || o.y !== t.y) ? [{ t, from: { x: o.x, y: o.y } }] : [];
+  /** The dropped route, drawn (line and ghost) on the map until the walk is over, so the drop never shows a gap. */
+  let plan: { id: string; route: Pt[] } | undefined = $state.raw();
+  const onmove = (ids: string[], primary: string, to: Pt, route?: Pt[]) => {
+    if (route?.length && !isWalking(primary)) plan = { id: primary, route };
+    return run(async () => {
+      const tk = scene?.tokens.find((t) => t.id === primary);
+      if (!scene || !tk || isWalking(primary)) return;
+      const mover = combat ? combatantForToken(combat, tk) : undefined, others = ids.filter((id) => id !== primary && !isWalking(id));
+      const path = route?.length ? route : stepsBetween(scene.grid, tk, to, tk.size);
+      let move = (s: Scene) => walkTokens(s, [primary, ...others], primary, path);
+      if (mover && currentRun(combat!).has(mover.id)) {
+        const end = await guardMove(await flow(), primary, path), dx = end.x - tk.x, dy = end.y - tk.y;
+        move = (s) => { const o = s.tokens.find((t) => t.id === others[0]); return o && (dx || dy) ? moveTokens(s, others, o.id, { x: o.x + dx, y: o.y + dy }) : s; };
+      }
+      let walked: { t: Token; from: Pt }[] = [], after: Scene | undefined;
+      await editScene(scene.id, (s) => {
+        const out = (after = move(s));
+        walked = out.tokens.flatMap((t) => {
+          const o = s.tokens.find((x) => x.id === t.id);
+          return o && (o.x !== t.x || o.y !== t.y) ? [{ t, from: { x: o.x, y: o.y } }] : [];
+        });
+        return out;
       });
-      return out;
-    });
-    if (walked.length && combat) await updateCombat(cid, (c) => (after ? noteEntries(c, after, walked) : c));
-    await reload();
-  });
+      if (walked.length && combat) await updateCombat(cid, (c) => (after ? noteEntries(c, after, walked) : c));
+      await reload();
+    }).finally(() => (plan = undefined));
+  };
   /** Speed after conditions, as the host's check counts it: a PC's player-view walk, a monster's stat block. */
   const speedFor = (x: Combatant): number | undefined => {
     const ch = x.characterId ? chars.find((c) => c.id === x.characterId) : undefined;
@@ -314,8 +319,10 @@
     const t = scene?.tokens.find((x) => x.id === id), x = t && combat && budgetApplies(combat, settings) ? combatantForToken(combat, t) : undefined;
     const speed = x && turnIds.has(x.id) ? speedFor(x) : undefined;
     const m = speed === undefined ? undefined : combat!.movement?.[x!.id];
-    return speed === undefined ? undefined : { from: originOf(m), budget: budgetFeet(speed, m), clamp: false };
+    return speed === undefined ? undefined : { left: remainingFeet(speed, m, t, scene!.grid, settings.diagonal), diags: m?.diags ?? 0, clamp: false };
   };
+  /** Of a dragged group, the creature whose turn it is: it walks the route and pays; the rest shift by its offset. */
+  const leadOf = (ids: string[]) => combat ? ids.find((id) => { const t = scene?.tokens.find((k) => k.id === id), x = t && combatantForToken(combat!, t); return !!x && turnIds.has(x.id); }) : undefined;
   /** One stroke, rectangle or Reveal all / Hide all: one write, painted onto the fresh record's fog. */
   const onfog = (e: FogEdit) => edit((s) => ({ ...s, fog: paintFog(s.fog, s.width, s.height, e) }));
   const speedOf = (id: string) => {
@@ -552,9 +559,11 @@
         dm={true}
         diagonal={settings.diagonal}
         {selected}
-        canDrag={() => true}
+        canDrag={(id) => !isWalking(id)}
         {speedOf}
         {limitOf}
+        {leadOf}
+        {plan}
         onselect={(ids) => (selected = ids)}
         {onmove}
         fog={settings.fog ? scene.fog ?? encodeFog(newFog(scene.width, scene.height, false)) : undefined}

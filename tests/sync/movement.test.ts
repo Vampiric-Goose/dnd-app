@@ -110,6 +110,15 @@ describe('engine', () => {
     expect(d.errors).toEqual([]);
   });
 
+  test('guest.sendMove with a route sends it with x/y exactly its last square: the host walks it (a trail), no violation', async () => {
+    const { d, host, a } = await joined();
+    a.guest.sendMove('s1', 't-thorin', cell(2, 0), [cell(1, 1), cell(2, 0)]); // a bend, not the straight line
+    await settle(host, a.guest);
+    expect(at(d)).toEqual(cell(2, 0));
+    expect(d.scene!.tokens[0].trail).toEqual([cell(1, 1), cell(2, 0)]);
+    expect(d.errors).toEqual([]);
+  });
+
   async function owner(combat?: Combat) {
     const { d, host } = setup(combat), raw = rawLink();
     host.accept(raw.link);

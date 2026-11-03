@@ -288,15 +288,17 @@ export class Guest {
   }
 
   /** Stage 5: the player's own token, dropped at `to` (kept inside the scene), sent only while online. The DM checks the turn. */
-  sendMove(sceneId: string, tokenId: string, to: Pt): void {
+  sendMove(sceneId: string, tokenId: string, to: Pt, path?: Pt[]): void {
     if (!Number.isFinite(to.x) || !Number.isFinite(to.y)) return;
     void this.#task(async () => {
       const s = this.#scene, t = s?.id === sceneId ? s.tokens.find((x) => x.id === tokenId) : undefined;
       if (this.#status !== 'online' || !s || !t?.characterId) return;
       const c = await this.#deps.loadCharacter(t.characterId);
       if (!c || c.campaignId !== this.#campaignId || c.ownerId !== this.#playerId) return;
-      const x = Math.min(Math.max(to.x, 0), s.width), y = Math.min(Math.max(to.y, 0), s.height);
-      this.#send({ t: 'move', sceneId, tokenId, x, y });
+      // with a route, x/y are its last square exactly (the DM rejects a route that ends elsewhere); a route past the protocol's 200 points is dropped (the DM walks straight)
+      const walk = path?.length && path.length <= 200 && path.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y)) ? path.map((p) => ({ x: p.x, y: p.y })) : undefined;
+      const last = walk?.[walk.length - 1], x = last ? last.x : Math.min(Math.max(to.x, 0), s.width), y = last ? last.y : Math.min(Math.max(to.y, 0), s.height);
+      this.#send({ t: 'move', sceneId, tokenId, x, y, ...(walk && { path: walk }) });
     });
   }
 
