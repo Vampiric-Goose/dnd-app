@@ -284,6 +284,7 @@ export function applyUse(k: Combat, x: Combatant, a: TurnAction, perAction = 1, 
   if (OBJECT.includes(a.id)) y = mark({ object: true });
   if (a.id === 'std:ready') y = mark({ readied: true });
   if (a.id === 'std:dodge') y = mark({ dodging: true }); // attacks against it have disadvantage until its next turn
+  if (a.id === 'std:disengage' || a.id === 'cunning:disengage') y = mark({ disengaging: true }); // its movement this turn provokes no Opportunity Attacks
   if (a.spell && !a.again && a.cost === 'bonus') y = mark({ bonusSpell: true }); // using a held spell again isn't casting one
   if (a.spell && !a.again && !(a.cost === 'action' && a.spell.level === 0)) y = mark({ leveledSpell: true });
   if (a.spend) y = { ...y, spellsUsed: { ...y.spellsUsed, [a.spend]: (y.spellsUsed?.[a.spend] ?? 0) + 1 } };
