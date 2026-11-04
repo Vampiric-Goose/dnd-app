@@ -14,7 +14,7 @@
   import { computeSheet } from '../../lib/rules/sheet.ts';
   import { currentActor } from '../../lib/sync/project.ts';
   import { sceneForPlayers, type PlayerScene } from '../../lib/sync/scene.ts';
-  import { clearDeclared, declareAction, sendDrag, sendEndTurn, sendLeap, sendUse, sendMove, session } from '../../lib/sync/session.svelte.ts';
+  import { clearDeclared, declareAction, sendDoor, sendDrag, sendEndTurn, sendLeap, sendUse, sendMove, session } from '../../lib/sync/session.svelte.ts';
   import { effectiveSpeed, moveSpeed, remainingFeet } from '../../lib/combat/movement.ts';
   import { pcActions, slotsLeft, type TurnAction } from '../../lib/combat/turnActions.ts';
   import { featureList } from '../../lib/character/play.ts';
@@ -245,6 +245,8 @@
         tokens={view.tokens}
         ghosts={session.drags}
         fog={view.fog}
+        walls={view.walls ?? []}
+        ondoor={(id) => sendDoor(view.id, id)}
         dm={false}
         diagonal={settings.diagonal}
         {selected}

@@ -211,6 +211,16 @@ test('cleanScene', () => {
   expect('fog' in cleanScene(base)!).toBe(false);
 });
 
+test('the parse: a door toggle', () => {
+  expect(parseGuestMessage({ t: 'door', sceneId: 's1', wallId: 'd1' })).toEqual({ t: 'door', sceneId: 's1', wallId: 'd1' });
+  expect(parseGuestMessage({ t: 'door', sceneId: 's1' })).toEqual({ error: 'bad door' });
+});
+
+test('cleanScene keeps well-formed walls and drops bad ones', () => {
+  const v = { id: 's1', name: 'S', width: 700, height: 700, grid: { ...DEFAULT_GRID }, tokens: [], walls: [{ id: 'd1', a: { x: 0, y: 0 }, b: { x: 70, y: 0 }, kind: 'door', open: true }, { id: 'x', a: { x: 0 }, b: { x: 1, y: 1 }, kind: 'wall' }, { id: 'y', a: { x: 0, y: 0 }, b: { x: 1, y: 1 }, kind: 'moat' }] };
+  expect(cleanScene(v)?.walls).toEqual([{ id: 'd1', a: { x: 0, y: 0 }, b: { x: 70, y: 0 }, kind: 'door', open: true }]);
+});
+
 test('the parse: move and blobWant shapes', () => {
   expect(parseGuestMessage({ t: 'move', sceneId: 's1', tokenId: 't', x: 1, y: 2, extra: 1 })).toEqual({ t: 'move', sceneId: 's1', tokenId: 't', x: 1, y: 2 });
   for (const bad of [{ x: '5' }, { x: Infinity }, { x: -1 }, { x: 8193 }, { tokenId: 'x'.repeat(101) }, { sceneId: 3 }]) {
@@ -238,6 +248,31 @@ describe('engine', () => {
   const scenes = (down: string[]) => down.filter((m) => JSON.parse(m).t === 'scene');
   const chunks = (down: string[]) => down.filter((m) => JSON.parse(m).t === 'blobChunk');
   const thorinAt = (d: Device) => d.scene!.tokens.find((t) => t.id === 't-thorin')!;
+
+  // doors (map/walls.ts): a player opens or closes one beside their own token; the DM's device checks
+  const door = { id: 'd1', a: { x: 70, y: 0 }, b: { x: 70, y: 70 }, kind: 'door' as const };
+  test('a player toggles a door beside their token; one far away is refused and stays shut', async () => {
+    const far = { id: 'd2', a: { x: 490, y: 0 }, b: { x: 490, y: 70 }, kind: 'door' as const };
+    const { d, host } = setup(scene({ walls: [door, far, { id: 'w', a: { x: 0, y: 140 }, b: { x: 70, y: 140 }, kind: 'wall' }] }));
+    const a = player('A1');
+    connect(host, a.guest);
+    await settle(host, a.guest);
+    expect(a.views.at(-1)?.walls?.map((w) => w.id)).toEqual(['d1', 'd2', 'w']); // players get the walls (their canvas draws doors only)
+    a.guest.sendDoor('s1', 'd1');
+    a.guest.sendDoor('s1', 'd2');
+    await settle(host, a.guest);
+    expect(d.scene!.walls!.map((w) => w.open)).toEqual([true, undefined, undefined]);
+    expect(a.views.at(-1)?.walls?.[0].open).toBe(true);
+  });
+  test('another player’s token beside the door does not let this player open it', async () => {
+    const { d, host } = setup(scene({ walls: [door] }));
+    const b = player('A2');
+    connect(host, b.guest);
+    await settle(host, b.guest);
+    b.guest.sendDoor('s1', 'd1');
+    await settle(host, b.guest);
+    expect(d.scene!.walls![0].open).toBeUndefined();
+  });
 
   // a player walking their own token into a lasting area (Cloudkill) is noted on the DM's device, like a DM drag
   test('a player’s move into a lasting area is noted as entering it', async () => {

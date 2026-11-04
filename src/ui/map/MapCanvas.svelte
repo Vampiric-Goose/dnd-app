@@ -1,5 +1,5 @@
 <script module lang="ts">
-  import { clipRoute } from '../../lib/map/walls.ts';
+  import { clipRoute, type Wall, type WallKind } from '../../lib/map/walls.ts';
   import type { Token } from '../../lib/types.ts';
   export type CanvasToken = Pick<Token, 'id' | 'name' | 'x' | 'y' | 'size' | 'color' | 'portrait' | 'hidden' | 'trail'> & { monsterId?: string; hp?: number; maxHp?: number; conditions?: string[]; health?: string };
 </script>
@@ -34,7 +34,7 @@
   // arrow (bindable): the arrow picked with the Select tool (a tap on its line or head); onclear: Delete / Backspace with a clearable one picked.
   // ondelete: Delete / Backspace with tokens selected (unset = the key does nothing, as for players).
   // ondrag: the dragged token's ghost moved to a new cell (`at` undefined: the drag ended).
-  let { width, height, image, grid, tokens, dm, diagonal, selected, canDrag, speedOf, limitOf, leadOf, plan, ghosts = {}, onselect, onmove, rev = 0, fog, fogStyle = dm ? 'shade' : 'black', onfog, corner, arrows = [], ondeclare, onclear, ondelete, arrow = $bindable(), ondrag, preset, aim, areas = [] }: {
+  let { width, height, image, grid, tokens, dm, diagonal, selected, canDrag, speedOf, limitOf, leadOf, plan, ghosts = {}, onselect, onmove, rev = 0, fog, fogStyle = dm ? 'shade' : 'black', onfog, corner, arrows = [], ondeclare, onclear, ondelete, arrow = $bindable(), ondrag, preset, aim, areas = [], walls = [], onwalls, ondoor }: {
     width: number; height: number; image?: string; grid: Grid; tokens: CanvasToken[]; dm: boolean; diagonal: '5-5-5' | '5-10-5'; selected: string[];
     canDrag: (id: string) => boolean; speedOf?: (id: string) => number | undefined; limitOf?: (id: string) => { left: number; diags: number; clamp: boolean } | undefined;
     leadOf?: (ids: string[]) => string | undefined; plan?: { id: string; route: Pt[] }; ghosts?: Record<string, Pt>;
@@ -56,12 +56,20 @@
       /** the area is where tokens will land (the library's Place), not a spell's: no "In the area" line */ footprint?: true };
     /** Spell areas cast on this scene, drawn for everyone under the tokens. */
     areas?: Template[];
+    /** The scene's walls (map/walls.ts): the DM sees every piece, players doors only; they stop a drag. `onwalls`: the DM's Walls tool saves the list. */
+    walls?: Wall[]; onwalls?: (walls: Wall[]) => void;
+    /** A tap on a door with the Select tool (the DM toggles it; a player asks the DM's device to). */
+    ondoor?: (id: string) => void;
   } = $props();
   // One selection at a time: picking tokens drops the arrow; an arrow that went (cleared, turn ended) is no longer picked.
   $effect(() => { if (selected.length || (arrow !== undefined && !arrows.some((a) => a.id === arrow))) untrack(() => (arrow = undefined)); });
 
-  let tool: 'select' | 'ruler' | 'fog' | 'template' = $state('select');
+  let tool: 'select' | 'ruler' | 'fog' | 'template' | 'walls' = $state('select');
   $effect(() => { if (!onfog && tool === 'fog') tool = 'select'; });
+  $effect(() => { if (!onwalls && tool === 'walls') tool = 'select'; });
+  // Walls tool: the kind it draws, or Erase
+  let wallKind: WallKind | 'erase' = $state('wall');
+  const WALL_KINDS: [WallKind | 'erase', string][] = [['wall', 'Wall'], ['low', 'Low wall'], ['slit', 'Arrow slit'], ['door', 'Door'], ['erase', 'Erase']];
 
   // Fog tools
   let fogTool = $state<'brush' | 'rect'>('brush');
@@ -148,7 +156,8 @@
     | { k: 'brush'; points: Pt[] }
     | { k: 'fogRect'; a: Pt; b: Pt }
     | { k: 'template' }
-    | { k: 'arrow'; a: Pt; b: Pt; fromToken?: string };
+    | { k: 'arrow'; a: Pt; b: Pt; fromToken?: string }
+    | { k: 'wall'; a: Pt; b: Pt };
   let mode: Mode = { k: 'none' };
   /** Touch: the long-press timer that turns a still press or pan into an arrow. */
   let hold: ReturnType<typeof setTimeout> | undefined, boxHold: ReturnType<typeof setTimeout> | undefined;
@@ -196,6 +205,25 @@
   let hover: string | undefined;
 
   const scene = () => ({ grid, tokens }) as unknown as Scene; // tokenAt and tokensInRect read only these two
+  const DOOR = '#c98b3a';
+  /** The piece within `tol` world px of p (`door`: closed or open doors only, as players see them), the nearest. */
+  function wallAt(p: Pt, tol: number, door = false): Wall | undefined {
+    let best: Wall | undefined, bestD = tol;
+    for (const w of walls) {
+      if ((door || !dm) && w.kind !== 'door') continue;
+      const dx = w.b.x - w.a.x, dy = w.b.y - w.a.y, len = dx * dx + dy * dy, k = len ? Math.max(0, Math.min(1, ((p.x - w.a.x) * dx + (p.y - w.a.y) * dy) / len)) : 0;
+      const d = Math.hypot(p.x - (w.a.x + k * dx), p.y - (w.a.y + k * dy));
+      if (d <= bestD) { best = w; bestD = d; }
+    }
+    return best;
+  }
+  /** Where a drawn wall ends: an existing end within 10 screen px, else the nearest grid corner (a hex grid: where the pointer is). */
+  function snapEnd(p: Pt): Pt {
+    const tol = 10 / view.scale, end = walls.flatMap((w) => [w.a, w.b]).find((q) => Math.hypot(q.x - p.x, q.y - p.y) <= tol);
+    if (end) return { x: end.x, y: end.y };
+    if (grid.type !== 'square') return p;
+    return { x: Math.round((p.x - grid.offsetX) / grid.size) * grid.size + grid.offsetX, y: Math.round((p.y - grid.offsetY) / grid.size) * grid.size + grid.offsetY };
+  }
 
   function schedule() {
     if (dirty) return;
@@ -222,7 +250,7 @@
   }
 
   // Redraw on any prop change; refit when the scene's sides or image change; reload images when rev bumps.
-  $effect(() => { void [width, height, image, grid, tokens, selected, dm, arrows, arrow, plan, ghosts]; untrack(schedule); });
+  $effect(() => { void [width, height, image, grid, tokens, selected, dm, arrows, arrow, plan, ghosts, walls]; untrack(schedule); });
 
   // Sliding: a token seen before whose position changed is drawn walking to it (from where it is drawn now, if it was already sliding).
   // One that was not there before just appears.
@@ -350,6 +378,20 @@
       ctx.stroke();
       ctx.restore();
     }
+
+    // walls (the DM: every piece; players: doors only), and the one being drawn
+    ctx.save();
+    ctx.lineCap = 'round';
+    const seg = (a: Pt, b: Pt, color: string, width: number, dash: number[] = []) => {
+      ctx.strokeStyle = color; ctx.lineWidth = width * px; ctx.setLineDash(dash.map((d) => d * px));
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    };
+    for (const w of walls) {
+      if (w.kind === 'door') seg(w.a, w.b, DOOR, w.open ? 2 : 6, w.open ? [6, 5] : []);
+      else if (dm) seg(w.a, w.b, pal.strong, w.kind === 'wall' ? 5 : 4, w.kind === 'low' ? [10, 7] : w.kind === 'slit' ? [2, 7] : []);
+    }
+    if (mode.k === 'wall') seg(mode.a, mode.b, accent, 4, [8, 6]);
+    ctx.restore();
 
     // tokens (a dragged group drawn at the ghost's offset)
     const sel = new Set(selected);
@@ -749,6 +791,13 @@
       schedule();
       return;
     }
+    if (tool === 'walls' && onwalls) {
+      if (wallKind === 'erase') { const hit = wallAt(w, 10 / view.scale); if (hit) onwalls(walls.filter((x) => x !== hit)); mode = { k: 'none' }; return; }
+      const a = e.altKey ? w : snapEnd(w);
+      mode = { k: 'wall', a, b: a };
+      schedule();
+      return;
+    }
     if (tool === 'template') { // the origin on the centre of the cell under the pointer, as a Medium token stands (square and hex)
       const o = snap(grid, w, 'M');
       tplAt = { origin: o, aim: { x: o.x + 1, y: o.y } };
@@ -756,6 +805,8 @@
       return;
     }
     const hit = tool === 'select' ? tokenAt(scene(), w, dm) : undefined;
+    const door = !hit && tool === 'select' && ondoor ? wallAt(w, (e.pointerType === 'mouse' ? 8 : 16) / view.scale, true) : undefined;
+    if (door) { ondoor!(door.id); mode = { k: 'none' }; return; } // a token wins; else a tap on a door opens or closes it
     if (hit) mode = { k: 'press', from: p, id: hit.id, grab: { x: w.x - hit.x, y: w.y - hit.y }, shift };
     else if (e.shiftKey && e.pointerType === 'mouse') mode = { k: 'box', a: w, b: w, shift }; // Shift-drag on empty map: box select (keyboard and mouse only)
     // Select tool, no token under the pointer (a token wins): a press on an arrow's line or head picks it if it stays a tap
@@ -805,7 +856,7 @@
         if (!t) { mode = { k: 'none' }; break; }
         const to = { x: w.x - mode.grab.x, y: w.y - mode.grab.y }, lim = limitOf?.(t.id), was = mode.ghost, home = snap(grid, t, t.size);
         let route = extendRoute(grid, home, mode.route, to, t.size); // squares skipped are filled in; back over the route cuts it
-        if (!(dm && e.altKey)) route = clipRoute(scene().walls, home, route); // a wall stops it (the DM's Alt-drag goes through)
+        if (!(dm && e.altKey)) route = clipRoute(walls, home, route); // a wall stops it (the DM's Alt-drag goes through)
         if (lim?.clamp) route = affordable(grid, home, route, lim.left, diagonal, lim.diags);
         mode.route = route;
         mode.ghost = route[route.length - 1] ?? home;
@@ -815,6 +866,9 @@
       case 'pan':
         if (Math.hypot(p.x - mode.from.x, p.y - mode.from.y) >= 4) mode.moved = true;
         view = { ...mode.view0, x: mode.view0.x + p.x - mode.from.x, y: mode.view0.y + p.y - mode.from.y };
+        break;
+      case 'wall':
+        mode.b = e.altKey ? w : snapEnd(w);
         break;
       case 'box':
         if (mode.two) { const [a1, b1] = [...pointers.values()]; if (a1 && b1) { mode.a = toWorld(view, a1); mode.b = toWorld(view, b1); } }
@@ -863,6 +917,9 @@
     else if (m.k === 'drag') {
       const t = tokens.find((x) => x.id === m.id);
       if (t && m.route.length) onmove(m.ids, m.id, m.ghost, m.route); // a single write per drop
+    } else if (m.k === 'wall') {
+      if ((m.a.x !== m.b.x || m.a.y !== m.b.y) && wallKind !== 'erase')
+        onwalls?.([...walls, { id: crypto.randomUUID(), a: m.a, b: m.b, kind: wallKind, ...(wallKind === 'door' && { open: false }) }]);
     } else if (m.k === 'box') {
       const ids = tokensInRect(scene(), m.a, m.b, dm);
       onselect(m.shift ? [...new Set([...selected, ...ids])] : ids);
@@ -916,11 +973,17 @@
         <button type="button" aria-pressed={tool === 'ruler'} onclick={() => (tool = 'ruler')}>Ruler</button>
         <button type="button" aria-pressed={tool === 'template'} onclick={() => (tool = 'template')}>Template</button>
         {#if onfog}<button type="button" aria-pressed={tool === 'fog'} onclick={() => (tool = 'fog')}>Fog</button>{/if}
+        {#if onwalls}<button type="button" aria-pressed={tool === 'walls'} onclick={() => (tool = 'walls')}>Walls</button>{/if}
       </div>
       {#if corner}<div class="corner">{@render corner()}</div>{/if}
     </div>
 
-    {#if tool === 'ruler'}
+    {#if tool === 'walls' && onwalls}
+      <div class="strip" role="group" aria-label="Walls">
+        <span class="seg">{#each WALL_KINDS as [k, label] (k)}<button type="button" aria-pressed={wallKind === k} onclick={() => (wallKind = k)}>{label}</button>{/each}</span>
+        <span class="hint">{wallKind === 'erase' ? 'Tap a piece to remove it' : 'Drag to draw · ends snap to grid corners (Alt: free)'}</span>
+      </div>
+    {:else if tool === 'ruler'}
       <div class="strip"><span class="hint">Drag to measure · tap again to clear</span></div>
     {:else if tool === 'fog' && onfog}
       <div class="strip" role="group" aria-label="Fog">

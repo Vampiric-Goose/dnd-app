@@ -459,6 +459,9 @@ function preview(p: Preview): void {
 /** At most 10 previews a second from this device (the latest position goes out once the wait is over); the end goes at once. */
 let dragSent = 0, dragWait: ReturnType<typeof setTimeout> | undefined;
 /** This device drags a token on `sceneId` (`at` undefined: the drag ended): who can see it watches it move. Player: their own token; DM: any (the host shows it to players who see it). */
+/** A player's tap on a door: the DM's device opens or closes it when one of their tokens stands beside it. */
+export function sendDoor(sceneId: string, wallId: string): void { run?.guest?.sendDoor(sceneId, wallId); }
+
 export function sendDrag(sceneId: string, tokenId: string, at?: Pt): void {
   const r = run;
   if (!r) return;

@@ -305,6 +305,11 @@ export class Guest {
   }
 
   /** A live drag preview of the player's own token (`at` undefined: the drag ended), sent only while online. The DM checks it like a move. */
+  /** Opens or closes a door (the DM's device checks one of this player's tokens stands beside it). */
+  sendDoor(sceneId: string, wallId: string): void {
+    if (this.#status === 'online') this.#send({ t: 'door', sceneId, wallId });
+  }
+
   sendDrag(sceneId: string, tokenId: string, at?: Pt): void {
     const s = this.#scene;
     if (this.#status !== 'online' || s?.id !== sceneId) return;

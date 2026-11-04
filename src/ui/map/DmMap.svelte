@@ -9,6 +9,7 @@
   import { snap, type Pt } from '../../lib/map/grid.ts';
   import { addTokens, liveHp, MAX_IMAGE, MAX_SIDE, MAX_TOKENS, moveTokens, newScene, patchToken, regrid, resizeScene, tokenColor, walkTokens, type NewToken } from '../../lib/map/scene.ts';
   import { arrowsOn } from '../../lib/map/actions.ts';
+  import { toggleDoor } from '../../lib/map/walls.ts';
   import { addTokensToCombat, dropTokens, editScene, joinFight, placeUnplaced, startFight, summon, tokenForCharacter, tokenForMonster } from '../../lib/map/store.ts';
   import { scaleSummon } from '../../lib/combat/summons.ts';
   import { currentRun, patchCombatant } from '../../lib/combat/combat.ts';
@@ -600,6 +601,9 @@
         {onmove}
         fog={settings.fog ? scene.fog ?? encodeFog(newFog(scene.width, scene.height, false)) : undefined}
         onfog={settings.fog ? onfog : undefined}
+        walls={scene.walls ?? []}
+        onwalls={(walls) => edit((s) => ({ ...s, walls }))}
+        ondoor={(id) => edit((s) => toggleDoor(s, id))}
         {corner}
         {arrows}
         ondeclare={scene.shown ? ondeclare : undefined}

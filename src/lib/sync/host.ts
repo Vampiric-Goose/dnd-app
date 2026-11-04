@@ -28,6 +28,7 @@ import { canon, latestClock, mergeCharacter, type Synced } from './merge.ts';
 import { campaignForPlayers, characterForPlayer, currentActor, playerPack, promptsFor, rosterEntry, trackerForPlayers, unprojectCharacter, type TrackerView } from './project.ts';
 import { uid } from '../uid.ts';
 import { BLOB_CHUNK, cleanRoll, cuts, IMAGE_TYPES, LOW_WATER, MAX_BLOB, MAX_CHUNK, MAX_MESSAGE, MAX_PACK, parseGuestMessage, size, type GuestMsg, type HostMsg, type PackOffer, type Preview } from './protocol.ts';
+import { nearDoor, toggleDoor } from '../map/walls.ts';
 import { moveCost, moveProblem, moveRoute, playerTokens, previewVisible, sceneBlobs, sceneForPlayers, type PlayerScene } from './scene.ts';
 
 export interface HostDeps {
@@ -307,6 +308,7 @@ export class Host {
       case 'packWant': return this.#packWant(c, msg.ids);
       case 'initiative': return this.#initiative(c, c.playerId, msg.characterId, msg.total);
       case 'move': return this.#move(c, c.playerId, msg);
+      case 'door': return this.#door(c, c.playerId, msg);
       case 'blobWant': return this.#blobWant(c, msg.hashes);
       case 'use': return this.#use(c, c.playerId, msg);
       case 'save': return this.#save(c, c.playerId, msg);
@@ -858,6 +860,20 @@ export class Host {
   async #sceneIfLinked(camp: Campaign, ids: string[]): Promise<void> {
     const s = await this.#deps.loadScene?.();
     if (s?.tokens.some((t) => t.characterId !== undefined && ids.includes(t.characterId))) await this.#sendScene(camp);
+  }
+
+  /** A player's door toggle: on the shown scene, a door, and one of their visible tokens beside it (map/walls.ts nearDoor); else refused. */
+  async #door(c: Conn, pid: string, m: { sceneId: string; wallId: string }): Promise<void> {
+    const camp = await this.#deps.loadCampaign(), s = await this.#deps.loadScene?.();
+    if (!camp || !s?.shown || s.id !== m.sceneId || !this.#deps.updateScene) return;
+    const d = s.walls?.find((w) => w.id === m.wallId && w.kind === 'door');
+    if (!d) return;
+    const mine = new Set((await this.#deps.loadCharacters()).filter((ch) => ch.ownerId === pid && ch.campaignId === camp.id).map((ch) => ch.id));
+    if (!s.tokens.some((t) => t.characterId !== undefined && mine.has(t.characterId) && !t.hidden && nearDoor(s.grid, d, t))) {
+      return this.#send(c, { t: 'useRefused', reason: 'stand beside the door to open or close it' });
+    }
+    await this.#deps.updateScene(m.sceneId, (x) => toggleDoor(x, m.wallId));
+    await this.#sendScene(camp);
   }
 
   /** Review Focus 2: shape (parse), then moveProblem: a crafted move is a violation; a stale one re-sends the scene to that link only. */

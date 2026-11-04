@@ -53,7 +53,8 @@ export type GuestMsg =
   | { t: 'action'; action: ActionRequest /* declared action: the player's arrow (replaces their last) */ }
   | { t: 'clearAction' /* the player's arrow goes */ }
   | { t: 'drag'; sceneId: string; tokenId: string; x: number; y: number /* live drag preview of the player's own token (never stored) */ }
-  | { t: 'dragEnd'; sceneId: string; tokenId: string /* that drag ended */ };
+  | { t: 'dragEnd'; sceneId: string; tokenId: string /* that drag ended */ }
+  | { t: 'door'; sceneId: string; wallId: string /* open or close a door beside one of the player's tokens */ };
 
 import type { Aim, UseOutcome } from '../combat/aiming.ts';
 export type { Aim, UseOutcome };
@@ -221,6 +222,8 @@ export function parseGuestMessage(raw: unknown): GuestMsg | { error: string } {
     }
     case 'dragEnd':
       return str(raw.sceneId, 100) && str(raw.tokenId, 100) ? { t: 'dragEnd', sceneId: raw.sceneId, tokenId: raw.tokenId } : { error: 'bad dragEnd' };
+    case 'door':
+      return str(raw.sceneId, 100) && str(raw.wallId, 100) ? { t: 'door', sceneId: raw.sceneId, wallId: raw.wallId } : { error: 'bad door' };
     default:
       return { error: 'unknown message' };
   }

@@ -15,7 +15,8 @@ import { HASH } from './protocol.ts';
 export interface PlayerToken { id: string; name: string; x: number; y: number; size: Size; color: string; portrait?: string; characterId?: string; conditions: string[]; health?: HealthStatus;
   /** The squares it walked to get here (Token.trail), when none of them is fogged. */ trail?: Pt[] }
 export interface PlayerScene { id: string; name: string; image?: string; width: number; height: number; grid: Grid; fog?: string /* C */; tokens: PlayerToken[];
-  /** Spell areas cast on this scene (areasOn): everyone sees them. */ areas?: Area[] }
+  /** Spell areas cast on this scene (areasOn): everyone sees them. */ areas?: Area[];
+  /** Its walls and doors (map/walls.ts): a player's canvas draws the doors and stops a drag at a wall. */ walls?: Wall[] }
 
 const gridOf = (g: Grid): Grid => ({ type: g.type, size: g.size, offsetX: g.offsetX, offsetY: g.offsetY, color: g.color, opacity: g.opacity, feet: g.feet });
 
@@ -48,7 +49,8 @@ export function sceneForPlayers(s: Scene | undefined, characters: Character[], c
     tokens.push({ ...base, conditions: [...live.conditions], ...(health && { health }) });
   }
   const areas = areasOn(combat, s);
-  const v: PlayerScene = { id: s.id, name: s.name, ...(s.image !== undefined && { image: s.image }), width: s.width, height: s.height, grid: gridOf(s.grid), tokens, ...(areas.length && { areas }) };
+  const v: PlayerScene = { id: s.id, name: s.name, ...(s.image !== undefined && { image: s.image }), width: s.width, height: s.height, grid: gridOf(s.grid), tokens, ...(areas.length && { areas }),
+    ...(s.walls?.length && { walls: s.walls.map((w) => ({ id: w.id, a: { x: w.a.x, y: w.a.y }, b: { x: w.b.x, y: w.b.y }, kind: w.kind, ...(w.open !== undefined && { open: w.open }) })) }) };
   return settings.fog ? applyFog(v, s) : v; // C2: no token whose centre is fogged; the fog (or all fogged) goes along
 }
 
@@ -138,6 +140,8 @@ export function cleanScene(v: unknown): PlayerScene | undefined {
   const areas = (Array.isArray(v.areas) ? v.areas : []).slice(0, 20).flatMap((a): Area[] => isRec(a) && AREA_SHAPES.includes(a.shape as string) && pt(a.origin) && pt(a.aim)
     && fin(a.feet) && (a.feet as number) > 0 && (a.feet as number) <= 1000 && (a.width === undefined || (fin(a.width) && (a.width as number) > 0 && (a.width as number) <= 100))
     ? [{ shape: a.shape as Area['shape'], origin: { x: a.origin.x, y: a.origin.y }, aim: { x: a.aim.x, y: a.aim.y }, feet: a.feet as number, ...(a.width !== undefined && { width: a.width as number }) }] : []);
+  const walls = (Array.isArray(v.walls) ? v.walls : []).slice(0, 2000).flatMap((x): Wall[] => isRec(x) && str(x.id, 100) && pt(x.a) && pt(x.b) && ['wall', 'low', 'slit', 'door'].includes(x.kind as string)
+    ? [{ id: x.id, a: { x: x.a.x, y: x.a.y }, b: { x: x.b.x, y: x.b.y }, kind: x.kind as Wall['kind'], ...(typeof x.open === 'boolean' && { open: x.open }) }] : []);
   return { id: v.id, name: v.name, ...(typeof v.image === 'string' && HASH.test(v.image) && { image: v.image }), width: w, height: h,
-    grid: gridOf(v.grid as Grid), ...(fog !== undefined && { fog }), tokens, ...(areas.length && { areas }) };
+    grid: gridOf(v.grid as Grid), ...(fog !== undefined && { fog }), tokens, ...(areas.length && { areas }), ...(walls.length && { walls }) };
 }
