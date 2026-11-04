@@ -25,8 +25,13 @@ function cross(p: Pt, q: Pt, a: Pt, b: Pt, touch: boolean): boolean {
   return (o1 === 0 && within(a, p, q)) || (o2 === 0 && within(b, p, q)) || (o3 === 0 && within(p, a, b)) || (o4 === 0 && within(q, a, b));
 }
 
-/** The line from p to q passes a wall or a closed door. */
-export const lineBlocked = (walls: readonly Wall[], p: Pt, q: Pt): boolean => walls.some((w) => sight(w) && cross(p, q, w.a, w.b, false));
+/** The line from p to q passes a wall or a closed door, or slips through a corner where two of them meet (a room's corner). */
+export function lineBlocked(walls: readonly Wall[], p: Pt, q: Pt): boolean {
+  const solid = walls.filter(sight);
+  if (solid.some((w) => cross(p, q, w.a, w.b, false))) return true;
+  const ends = solid.flatMap((w) => [w.a, w.b]), same = (a: Pt, b: Pt) => a.x === b.x && a.y === b.y;
+  return ends.some((c, i) => ends.some((d, j) => j !== i && same(c, d)) && orient(p, q, c) === 0 && within(c, p, q) && !same(c, p) && !same(c, q));
+}
 /** A step from p to q (square centres) crosses a wall, closed door or arrow slit, or slips through where two meet. */
 export const stepBlocked = (walls: readonly Wall[], p: Pt, q: Pt): boolean => walls.some((w) => body(w) && cross(p, q, w.a, w.b, true));
 

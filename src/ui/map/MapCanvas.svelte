@@ -1,5 +1,6 @@
 <script module lang="ts">
   import { clipRoute, type Wall, type WallKind } from '../../lib/map/walls.ts';
+  import { uid } from '../../lib/uid.ts';
   import type { Token } from '../../lib/types.ts';
   export type CanvasToken = Pick<Token, 'id' | 'name' | 'x' | 'y' | 'size' | 'color' | 'portrait' | 'hidden' | 'trail'> & { monsterId?: string; hp?: number; maxHp?: number; conditions?: string[]; health?: string };
 </script>
@@ -147,7 +148,7 @@
   const pointers = new Map<number, Pt>();
   type Mode =
     | { k: 'none' }
-    | { k: 'pan'; from: Pt; view0: View; moved: boolean; shift: boolean; arrow?: string /* pressed on this arrow: a tap picks it */ }
+    | { k: 'pan'; from: Pt; view0: View; moved: boolean; shift: boolean; arrow?: string /* pressed on this arrow: a tap picks it */; door?: string /* on this door: a tap opens or closes it */ }
     | { k: 'press'; from: Pt; id: string; grab: Pt; shift: boolean }
     | { k: 'drag'; id: string; ids: string[]; grab: Pt; ghost: Pt; route: Pt[] }
     | { k: 'box'; a: Pt; b: Pt; shift: boolean; /** two fingers held still: their corners */ two?: true }
@@ -806,11 +807,10 @@
     }
     const hit = tool === 'select' ? tokenAt(scene(), w, dm) : undefined;
     const door = !hit && tool === 'select' && ondoor ? wallAt(w, (e.pointerType === 'mouse' ? 8 : 16) / view.scale, true) : undefined;
-    if (door) { ondoor!(door.id); mode = { k: 'none' }; return; } // a token wins; else a tap on a door opens or closes it
     if (hit) mode = { k: 'press', from: p, id: hit.id, grab: { x: w.x - hit.x, y: w.y - hit.y }, shift };
     else if (e.shiftKey && e.pointerType === 'mouse') mode = { k: 'box', a: w, b: w, shift }; // Shift-drag on empty map: box select (keyboard and mouse only)
     // Select tool, no token under the pointer (a token wins): a press on an arrow's line or head picks it if it stays a tap
-    else mode = { k: 'pan', from: p, view0: view, moved: false, shift, arrow: tool === 'select' ? arrowAt(w, 1 / view.scale, (e.pointerType === 'mouse' ? 8 : 16) / view.scale)?.id : undefined };
+    else mode = { k: 'pan', from: p, view0: view, moved: false, shift, arrow: tool === 'select' ? arrowAt(w, 1 / view.scale, (e.pointerType === 'mouse' ? 8 : 16) / view.scale)?.id : undefined, door: door?.id }; // a token wins; a tap (no pan) on a door opens or closes it
     // Touch: held still for 500 ms, the press or pan becomes an arrow from where it started (a second finger cancels it: a pinch)
     const m0 = mode;
     if (ondeclare && e.pointerType !== 'mouse') hold = setTimeout(() => {
@@ -919,11 +919,12 @@
       if (t && m.route.length) onmove(m.ids, m.id, m.ghost, m.route); // a single write per drop
     } else if (m.k === 'wall') {
       if ((m.a.x !== m.b.x || m.a.y !== m.b.y) && wallKind !== 'erase')
-        onwalls?.([...walls, { id: crypto.randomUUID(), a: m.a, b: m.b, kind: wallKind, ...(wallKind === 'door' && { open: false }) }]);
+        onwalls?.([...walls, { id: uid(), a: m.a, b: m.b, kind: wallKind, ...(wallKind === 'door' && { open: false }) }]);
     } else if (m.k === 'box') {
       const ids = tokensInRect(scene(), m.a, m.b, dm);
       onselect(m.shift ? [...new Set([...selected, ...ids])] : ids);
-    } else if (m.k === 'pan' && !m.moved && !m.shift) { // a tap on empty map (or an arrow): tokens drop, the arrow is picked or dropped
+    } else if (m.k === 'pan' && !m.moved && !m.shift && m.door) ondoor?.(m.door);
+    else if (m.k === 'pan' && !m.moved && !m.shift) { // a tap on empty map (or an arrow): tokens drop, the arrow is picked or dropped
       if (selected.length) onselect([]);
       arrow = m.arrow;
     }

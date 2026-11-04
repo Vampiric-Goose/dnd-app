@@ -439,3 +439,33 @@ describe('cover from walls and creatures', () => {
     expect(typeof r !== 'string' && r.resolution.outcomes.find((o) => o.id === 'o1')).toMatchObject({ note: expect.stringContaining('half cover'), cover: 2 });
   });
 });
+
+describe('review: cover edge cases', () => {
+  const sc = (tokens: Scene['tokens'], walls: Scene['walls'] = []): Scene => ({ id: 's1', campaignId: 'c1', name: 'F', width: 1400, height: 1400, grid: { ...DEFAULT_GRID }, shown: true, updatedAt: 0, walls, tokens });
+  const k: Combat = { campaignId: 'c1', round: 1, turn: 'g', groupMonsters: false, updatedAt: 0, combatants: [
+    cb({ id: 'g', kind: 'monster', name: 'Goblin' }), cb({ id: 'o1', kind: 'monster', name: 'Orc 1' }), cb({ id: 'o2', kind: 'monster', name: 'Orc 2' })] };
+  const tok = (id: string, cid: string, q: number, r = 0) => ({ id, name: id, ...cell(q, r), size: 'M' as const, color: '#000000', combatantId: cid });
+  const run = (scene: Scene, a: TurnAction, aim: WorkIn['aim']) => workOut({ a, features: [], actor: k.combatants[0], combat: k, scene, diagonal: '5-5-5', aim,
+    findTarget: (id) => k.combatants.find((z) => z.id === id), info: (z) => ({ ...targetOf(z, {}), ac: 14 }), nameOf: (z) => z.name, magical: false, id: 'r1', now: 0, rng: () => 0.5 });
+  test('a cone from the caster gives nobody cover from the caster itself', async () => {
+    const cone = spell({ save: 'Dex', onSave: 'half', damage: [{ dice: '3d6', type: 'fire' }], area: { shape: 'cone', feet: 15, self: true } }, 'self' as never);
+    const r = await run(sc([tok('t-g', 'g', 0), tok('t-1', 'o1', 2)]), { ...cone, cast: { ...cone.cast!, read: { ...cone.cast!.read, range: 'self' } } }, { point: cell(3), rolled: { dmg: [[3, 3, 3]] }, toggles: [] });
+    expect(typeof r !== 'string' && r.resolution.outcomes.map((o) => [o.id, o.cover])).toEqual([['o1', undefined]]);
+  });
+  test('Sacred Flame ignores half cover but not a wall', async () => {
+    const flame = { ...spell({ save: 'Dex', damage: [{ dice: '1d8', type: 'radiant' }] }), name: 'Sacred Flame' };
+    expect(await run(sc([tok('t-g', 'g', 0), tok('t-1', 'o1', 3)], [{ id: 'w', a: { x: 140, y: 0 }, b: { x: 140, y: 70 }, kind: 'wall' }]), flame, { target: 'o1', rolled: { dmg: [[4]] }, toggles: [] })).toBe('total cover');
+  });
+  test('a helpful spell cannot reach a creature behind a wall', async () => {
+    const heal = spell({ heal: { dice: '1d4', mod: true }, range: { feet: 60 } });
+    expect(await run(sc([tok('t-g', 'g', 0), tok('t-1', 'o1', 3)], [{ id: 'w', a: { x: 140, y: 0 }, b: { x: 140, y: 70 }, kind: 'wall' }]), heal, { targets: ['o1'], rolled: { dmg: [[2]] }, toggles: [] })).toBe('total cover');
+  });
+  test('a lasting area does not reach a creature behind a wall when its turn starts', () => {
+    const cloud: Resolution = { id: 'ck', actor: 'g', action: 'Moonbeam', outcomes: [], applied: [], at: 0, sceneId: 's1', round: 1, lasting: true,
+      area: { shape: 'cylinder', origin: cell(2), aim: cell(2), feet: 10 }, linger: { dice: [{ expr: '2d10', type: 'radiant' }], read: { damage: [], save: 'Con' } } };
+    const kk: Combat = { ...k, combatants: [{ ...k.combatants[0], concentrating: true, concentratingOn: 'Moonbeam' }, ...k.combatants.slice(1)], resolutions: [cloud] };
+    const s = sc([tok('t-g', 'g', 5), tok('t-1', 'o1', 3)]);
+    expect(startsIn(kk, s, 'o1').map((r) => r.id)).toEqual(['ck']);
+    expect(startsIn(kk, { ...s, walls: [{ id: 'w', a: { x: 210, y: 0 }, b: { x: 210, y: 70 }, kind: 'wall' }] }, 'o1')).toEqual([]);
+  });
+});

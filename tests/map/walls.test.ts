@@ -94,3 +94,15 @@ describe('walls on moves and Opportunity Attacks', () => {
     expect(leaveStep(g, '5-5-5', pc, [gob], { x: 315, y: 35 }, false, undefined, undefined, blocked)).toBeUndefined();
   });
 });
+
+describe('review: room corners', () => {
+  const room = [w(70, 70, 140, 70), w(140, 70, 140, 140), w(140, 140, 70, 140), w(70, 140, 70, 70)]; // cell (1, 1) closed on all four sides
+  test('a line through the corner where two walls meet is blocked: a closed room is total cover, even diagonally', () => {
+    expect(lineBlocked(room, { x: 35, y: 35 }, { x: 105, y: 105 })).toBe(true);
+    expect(cover(g, room, at(0, 0), at(1, 1), [])).toBe('total');
+    expect(cover(g, [w(70, 70, 140, 70), w(70, 70, 70, 140)], at(0, 0), at(1, 1), [])).toBe('total'); // an L of walls
+  });
+  test('the tip of a lone wall does not block a line passing it', () => {
+    expect(lineBlocked([w(70, 70, 140, 70)], { x: 35, y: 35 }, { x: 105, y: 105 })).toBe(false);
+  });
+});

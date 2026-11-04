@@ -2,7 +2,7 @@
 // player's use). aimPlan says what an action needs (reach, a line, an area, its dice); workOut checks an aim against the shown scene and
 // works it out with resolve.ts. The target must be in reach or range (PHB range, close-combat disadvantage), the dice must fit, and an
 // area catches every token in it, hidden ones too; the acting player hears only hit or miss, a spell's DC and the visible names caught.
-import { feetBetween, tokenFeet, type Pt } from '../map/grid.ts';
+import { feetBetween, tokenFeet, type Pt, SIZE_CELLS } from '../map/grid.ts';
 import { tokensInTemplate, type Shape } from '../map/templates.ts';
 import { cover as coverOf, lineBlocked, type Cover } from '../map/walls.ts';
 import type { Ability, Area, Character, Combat, Combatant, Grid, Resolution, Scene, Size, Snap, Token } from '../types.ts';
@@ -68,7 +68,10 @@ function liveAreas(k: Combat | undefined, sceneId: string): Resolution[] {
 }
 
 const tokenOfCombatant = (k: Combat, s: Scene, id: string) => s.tokens.find((x) => combatantForToken(k, x)?.id === id);
-const inArea = (k: Combat, s: Scene, r: Resolution, t: Token, at: Pt = t) => tokensInTemplate(areaNow(k, r, s), s.grid, [{ ...t, x: at.x, y: at.y }]).length > 0;
+const inArea = (k: Combat, s: Scene, r: Resolution, t: Token, at: Pt = t) => { // a wall between its origin and the creature keeps it out (map/walls.ts)
+  const a = areaNow(k, r, s);
+  return tokensInTemplate(a, s.grid, [{ ...t, x: at.x, y: at.y }]).length > 0 && !lineBlocked(s.walls ?? [], a.origin, at);
+};
 
 /** The lasting areas that act as a turn starts there (Moonbeam) which creature `id`'s turn began in: where it stood then, once it has moved. */
 export function startsIn(k: Combat, s: Scene, id: string): Resolution[] {
@@ -325,6 +328,7 @@ export async function workOut(i: WorkIn): Promise<Aimed | string> {
     for (const id of ids) {
       const z = i.findTarget(id), t = z && tokenOf(z.id);
       if (!z || !t) return 'pick a target';
+      if (z.id !== actor.id && coverOf(s.grid, s.walls, me, t, []) === 'total') return 'total cover';
       if (plan.reach === 'self' ? z.id !== actor.id : !canTarget(plan.reach, tokenFeet(s.grid, me, t, i.diagonal), false, false).ok) return 'out of range';
     }
     const n = plan.dice.length;
@@ -345,9 +349,9 @@ export async function workOut(i: WorkIn): Promise<Aimed | string> {
   // cover (map/walls.ts): total refuses the target; half and three-quarters add to its AC and Dex save. Sharpshooter (a ranged weapon) and
   // Spell Sniper (a spell attack) shoot past both; Sacred Flame gives none.
   const others = (...ids: string[]) => s.tokens.filter((t) => !ids.includes(t.id) && combatantForToken(k, t));
-  let cv: Cover = tt && target && target.id !== actor.id && a.name !== 'Sacred Flame' ? coverOf(s.grid, s.walls, me, tt, others(me.id, tt.id)) : 0;
+  let cv: Cover = tt && target && target.id !== actor.id ? coverOf(s.grid, s.walls, me, tt, others(me.id, tt.id)) : 0;
   if (cv === 'total') return 'total cover';
-  if (cv && plan.attack && ((!a.spell && plan.line && i.features.includes('Sharpshooter')) || (a.spell && i.features.includes('Spell Sniper')))) cv = 0;
+  if (cv && (a.name === 'Sacred Flame' || (plan.attack && ((!a.spell && plan.line && i.features.includes('Sharpshooter')) || (a.spell && i.features.includes('Spell Sniper')))))) cv = 0;
   if (plan.attack && !tt) return 'pick a target';
   const edge = pick?.ok ? { adv: pick.adv ?? [], dis: pick.dis ?? [] } : { adv: [], dis: [] };
   const rolled = { ...aim.rolled, mode: plan.attack ? combineMode(edge, aim.rolled.mode) : aim.rolled.mode };
@@ -385,7 +389,9 @@ export async function workOut(i: WorkIn): Promise<Aimed | string> {
   const inLine = (id: string) => { const t = s.tokens.find((x) => x.id === id)!; return !lineBlocked(s.walls ?? [], origin, t) ? t : undefined; };
   const caughtTokens = placed ? tokensInTemplate(placed, s.grid, s.tokens).map(inLine).filter((t): t is Token => !!t) : [];
   const caught = caughtTokens.map((t) => combatantForToken(k, t)).filter((z): z is Combatant => !!z && !(area?.on === 'self' && z.id === actor.id));
-  const areaCover = new Map(placed ? caughtTokens.map((t) => { const c = coverOf(s.grid, s.walls, origin, t, others(t.id)); return [combatantForToken(k, t)?.id, c === 'total' ? 0 : c] as const; }) : []);
+  // a creature standing at the origin (the caster of a cone, the one a sphere is centred on) is where it starts, not in its way
+  const atOrigin = s.tokens.filter((t) => { const h = (SIZE_CELLS[t.size] * s.grid.size) / 2; return Math.abs(t.x - origin.x) < h && Math.abs(t.y - origin.y) < h; }).map((t) => t.id);
+  const areaCover = new Map(placed ? caughtTokens.map((t) => { const c = coverOf(s.grid, s.walls, origin, t, others(t.id, ...atOrigin)); return [combatantForToken(k, t)?.id, c === 'total' ? 0 : c] as const; }) : []);
   const bad = checkFaces(plan.dice.map((d) => ({ expr: d.expr, crit: crit && d.on !== 'save' })), rolled);
   if (bad) return bad;
   const outcomes = resolveSpell(read, plan.dice, a.cast!.dc, toHit, target && behind(await i.info(target), cv), await Promise.all(caught.map(async (z) => behind(await i.info(z), areaCover.get(z.id) ?? 0))), rolled, i.rng, autoCrit, actor.kind === 'pc', i.critAll)
