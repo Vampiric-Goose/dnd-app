@@ -1,5 +1,6 @@
 // Pure (no Svelte/Vite/DOM). Stage 5: the battle map scene as players get it (an allowlist, spec 3.6), the check on a player's token
 // move, and the guest's rebuild of what a host sent. Lazy: only host.ts and guest.ts import it.
+import { clipRoute, type Wall } from '../map/walls.ts';
 import { applyFog, cleanFog, decodeFog, isRevealed } from '../map/fog.ts';
 import { budgetApplies, budgetFeet, combatantForToken, effectiveSpeed, moveSpeed, routeFeet, stepsBetween, usedFeet } from '../combat/movement.ts';
 import { cellAt, cellDistance, snap, type Pt } from '../map/grid.ts';
@@ -70,8 +71,9 @@ export const sceneBlobs = (v: PlayerScene | undefined): string[] =>
   v ? [...new Set([v.image, ...v.tokens.map((t) => t.portrait)])].filter((h): h is string => typeof h === 'string' && HASH.test(h)) : [];
 
 /** A player's move as squares from the token (snapped): its `path`, or with none (an old client) the straight route to x/y. */
-export const moveRoute = (g: Grid, t: Token, m: { x: number; y: number; path?: Pt[] }): Pt[] =>
-  m.path ? m.path.map((p) => snap(g, p, t.size)) : stepsBetween(g, t, m, t.size);
+/** A player's move as squares, stopped before the first one a wall blocks (`walls`: the scene's). */
+export const moveRoute = (g: Grid, t: Token, m: { x: number; y: number; path?: Pt[] }, walls?: Wall[]): Pt[] =>
+  clipRoute(walls, t, m.path ? m.path.map((p) => snap(g, p, t.size)) : stepsBetween(g, t, m, t.size));
 
 /** Why a player's move (or, `budget` false, drag preview) is refused (undefined = allowed). `violation` only for a crafted one; the rest can come from a stale view. */
 export function moveProblem(s: Scene | undefined, m: { sceneId: string; tokenId: string; x: number; y: number; path?: Pt[] }, playerId: string,
@@ -108,7 +110,7 @@ export function moveCost(s: Scene, m: { tokenId: string; x: number; y: number; p
   const x = t && budgetApplies(combat, settings) ? combatantForToken(combat!, { characterId: ch.id }) : undefined;
   if (!t || !x) return undefined;
   const speed = effectiveSpeed(moveSpeed(computeSheet(ch, { settings, viewer: 'player' }).speed), ch.state.conditions, ch.state.exhaustion);
-  const mv = combat!.movement?.[x.id], r = routeFeet(s.grid, snap(s.grid, t, t.size), moveRoute(s.grid, t, m), settings.diagonal, mv?.diags ?? 0);
+  const mv = combat!.movement?.[x.id], r = routeFeet(s.grid, snap(s.grid, t, t.size), moveRoute(s.grid, t, m, s.walls), settings.diagonal, mv?.diags ?? 0);
   return { combatantId: x.id, used: usedFeet(mv, t, s.grid, settings.diagonal), feet: r.feet, diags: r.diags, budget: budgetFeet(speed, mv) };
 }
 

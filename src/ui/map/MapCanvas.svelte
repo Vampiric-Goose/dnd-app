@@ -1,4 +1,5 @@
 <script module lang="ts">
+  import { clipRoute } from '../../lib/map/walls.ts';
   import type { Token } from '../../lib/types.ts';
   export type CanvasToken = Pick<Token, 'id' | 'name' | 'x' | 'y' | 'size' | 'color' | 'portrait' | 'hidden' | 'trail'> & { monsterId?: string; hp?: number; maxHp?: number; conditions?: string[]; health?: string };
 </script>
@@ -804,6 +805,7 @@
         if (!t) { mode = { k: 'none' }; break; }
         const to = { x: w.x - mode.grab.x, y: w.y - mode.grab.y }, lim = limitOf?.(t.id), was = mode.ghost, home = snap(grid, t, t.size);
         let route = extendRoute(grid, home, mode.route, to, t.size); // squares skipped are filled in; back over the route cuts it
+        if (!(dm && e.altKey)) route = clipRoute(scene().walls, home, route); // a wall stops it (the DM's Alt-drag goes through)
         if (lim?.clamp) route = affordable(grid, home, route, lim.left, diagonal, lim.diags);
         mode.route = route;
         mode.ghost = route[route.length - 1] ?? home;

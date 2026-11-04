@@ -870,14 +870,14 @@ export class Host {
     if (why?.violation) return this.#violation(c, why.error);
     const tk = !why ? shown?.tokens.find((t) => t.id === m.tokenId) : undefined, cid = tk?.characterId, x = cid !== undefined && combat && combat.round >= 1 ? combatantForToken(combat, { characterId: cid }) : undefined;
     if (tk && x && combat!.turn === x.id && this.#deps.guardMove) { // the mover's own turn: it walks the whole way through the reaction flow (a token already walking stays)
-      const go = this.#deps.guardMove, route = moveRoute(shown!.grid, tk, m);
+      const go = this.#deps.guardMove, route = moveRoute(shown!.grid, tk, m, shown!.walls);
       return this.#detach(async () => { await go(m.tokenId, route); await this.#task(() => this.#sendScene(camp, c)); }, cid);
     }
     // checked again on the fresh record, in the write (the DM may have hidden the token since); its cost is measured on that record too
     let moved: { combatantId: string; from: { x: number; y: number }; cost: { feet: number; diags: number } } | undefined, walked: { s: Scene; from: { x: number; y: number } } | undefined;
     if (!why) await this.#deps.updateScene(m.sceneId, (s) => {
       if (moveProblem(s, m, pid, chars, combat, camp.settings)) return s;
-      const t = s.tokens.find((x) => x.id === m.tokenId)!, out = walkTokens(s, [m.tokenId], m.tokenId, moveRoute(s.grid, t, m));
+      const t = s.tokens.find((x) => x.id === m.tokenId)!, out = walkTokens(s, [m.tokenId], m.tokenId, moveRoute(s.grid, t, m, s.walls));
       if (out === s) return s;
       const cost = moveCost(s, m, chars.find((ch) => ch.id === t.characterId)!, combat, camp.settings);
       if (cost) moved = { combatantId: cost.combatantId, from: { x: t.x, y: t.y }, cost };

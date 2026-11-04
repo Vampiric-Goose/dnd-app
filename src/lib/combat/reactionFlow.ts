@@ -7,6 +7,7 @@ import { rollDice } from '../dice.ts';
 import { db } from '../db.ts';
 import { snap, type Pt } from '../map/grid.ts';
 import { walkTokens } from '../map/scene.ts';
+import { cover } from '../map/walls.ts';
 import { editScene } from '../map/store.ts';
 import { computeSheet } from '../rules/sheet.ts';
 import { playerTokens } from '../sync/scene.ts';
@@ -298,7 +299,7 @@ async function walk(ctx: FlowCtx, tokenId: string, route: Pt[]): Promise<Pt> {
     if (me.x.hp === 0 || me.conditions.some((c) => STOP.includes(c.toLowerCase())) || w.k.movement?.[me.x.id]?.mult === 0) return here;
     const foes = [...w.bs.values()].filter((b) => b !== me), off = !!me.x.economy?.disengaging, was = (f: Body, on: 'leave' | 'enter') => asked.has(`${on}:${f.x.id}`);
     let j = 0, edge: ReturnType<typeof leaveStep>;
-    for (let prev = here; j < rest.length; prev = rest[j++]) if ((edge = leaveStep(w.s.grid, ctx.settings.diagonal, { ...me, pt: { ...me.pt, ...prev } }, foes, rest[j], off, enterOptions, was))) break;
+    for (let prev = here; j < rest.length; prev = rest[j++]) if ((edge = leaveStep(w.s.grid, ctx.settings.diagonal, { ...me, pt: { ...me.pt, ...prev } }, foes, rest[j], off, enterOptions, was, (f, p) => cover(w.s.grid, w.s.walls, f.pt, { ...me.pt, ...p }, []) === 'total'))) break;
     if (!edge) return step(ctx, w.s, tokenId, rest);
     if (edge.enter) j++; // entering a reach: the mover takes that square first
     if (j) { // up to the edge (a write refused, off the map: it stays)

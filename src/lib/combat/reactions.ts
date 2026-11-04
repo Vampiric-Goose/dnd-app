@@ -57,7 +57,8 @@ function oaOptions(b: Body): ReactOption[] {
  * asked at the first cell inside (`at`, with `enter` set). The caller drops foes already asked before stepping on from `at`.
  */
 export function leaveStep(g: Grid, diagonal: Diagonal, mover: Body, foes: Body[], to: Pt, disengaged: boolean,
-  enter?: (f: Body) => { feet: number; option: ReactOption }[], asked: (f: Body, on: 'leave' | 'enter') => boolean = () => false): { at: Pt; reactors: Reactor[]; enter?: true } | undefined {
+  enter?: (f: Body) => { feet: number; option: ReactOption }[], asked: (f: Body, on: 'leave' | 'enter') => boolean = () => false,
+  /** a wall gives the mover total cover from that foe there (map/walls.ts): it can't attack */ blocked: (f: Body, at: Pt) => boolean = () => false): { at: Pt; reactors: Reactor[]; enter?: true } | undefined {
   const from = mover.pt, c0 = cellAt(g, from), c1 = cellAt(g, to), p0 = cellCenter(g, c0), p1 = cellCenter(g, c1);
   const n = cellDistance(g, c0, c1, '5-5-5'), hostile = foes.filter((f) => f.side !== mover.side && canReact(f) && sees(f, mover));
   const sentinel = (f: Body) => !disengaged || f.features.includes('Sentinel');
@@ -67,9 +68,9 @@ export function leaveStep(g: Grid, diagonal: Diagonal, mover: Body, foes: Body[]
   // Polearm Master's is an Opportunity Attack: a Disengage stops it, unless Sentinel
   const entering = enter ? hostile.filter((f) => !asked(f, 'enter')).map((f) => ({ f, list: enter(f).filter((e) => e.option.key !== 'Polearm Master' || sentinel(f)) })).filter((e) => e.list.length) : [];
   for (let i = 1, prev: Pt = { x: from.x, y: from.y }; i <= n; prev = at(i), i++) {
-    const cur = at(i), left = eligible.filter((f) => within(f, prev, f.reach) && !within(f, cur, f.reach));
+    const cur = at(i), left = eligible.filter((f) => within(f, prev, f.reach) && !within(f, cur, f.reach) && !blocked(f, prev));
     if (left.length) return { at: prev, reactors: left.flatMap((f) => reactor(f, oaOptions(f))) };
-    const came = entering.flatMap(({ f, list }) => reactor(f, list.filter((e) => !within(f, prev, e.feet) && within(f, cur, e.feet)).map((e) => e.option)));
+    const came = entering.flatMap(({ f, list }) => reactor(f, blocked(f, cur) ? [] : list.filter((e) => !within(f, prev, e.feet) && within(f, cur, e.feet)).map((e) => e.option)));
     if (came.length) return { at: cur, reactors: came, enter: true };
   }
   return undefined;

@@ -73,3 +73,24 @@ describe('saved walls', () => {
     expect(sceneProblem({ ...s, walls: 'x' })).toBe('has a damaged wall list');
   });
 });
+
+describe('walls on moves and Opportunity Attacks', () => {
+  test('a player’s move route stops before a wall', async () => {
+    const { moveRoute } = await import('../../src/lib/sync/scene.ts');
+    const t = { id: 't', name: 't', ...at(0, 0), color: '#000000' };
+    const m = { x: 245, y: 35, path: [{ x: 105, y: 35 }, { x: 175, y: 35 }, { x: 245, y: 35 }] };
+    expect(moveRoute(g, t, m, [w(140, 0, 140, 70)])).toEqual([{ x: 105, y: 35 }]);
+    expect(moveRoute(g, t, m)).toHaveLength(3);
+  });
+  test('a foe across a wall is not asked for an Opportunity Attack', async () => {
+    const { leaveStep } = await import('../../src/lib/combat/reactions.ts');
+    const scim = { id: 'mon:action:0', name: 'Scimitar', cost: 'action' as const, group: 'monster' as const, text: [{ p: 'Melee Weapon Attack: +4 to hit, reach 5 ft., one target.' }] };
+    const body = (id: string, pc: boolean, p: { x: number; y: number }) => ({ x: { id, kind: pc ? 'pc' as const : 'monster' as const, name: id, initMod: 0, dex: 10, tie: 0.5, conSave: 0 },
+      pt: { ...p, size: 'M' as const }, conditions: [], actions: pc ? [] : [scim], features: [], slots: [], reach: 5, pc, side: pc ? 'party' as const : 'foes' as const, hidden: false, name: id });
+    const pc = body('pc', true, at(1, 0)), gob = body('gob', false, at(1, 1));
+    const wall = [w(70, 70, 210, 70)]; // along the goblin's top edge, under the PC's way
+    const blocked = (f: { pt: { x: number; y: number; size: 'M' | 'L' | 'S' | 'T' | 'H' | 'G' } }, p: { x: number; y: number }) => cover(g, wall, f.pt, { ...p, size: 'M' }, []) === 'total';
+    expect(leaveStep(g, '5-5-5', pc, [gob], { x: 315, y: 35 }, false)?.reactors.map((r) => r.id)).toEqual(['gob']);
+    expect(leaveStep(g, '5-5-5', pc, [gob], { x: 315, y: 35 }, false, undefined, undefined, blocked)).toBeUndefined();
+  });
+});
