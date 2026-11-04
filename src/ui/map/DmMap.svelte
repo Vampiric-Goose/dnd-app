@@ -10,6 +10,7 @@
   import { addTokens, liveHp, MAX_IMAGE, MAX_SIDE, MAX_TOKENS, moveTokens, newScene, patchToken, regrid, resizeScene, tokenColor, walkTokens, type NewToken } from '../../lib/map/scene.ts';
   import { arrowsOn } from '../../lib/map/actions.ts';
   import { toggleDoor } from '../../lib/map/walls.ts';
+  import { cover } from '../../lib/map/walls.ts';
   import { addTokensToCombat, dropTokens, editScene, joinFight, placeUnplaced, startFight, summon, tokenForCharacter, tokenForMonster } from '../../lib/map/store.ts';
   import { scaleSummon } from '../../lib/combat/summons.ts';
   import { currentRun, patchCombatant } from '../../lib/combat/combat.ts';
@@ -476,7 +477,7 @@
     const foe = foeWithin5(k, s, m.v.x, settings.diagonal, conditionsOf);
     const pickable = (id: string): Pickable => {
       const t = s.tokens.find((x) => x.id === id), z = t && combatantForToken(k, t);
-      return t && z && (m.plan.helps || z.id !== m.v.x.id) && !m.leap?.exclude.includes(z.id) ? judge(m.plan, s.grid, settings.diagonal, me, foe, t,
+      return t && z && (m.plan.helps || z.id !== m.v.x.id) && !m.leap?.exclude.includes(z.id) && (t.id === me.id || cover(s.grid, s.walls, me, t, []) !== 'total') ? judge(m.plan, s.grid, settings.diagonal, me, foe, t,
         { attacker: conditionsOf(m.v.x), target: conditionsOf(z), exhaustion: m.v.ch?.state.exhaustion, dodging: !!z.economy?.dodging }) : { ok: false };
     };
     const picks = m.picks ?? [], count = m.plan.count ?? m.plan.helps?.max, nameAt = (p: Pick) => s.tokens.find((t) => t.id === p.tokenId)?.name ?? '?';

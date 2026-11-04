@@ -15,6 +15,7 @@
   import { currentActor } from '../../lib/sync/project.ts';
   import { sceneForPlayers, type PlayerScene } from '../../lib/sync/scene.ts';
   import { clearDeclared, declareAction, sendDoor, sendDrag, sendEndTurn, sendLeap, sendUse, sendMove, session } from '../../lib/sync/session.svelte.ts';
+  import { cover } from '../../lib/map/walls.ts';
   import { effectiveSpeed, moveSpeed, remainingFeet } from '../../lib/combat/movement.ts';
   import { pcActions, slotsLeft, type TurnAction } from '../../lib/combat/turnActions.ts';
   import { featureList } from '../../lib/character/play.ts';
@@ -139,7 +140,7 @@
     const pickable = (id: string): Pickable => {
       const t = v.tokens.find((x) => x.id === id);
       // its conditions as the player's map shows them; a monster's Dodge only the DM's device knows (two d20s are sent either way)
-      return t && (m.plan.helps || (t.id !== me.id && t.characterId !== m.c.id)) && !m.leap?.exclude.includes(t.id) ? judge(m.plan, v.grid, settings.diagonal, me, foe, t, { attacker: m.c.state.conditions, target: t.conditions, exhaustion: m.c.state.exhaustion }) : { ok: false };
+      return t && (m.plan.helps || (t.id !== me.id && t.characterId !== m.c.id)) && !m.leap?.exclude.includes(t.id) && (t.id === me.id || cover(v.grid, v.walls, me, t, []) !== 'total') ? judge(m.plan, v.grid, settings.diagonal, me, foe, t, { attacker: m.c.state.conditions, target: t.conditions, exhaustion: m.c.state.exhaustion }) : { ok: false };
     };
     const picks = m.picks ?? [], count = m.plan.count ?? m.plan.helps?.max, nameAt = (p: Pick) => v.tokens.find((t) => t.id === p.tokenId)?.name ?? '?';
     return { from: { x: me.x, y: me.y }, line: m.plan.line, ...(m.plan.area && { area: m.plan.area }), pickable,
