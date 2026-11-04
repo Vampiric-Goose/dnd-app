@@ -59,7 +59,7 @@
   // One selection at a time: picking tokens drops the arrow; an arrow that went (cleared, turn ended) is no longer picked.
   $effect(() => { if (selected.length || (arrow !== undefined && !arrows.some((a) => a.id === arrow))) untrack(() => (arrow = undefined)); });
 
-  let tool: 'select' | 'box' | 'ruler' | 'fog' | 'template' = $state('select');
+  let tool: 'select' | 'ruler' | 'fog' | 'template' = $state('select');
   $effect(() => { if (!onfog && tool === 'fog') tool = 'select'; });
 
   // Fog tools
@@ -748,7 +748,7 @@
     }
     const hit = tool === 'select' ? tokenAt(scene(), w, dm) : undefined;
     if (hit) mode = { k: 'press', from: p, id: hit.id, grab: { x: w.x - hit.x, y: w.y - hit.y }, shift };
-    else if (tool === 'box' || (e.shiftKey && e.pointerType === 'mouse')) mode = { k: 'box', a: w, b: w, shift };
+    else if (e.shiftKey && e.pointerType === 'mouse') mode = { k: 'box', a: w, b: w, shift }; // Shift-drag on empty map: box select (keyboard and mouse only)
     // Select tool, no token under the pointer (a token wins): a press on an arrow's line or head picks it if it stays a tap
     else mode = { k: 'pan', from: p, view0: view, moved: false, shift, arrow: tool === 'select' ? arrowAt(w, 1 / view.scale, (e.pointerType === 'mouse' ? 8 : 16) / view.scale)?.id : undefined };
     // Touch: held still for 500 ms, the press or pan becomes an arrow from where it started (a second finger cancels it: a pinch)
@@ -898,7 +898,8 @@
   <div class="float">
     <div class="top">
       <div class="seg tools" role="toolbar" aria-label="Map tools">
-        <button type="button" aria-pressed={tool === 'select' || tool === 'box'} onclick={() => (tool = 'select')}>Select</button>
+        <button type="button" aria-pressed={tool === 'select'} onclick={() => (tool = 'select')}
+          title={`Tap a token · Shift-click adds · Shift-drag on empty map to box select${ondeclare ? ' · Right-drag or long-press to point' : ''}`}>Select</button>
         <button type="button" aria-pressed={tool === 'ruler'} onclick={() => (tool = 'ruler')}>Ruler</button>
         <button type="button" aria-pressed={tool === 'template'} onclick={() => (tool = 'template')}>Template</button>
         {#if onfog}<button type="button" aria-pressed={tool === 'fog'} onclick={() => (tool = 'fog')}>Fog</button>{/if}
@@ -906,12 +907,7 @@
       {#if corner}<div class="corner">{@render corner()}</div>{/if}
     </div>
 
-    {#if tool === 'select' || tool === 'box'}
-      <div class="strip" role="group" aria-label="Select">
-        <button type="button" aria-pressed={tool === 'box'} onclick={() => (tool = tool === 'box' ? 'select' : 'box')}>Box select</button>
-        <span class="hint">{tool === 'box' ? 'Drag on empty map · Shift adds' : 'Tap a token · Shift-click adds'}{#if ondeclare} · Right-drag or long-press to point{/if}</span>
-      </div>
-    {:else if tool === 'ruler'}
+    {#if tool === 'ruler'}
       <div class="strip"><span class="hint">Drag to measure · tap again to clear</span></div>
     {:else if tool === 'fog' && onfog}
       <div class="strip" role="group" aria-label="Fog">
