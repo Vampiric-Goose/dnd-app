@@ -333,7 +333,8 @@ export async function settleSave(cid: string, rid: string, target: string, d20: 
   if (!r || r.dc === undefined || !ch) return undefined;
   const sheet = computeSheet(ch, { settings, viewer: 'dm' });
   const extra = rollSpellDice(spellMods(ch.state.conditions), 'save', Math.random); // Bless, Bane: rolled here, on the DM's device
-  const total = d20 + sheet.saves[r.ability ?? 'dex'].bonus + extra.total, ok = total >= r.dc;
+  const behind = (r.ability ?? 'dex') === 'dex' ? r.outcomes.find((o) => o.id === target && o.pending)?.cover ?? 0 : 0; // cover from the area's origin
+  const total = d20 + sheet.saves[r.ability ?? 'dex'].bonus + extra.total + behind, ok = total >= r.dc;
   let owed: Outcome['owed'], lost: string[] = [], freed: string[] = [];
   await serial(() => update(cid, (c) => ({ ...c, resolutions: (c.resolutions ?? []).map((y) => y.id !== rid ? y : { ...y, outcomes: y.outcomes.map((o) => {
     if (o.id !== target || !o.pending) return o;

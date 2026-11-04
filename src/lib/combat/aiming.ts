@@ -4,6 +4,7 @@
 // area catches every token in it, hidden ones too; the acting player hears only hit or miss, a spell's DC and the visible names caught.
 import { feetBetween, tokenFeet, type Pt } from '../map/grid.ts';
 import { tokensInTemplate, type Shape } from '../map/templates.ts';
+import { cover as coverOf, lineBlocked, type Cover } from '../map/walls.ts';
 import type { Ability, Area, Character, Combat, Combatant, Grid, Resolution, Scene, Size, Snap, Token } from '../types.ts';
 import { combatantForToken } from './movement.ts';
 import { checkFaces, keptD20, resolveAttack, resolveSpell, totalOf, type Outcome, type TargetInfo } from './resolve.ts';
@@ -172,6 +173,11 @@ export function endedSpells(prev: Combat | undefined, next: Combat): { combat: C
   }) } };
 }
 
+/** Cover on the target's numbers: + to its AC and Dex save. */
+const behind = (t: TargetInfo, c: Cover): TargetInfo => (typeof c === 'number' && c ? { ...t, ac: t.ac + c, save: { ...t.save, dex: t.save.dex + c } } : t);
+/** Its cover noted on the result (`cover`: what a PC's Dex save still to come adds). */
+const covered = (o: Outcome, c: Cover): Outcome => (typeof c === 'number' && c ? { ...o, cover: c, note: [o.note, c === 5 ? 'three-quarters cover' : 'half cover'].filter(Boolean).join(', ') } : o);
+
 /** The creatures a result touches: its actor (who paid), everyone it rolled for, and everyone its area caught. */
 export const touched = (r: Pick<Resolution, 'actor' | 'outcomes' | 'caught'>): string[] => [...new Set([r.actor, ...r.outcomes.map((o) => o.id), ...(r.caught ?? [])])];
 
@@ -336,6 +342,12 @@ export async function workOut(i: WorkIn): Promise<Aimed | string> {
   const cond = (z: Combatant) => i.conditionsOf?.(z) ?? z.conditions ?? [];
   const pick = tt && target ? judge(plan, s.grid, i.diagonal, me, foe, tt, { attacker: cond(actor), target: cond(target), exhaustion: i.exhaustionOf?.(actor), dodging: !!target.economy?.dodging }) : undefined;
   if (pick && !pick.ok) return 'out of range';
+  // cover (map/walls.ts): total refuses the target; half and three-quarters add to its AC and Dex save. Sharpshooter (a ranged weapon) and
+  // Spell Sniper (a spell attack) shoot past both; Sacred Flame gives none.
+  const others = (...ids: string[]) => s.tokens.filter((t) => !ids.includes(t.id) && combatantForToken(k, t));
+  let cv: Cover = tt && target && target.id !== actor.id && a.name !== 'Sacred Flame' ? coverOf(s.grid, s.walls, me, tt, others(me.id, tt.id)) : 0;
+  if (cv === 'total') return 'total cover';
+  if (cv && plan.attack && ((!a.spell && plan.line && i.features.includes('Sharpshooter')) || (a.spell && i.features.includes('Spell Sniper')))) cv = 0;
   if (plan.attack && !tt) return 'pick a target';
   const edge = pick?.ok ? { adv: pick.adv ?? [], dis: pick.dis ?? [] } : { adv: [], dis: [] };
   const rolled = { ...aim.rolled, mode: plan.attack ? combineMode(edge, aim.rolled.mode) : aim.rolled.mode };
@@ -355,7 +367,7 @@ export async function workOut(i: WorkIn): Promise<Aimed | string> {
   if (!plan.read) { // a weapon or a monster's attack
     const bad = checkFaces(plan.dice.map((d) => ({ expr: d.expr, crit })), rolled);
     if (bad) return bad;
-    const o = withWhy(resolveAttack(await i.info(target!), toHit ?? 0, plan.dice, rolled, i.magical, autoCrit, i.critAll));
+    const o = covered(withWhy(resolveAttack(behind(await i.info(target!), cv), toHit ?? 0, plan.dice, rolled, i.magical, autoCrit, i.critAll)), cv);
     return { resolution: { ...base, outcomes: [o], ...(o.hit && actor.rider?.once && { spent: true as const }) }, outcome: { action: a.name, hit: !!o.hit } };
   }
   const read = plan.read, area = plan.area;
@@ -369,11 +381,15 @@ export async function workOut(i: WorkIn): Promise<Aimed | string> {
   if (!area && !target) return 'pick a target';
   const origin = area?.on === 'self' ? { x: me.x, y: me.y } : point!;
   const placed: Area | undefined = area && { shape: area.shape, origin: { x: origin.x, y: origin.y }, aim: aim.point ?? { x: origin.x, y: origin.y }, feet: area.feet, ...(area.width && { width: area.width }) };
-  const caught = placed ? tokensInTemplate(placed, s.grid, s.tokens)
-    .map((id) => combatantForToken(k, s.tokens.find((t) => t.id === id)!)).filter((z): z is Combatant => !!z && !(area?.on === 'self' && z.id === actor.id)) : [];
+  // an area reaches only what a clear line from its point of origin reaches (a wall stops it); each caught creature's cover is measured from there
+  const inLine = (id: string) => { const t = s.tokens.find((x) => x.id === id)!; return !lineBlocked(s.walls ?? [], origin, t) ? t : undefined; };
+  const caughtTokens = placed ? tokensInTemplate(placed, s.grid, s.tokens).map(inLine).filter((t): t is Token => !!t) : [];
+  const caught = caughtTokens.map((t) => combatantForToken(k, t)).filter((z): z is Combatant => !!z && !(area?.on === 'self' && z.id === actor.id));
+  const areaCover = new Map(placed ? caughtTokens.map((t) => { const c = coverOf(s.grid, s.walls, origin, t, others(t.id)); return [combatantForToken(k, t)?.id, c === 'total' ? 0 : c] as const; }) : []);
   const bad = checkFaces(plan.dice.map((d) => ({ expr: d.expr, crit: crit && d.on !== 'save' })), rolled);
   if (bad) return bad;
-  const outcomes = resolveSpell(read, plan.dice, a.cast!.dc, toHit, target && await i.info(target), await Promise.all(caught.map(i.info)), rolled, i.rng, autoCrit, actor.kind === 'pc', i.critAll);
+  const outcomes = resolveSpell(read, plan.dice, a.cast!.dc, toHit, target && behind(await i.info(target), cv), await Promise.all(caught.map(async (z) => behind(await i.info(z), areaCover.get(z.id) ?? 0))), rolled, i.rng, autoCrit, actor.kind === 'pc', i.critAll)
+    .map((o) => covered(o, o.part === 'hit' || !placed ? cv : areaCover.get(o.id) ?? 0));
   // a draining spell (Vampiric Touch) heals its caster half the necrotic damage it deals. ponytail: a save its target rolls later (a PC's) drains nothing
   const drained = read.drain ? Math.floor(outcomes.reduce((t, o) => t + (o.damage ?? 0), 0) / 2) : 0;
   if (drained > 0) outcomes.push({ id: actor.id, damage: 0, heal: drained });

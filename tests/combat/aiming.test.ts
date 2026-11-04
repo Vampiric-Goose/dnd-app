@@ -160,7 +160,7 @@ describe('workOut on the DM\'s map', () => {
       typeFromDie: { sides: 8, types: ['acid', 'cold', 'fire', 'force', 'lightning', 'poison', 'psychic', 'thunder'] } });
     const rolled = { d20: [18, 18], dmg: [[3, 2, 4]] }; // d8s 3 (fire) and 2 (cold)
     const r = await workOut({ ...base(bolt, rolled), info: (z: Combatant) => ({ ...targetOf(z, {}), ac: 14, defenses: { resist: ['fire'], immune: [], vulnerable: [] } }) });
-    expect(r).toMatchObject({ resolution: { outcomes: [{ hit: true, damage: 9, note: 'cold (d8 2)' }] } });
+    expect(r).toMatchObject({ resolution: { outcomes: [{ hit: true, damage: 9, note: 'cold (d8 2), half cover' }] } }); // Mira stands in the way
   });
   test('darts that always hit: a target per dart (repeats allowed), each its own damage', async () => {
     const darts = spell({ auto: { count: 3, above: 1 }, damage: [{ dice: '1d4+1', type: 'force' }] });
@@ -397,5 +397,45 @@ describe('healing', () => {
   test('a repeat rolls the dice of the slot it was cast with', () => {
     const vt: TurnAction = { ...spell({ attack: 'melee', reach: 5, damage: [{ dice: '3d6', type: 'necrotic' }], perSlot: { dice: '1d6', above: 3, step: 1 } }, 'self' as never), spell: { id: 's', level: 3, concentration: false }, again: true, at: 5 };
     expect(aimPlan(vt)!.dice[0].expr).toBe('5d6');
+  });
+});
+
+describe('cover from walls and creatures', () => {
+  const wall = (x0: number, y0: number, x1: number, y1: number) => ({ id: `w${x0}${y0}${x1}${y1}`, a: { x: x0, y: y0 }, b: { x: x1, y: y1 }, kind: 'wall' as const });
+  const mk = (walls: Scene['walls'], o: { mira?: number } = {}): Scene => ({ id: 's1', campaignId: 'c1', name: 'F', width: 1400, height: 1400, grid: { ...DEFAULT_GRID }, shown: true, updatedAt: 0, walls, tokens: [
+    { id: 't-g', name: 'Goblin', ...cell(0), size: 'M', color: '#000000', combatantId: 'g' },
+    { id: 't-p', name: 'Thorin', ...cell(4), size: 'M', color: '#000000', combatantId: 'o1' },
+    { id: 't-q', name: 'Mira', ...cell(o.mira ?? 2, o.mira === undefined ? 5 : 0), size: 'M', color: '#000000', combatantId: 'o2' },
+  ] });
+  const k: Combat = { campaignId: 'c1', round: 1, turn: 'g', groupMonsters: false, updatedAt: 0, combatants: [
+    cb({ id: 'g', kind: 'monster', name: 'Goblin' }), cb({ id: 'o1', kind: 'monster', name: 'Orc 1' }), cb({ id: 'o2', kind: 'monster', name: 'Orc 2' })] };
+  const run = (scene: Scene, a: TurnAction, aim: WorkIn['aim']) => workOut({ a, features: [], actor: k.combatants[0], combat: k, scene, diagonal: '5-5-5', aim,
+    findTarget: (id) => k.combatants.find((z) => z.id === id), info: (z) => ({ ...targetOf(z, {}), ac: 14 }), nameOf: (z) => z.name, magical: false, id: 'r1', now: 0, rng: () => 0.5 });
+  const bow = monster('Ranged Weapon Attack: +4 to hit, range 80/320 ft., one target. Hit: 5 (1d6 + 2) piercing damage.');
+  const shoot = (scene: Scene, d20: number) => run(scene, bow, { target: 'o1', rolled: { d20: [d20], dmg: [[4]] }, toggles: [] });
+
+  test('a creature in the way: half cover, AC + 2, noted on the result', async () => {
+    expect(await shoot(mk([], { mira: 2 }), 12)).toMatchObject({ resolution: { outcomes: [{ id: 'o1', hit: true, roll: 16, ac: 16, note: 'half cover' }] } });
+    expect(await shoot(mk([], { mira: 2 }), 11)).toMatchObject({ resolution: { outcomes: [{ id: 'o1', hit: false, ac: 16 }] } });
+    expect(await shoot(mk([]), 11)).toMatchObject({ resolution: { outcomes: [{ id: 'o1', hit: true, ac: 14 }] } });
+  });
+  test('behind a wall: total cover, refused', async () => {
+    expect(await shoot(mk([wall(140, 0, 140, 70)]), 12)).toBe('total cover');
+  });
+  test('Sharpshooter shoots past half cover', async () => {
+    const r = await workOut({ a: bow, features: ['Sharpshooter'], actor: k.combatants[0], combat: k, scene: mk([], { mira: 2 }), diagonal: '5-5-5', aim: { target: 'o1', rolled: { d20: [11], dmg: [[4]] }, toggles: [] },
+      findTarget: (id) => k.combatants.find((z) => z.id === id), info: (z) => ({ ...targetOf(z, {}), ac: 14 }), nameOf: (z) => z.name, magical: false, id: 'r1', now: 0, rng: () => 0.5 });
+    expect(r).toMatchObject({ resolution: { outcomes: [{ hit: true, ac: 14 }] } });
+  });
+  test('a Fireball stops at a wall; a creature it catches behind a low wall gets + 2 on its Dex save', async () => {
+    const fireball = spell({ save: 'Dex', onSave: 'half', damage: [{ dice: '8d6', type: 'fire' }], area: { shape: 'sphere', feet: 20, self: false } }, { feet: 150 });
+    const point = { x: 35 + 70 * 5, y: 35 + 70 * 2 }; // down-right of Thorin (cell 4) and Mira (cell 3); the goblin (cell 0) is 25 ft off
+    const aim = { point, rolled: { dmg: [[3, 3, 3, 3, 3, 3, 3, 3]] }, toggles: [] };
+    const caught = (r: Awaited<ReturnType<typeof run>>) => (typeof r === 'string' ? r : r.resolution.outcomes.map((o) => o.id));
+    expect(caught(await run(mk([], { mira: 3 }), fireball, aim))).toEqual(['o1', 'o2']);
+    expect(caught(await run(mk([wall(0, 105, 1400, 105)], { mira: 3 }), fireball, aim))).toEqual([]); // a wall across the row between the point and them
+    const low = { ...wall(245, 105, 355, 105), kind: 'low' as const }; // under Thorin's way to the point
+    const r = await run(mk([low], { mira: 3 }), fireball, aim);
+    expect(typeof r !== 'string' && r.resolution.outcomes.find((o) => o.id === 'o1')).toMatchObject({ note: expect.stringContaining('half cover'), cover: 2 });
   });
 });

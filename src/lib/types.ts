@@ -170,7 +170,7 @@ export interface Outcome {
   id: string /* combatant */; part?: 'hit' | 'save';
   hit?: boolean; nat?: 20 | 1; /** the natural d20 kept */ die?: number; /** it rolled two d20s (advantage or disadvantage); `first`: the first, a straight roll's */ two?: { mode: 'adv' | 'dis'; first: number }; roll?: number; ac?: number /* the DM's Results list (a Combat never reaches players) */; edge?: string /* why it had advantage or disadvantage */;
   save?: { roll: number; total: number; ok: boolean };
-  damage: number; note?: string;
+  damage: number; note?: string; /** cover (map/walls.ts): its + to AC and Dex saves, which a PC's save still to come adds */ cover?: number;
   pending?: true; owed?: { amount: number; type: string }[];
   /** conditions a failed save left (`inflicts`: what a PC's pending save would leave on a failure; `ends`: what a repeat save ends on a success) */ inflict?: string[]; inflicts?: string[]; ends?: string[];
   /** its dice matched: the spell may leap to another creature (Chaos Bolt) */ leap?: true;

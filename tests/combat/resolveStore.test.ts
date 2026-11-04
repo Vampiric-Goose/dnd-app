@@ -307,3 +307,9 @@ describe('breath weapon recharge', () => {
     expect(await used('g2')).toEqual({ 'slot:1': 1 });
   });
 });
+
+test('a PC’s Dex save against an area adds the cover it had from the area’s origin', async () => {
+  await applyResolution('c1', res('r1', [{ id: 'pc:p', part: 'save', pending: true, damage: 0, owed: [{ amount: 10, type: 'fire' }], cover: 2 }], { dc: 12, ability: 'dex', onSave: 'half' }), settings);
+  await settleSave('c1', 'r1', 'pc:p', 10, settings); // 10 + 0 + 2 = 12: a success
+  expect((await db.combat.get('c1'))!.resolutions![0].outcomes[0]).toMatchObject({ save: { roll: 10, total: 12, ok: true }, damage: 5 });
+});
