@@ -141,7 +141,7 @@
     | { k: 'pan'; from: Pt; view0: View; moved: boolean; shift: boolean; arrow?: string /* pressed on this arrow: a tap picks it */ }
     | { k: 'press'; from: Pt; id: string; grab: Pt; shift: boolean }
     | { k: 'drag'; id: string; ids: string[]; grab: Pt; ghost: Pt; route: Pt[] }
-    | { k: 'box'; a: Pt; b: Pt; shift: boolean }
+    | { k: 'box'; a: Pt; b: Pt; shift: boolean; /** two fingers held still: their corners */ two?: true }
     | { k: 'ruler' }
     | { k: 'pinch'; a0: Pt; b0: Pt; view0: View }
     | { k: 'brush'; points: Pt[] }
@@ -150,7 +150,7 @@
     | { k: 'arrow'; a: Pt; b: Pt; fromToken?: string };
   let mode: Mode = { k: 'none' };
   /** Touch: the long-press timer that turns a still press or pan into an arrow. */
-  let hold: ReturnType<typeof setTimeout> | undefined;
+  let hold: ReturnType<typeof setTimeout> | undefined, boxHold: ReturnType<typeof setTimeout> | undefined;
 
   // Fog: the decoded bits (a stroke paints a local copy at once; it is dropped when the fog prop next changes), drawn from a cols×rows
   // canvas, one pixel per fog cell, rebuilt only when the bits change.
@@ -713,6 +713,14 @@
       if (mode.k === 'ruler') ruler = undefined; // the first finger started a ruler: it was a pinch
       if (mode.k === 'brush') strokeBits = undefined; // ... or a fog stroke
       mode = { k: 'pinch', a0, b0, view0: view };
+      // Select tool: two fingers held still a moment box-select between them (moving at once pinches, as before)
+      if (tool === 'select') boxHold = setTimeout(() => {
+        if (mode.k !== 'pinch' || pointers.size !== 2) return;
+        const [a, b] = [...pointers.values()];
+        view = mode.view0;
+        mode = { k: 'box', a: toWorld(view, a), b: toWorld(view, b), shift: false, two: true };
+        schedule();
+      }, 350);
       schedule();
       return;
     }
@@ -776,6 +784,7 @@
       case 'pinch': {
         if (pointers.size < 2) return;
         const [a1, b1] = [...pointers.values()];
+        if (Math.hypot(a1.x - mode.a0.x, a1.y - mode.a0.y) + Math.hypot(b1.x - mode.b0.x, b1.y - mode.b0.y) > 12) clearTimeout(boxHold); // it moved: a pinch
         view = pinch(mode.view0, mode.a0, mode.b0, a1, b1);
         break;
       }
@@ -806,7 +815,8 @@
         view = { ...mode.view0, x: mode.view0.x + p.x - mode.from.x, y: mode.view0.y + p.y - mode.from.y };
         break;
       case 'box':
-        mode.b = w;
+        if (mode.two) { const [a1, b1] = [...pointers.values()]; if (a1 && b1) { mode.a = toWorld(view, a1); mode.b = toWorld(view, b1); } }
+        else mode.b = w;
         break;
       case 'ruler':
         if (ruler) ruler.b = w;
@@ -833,6 +843,7 @@
   function up(e: PointerEvent, cancel = false) {
     if (!pointers.delete(e.pointerId)) return;
     clearTimeout(hold);
+    clearTimeout(boxHold);
     const m = mode;
     if (m.k === 'drag') ondrag?.(m.id, undefined); // the preview ends (a drop's move follows)
     mode = { k: 'none' }; // after a pinch the remaining finger does nothing until it lifts
@@ -899,7 +910,7 @@
     <div class="top">
       <div class="seg tools" role="toolbar" aria-label="Map tools">
         <button type="button" aria-pressed={tool === 'select'} onclick={() => (tool = 'select')}
-          title={`Tap a token · Shift-click adds · Shift-drag on empty map to box select${ondeclare ? ' · Right-drag or long-press to point' : ''}`}>Select</button>
+          title={`Tap a token · Shift-click adds · Shift-drag on empty map (or hold two fingers, then drag) to box select${ondeclare ? ' · Right-drag or long-press to point' : ''}`}>Select</button>
         <button type="button" aria-pressed={tool === 'ruler'} onclick={() => (tool = 'ruler')}>Ruler</button>
         <button type="button" aria-pressed={tool === 'template'} onclick={() => (tool = 'template')}>Template</button>
         {#if onfog}<button type="button" aria-pressed={tool === 'fog'} onclick={() => (tool = 'fog')}>Fog</button>{/if}
