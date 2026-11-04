@@ -227,4 +227,5 @@ export interface Token { id: string; name: string; x: number; y: number /* centr
   characterId?: string; monsterId?: string; hp?: number; maxHp?: number /* monster instance state */; combatantId?: string /* C3: linked monster combatant */;
   /** a monster's own AC (the library's), DM only: players' scenes never carry it */ ac?: number;
   /** Transient: the squares (token centres, ≤200) walked in the write that set it, ending where it stands; any other write drops it (db.scenes.update). */ trail?: { x: number; y: number }[] }
-export interface Scene { id: string; campaignId: string; name: string; image?: string /* blob hash */; width: number; height: number; grid: Grid; tokens: Token[]; fog?: string /* C */; shown?: boolean; updatedAt: number }
+export interface Scene { id: string; campaignId: string; name: string; image?: string /* blob hash */; width: number; height: number; grid: Grid; tokens: Token[]; fog?: string /* C */; shown?: boolean; updatedAt: number;
+  /** Walls, low walls, arrow slits and doors the DM drew (map/walls.ts) */ walls?: import('./map/walls.ts').Wall[] }

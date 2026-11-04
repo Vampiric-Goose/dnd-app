@@ -115,6 +115,12 @@ export function sceneProblem(r: unknown): string | undefined {
   const t = tokensProblem(r.tokens);
   if (t) return t;
   if (r.fog !== undefined && typeof r.fog !== 'string') return 'has damaged fog';
+  if (r.walls !== undefined) {
+    if (!Array.isArray(r.walls) || r.walls.length > 2000) return 'has a damaged wall list';
+    const pt = (p: unknown) => isRec(p) && finite(p.x) && finite(p.y);
+    const i = r.walls.findIndex((w) => !isRec(w) || typeof w.id !== 'string' || !pt(w.a) || !pt(w.b) || !['wall', 'low', 'slit', 'door'].includes(w.kind as string) || !opt(w.open, 'boolean'));
+    if (i >= 0) return `has a damaged wall (${i + 1})`;
+  }
 }
 
 /** A scene's token list (also a saved fight's map): at most 200 tokens, each with the fields the map relies on. */
