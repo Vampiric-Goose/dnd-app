@@ -32,6 +32,31 @@ export function shortRest(c: Character, spent: { die: number; rolls: number[] }[
   return applyHealing({ ...withState(c, { hitDiceUsed: used, pactSlotsUsed: 0, resourcesUsed }), inventory }, heal, sheet);
 }
 
+const AR = 'Arcane Recovery';
+const ORD = ['1st', '2nd', '3rd', '4th', '5th'];
+/** Arcane Recovery's slot levels left today: half the wizard level, rounded up; 0 without the feature or once it is used (until a long rest). */
+export function recoveryBudget(c: Character, sheet: Sheet): number {
+  const r = sheet.resources.find((x) => x.name === AR);
+  if (!r || (c.state.resourcesUsed[AR] ?? 0) >= r.max) return 0;
+  return Math.ceil(c.build.levels.filter((l) => /^class:wizard@/.test(l.classId)).length / 2);
+}
+
+/** Arcane Recovery (wizard 1, on a short rest): `counts[i]` spent (i+1)th-level slots come back, combined levels within the budget, none 6th or
+ *  higher; the feature is then used until a long rest. Anything else: the reason it can't. */
+export function arcaneRecovery(c: Character, sheet: Sheet, counts: number[]): Character | string {
+  const budget = recoveryBudget(c, sheet);
+  if (!budget) return sheet.resources.some((x) => x.name === AR) ? `${AR} is used until a long rest` : `no ${AR}`;
+  if (counts.slice(5).some((n) => n > 0)) return `${AR} cannot recover a slot of 6th level or higher`;
+  const levels = counts.reduce((t, n, i) => t + n * (i + 1), 0);
+  if (!levels) return 'pick the slots to recover';
+  const over = counts.findIndex((n, i) => n > (c.state.slotsUsed[i] ?? 0));
+  if (over >= 0) return `only ${c.state.slotsUsed[over] ?? 0} ${ORD[over]}-level slot${(c.state.slotsUsed[over] ?? 0) === 1 ? ' is' : 's are'} spent`;
+  if (levels > budget) return `those slots come to ${levels} levels; ${AR} gives back ${budget}`;
+  const slotsUsed = c.state.slotsUsed.map((n, i) => n - (counts[i] ?? 0));
+  const max = sheet.resources.find((x) => x.name === AR)!.max;
+  return withState(c, { slotsUsed, resourcesUsed: { ...c.state.resourcesUsed, [AR]: max } });
+}
+
 /** Full HP, half the hit dice back (largest first, at least 1), all slots and short/long resources and items, one less exhaustion.
  *  R26: no benefit when dead or below 1 HP (PHB p.186); the character comes back unchanged. */
 export function longRest(c: Character, sheet: Sheet, rng?: () => number): Character {

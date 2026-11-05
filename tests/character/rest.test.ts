@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { applyDamage, applyHealing, longRest, rollDeathSave, shortRest } from '../../src/lib/character/rest.ts';
+import { applyDamage, applyHealing, arcaneRecovery, longRest, recoveryBudget, rollDeathSave, shortRest } from '../../src/lib/character/rest.ts';
 import { computeSheet } from '../../src/lib/rules/sheet.ts';
 import { DEFAULT_SETTINGS } from '../../src/lib/settings.ts';
 import { makeEntry, useCharge } from '../../src/lib/items/inventory.ts';
@@ -61,4 +61,26 @@ test('a long rest ends Mage Armor (8 hours); real conditions stay', () => {
   const w = mkChar({ race: 'human', base: {}, levels: ['fighter'] });
   w.state = { ...w.state, conditions: ['Mage Armor', 'Poisoned'] };
   expect(longRest(w, computeSheet(w, dm)).state.conditions).toEqual(['Poisoned']);
+});
+
+test('Arcane Recovery: on a short rest, spent slots back up to half the wizard level (rounded up), none 6th or higher, once a day', () => {
+  const w = mkChar({ race: 'human', base: {}, levels: Array(5).fill('wizard') }), s = computeSheet(w, dm); // budget 3
+  w.state = { ...w.state, slotsUsed: [2, 1, 1] };
+  expect(recoveryBudget(w, s)).toBe(3);
+  const r = arcaneRecovery(w, s, [1, 1]) as typeof w; // a 1st and a 2nd
+  expect(r.state.slotsUsed).toEqual([1, 0, 1]);
+  expect(r.state.resourcesUsed['Arcane Recovery']).toBe(1);
+  expect(recoveryBudget(r, s)).toBe(0); // used for the day
+  expect(arcaneRecovery(r, s, [1])).toBe('Arcane Recovery is used until a long rest');
+  expect(arcaneRecovery(w, s, [1, 1, 1])).toBe('those slots come to 6 levels; Arcane Recovery gives back 3');
+  expect(arcaneRecovery(w, s, [3])).toBe('only 2 1st-level slots are spent');
+  expect(arcaneRecovery(w, s, [])).toBe('pick the slots to recover');
+  expect(longRest(r, s).state.resourcesUsed['Arcane Recovery']).toBeUndefined();
+});
+test('Arcane Recovery: never a 6th-level slot; a non-wizard has none', () => {
+  const w = mkChar({ race: 'human', base: {}, levels: Array(11).fill('wizard') }), s = computeSheet(w, dm); // budget 6
+  w.state = { ...w.state, slotsUsed: [0, 0, 0, 0, 0, 1] };
+  expect(arcaneRecovery(w, s, [0, 0, 0, 0, 0, 1])).toBe('Arcane Recovery cannot recover a slot of 6th level or higher');
+  const f = mkChar({ race: 'human', base: {}, levels: ['fighter'] });
+  expect(recoveryBudget(f, computeSheet(f, dm))).toBe(0);
 });
