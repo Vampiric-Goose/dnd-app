@@ -365,7 +365,7 @@
       {#if c.ownerId}<p class="sub"><span class="caption">Player</span> {ownerLabel(c)}</p>{/if}
       <div class="row pact">
         <a class="btn primary" href="#/characters/{c.id}">Open sheet</a>
-        {#if app.viewer === 'dm'}<a class="btn" href="#/characters/{c.id}/level-up">Level up</a>{/if}
+        <a class="btn" href="#/characters/{c.id}/level-up">Level up</a>
       </div>
       <div class="pdanger">
         <button class="danger" aria-label="Delete {c.name}" onclick={() => (deleting = c)}>Delete</button>

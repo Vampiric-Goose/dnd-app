@@ -267,10 +267,9 @@
       </div>
       <div class="actions">
         {#if pending}<button type="button" class="primary" onclick={() => navigate(`characters/${c!.id}/choices`)}>Choices to make ({pending})</button>{/if}
-        {#if app.viewer === 'dm'}
-          <button type="button" aria-pressed={edit} onclick={() => (editOn = !editOn)}>Edit mode</button>
-          <button type="button" class="primary" onclick={() => navigate(`characters/${c!.id}/level-up`)}>Level up</button>
-        {/if}
+        {#if app.viewer === 'dm'}<button type="button" aria-pressed={edit} onclick={() => (editOn = !editOn)}>Edit mode</button>{/if}
+        <!-- ponytail: players level up their own characters on their own for now; a DM approval step comes later -->
+        <button type="button" class="primary" onclick={() => navigate(`characters/${c!.id}/level-up`)}>Level up</button>
         <Menu label="⋯" ariaLabel="More character actions" caret={false} align="end"
           items={[{ label: 'Export JSON', onselect: exportJson }, { label: exporting ? 'Exporting PDF…' : 'Export PDF', disabled: exporting, onselect: exportPdf }]}>
           {#snippet children()}

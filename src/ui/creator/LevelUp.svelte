@@ -33,7 +33,7 @@
   });
 
   const settings = $derived(app.campaigns.find((x) => x.id === c?.campaignId)?.settings ?? DEFAULT_SETTINGS);
-  const sheetOf = (ch: Character) => computeSheet(embedContent(ch, index!), { settings, viewer: 'dm' });
+  const sheetOf = (ch: Character) => computeSheet(embedContent(ch, index!), { settings, viewer: app.viewer }); // a player levels up their own (R12: their view)
   const sheet = $derived(c && index ? sheetOf(c) : undefined);
   const oldSheet = $derived(base && index ? sheetOf(base) : undefined);
 
@@ -87,7 +87,7 @@
     error = '';
     try {
       const done = embedContent($state.snapshot(c) as Character, index);
-      const max = computeSheet(done, { settings, viewer: 'dm' }).maxHp;
+      const max = computeSheet(done, { settings, viewer: app.viewer }).maxHp;
       done.state = { ...done.state, hp: Math.max(0, Math.min(max, done.state.hp + max - oldSheet.maxHp)) };
       await db.characters.put(done);
       navigate(`characters/${done.id}`);
@@ -108,13 +108,11 @@
 <Workspace panelLabel="Summary" open={summaryOpen} onclose={() => (summaryOpen = false)}>
   <header class="head">
     <h1>Level up{c ? `: ${c.name}` : ''}</h1>
-    {#if app.viewer === 'dm' && c && sheet}<button type="button" class="summary-btn" aria-expanded={summaryOpen} onclick={() => (summaryOpen = true)}>Summary</button>{/if}
+    {#if c && sheet}<button type="button" class="summary-btn" aria-expanded={summaryOpen} onclick={() => (summaryOpen = true)}>Summary</button>{/if}
   </header>
   {#if error}<p role="alert" class="error">{error}</p>{/if}
 
-  {#if app.viewer !== 'dm'}
-    <p class="muted">Levelling up is done in DM view.</p>
-  {:else if c && index && sheet && oldSheet}
+  {#if c && index && sheet && oldSheet}
     <p>Level <span class="num">{base?.build.levels.length}</span> → <strong class="num">{c.build.levels.length}</strong>. Max HP <span class="num">{oldSheet.maxHp}</span> → <strong class="num">{sheet.maxHp}</strong>.</p>
 
     <nav aria-label="Level up steps">

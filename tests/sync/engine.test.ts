@@ -114,6 +114,23 @@ describe('join', () => {
     expect(sent).toBeLessThan(10);
   });
 
+  test('a player levels up their own character: the new level, its choices and HP reach the DM', async () => {
+    const { d, host } = dm({ A1: {} });
+    d.edit({ ...char('ch1', CID), ownerId: 'A1', build: { ...char('ch1').build, levels: [{ classId: 'class:fighter' }] } });
+    const a = player({ playerId: 'A1' });
+    connect(host, a.guest);
+    await settle(host, a.guest);
+    const mine = a.d.char('ch1')!;
+    a.d.edit({ ...mine, build: { ...mine.build, levels: [...mine.build.levels, { classId: 'class:fighter', hpRoll: 7 }], choices: { ...mine.build.choices, '2|x|0': { type: 'ids', ids: ['y'] } } },
+      state: { ...mine.state, hp: mine.state.hp + 9 } });
+    a.guest.characterChanged('ch1');
+    await settle(host, a.guest);
+    const m = d.char('ch1')!;
+    expect(m.build.levels).toEqual([{ classId: 'class:fighter' }, { classId: 'class:fighter', hpRoll: 7 }]);
+    expect(m.build.choices['2|x|0']).toEqual({ type: 'ids', ids: ['y'] });
+    expect(m.state.hp).toBe(mine.state.hp + 9);
+  });
+
   test('a public roll is shared with the party and logged by the DM; a private one never leaves', async () => {
     const { d, host } = dm();
     const a = player(), b = player();
