@@ -28,7 +28,7 @@ export function rollAim(name: string, plan: AimPlan, judged?: Pickable | (Pickab
   const mode = plan.attack ? combineMode({ adv: j?.adv ?? [], dis: j?.dis ?? (j?.disadvantage ? [j.disadvantage] : []) }, pick) : undefined;
   const d20 = plan.attack ? roll(`${name}: attack`, `1d20${signed(plan.toHit ?? 0)}`, { mode: mode ?? 'normal', shareAs: 'Attack' }) : undefined;
   const crit = !!d20 && (natD20(d20.detail) === 'nat20' || !!j?.autoCrit);
-  const dmg = plan.dice.map((d) => ({ d, r: roll(`${name}: ${d.type} damage`, d.expr, { crit: crit && d.on !== 'save', hold: true }) }));
+  const dmg = plan.dice.map((d) => ({ d, r: roll(`${name}: ${d.type} damage`, d.expr, { crit: crit && d.on !== 'save', hold: true, reroll: d.reroll }) }));
   rollMode.value = 'normal';
   return {
     // two d20s always (the second unshown when none was asked for): the DM's device may see a disadvantage this one can't (fog)

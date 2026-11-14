@@ -11,7 +11,7 @@ import { checkFaces, keptD20, resolveAttack, resolveSpell, totalOf, type Outcome
 import { SPELL_EFFECTS } from '../rules/constants.ts';
 import { diceAt, type SpellRead } from './spellText.ts';
 import { rollSpellDice, spellMods } from './spellEffects.ts';
-import { attackEdge, attackToggles, canTarget, combineMode, monsterAttack, reachOf, type Pickable, type Reach, type Sides, type Toggle } from './targeting.ts';
+import { attackEdge, attackToggles, canTarget, combineMode, gwfReroll, monsterAttack, reachOf, type Pickable, type Reach, type Sides, type Toggle } from './targeting.ts';
 import type { TurnAction } from './turnActions.ts';
 
 /** What a use aims at (a creature's id, or a map point for an area) and the roller's own raw dice (resolve.ts Rolled). */
@@ -27,7 +27,7 @@ export interface AimArea { shape: Shape; feet: number; width?: number; on: 'crea
 /** `ignore`: disadvantages a feat removes (Sharpshooter: long range; Crossbow Expert: a hostile within 5 ft). */
 /** `choices`: the damage types to pick from for dice whose type is chosen (their `type` stays '' until one is picked). */
 /** `mark`: a rider spell aimed at the creature it marks (no dice). A die's `vs`: it hurts only that creature (a marked rider). */
-export interface AimPlan { reach: Reach; line: boolean; attack: boolean; toHit?: number; area?: AimArea; dice: { expr: string; type: string; on?: 'hit' | 'save'; vs?: string; part?: 'alt' | 'later' }[]; read?: SpellRead;
+export interface AimPlan { reach: Reach; line: boolean; attack: boolean; toHit?: number; area?: AimArea; dice: { expr: string; type: string; on?: 'hit' | 'save'; vs?: string; part?: 'alt' | 'later'; /** Great Weapon Fighting */ reroll?: number }[]; read?: SpellRead;
   ignore?: { long?: true; close?: true }; choices?: string[]; mark?: true; /** rays, beams or darts: a target each */ count?: number; /** `count` is a most, each creature once (Bane) */ upTo?: true; /** a helpful spell: up to `max` creatures, the caster included */ helps?: { max: number }; /** damage over time, kept for the turns to come */ linger?: { dice: { expr: string; type: string }[]; read: SpellRead } }
 
 /** A melee weapon attack (Parry applies to it): an attack whose reach has a melee part. */
@@ -206,7 +206,7 @@ export function aimPlan(a: TurnAction, o: { level?: number; toggles?: Toggle[]; 
     const w = a.attack, t = o.toggles ?? [], ranged = !!w.ranged || !!w.range;
     const ignore = { ...(w.ranged && has('Sharpshooter') && { long: true as const }), ...(ranged && has('Crossbow Expert') && { close: true as const }) };
     return { reach, line: !!w.ranged, attack: true, toHit: w.toHit + t.reduce((n, x) => n + x.toHit, 0),
-      dice: [{ expr: w.damage, type: w.damageType }, ...t.map((x) => ({ expr: String(x.damage), type: w.damageType })), ...rider(w.damageType)], ...(Object.keys(ignore).length && { ignore }) };
+      dice: [{ expr: w.damage, type: w.damageType, ...(gwfReroll(o.features, w) && { reroll: 2 }) }, ...t.map((x) => ({ expr: String(x.damage), type: w.damageType })), ...rider(w.damageType)], ...(Object.keys(ignore).length && { ignore }) };
   }
   const ma = a.group === 'monster' ? monsterAttack(a) : undefined;
   if (ma) return { reach, line: ma.ranged, attack: true, toHit: ma.toHit, dice: [...ma.dmg, ...rider(ma.dmg[0]?.type)] };

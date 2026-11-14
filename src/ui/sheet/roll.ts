@@ -6,7 +6,7 @@ import { message } from '../creator/labels.ts';
  * Rolls an expression into the dice tray's log. A bad expression (say, odd imported damage text) becomes a toast. R12: shared from DM view,
  * only `shareAs` (default: the label) and the total leave the device: the expression may hold a hidden item's bonus.
  */
-export function rollTo(label: string, expr: string, opts: { crit?: boolean; public?: boolean; shareAs?: string } = {}): RollEntry | undefined {
+export function rollTo(label: string, expr: string, opts: { crit?: boolean; public?: boolean; shareAs?: string; reroll?: number } = {}): RollEntry | undefined {
   try {
     return roll(label, expr, { shareAs: label, ...opts });
   } catch (e) {

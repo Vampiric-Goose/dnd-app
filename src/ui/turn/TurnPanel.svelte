@@ -6,7 +6,7 @@
   import { CONDITION_TEXT } from '../../lib/combat/economy.ts';
   import { primaryAction, problemOf, visible, type TurnAction } from '../../lib/combat/turnActions.ts';
   import { aimPlan } from '../../lib/combat/aiming.ts';
-  import { attackToggles, type Toggle } from '../../lib/combat/targeting.ts';
+  import { attackToggles, gwfReroll, type Toggle } from '../../lib/combat/targeting.ts';
   import { richToPlain } from '../../lib/content/richtext.ts';
   import { rollParts } from '../../lib/monsters/library.ts';
   import { diceAt, type SpellArea } from '../../lib/combat/spellText.ts';
@@ -116,8 +116,8 @@
     const r = rollD20(`${a.attack!.name} attack`, a.attack!.toHit, { shareAs: 'Attack' });
     if (r) crit = natD20(r.detail) === 'nat20';
   }
-  function damage(label: string, expr: string) {
-    rollTo(label, expr, { crit, shareAs: 'Damage' });
+  function damage(label: string, expr: string, reroll?: number) {
+    rollTo(label, expr, { crit, shareAs: 'Damage', reroll });
     crit = false;
   }
   const condEffect = (c: string) => CONDITION_TEXT[titleCase(c)] ?? '';
@@ -239,8 +239,8 @@
       <button type="button" class="use" disabled={!!why || busy} onclick={() => { dialog?.close(); onaim(a, slotted(a) ? slotOf(a) : undefined, toggles.filter((t) => toggleFor[a.id]?.includes(t.id)), choices && (typeFor[a.id] ?? choices[0])); }}>Target</button>
     {:else if a.attack}
       <button type="button" disabled={!!why || busy} aria-label="Roll {a.name} attack, {signed(a.attack.toHit)}" onclick={() => attack(a)}>Attack <span class="num">{signed(a.attack.toHit)}</span></button>
-      <button type="button" aria-label="Roll {a.name} damage, {a.attack.damage}" onclick={() => damage(`${a.attack!.name} damage`, a.attack!.damage)}>Damage <span class="num">{a.attack.damage}</span></button>
-      {#if a.attack.versatile}<button type="button" onclick={() => damage(`${a.attack!.name} damage (two-handed)`, a.attack!.versatile!)}>Two-handed <span class="num">{a.attack.versatile}</span></button>{/if}
+      <button type="button" aria-label="Roll {a.name} damage, {a.attack.damage}" onclick={() => damage(`${a.attack!.name} damage`, a.attack!.damage, gwfReroll(features, a.attack!))}>Damage <span class="num">{a.attack.damage}</span></button>
+      {#if a.attack.versatile}<button type="button" onclick={() => damage(`${a.attack!.name} damage (two-handed)`, a.attack!.versatile!, gwfReroll(features, a.attack!, true))}>Two-handed <span class="num">{a.attack.versatile}</span></button>{/if}
     {:else if a.check}
       {#each a.check as c (c.label)}
         <button type="button" disabled={!!why || busy} aria-label="Roll {a.name}, {c.label} {signed(c.bonus)}" onclick={() => { if (use(a)) rollD20(`${name}: ${a.name} (${c.label})`, c.bonus); }}>{c.label} <span class="num">{signed(c.bonus)}</span></button>

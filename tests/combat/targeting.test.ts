@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { afterDefenses, attackEdge, attackToggles, canTarget, combineMode, finalMode, monsterAttack, reachOf, targetingOn } from '../../src/lib/combat/targeting.ts';
+import { afterDefenses, attackEdge, attackToggles, canTarget, combineMode, finalMode, gwfReroll, monsterAttack, reachOf, targetingOn } from '../../src/lib/combat/targeting.ts';
 import type { TurnAction } from '../../src/lib/combat/turnActions.ts';
 import { DEFAULT_SETTINGS } from '../../src/lib/settings.ts';
 import type { Attack } from '../../src/lib/types.ts';
@@ -101,5 +101,16 @@ describe('targeting', () => {
     expect(finalMode('adv', 'long range')).toBeUndefined();
     expect(finalMode(undefined, 'long range')).toBe('dis');
     expect(finalMode('adv')).toBe('adv');
+  });
+});
+
+describe('Great Weapon Fighting', () => {
+  const w = (o: Partial<Attack>): Attack => ({ entryId: 'e', name: 'W', toHit: 5, damage: '2d6+3', damageType: 'slashing', properties: [], ...o });
+  test('rerolls 1s and 2s with a melee weapon held in two hands, only with the style', () => {
+    expect(gwfReroll(['Great Weapon Fighting'], w({ properties: ['heavy', 'two-handed'] }))).toBe(2);
+    expect(gwfReroll(['Great Weapon Fighting'], w({ properties: ['versatile'] }))).toBeUndefined(); // one-handed
+    expect(gwfReroll(['Great Weapon Fighting'], w({ properties: ['versatile'] }), true)).toBe(2); // its two-handed die
+    expect(gwfReroll(['Great Weapon Fighting'], w({ properties: ['heavy', 'two-handed'], ranged: true }))).toBeUndefined(); // a heavy crossbow
+    expect(gwfReroll(['Great Weapon Master'], w({ properties: ['heavy', 'two-handed'] }))).toBeUndefined();
   });
 });

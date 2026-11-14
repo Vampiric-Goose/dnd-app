@@ -14,6 +14,11 @@ const spell = (read: object, range = { feet: 60 }): TurnAction => ({ id: 's', na
   cast: { read: { damage: [], range, ...read } as never, attack: 5, dc: 13, charLevel: 1, mod: 3 } });
 
 describe('aimPlan', () => {
+  test('Great Weapon Fighting: the weapon dice reroll 1s and 2s with a two-handed melee weapon, not the extra +10', () => {
+    const a: TurnAction = { id: 'a', name: 'Greatsword', cost: 'action', group: 'attack', attack: { entryId: 'e', name: 'Greatsword', toHit: 7, damage: '2d6+4', damageType: 'slashing', properties: ['heavy', 'two-handed'] } };
+    expect(aimPlan(a, { features: ['Great Weapon Fighting'], toggles: [{ id: 'gwm', name: 'GWM', toHit: -5, damage: 10 }] })?.dice).toEqual([{ expr: '2d6+4', type: 'slashing', reroll: 2 }, { expr: '10', type: 'slashing' }]);
+    expect(aimPlan(a)?.dice).toEqual([{ expr: '2d6+4', type: 'slashing' }]);
+  });
   test('a weapon with Great Weapon Master on: -5 to hit, +10 damage as one more expression', () => {
     const a: TurnAction = { id: 'a', name: 'Greatsword', cost: 'action', group: 'attack', attack: { entryId: 'e', name: 'Greatsword', toHit: 7, damage: '2d6+4', damageType: 'slashing', properties: ['heavy'] } };
     expect(aimPlan(a, { toggles: [{ id: 'gwm', name: 'GWM', toHit: -5, damage: 10 }] })).toMatchObject({ attack: true, toHit: 2, line: false, dice: [{ expr: '2d6+4' }, { expr: '10' }] });

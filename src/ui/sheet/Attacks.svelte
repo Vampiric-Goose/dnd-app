@@ -1,10 +1,11 @@
 <script lang="ts">
   import { natD20 } from '../../lib/rolls.svelte.ts';
+  import { gwfReroll } from '../../lib/combat/targeting.ts';
   import type { Sheet } from '../../lib/types.ts';
   import { signed, titleCase } from '../creator/labels.ts';
   import { rollD20, rollTo } from './roll.ts';
 
-  let { sheet }: { sheet: Sheet } = $props();
+  let { sheet, features = [] }: { sheet: Sheet; features?: string[] } = $props();
 
   let crit = $state(false);
 
@@ -13,8 +14,8 @@
     if (r) crit = natD20(r.detail) === 'nat20'; // each attack roll sets the box: ticked on a natural 20, cleared otherwise (tick it by hand for a 19 crit range)
   }
 
-  function damage(label: string, expr: string, shareAs: string) {
-    rollTo(label, expr, { crit, shareAs });
+  function damage(label: string, expr: string, shareAs: string, reroll?: number) {
+    rollTo(label, expr, { crit, shareAs, reroll });
     crit = false;
   }
 </script>
@@ -29,9 +30,9 @@
       </span>
       <span class="rolls">
         <button type="button" aria-label="Roll {a.name} attack, {signed(a.toHit)}" onclick={() => attack(a.name, a.toHit)}>Attack <span class="num">{signed(a.toHit)}</span></button>
-        <button type="button" aria-label="Roll {a.name} damage, {a.damage}" onclick={() => damage(`${a.name} damage`, a.damage, 'Damage')}>Damage <span class="num">{a.damage}</span></button>
+        <button type="button" aria-label="Roll {a.name} damage, {a.damage}" onclick={() => damage(`${a.name} damage`, a.damage, 'Damage', gwfReroll(features, a))}>Damage <span class="num">{a.damage}</span></button>
         {#if a.versatile}
-          <button type="button" aria-label="Roll {a.name} damage two-handed, {a.versatile}" onclick={() => damage(`${a.name} damage (two-handed)`, a.versatile!, 'Damage (two-handed)')}>Two-handed <span class="num">{a.versatile}</span></button>
+          <button type="button" aria-label="Roll {a.name} damage two-handed, {a.versatile}" onclick={() => damage(`${a.name} damage (two-handed)`, a.versatile!, 'Damage (two-handed)', gwfReroll(features, a, true))}>Two-handed <span class="num">{a.versatile}</span></button>
         {/if}
       </span>
     </li>

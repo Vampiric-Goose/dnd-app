@@ -335,7 +335,7 @@
     <div class="drawers">
       <Drawer title="Attacks" open>
         {#snippet summary()}{attackSummary}{/snippet}
-        <Attacks {sheet} />
+        <Attacks {sheet} features={features.map((f) => f.name)} />
       </Drawer>
       <Drawer title="Skills & saves">
         {#snippet summary()}{skillSummary}{/snippet}

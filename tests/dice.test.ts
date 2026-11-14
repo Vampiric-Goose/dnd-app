@@ -59,3 +59,10 @@ test('house rule: a crit rolls the damage once and doubles the total', () => {
   expect(rollDice('2d6+3', { rng: () => 0.999, crit: 'all' })).toMatchObject({ total: 30, detail: '(2d6 (6, 6) + 3) ×2', faces: [6, 6] });
   expect(rollDice('1d8+1', { rng: () => 0, crit: 'all' }).total).toBe((1 + 1) * 2);
 });
+
+test('reroll (Great Weapon Fighting): each die showing 2 or less is rolled once more and the new roll kept, even another 1 or 2', () => {
+  const seq = [0, 0.7, 0.2], rng = () => seq.shift()!; // 1, 5, then the 1 rerolled to a 2 (kept)
+  expect(rollDice('2d6+3', { rng, reroll: 2 })).toEqual({ total: 10, detail: '2d6 (1→2, 5) + 3', faces: [2, 5] });
+  const crit = [0.9, 0.1, 0.5], r2 = () => crit.shift()!; // a crit doubles the dice; each is rerolled too: 6, 1→4
+  expect(rollDice('1d6', { rng: r2, reroll: 2, crit: true }).faces).toEqual([6, 4]);
+});

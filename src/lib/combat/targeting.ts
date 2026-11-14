@@ -3,7 +3,7 @@
 // -5/+10, and damage resistance, immunity and vulnerability. The map and the DM's device use these; no rolls happen here.
 import { richToPlain } from '../content/richtext.ts';
 import { rollParts } from '../monsters/library.ts';
-import type { CampaignSettings } from '../types.ts';
+import type { Attack, CampaignSettings } from '../types.ts';
 import type { TurnAction } from './turnActions.ts';
 import { spellEdges, spellMods } from './spellEffects.ts';
 
@@ -76,6 +76,10 @@ export function attackEdge(s: Sides): { adv: string[]; dis: string[]; autoCrit: 
 }
 
 export interface Toggle { id: 'gwm' | 'ss'; name: string; toHit: -5; damage: 10 }
+/** Great Weapon Fighting: 1s and 2s on the damage dice of a melee weapon held in two hands (two-handed, or versatile used so) are rerolled. */
+export const gwfReroll = (features: readonly string[] | undefined, w: Attack, twoHands = w.properties.includes('two-handed')): 2 | undefined =>
+  !w.ranged && twoHands && features?.includes('Great Weapon Fighting') ? 2 : undefined;
+
 /** Great Weapon Master with a heavy melee weapon, Sharpshooter with a ranged weapon: -5 to hit, +10 damage, only with the feat. */
 export function attackToggles(a: TurnAction, features: string[]): Toggle[] {
   const w = a.attack;
