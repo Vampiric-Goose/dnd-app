@@ -54,8 +54,8 @@ const changed = (kind: ChangeKind, id: string) => { try { onChange?.(kind, id); 
 export const combatKey = (campaignId: string) => `combat:${campaignId}`;
 
 function open() {
-  return (conn ??= openDB<Schema>(NAME, 4, {
-    upgrade(d, oldVersion) {
+  return (conn ??= openDB<Schema>(NAME, 5, {
+    upgrade(d, oldVersion, _v, tx) {
       if (oldVersion < 1) {
         d.createObjectStore('campaigns', { keyPath: 'id' });
         d.createObjectStore('characters', { keyPath: 'id' }).createIndex('campaignId', 'campaignId');
@@ -69,6 +69,10 @@ function open() {
       if (oldVersion < 2) d.createObjectStore('monsters', { keyPath: 'id' }).createIndex('campaignId', 'campaignId'); // stage 2: the DM's own monsters
       if (oldVersion < 3) d.createObjectStore('encounters', { keyPath: 'id' }).createIndex('campaignId', 'campaignId'); // stage 4: prepared encounters
       if (oldVersion < 4) d.createObjectStore('scenes', { keyPath: 'id' }).createIndex('campaignId', 'campaignId'); // stage 5: battle map scenes
+      // once, for campaigns made before it: level-up HP rolls once, then the player keeps the roll or the average (a DM can change it after)
+      if (oldVersion >= 1 && oldVersion < 5) void (async () => {
+        for (let cur = await tx.objectStore('campaigns').openCursor(); cur; cur = await cur.continue()) void cur.update({ ...cur.value, settings: { ...cur.value.settings, hpMethod: 'choose' } });
+      })();
     },
     // An older tab holds the old version open: the upgrade waits (and still completes by itself once that tab closes).
     blocked() { onBlocked?.(); },

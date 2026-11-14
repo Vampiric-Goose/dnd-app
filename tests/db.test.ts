@@ -1,5 +1,6 @@
 import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import { openDB } from 'idb';
 import { db, resetDb } from '../src/lib/db.ts';
 import type { Character, Pack } from '../src/lib/types.ts';
 import { camp, char, item } from './fixtures/records.ts';
@@ -80,4 +81,20 @@ test('saveTogether writes characters and campaign atomically', async () => {
   await expect(db.saveTogether({ characters: [{ ...a, name: 'changed' }, {} as Character], campaign: camp('c2') })).rejects.toThrow(/Could not save/);
   expect((await db.characters.get('a'))!.name).toBe('a');
   expect(await db.campaigns.get('c2')).toBeUndefined();
+});
+
+test('a version 4 database upgrades to 5: every campaign rolls once for level-up HP, then keeps the roll or the average', async () => {
+  const v4 = await openDB('dnd-app', 4, {
+    upgrade(d) {
+      d.createObjectStore('campaigns', { keyPath: 'id' });
+      for (const n of ['characters', 'items', 'monsters', 'encounters', 'scenes']) d.createObjectStore(n, { keyPath: 'id' }).createIndex('campaignId', 'campaignId');
+      for (const n of ['packMeta', 'packs']) d.createObjectStore(n, { keyPath: 'id' });
+      d.createObjectStore('raw5e'); d.createObjectStore('blobs', { keyPath: 'hash' }); d.createObjectStore('meta');
+    },
+  });
+  await v4.put('campaigns', { ...camp('c1'), settings: { ...camp('c1').settings, hpMethod: 'average' } });
+  await v4.put('campaigns', { ...camp('c2'), settings: { ...camp('c2').settings, hpMethod: 'roll', fog: true } });
+  v4.close();
+  const after = await db.campaigns.list();
+  expect(after.map((c) => [c.id, c.settings.hpMethod, c.settings.fog])).toEqual([['c1', 'choose', false], ['c2', 'choose', true]]);
 });
