@@ -83,7 +83,7 @@ export interface GuestDeps {
 const same = (a: Character, b: Character) => canon({ ...a, updatedAt: 0 }) === canon({ ...b, updatedAt: 0 });
 
 const CHOICES: Partial<Record<keyof CampaignSettings, readonly string[]>> = {
-  hpMethod: ['average', 'roll'], encumbrance: ['off', 'standard', 'variant'], diagonal: ['5-5-5', '5-10-5'], monsterHp: ['average', 'roll'],
+  hpMethod: ['average', 'roll', 'choose'], encumbrance: ['off', 'standard', 'variant'], diagonal: ['5-5-5', '5-10-5'], monsterHp: ['average', 'roll'],
 };
 /** M1: the DM's settings rebuilt key by key from DEFAULT_SETTINGS (same types, known choices); a missing key keeps the default. Undefined when any is wrong. */
 export function cleanSettings(v: unknown): CampaignSettings | undefined {

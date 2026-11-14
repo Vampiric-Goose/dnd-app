@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { addLevel, classesFor, type Problem } from '../../lib/character/build.ts';
+  import { addLevel, classesFor, keptHp, type Problem } from '../../lib/character/build.ts';
   import { app } from '../../lib/store.svelte.ts';
   import type { ContentIndex } from '../../lib/content/index.ts';
   import { roll } from '../../lib/rolls.svelte.ts';
@@ -35,7 +35,8 @@
     if (!classId || k?.kind !== 'class') return void (c = next);
     for (let i = 0; i < n; i++) {
       // One roll per level and class for the creator's life: dropping and re-adding a level, or switching class and back, reuses it.
-      const hpRoll = i > 0 && settings.hpMethod === 'roll' ? (hpRolls[`${i + 1}|${k.id}`] ??= roll(`HP: ${k.name} level ${i + 1}`, `1d${k.hitDie}`).total) : undefined;
+      // 'choose' (roll, then keep it or the average) keeps the better of the two here; Level up lets the player pick
+      const hpRoll = i > 0 && settings.hpMethod !== 'average' ? keptHp(settings.hpMethod, (hpRolls[`${i + 1}|${k.id}`] ??= roll(`HP: ${k.name} level ${i + 1}`, `1d${k.hitDie}`).total), k.hitDie) : undefined;
       const r = addLevel(next, classId, index, settings, hpRoll);
       problems.push(...r.problems);
       if (r.character === next) break;
@@ -55,7 +56,7 @@
 </div>
 
 <p class="muted">
-  Hit points: maximum at 1st level, then {settings.hpMethod === 'roll' ? 'a roll per level (logged in the dice tray)' : 'the average per level'}, plus your Constitution modifier.
+  Hit points: maximum at 1st level, then {settings.hpMethod === 'roll' ? 'a roll per level (logged in the dice tray)' : settings.hpMethod === 'choose' ? 'a roll per level or the average, whichever is higher (rolls logged in the dice tray)' : 'the average per level'}, plus your Constitution modifier.
   {#if rolled.length}HP rolls: {rolled.join(', ')}.{/if}
 </p>
 <p class="muted">Multiclassing: create the character in one class, then add levels in other classes from Level up.</p>

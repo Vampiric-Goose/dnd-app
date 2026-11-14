@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { addLevel, answerChoice, embedContent, embedStale, listChoices, newCharacter, skillOptions, spellLimits, takenElsewhere, validateCharacter } from '../../src/lib/character/build.ts';
+import { addLevel, answerChoice, keptHp, withHpRoll, embedContent, embedStale, listChoices, newCharacter, skillOptions, spellLimits, takenElsewhere, validateCharacter } from '../../src/lib/character/build.ts';
 import { computeSheet } from '../../src/lib/rules/sheet.ts';
 import { DEFAULT_SETTINGS } from '../../src/lib/settings.ts';
 import { enumerateChoices } from '../../src/lib/character/choices.ts';
@@ -215,4 +215,16 @@ test('a spell copied before the import kept book mechanics is stale: the sheet r
   const c = embedContent({ ...m, build: { ...m.build, spells: { [m.build.levels[0].classId]: { known: [magicMissile.id], prepared: [magicMissile.id] } } } }, old);
   expect(embedStale(c, now, S)).toBe(true);
   expect(embedStale(embedContent(c, now), now, S)).toBe(false);
+});
+
+test('level-up HP: average keeps none; roll keeps the roll; roll-then-choose keeps the pick, the better one until picked', () => {
+  expect(keptHp('average', 3, 10)).toBeUndefined();
+  expect(keptHp('roll', 3, 10)).toBe(3);
+  expect(keptHp('choose', 3, 10)).toBeUndefined(); // average 6 beats a 3
+  expect(keptHp('choose', 9, 10)).toBe(9);
+  expect(keptHp('choose', 9, 10, 'average')).toBeUndefined();
+  expect(keptHp('choose', 3, 10, 'roll')).toBe(3);
+  const c = mkChar({ race: 'human', base: {}, levels: ['fighter', 'fighter'] });
+  expect(withHpRoll(c, 1, 8).build.levels[1]).toMatchObject({ hpRoll: 8 });
+  expect(withHpRoll(withHpRoll(c, 1, 8), 1, undefined).build.levels[1]).not.toHaveProperty('hpRoll');
 });

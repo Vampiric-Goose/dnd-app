@@ -1,7 +1,7 @@
 import { slug } from '../content/ids.ts';
 import type { ContentIndex } from '../content/index.ts';
 import { isStandardArray, pointBuyCost } from '../rules/abilities.ts';
-import { ABILITIES, POINT_BUY_BUDGET, SKILL_ABILITY, STANDARD_ARRAY } from '../rules/constants.ts';
+import { ABILITIES, averageHp, POINT_BUY_BUDGET, SKILL_ABILITY, STANDARD_ARRAY } from '../rules/constants.ts';
 import { computeSheet } from '../rules/sheet.ts';
 import { uid } from '../uid.ts';
 import type { Ability, CampaignSettings, Character, ChoiceAnswer, ClassDef, Entity, MulticlassPrereq, Scores, Sheet, SpellDef } from '../types.ts';
@@ -57,6 +57,20 @@ function multiclassProblems(target: ClassDef, current: ClassDef[], s: Scores, se
     if (gap) return [problem('class', `Multiclassing into ${target.name} needs ${gap}`)];
   }
   return [];
+}
+
+/** The HP roll a new level keeps (none: the average). 'roll' keeps the roll; 'choose' (roll once, then keep the roll or the average) keeps the
+ *  player's pick, the better of the two until they pick. */
+export function keptHp(method: CampaignSettings['hpMethod'], roll: number | undefined, die: number, pick?: 'roll' | 'average'): number | undefined {
+  if (roll === undefined || method === 'average') return undefined;
+  if (method === 'roll') return roll;
+  return (pick ?? (roll > averageHp(die) ? 'roll' : 'average')) === 'roll' ? roll : undefined;
+}
+
+/** Level `i` (0-based) with that HP roll, or the average when undefined. */
+export function withHpRoll(c: Character, i: number, hpRoll: number | undefined): Character {
+  const levels = c.build.levels.map((l, k) => { if (k !== i) return l; const { hpRoll: _, ...rest } = l; return hpRoll === undefined ? rest : { ...rest, hpRoll }; });
+  return { ...c, build: { ...c.build, levels } };
 }
 
 /** Adds one level of `classId`. With a blocking problem the character comes back unchanged. Unknown classes and level 21 can't be overridden. */

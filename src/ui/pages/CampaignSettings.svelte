@@ -68,7 +68,7 @@
 
   // Closed drawers' one-line summaries.
   const onList = (xs: string[]) => (xs.length ? xs.join(', ') : 'All off');
-  const hpText = { average: 'Average', roll: 'Roll' } as const;
+  const hpText = { average: 'Average', roll: 'Roll', choose: 'Roll or average' } as const;
   const encText = { off: 'Off', standard: 'Standard', variant: 'Variant' } as const;
 </script>
 
@@ -105,9 +105,10 @@
       {#snippet summary()}{hpText[c.settings.hpMethod]} HP on level-up · Encumbrance {encText[c.settings.encumbrance].toLowerCase()}{/snippet}
       <div class="field">
         <label for="hp-method">Hit points on level-up</label>
-        <select id="hp-method" value={c.settings.hpMethod} onchange={(e) => change((n) => (n.settings.hpMethod = e.currentTarget.value as 'average' | 'roll'))}>
+        <select id="hp-method" value={c.settings.hpMethod} onchange={(e) => change((n) => (n.settings.hpMethod = e.currentTarget.value as 'average' | 'roll' | 'choose'))}>
+          <option value="choose">Roll once, then keep the roll or take the average</option>
           <option value="average">Take the average</option>
-          <option value="roll">Roll</option>
+          <option value="roll">Roll (the roll stands)</option>
         </select>
       </div>
       <div class="field">

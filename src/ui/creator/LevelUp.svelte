@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { addLevel, classesFor, embedContent, validateCharacter, type Problem } from '../../lib/character/build.ts';
+  import { addLevel, classesFor, embedContent, keptHp, validateCharacter, withHpRoll, type Problem } from '../../lib/character/build.ts';
+  import { averageHp } from '../../lib/rules/constants.ts';
   import type { ContentIndex } from '../../lib/content/index.ts';
   import { db } from '../../lib/db.ts';
   import { navigate } from '../../lib/router.svelte.ts';
@@ -55,6 +56,12 @@
   let added = $state(0);
   let notes: string[] = $state([]);
   const hpRolls: Record<string, number> = {}; // `characterId|level|classId` → the roll made for it on this page
+  // 'choose': each added level's one roll, and whether the player keeps it or takes the average (the better one until they pick)
+  let hpPicks: { i: number; die: number; roll: number; pick: 'roll' | 'average' }[] = $state([]);
+  function pickHp(p: (typeof hpPicks)[number], pick: 'roll' | 'average') {
+    p.pick = pick;
+    if (c) c = withHpRoll(c, p.i, pick === 'roll' ? p.roll : undefined);
+  }
 
   function addOne() {
     if (!c || !index || blocked) return;
@@ -63,12 +70,14 @@
     const lv = c.build.levels.length + 1;
     // A level re-added after Start over keeps its first roll, so starting over can't fish for better HP.
     const key = `${params.id}|${lv}|${cls.id}`;
-    const hpRoll = settings.hpMethod === 'roll' ? (hpRolls[key] ??= roll(`HP: ${cls.name}, character level ${lv}`, `1d${cls.hitDie}`).total) : undefined;
+    const rolled = settings.hpMethod === 'average' ? undefined : (hpRolls[key] ??= roll(`HP: ${cls.name}, character level ${lv}`, `1d${cls.hitDie}`).total);
+    const hpRoll = keptHp(settings.hpMethod, rolled, cls.hitDie);
     const r = addLevel(c, classId, index, settings, hpRoll);
     if (r.problems.some((p) => p.blocking)) return;
     c = r.character;
     added++;
-    notes.push(`Level ${lv}: ${cls.name}${hpRoll !== undefined ? `, rolled ${hpRoll} for HP` : ', average HP'}${r.problems.length ? ` (warning: ${r.problems.map((p) => p.message).join('; ')})` : ''}`);
+    if (settings.hpMethod === 'choose' && rolled !== undefined) hpPicks.push({ i: lv - 1, die: cls.hitDie, roll: rolled, pick: hpRoll === undefined ? 'average' : 'roll' });
+    notes.push(`Level ${lv}: ${cls.name}${settings.hpMethod === 'choose' ? `, rolled ${rolled} for HP` : hpRoll !== undefined ? `, rolled ${hpRoll} for HP` : ', average HP'}${r.problems.length ? ` (warning: ${r.problems.map((p) => p.message).join('; ')})` : ''}`);
   }
 
   function startOver() {
@@ -76,6 +85,7 @@
     c = structuredClone(base);
     added = 0;
     notes = [];
+    hpPicks = [];
   }
 
   const problems = $derived<Problem[]>(c && index ? validateCharacter(c, index, settings) : []);
@@ -131,7 +141,7 @@
       <section class="stage" aria-labelledby="lu-add-h">
         <h2 id="lu-add-h">Add a level</h2>
         <FilterSelect id="lu-class" label="Class" options={classOptions} value={classId} onchange={(id) => (classId = id)} />
-        <p class="muted">Hit points: {settings.hpMethod === 'roll' ? 'rolled when you add the level (logged in the dice tray)' : 'the average for the hit die'}, plus your Constitution modifier.</p>
+        <p class="muted">Hit points: {settings.hpMethod === 'roll' ? 'rolled when you add the level (logged in the dice tray)' : settings.hpMethod === 'choose' ? 'rolled once when you add the level (logged in the dice tray); then keep the roll or take the average' : 'the average for the hit die'}, plus your Constitution modifier.</p>
         {#each preview?.problems ?? [] as p}
           <p role="alert" class:error={p.blocking} class:muted={!p.blocking}>{p.blocking ? '' : 'Warning (rule overrides are on): '}{p.message}</p>
         {/each}
@@ -140,6 +150,13 @@
           {#if added}<button onclick={startOver}>Start over</button>{/if}
         </p>
         {#if notes.length}<ul class="notes">{#each notes as n}<li>{n}</li>{/each}</ul>{/if}
+        {#each hpPicks as p (p.i)}
+          <fieldset class="hp-pick">
+            <legend>Level {p.i + 1} hit points (plus your Constitution modifier)</legend>
+            <label><input type="radio" name="hp-{p.i}" checked={p.pick === 'roll'} onchange={() => pickHp(p, 'roll')} /> Keep the roll: <span class="num">{p.roll}</span> on the d{p.die}</label>
+            <label><input type="radio" name="hp-{p.i}" checked={p.pick === 'average'} onchange={() => pickHp(p, 'average')} /> Take the average: <span class="num">{averageHp(p.die)}</span></label>
+          </fieldset>
+        {/each}
       </section>
     {:else if step === 'choices'}
       <section class="stage" aria-labelledby="lu-ch-h">
@@ -197,6 +214,11 @@
 </Workspace>
 
 <style>
+  .hp-pick label {
+    display: block;
+    margin: 0.25rem 0;
+  }
+
   .head {
     display: flex;
     align-items: center;

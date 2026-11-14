@@ -7,7 +7,7 @@ export const DEFAULT_SETTINGS: CampaignSettings = {
   optionalClassFeatures: false,
   multiclassing: true,
   feats: true,
-  hpMethod: 'average',
+  hpMethod: 'choose',
   encumbrance: 'off',
   crSuggestion: false,
   fog: false,
