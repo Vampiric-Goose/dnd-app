@@ -19,7 +19,8 @@ export function computeSheet(c: Character, opts: SheetOpts): Sheet {
   const warnings = new Set<string>();
   const lookup = (id: string) => {
     const e = c.embedded[id];
-    if (!e) warnings.add(`Missing ${id.slice(0, id.indexOf(':'))}: ${id}`);
+    // a Tasha optional class feature (a PHB class lists them) the campaign lacks: silent while optional class features are off
+    if (!e && !(id.startsWith('feature:') && id.endsWith('@TCE') && !opts.settings.optionalClassFeatures)) warnings.add(`Missing ${id.slice(0, id.indexOf(':'))}: ${id}`);
     return e;
   };
   const { steps, pending, items, effects } = gather(c, opts, lookup);

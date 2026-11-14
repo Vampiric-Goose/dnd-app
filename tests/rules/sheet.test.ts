@@ -5,7 +5,9 @@ import type { PlayerView } from '../../src/lib/types.ts';
 import { enumerateChoices } from '../../src/lib/character/choices.ts';
 import { featureList } from '../../src/lib/character/play.ts';
 import type { Character, SubraceDef } from '../../src/lib/types.ts';
-import { halfElf, human, mkChar } from '../fixtures/content.ts';
+import { fixtureEntities, halfElf, human, mkChar } from '../fixtures/content.ts';
+import { embedContent } from '../../src/lib/character/build.ts';
+import { ContentIndex } from '../../src/lib/content/index.ts';
 
 const S = DEFAULT_SETTINGS, dm = { settings: S, viewer: 'dm' as const };
 test('a ranged weapon attack carries its normal and long range', () => {
@@ -133,4 +135,14 @@ test('subrace overwrite: race ability and skill choices drop, other race choices
   expect([s.scores.cha, s.scores.dex, s.skills.perception.proficient]).toEqual([10, 12, true]);
   expect(featureList(c, S).map(f => f.name)).toEqual(expect.arrayContaining(['Fey Ancestry', 'Drow Magic']));
   expect(featureList(c, S).map(f => f.name)).not.toContain('Skill Versatility');
+});
+
+test('a Tasha optional feature the campaign lacks is silent while optional class features are off, and warns when they are on', () => {
+  const ents = fixtureEntities.map((e) => (e.id === 'class:wizard@FIX' && e.kind === 'class' ? { ...e, features: [...e.features, { id: 'feature:wizard:magical-thing:2@TCE', level: 2 }] } : e));
+  const index = new ContentIndex([{ id: 'fix', name: 'Fixture', source: 'FIX', importedAt: 0, hash: 'fix', entities: ents, patches: [] }]);
+  const c = embedContent(mkChar({ race: 'human', base: {}, levels: ['wizard', 'wizard'] }), index);
+  expect(computeSheet(c, dm).warnings).toEqual([]);
+  expect(computeSheet(c, { ...dm, settings: { ...dm.settings, optionalClassFeatures: true } }).warnings).toEqual(['Missing feature: feature:wizard:magical-thing:2@TCE']);
+  const lost = { ...c, build: { ...c.build, subclasses: { 'class:wizard@FIX': 'subclass:creation@TCE' } } }; // anything else from the book still warns
+  expect(computeSheet(lost, dm).warnings).toContain('Missing subclass: subclass:creation@TCE');
 });
