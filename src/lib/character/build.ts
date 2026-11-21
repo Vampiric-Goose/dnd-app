@@ -59,6 +59,22 @@ function multiclassProblems(target: ClassDef, current: ClassDef[], s: Scores, se
   return [];
 }
 
+/** Level up needs the DM's leave (`state.levelUpTo`, set by the DM): a player may add levels up to it; the DM always may. */
+export const canLevelUp = (c: Character, dm: boolean): boolean => dm || (c.state.levelUpTo ?? 0) > c.build.levels.length;
+
+/** The DM allows the next level up (or takes the leave back). */
+export function allowLevelUp(c: Character, on: boolean): Character {
+  const { levelUpTo: _, ...state } = c.state;
+  return { ...c, state: on ? { ...state, levelUpTo: c.build.levels.length + 1 } : state };
+}
+
+/** The DM's device, on a player's copy of their own character: a level past the DM's leave, or the leave itself changed, is refused. */
+export function levelProblem(stored: Character, incoming: Character): string | undefined {
+  if ((incoming.state.levelUpTo ?? 0) !== (stored.state.levelUpTo ?? 0)) return 'only the DM allows a level up';
+  const n = incoming.build.levels.length;
+  return n > stored.build.levels.length && n > (stored.state.levelUpTo ?? 0) ? 'level up only when your DM allows it' : undefined;
+}
+
 /** The HP roll a new level keeps (none: the average). 'roll' keeps the roll; 'choose' (roll once, then keep the roll or the average) keeps the
  *  player's pick, the better of the two until they pick. */
 export function keptHp(method: CampaignSettings['hpMethod'], roll: number | undefined, die: number, pick?: 'roll' | 'average'): number | undefined {

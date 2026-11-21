@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { addLevel, answerChoice, keptHp, withHpRoll, embedContent, embedStale, listChoices, newCharacter, skillOptions, spellLimits, takenElsewhere, validateCharacter } from '../../src/lib/character/build.ts';
+import { addLevel, allowLevelUp, answerChoice, canLevelUp, keptHp, levelProblem, withHpRoll, embedContent, embedStale, listChoices, newCharacter, skillOptions, spellLimits, takenElsewhere, validateCharacter } from '../../src/lib/character/build.ts';
 import { computeSheet } from '../../src/lib/rules/sheet.ts';
 import { DEFAULT_SETTINGS } from '../../src/lib/settings.ts';
 import { enumerateChoices } from '../../src/lib/character/choices.ts';
@@ -227,4 +227,20 @@ test('level-up HP: average keeps none; roll keeps the roll; roll-then-choose kee
   const c = mkChar({ race: 'human', base: {}, levels: ['fighter', 'fighter'] });
   expect(withHpRoll(c, 1, 8).build.levels[1]).toMatchObject({ hpRoll: 8 });
   expect(withHpRoll(withHpRoll(c, 1, 8), 1, undefined).build.levels[1]).not.toHaveProperty('hpRoll');
+});
+
+test('level-up needs the DM: a player may add levels up to the allowed level; the DM always may', () => {
+  const c = mkChar({ race: 'human', base: {}, levels: ['fighter', 'fighter'] });
+  expect([canLevelUp(c, false), canLevelUp(c, true)]).toEqual([false, true]);
+  const ok = allowLevelUp(c, true);
+  expect([ok.state.levelUpTo, canLevelUp(ok, false)]).toEqual([3, true]);
+  expect(canLevelUp({ ...ok, build: { ...ok.build, levels: [...ok.build.levels, { classId: 'class:fighter@FIX' }] } }, false)).toBe(false); // used
+  expect(allowLevelUp(ok, false).state).not.toHaveProperty('levelUpTo');
+  // the DM's device: what a player may not send
+  const up = (x: typeof c) => ({ ...x, build: { ...x.build, levels: [...x.build.levels, { classId: 'class:fighter@FIX' }] } });
+  expect(levelProblem(c, up(c))).toBe('level up only when your DM allows it');
+  expect(levelProblem(ok, up(ok))).toBeUndefined();
+  expect(levelProblem(ok, up(up(ok)))).toBe('level up only when your DM allows it');
+  expect(levelProblem(c, allowLevelUp(c, true))).toBe('only the DM allows a level up');
+  expect(levelProblem(c, { ...c, state: { ...c.state, hp: 3 } })).toBeUndefined();
 });

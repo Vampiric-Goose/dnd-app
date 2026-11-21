@@ -114,9 +114,9 @@ describe('join', () => {
     expect(sent).toBeLessThan(10);
   });
 
-  test('a player levels up their own character: the new level, its choices and HP reach the DM', async () => {
+  test('a player levels up their own character when the DM allows it: the new level, its choices and HP reach the DM', async () => {
     const { d, host } = dm({ A1: {} });
-    d.edit({ ...char('ch1', CID), ownerId: 'A1', build: { ...char('ch1').build, levels: [{ classId: 'class:fighter' }] } });
+    d.edit({ ...char('ch1', CID), ownerId: 'A1', build: { ...char('ch1').build, levels: [{ classId: 'class:fighter' }] }, state: { ...char('ch1').state, levelUpTo: 2 } });
     const a = player({ playerId: 'A1' });
     connect(host, a.guest);
     await settle(host, a.guest);
@@ -129,6 +129,34 @@ describe('join', () => {
     expect(m.build.levels).toEqual([{ classId: 'class:fighter' }, { classId: 'class:fighter', hpRoll: 7 }]);
     expect(m.build.choices['2|x|0']).toEqual({ type: 'ids', ids: ['y'] });
     expect(m.state.hp).toBe(mine.state.hp + 9);
+  });
+
+  test("a level up without the DM's leave, or a player granting it to themselves, is refused and rolled back on the player's device", async () => {
+    const { d, host } = dm({ A1: {} });
+    d.edit({ ...char('ch1', CID), ownerId: 'A1', build: { ...char('ch1').build, levels: [{ classId: 'class:fighter' }] } });
+    const a = player({ playerId: 'A1' });
+    const down: string[] = [];
+    connect(host, a.guest, down);
+    await settle(host, a.guest);
+    const mine = a.d.char('ch1')!;
+    a.d.edit({ ...mine, build: { ...mine.build, levels: [...mine.build.levels, { classId: 'class:fighter' }] }, state: { ...mine.state, hp: mine.state.hp + 9 } });
+    a.guest.characterChanged('ch1');
+    await settle(host, a.guest);
+    expect(d.char('ch1')!.build.levels).toHaveLength(1);
+    expect(a.d.char('ch1')!.build.levels).toHaveLength(1); // the player's copy takes the DM's back
+    expect(a.d.char('ch1')!.state.hp).toBe(mine.state.hp);
+    expect(down.some((m) => m.includes('level up only when your DM allows it'))).toBe(true);
+
+    const back = a.d.char('ch1')!;
+    a.d.edit({ ...back, state: { ...back.state, levelUpTo: 5 } });
+    a.guest.characterChanged('ch1');
+    await settle(host, a.guest);
+    expect(d.char('ch1')!.state.levelUpTo).toBeUndefined();
+    expect(a.d.char('ch1')!.state.levelUpTo).toBeUndefined();
+    a.d.edit({ ...a.d.char('ch1')!, state: { ...a.d.char('ch1')!.state, hp: 2 } }); // and later ordinary edits still land
+    a.guest.characterChanged('ch1');
+    await settle(host, a.guest);
+    expect(d.char('ch1')!.state.hp).toBe(2);
   });
 
   test('a public roll is shared with the party and logged by the DM; a private one never leaves', async () => {

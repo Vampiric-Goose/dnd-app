@@ -1,5 +1,6 @@
 <script lang="ts">
   import { deletedInCampaign, exportRecord, importRecord, keepBoth, replacement } from '../../lib/backup.ts';
+  import { canLevelUp } from '../../lib/character/build.ts';
   import { characterSummary } from '../../lib/character/play.ts';
   import { db, type TrashEntry } from '../../lib/db.ts';
   import { characterListProblem } from '../../lib/recordShape.ts';
@@ -365,7 +366,7 @@
       {#if c.ownerId}<p class="sub"><span class="caption">Player</span> {ownerLabel(c)}</p>{/if}
       <div class="row pact">
         <a class="btn primary" href="#/characters/{c.id}">Open sheet</a>
-        <a class="btn" href="#/characters/{c.id}/level-up">Level up</a>
+        {#if canLevelUp(c, app.viewer === 'dm')}<a class="btn" href="#/characters/{c.id}/level-up">Level up</a>{/if}
       </div>
       <div class="pdanger">
         <button class="danger" aria-label="Delete {c.name}" onclick={() => (deleting = c)}>Delete</button>

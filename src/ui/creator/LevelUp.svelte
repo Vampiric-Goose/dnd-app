@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { addLevel, classesFor, embedContent, keptHp, validateCharacter, withHpRoll, type Problem } from '../../lib/character/build.ts';
+  import { addLevel, canLevelUp, classesFor, embedContent, keptHp, validateCharacter, withHpRoll, type Problem } from '../../lib/character/build.ts';
   import { averageHp } from '../../lib/rules/constants.ts';
   import type { ContentIndex } from '../../lib/content/index.ts';
   import { db } from '../../lib/db.ts';
@@ -64,7 +64,7 @@
   }
 
   function addOne() {
-    if (!c || !index || blocked) return;
+    if (!c || !index || blocked || !canLevelUp(c, app.viewer === 'dm')) return;
     const cls = index.resolve(classId);
     if (cls?.kind !== 'class') return;
     const lv = c.build.levels.length + 1;
@@ -122,7 +122,9 @@
   </header>
   {#if error}<p role="alert" class="error">{error}</p>{/if}
 
-  {#if c && index && sheet && oldSheet}
+  {#if c && base && app.viewer !== 'dm' && !canLevelUp(base, false) && !added}
+    <p class="muted">Your DM allows a level up from your sheet. Ask them, then come back here.</p>
+  {:else if c && index && sheet && oldSheet}
     <p>Level <span class="num">{base?.build.levels.length}</span> → <strong class="num">{c.build.levels.length}</strong>. Max HP <span class="num">{oldSheet.maxHp}</span> → <strong class="num">{sheet.maxHp}</strong>.</p>
 
     <nav aria-label="Level up steps">
@@ -146,7 +148,7 @@
           <p role="alert" class:error={p.blocking} class:muted={!p.blocking}>{p.blocking ? '' : 'Warning (rule overrides are on): '}{p.message}</p>
         {/each}
         <p class="row">
-          <button class="primary" disabled={!classId || blocked || c.build.levels.length >= 20} onclick={addOne}>Add a level</button>
+          <button class="primary" disabled={!classId || blocked || c.build.levels.length >= 20 || !canLevelUp(c, app.viewer === 'dm')} onclick={addOne}>Add a level</button>
           {#if added}<button onclick={startOver}>Start over</button>{/if}
         </p>
         {#if notes.length}<ul class="notes">{#each notes as n}<li>{n}</li>{/each}</ul>{/if}

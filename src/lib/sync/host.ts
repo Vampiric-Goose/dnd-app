@@ -14,6 +14,7 @@ import { targetOf, type TargetInfo } from '../combat/resolve.ts';
 import { aimPlan, meleeAttack, noteEntries, snapOf, touched, workOut, type Aim, type Aimed, type UseOutcome, type WorkIn } from '../combat/aiming.ts';
 import { targetingOn } from '../combat/targeting.ts';
 import { featureList } from '../character/play.ts';
+import { levelProblem } from '../character/build.ts';
 import { computeSheet } from '../rules/sheet.ts';
 import { walkTokens } from '../map/scene.ts';
 import { ActionBoard, actionProblem, actionsForPlayers, expiry, type ActionRequest, type DeclaredAction, type PlayerAction } from '../map/actions.ts';
@@ -670,6 +671,17 @@ export class Host {
       // R8: the player's copy holds player views; the DM's real items, views and hidden charge counts go back in before the merge.
       const incoming = s ? unprojectCharacter(ch, s) : ch;
       let merged = mergeCharacter(s ?? incoming, incoming);
+      // Level up needs the DM's leave (character/build.ts levelProblem): refused, and every path this copy changed goes back to the DM's
+      // values at a new clock, so the player's copy takes them back.
+      const why = s && levelProblem(s, merged);
+      if (s && why) {
+        const at = hlcNow(sync.node, [sync.last ?? '', latestClock(merged)].sort().pop(), this.#deps.now?.());
+        const was = s.sync ?? { clock: {}, gone: {} }, now = merged.sync ?? { clock: {}, gone: {} };
+        const keys = new Set([...Object.keys(was.clock), ...Object.keys(now.clock), ...Object.keys(now.gone)]);
+        const clock = Object.fromEntries([...keys].map((k) => [k, now.clock[k] !== was.clock[k] || now.gone[k] !== was.gone[k] ? at : was.clock[k]]).filter(([, v]) => v !== undefined));
+        merged = { ...s, sync: { clock, gone: was.gone } };
+        this.#send(c, { t: 'useRefused', reason: why });
+      }
       // Where the player's clock won but the DM's real entry projects differently from what the player sent (a revealed field, an
       // item the player tried to rewrite), the DM's entry gets a new clock, so the player's copy takes it instead of tying forever.
       const sent = new Map(ch.inventory.map((e) => [e.id, e]));

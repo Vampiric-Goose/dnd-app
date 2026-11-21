@@ -12,7 +12,7 @@
   import { replay } from '../../lib/sync/merge.ts';
   import { session } from '../../lib/sync/session.svelte.ts';
   import { app, getFullIndex, getIndex, refreshCampaigns } from '../../lib/store.svelte.ts';
-  import { embedContent, embedStale, listChoices } from '../../lib/character/build.ts';
+  import { allowLevelUp, canLevelUp, embedContent, embedStale, listChoices } from '../../lib/character/build.ts';
   import type { ContentIndex } from '../../lib/content/index.ts';
   import { toast } from '../../lib/toast.svelte.ts';
   import type { Campaign, CampaignSettings, Character, OverrideKey } from '../../lib/types.ts';
@@ -267,9 +267,13 @@
       </div>
       <div class="actions">
         {#if pending}<button type="button" class="primary" onclick={() => navigate(`characters/${c!.id}/choices`)}>Choices to make ({pending})</button>{/if}
-        {#if app.viewer === 'dm'}<button type="button" aria-pressed={edit} onclick={() => (editOn = !editOn)}>Edit mode</button>{/if}
-        <!-- ponytail: players level up their own characters on their own for now; a DM approval step comes later -->
-        <button type="button" class="primary" onclick={() => navigate(`characters/${c!.id}/level-up`)}>Level up</button>
+        {#if app.viewer === 'dm'}
+          <button type="button" aria-pressed={edit} onclick={() => (editOn = !editOn)}>Edit mode</button>
+          <!-- a player levels up only with the DM's leave (checked again on the DM's device) -->
+          <button type="button" aria-pressed={canLevelUp(c, false)} title="Lets the player add the next level themselves"
+            onclick={() => update((x) => allowLevelUp(x, !canLevelUp(x, false)))}>{canLevelUp(c, false) ? 'Level up allowed' : 'Allow level up'}</button>
+        {/if}
+        {#if canLevelUp(c, app.viewer === 'dm')}<button type="button" class="primary" onclick={() => navigate(`characters/${c!.id}/level-up`)}>Level up</button>{/if}
         <Menu label="⋯" ariaLabel="More character actions" caret={false} align="end"
           items={[{ label: 'Export JSON', onselect: exportJson }, { label: exporting ? 'Exporting PDF…' : 'Export PDF', disabled: exporting, onselect: exportPdf }]}>
           {#snippet children()}

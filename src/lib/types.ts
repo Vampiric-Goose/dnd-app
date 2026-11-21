@@ -113,7 +113,7 @@ export interface Character {
     levels: { classId: string; hpRoll?: number }[]; subclasses: Record<string, string>; choices: Record<string, ChoiceAnswer>;
     spells: Record<string, { known: string[]; prepared: string[] }> };
   embedded: Record<string, Entity>;
-  state: { hp: number; tempHp: number; hitDiceUsed: Record<number, number>; slotsUsed: number[]; pactSlotsUsed: number; resourcesUsed: Record<string, number>; conditions: string[]; exhaustion: number; deathSaves: { success: number; fail: number }; stable?: boolean; dead?: boolean; inspiration: boolean };
+  state: { hp: number; tempHp: number; hitDiceUsed: Record<number, number>; slotsUsed: number[]; pactSlotsUsed: number; resourcesUsed: Record<string, number>; conditions: string[]; exhaustion: number; deathSaves: { success: number; fail: number }; stable?: boolean; dead?: boolean; inspiration: boolean; /** the DM's leave: a player may level up to this total level */ levelUpTo?: number };
   inventory: InventoryEntry[]; currency: { cp: number; sp: number; ep: number; gp: number; pp: number };
   overrides: Partial<Record<OverrideKey, number>>; customEffects: Effect[];
   details: { alignment: string; personality: string; ideals: string; bonds: string; flaws: string; appearance: string; backstory: string; notes: string; portrait?: string };
